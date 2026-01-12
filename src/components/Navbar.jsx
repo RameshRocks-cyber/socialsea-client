@@ -1,0 +1,58 @@
+import { Link } from "react-router-dom"
+
+const [count, setCount] = useState(0)
+
+useEffect(() => {
+  fetch("http://localhost:8080/api/notifications/unread-count", {
+    headers: {
+      Authorization: `Bearer ${localStorage.getItem("token")}`
+    }
+  })
+    .then(res => res.text())
+    .then(setCount)
+}, [])
+
+
+export default function Navbar() {
+  return (
+    <div style={styles.nav}>
+      <h2 style={styles.logo}>SocialSea</h2>
+
+      <div style={styles.links}>
+        <Link to="/">🏠</Link>
+        <Link to="/upload">➕</Link>
+        <Link to="/anonymous-upload">anonymous</Link>
+        <Link to="/anonymous-feed">👻</Link>
+        <Link to="/reels">🎬</Link>
+        <Link to="/profile/user1">👤</Link>
+        <Link to="/notifications">
+          🔔 {count > 0 && <span style={{ color: "red" }}>{count}</span>}
+        </Link>
+
+      </div>
+    </div>
+  )
+}
+
+const styles = {
+  nav: {
+    height: 60,
+    borderBottom: "1px solid #262626",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "0 20px",
+    position: "sticky",
+    top: 0,
+    background: "#000",
+    zIndex: 10
+  },
+  logo: {
+    fontWeight: "bold"
+  },
+  links: {
+    display: "flex",
+    gap: 20,
+    fontSize: 20
+  }
+}
