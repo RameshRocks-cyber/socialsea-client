@@ -1,19 +1,41 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, Link } from "react-router-dom";
 
 export default function Profile() {
+  console.log("Profile component rendering");
   const { username } = useParams();
   const [profile, setProfile] = useState(null);
   const [posts, setPosts] = useState([]);
+  const [error, setError] = useState("");
 
   useEffect(() => {
+    console.log("Profile page mounted for:", username);
+    setError("");
+    setProfile(null);
+
     fetch(`http://localhost:8081/api/profile/${username}`)
-      .then(res => res.json())
-      .then(setProfile);
+      .then(async res => {
+        if (!res.ok) {
+          throw new Error("User not found");
+        }
+        return res.json();
+      })
+      .then(data => {
+        console.log("Profile data:", data);
+        setProfile(data);
+      })
+      .catch(err => {
+        console.error(err);
+        setError("User not found");
+      });
 
     fetch(`http://localhost:8081/api/profile/${username}/posts`)
       .then(res => res.json())
-      .then(setPosts);
+      .then(data => {
+        console.log("Posts data:", data);
+        setPosts(Array.isArray(data) ? data : []);
+      })
+      .catch(console.error);
   }, [username]);
 
   function follow() {
@@ -34,10 +56,22 @@ export default function Profile() {
     });
   }
 
-  if (!profile) return <p>Loading...</p>;
-
   return (
-    <div style={{ padding: 20 }}>
+    <div style={{ padding: 20, color: "white", background: "#000", minHeight: "100vh" }}>
+      <nav style={{ marginBottom: 20, display: "flex", gap: 20 }}>
+        <Link to="/" style={{ color: "white" }}>Feed</Link>
+        <Link to="/upload" style={{ color: "white" }}>Upload</Link>
+        <Link to="/reels" style={{ color: "white" }}>Reels</Link>
+        <Link to="/notifications" style={{ color: "white" }}>Notifications</Link>
+        <Link to="/login" style={{ color: "white" }}>Login</Link>
+        <Link to="/register" style={{ color: "white" }}>Create Account</Link>
+      </nav>
+
+      {error && <div>{error}</div>}
+      {!error && !profile && <div>Loading...</div>}
+
+      {!error && profile && (
+        <>
       {/* Profile Header */}
       <div style={{ display: "flex", gap: 40, alignItems: "center" }}>
         <div
@@ -86,6 +120,8 @@ export default function Profile() {
           />
         ))}
       </div>
+        </>
+      )}
     </div>
   );
 }

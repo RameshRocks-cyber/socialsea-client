@@ -4,7 +4,7 @@ export default function Notifications() {
   const [items, setItems] = useState([])
 
   useEffect(() => {
-    fetch("http://localhost:8080/api/notifications", {
+    fetch("http://localhost:8081/api/notifications", {
       headers: {
         Authorization: `Bearer ${localStorage.getItem("token")}`
       }
