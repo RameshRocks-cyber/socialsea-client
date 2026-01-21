@@ -1,2 +1,2 @@
-const BASE_URL = import.meta.env.VITE_API_URL || "https://socialsea-backend.onrender.com"
-export default BASE_URL
+const BASE_URL = "https://socialsea-production.up.railway.app";
+export default BASE_URL;
