@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import api from "../api/axios";
 
 /* ---------- Follow Stats Component ---------- */
 function FollowStats({ username }) {
@@ -7,13 +8,13 @@ function FollowStats({ username }) {
   const [following, setFollowing] = useState(0);
 
   useEffect(() => {
-    fetch(`http://localhost:8081/api/follow/${username}/followers`)
-      .then(res => res.text())
-      .then(setFollowers);
+    api.get(`/api/follow/${username}/followers`)
+      .then(res => setFollowers(res.data))
+      .catch(console.error);
 
-    fetch(`http://localhost:8081/api/follow/${username}/following`)
-      .then(res => res.text())
-      .then(setFollowing);
+    api.get(`/api/follow/${username}/following`)
+      .then(res => setFollowing(res.data))
+      .catch(console.error);
   }, [username]);
 
   return (
@@ -28,41 +29,24 @@ export default function Feed() {
   const [posts, setPosts] = useState([]);
 
   useEffect(() => {
-    fetch("http://localhost:8081/api/posts", {
-      headers: {
-        Authorization: `Bearer ${localStorage.getItem("token")}`
-      }
-    })
-      .then(res => res.json())
-      .then(setPosts)
+    api.get("/api/posts")
+      .then(res => setPosts(res.data))
       .catch(console.error);
   }, []);
 
   function likePost(postId) {
-    fetch(`http://localhost:8081/api/likes/${postId}`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${localStorage.getItem("token")}`
-      }
-    });
+    api.post(`/api/likes/${postId}`)
+      .catch(console.error);
   }
 
   function followUser(username) {
-    fetch(`http://localhost:8081/api/follow/${username}`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${localStorage.getItem("token")}`
-      }
-    });
+    api.post(`/api/follow/${username}`)
+      .catch(console.error);
   }
 
   function unfollowUser(username) {
-    fetch(`http://localhost:8081/api/follow/${username}`, {
-      method: "DELETE",
-      headers: {
-        Authorization: `Bearer ${localStorage.getItem("token")}`
-      }
-    });
+    api.delete(`/api/follow/${username}`)
+      .catch(console.error);
   }
 
   return (
@@ -94,7 +78,7 @@ export default function Feed() {
             {/* Media */}
             {post.mediaUrl && (
               <img
-                src={`http://localhost:8081${post.mediaUrl}`}
+                src={post.mediaUrl.startsWith("http") ? post.mediaUrl : `${import.meta.env.VITE_API_BASE}${post.mediaUrl}`}
                 alt=""
                 style={styles.image}
               />

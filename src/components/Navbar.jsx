@@ -1,19 +1,16 @@
-import { Link } from "react-router-dom"
-
-const [count, setCount] = useState(0)
-
-useEffect(() => {
-  fetch("http://localhost:8080/api/notifications/unread-count", {
-    headers: {
-      Authorization: `Bearer ${localStorage.getItem("token")}`
-    }
-  })
-    .then(res => res.text())
-    .then(setCount)
-}, [])
-
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import api from "../api/axios";
 
 export default function Navbar() {
+  const [count, setCount] = useState(0);
+
+  useEffect(() => {
+    api.get("/api/notifications/unread-count")
+      .then(res => setCount(res.data))
+      .catch(err => console.error("Failed to fetch notifications", err));
+  }, []);
+
   return (
     <div style={styles.nav}>
       <h2 style={styles.logo}>SocialSea</h2>
