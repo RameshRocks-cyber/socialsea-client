@@ -1,7 +1,7 @@
 import axios from "axios";
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE || "https://socialsea-production.up.railway.app",
+  baseURL: import.meta.env.VITE_API_BASE,
   withCredentials: true
 });
 
