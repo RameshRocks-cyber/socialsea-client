@@ -10,7 +10,7 @@ import Profile from "./pages/Profile";
 import AnonymousFeed from "./pages/AnonymousFeed";
 import AnonymousUpload from "./pages/AnonymousUpload";
 import AdminDashboard from "./pages/AdminDashboard";
-import PendingAnonymousPosts from "./admin/PendingAnonymousPosts";
+import PendingAnonymousPosts from "./pages/PendingAnonymousPosts";
 
 export default function App() {
   return (
