@@ -1,38 +1,29 @@
 import { useEffect, useState } from "react"
+import api from "../api/axios"
 
 export default function Admin() {
   const [users, setUsers] = useState([])
   const [posts, setPosts] = useState([])
 
   useEffect(() => {
-    fetch("http://localhost:8081/api/admin/users", {
-      headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
-    })
-      .then(res => res.json())
-      .then(setUsers)
+    api.get("/api/admin/users")
+      .then(res => setUsers(res.data))
+      .catch(console.error)
 
-    fetch("http://localhost:8081/api/admin/posts", {
-      headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
-    })
-      .then(res => res.json())
-      .then(setPosts)
+    api.get("/api/admin/posts")
+      .then(res => setPosts(res.data))
+      .catch(console.error)
   }, [])
 
   function ban(id) {
-    fetch(`http://localhost:8081/api/admin/users/${id}/ban`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
-    })
+    api.post(`/api/admin/users/${id}/ban`)
   }
 
   function del(id) {
-    fetch(`http://localhost:8081/api/admin/posts/${id}`, {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
-    })
+    api.delete(`/api/admin/posts/${id}`)
   }
 
-  const token = localStorage.getItem("token")
+  const token = localStorage.getItem("accessToken")
   if (!token) return null
 
   const user = JSON.parse(atob(token.split(".")[1]))
@@ -53,7 +44,7 @@ export default function Admin() {
       <h3>Posts</h3>
       {posts.map(p => (
         <div key={p.id}>
-          <img src={`http://localhost:8081${p.mediaUrl}`} width="100" alt="" />
+          <img src={`${import.meta.env.VITE_API_URL}${p.mediaUrl}`} width="100" alt="" />
           <button onClick={() => del(p.id)}>Delete</button>
         </div>
       ))}

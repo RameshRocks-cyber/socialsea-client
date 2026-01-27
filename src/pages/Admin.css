@@ -1,0 +1,26 @@
+.admin {
+  padding: 20px;
+  color: white;
+}
+
+.post-card {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 15px;
+  border: 1px solid #333;
+  padding: 10px;
+  background-color: #121212;
+}
+
+.post-card img,
+.post-card video {
+  width: 120px;
+  border-radius: 8px;
+}
+
+.actions {
+  margin-top: 20px;
+  display: flex;
+  gap: 10px;
+}

@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
+import api from "../api/axios";
 
 export default function Reels() {
   const [reels, setReels] = useState([]);
 
   useEffect(() => {
-    fetch("https://your-backend.onrender.com/api/reels")
-      .then(res => res.json())
-      .then(setReels)
+    api.get("/api/reels")
+      .then(res => setReels(res.data))
       .catch(err => console.error(err));
   }, []);
 
@@ -21,7 +21,7 @@ export default function Reels() {
       {reels.map(reel => (
         <video
           key={reel.id}
-          src={reel.mediaUrl}
+          src={`${import.meta.env.VITE_API_URL}${reel.mediaUrl}`}
           autoPlay
           loop
           muted

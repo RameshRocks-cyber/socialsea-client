@@ -5,16 +5,14 @@ export default function AnonymousFeed() {
   const [videos, setVideos] = useState([]);
 
   useEffect(() => {
-    fetch("http://localhost:8081/api/anonymous/feed")
+    fetch(import.meta.env.VITE_API_URL + "/api/anonymous/feed")
       .then(res => res.json())
       .then(setVideos)
       .catch(console.error);
   }, []);
 
   function likeVideo(id) {
-    fetch(`http://localhost:8081/api/anonymous/like/${id}`, {
-      method: "POST"
-    });
+    fetch(import.meta.env.VITE_API_URL + `/api/anonymous/like/${id}`, { method: "POST" });
   }
 
   return (
@@ -40,7 +38,7 @@ export default function AnonymousFeed() {
             {/* Video */}
             <div style={styles.videoWrapper}>
               <video
-                src={`http://localhost:8081${v.videoUrl}`}
+                src={`${import.meta.env.VITE_API_URL}${v.videoUrl}`}
                 controls
                 style={styles.video}
               />

@@ -1,20 +1,22 @@
 import { useState } from "react"
-import { Link } from "react-router-dom"
+import { Link, useNavigate } from "react-router-dom"
+import api from "../api/axios"
 
 export default function Login() {
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
+  const navigate = useNavigate()
 
   const login = async () => {
-    const res = await fetch("http://localhost:8081/api/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password })
-    })
-
-    const token = await res.text()
-    localStorage.setItem("token", token)
-    alert("Login success")
+    try {
+      const res = await api.post("/auth/login", { email: username, password })
+      localStorage.setItem("accessToken", res.data.accessToken)
+      localStorage.setItem("refreshToken", res.data.refreshToken)
+      navigate("/")
+    } catch (err) {
+      console.error(err)
+      alert("Login failed")
+    }
   }
 
   return (

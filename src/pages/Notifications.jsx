@@ -1,16 +1,13 @@
 import { useEffect, useState } from "react"
+import api from "../api/axios"
 
 export default function Notifications() {
   const [items, setItems] = useState([])
 
   useEffect(() => {
-    fetch("http://localhost:8081/api/notifications", {
-      headers: {
-        Authorization: `Bearer ${localStorage.getItem("token")}`
-      }
-    })
-      .then(res => res.json())
-      .then(setItems)
+    api.get("/api/notifications")
+      .then(res => setItems(res.data))
+      .catch(console.error)
   }, [])
 
   return (

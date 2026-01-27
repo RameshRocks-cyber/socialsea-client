@@ -9,6 +9,8 @@ import Notifications from "./pages/Notifications";
 import Profile from "./pages/Profile";
 import AnonymousFeed from "./pages/AnonymousFeed";
 import AnonymousUpload from "./pages/AnonymousUpload";
+import AdminDashboard from "./pages/AdminDashboard";
+import PendingAnonymousPosts from "./admin/PendingAnonymousPosts";
 
 export default function App() {
   return (
@@ -24,6 +26,8 @@ export default function App() {
         <Route path="/profile/:username" element={<Profile />} />
         <Route path="/anonymous-feed" element={<AnonymousFeed />} />
         <Route path="/anonymous-upload" element={<AnonymousUpload />} />
+        <Route path="/admin/dashboard" element={<AdminDashboard />} />
+        <Route path="/admin/pending" element={<PendingAnonymousPosts />} />
       </Routes>
     </BrowserRouter>
   );

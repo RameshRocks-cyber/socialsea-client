@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
+import api from "../api/axios";
 
 export default function Profile() {
   console.log("Profile component rendering");
@@ -13,48 +14,26 @@ export default function Profile() {
     setError("");
     setProfile(null);
 
-    fetch(`http://localhost:8081/api/profile/${username}`)
-      .then(async res => {
-        if (!res.ok) {
-          throw new Error("User not found");
-        }
-        return res.json();
-      })
-      .then(data => {
-        console.log("Profile data:", data);
-        setProfile(data);
+    api.get(`/api/profile/${username}`)
+      .then(res => {
+        console.log("Profile data:", res.data);
+        setProfile(res.data);
       })
       .catch(err => {
         console.error(err);
         setError("User not found");
       });
 
-    fetch(`http://localhost:8081/api/profile/${username}/posts`)
-      .then(res => res.json())
-      .then(data => {
-        console.log("Posts data:", data);
-        setPosts(Array.isArray(data) ? data : []);
+    api.get(`/api/profile/${username}/posts`)
+      .then(res => {
+        console.log("Posts data:", res.data);
+        setPosts(Array.isArray(res.data) ? res.data : []);
       })
       .catch(console.error);
   }, [username]);
 
-  function follow() {
-    fetch(`http://localhost:8081/api/follow/${username}`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${localStorage.getItem("token")}`
-      }
-    });
-  }
-
-  function unfollow() {
-    fetch(`http://localhost:8081/api/follow/${username}`, {
-      method: "DELETE",
-      headers: {
-        Authorization: `Bearer ${localStorage.getItem("token")}`
-      }
-    });
-  }
+  const follow = () => api.post(`/api/follow/${username}`).catch(console.error);
+  const unfollow = () => api.delete(`/api/follow/${username}`).catch(console.error);
 
   return (
     <div style={{ padding: 20, color: "white", background: "#000", minHeight: "100vh" }}>
@@ -114,7 +93,7 @@ export default function Profile() {
         {posts.map(p => (
           <img
             key={p.id}
-            src={`http://localhost:8081${p.mediaUrl}`}
+            src={`${import.meta.env.VITE_API_URL}${p.mediaUrl}`}
             alt=""
             style={{ width: "100%" }}
           />

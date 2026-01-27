@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import api from "../api/axios";
+import { getRole } from "../api/auth";
 
 export default function Navbar() {
   const [count, setCount] = useState(0);
+  const role = getRole();
 
   useEffect(() => {
     api.get("/api/notifications/unread-count")
@@ -22,6 +24,7 @@ export default function Navbar() {
         <Link to="/anonymous-feed">👻</Link>
         <Link to="/reels">🎬</Link>
         <Link to="/profile/user1">👤</Link>
+        {role === "ADMIN" && <Link to="/admin/dashboard">🧑‍⚖️ Admin</Link>}
         <Link to="/notifications">
           🔔 {count > 0 && <span style={{ color: "red" }}>{count}</span>}
         </Link>
