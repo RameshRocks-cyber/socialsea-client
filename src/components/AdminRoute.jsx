@@ -1,8 +1,11 @@
 import { Navigate } from "react-router-dom";
-import { getRole } from "../api/auth";
 
 export default function AdminRoute({ children }) {
-  return getRole() === "ADMIN"
-    ? children
-    : <Navigate to="/" />;
+  const role = localStorage.getItem("role");
+
+  if (role !== "ADMIN") {
+    return <Navigate to="/" />;
+  }
+
+  return children;
 }

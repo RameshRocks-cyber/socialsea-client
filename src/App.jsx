@@ -9,25 +9,34 @@ import Notifications from "./pages/Notifications";
 import Profile from "./pages/Profile";
 import AnonymousFeed from "./pages/AnonymousFeed";
 import AnonymousUpload from "./pages/AnonymousUpload";
-import AdminDashboard from "./pages/AdminDashboard";
-import PendingAnonymousPosts from "./pages/PendingAnonymousPosts";
+import AdminDashboard from "./pages/admin/AdminDashboard";
+import PendingAnonymousPosts from "./admin/PendingAnonymousPosts";
+import ReportedPosts from "./admin/ReportedPosts";
+import NotificationsPage from "./admin/NotificationsPage";
+import Dashboard from "./admin/Dashboard";
+import ProtectedRoute from "./components/ProtectedRoute";
+import Unauthorized from "./pages/Unauthorized";
 
 export default function App() {
   return (
     <BrowserRouter>
       <Navbar />
       <Routes>
-        <Route path="/" element={<Feed />} />
+        <Route path="/" element={<ProtectedRoute><Feed /></ProtectedRoute>} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
-        <Route path="/upload" element={<Upload />} />
-        <Route path="/reels" element={<Reels />} />
-        <Route path="/notifications" element={<Notifications />} />
-        <Route path="/profile/:username" element={<Profile />} />
+        <Route path="/upload" element={<ProtectedRoute><Upload /></ProtectedRoute>} />
+        <Route path="/reels" element={<ProtectedRoute><Reels /></ProtectedRoute>} />
+        <Route path="/notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
+        <Route path="/profile/:username" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
         <Route path="/anonymous-feed" element={<AnonymousFeed />} />
-        <Route path="/anonymous-upload" element={<AnonymousUpload />} />
-        <Route path="/admin/dashboard" element={<AdminDashboard />} />
-        <Route path="/admin/pending" element={<PendingAnonymousPosts />} />
+        <Route path="/anonymous/upload" element={<ProtectedRoute><AnonymousUpload /></ProtectedRoute>} />
+        <Route path="/admin" element={<ProtectedRoute role="ADMIN"><AdminDashboard /></ProtectedRoute>} />
+        <Route path="/admin/pending" element={<ProtectedRoute role="ADMIN"><PendingAnonymousPosts /></ProtectedRoute>} />
+        <Route path="/admin/reports" element={<ProtectedRoute role="ADMIN"><ReportedPosts /></ProtectedRoute>} />
+        <Route path="/admin/notifications" element={<ProtectedRoute role="ADMIN"><NotificationsPage /></ProtectedRoute>} />
+        <Route path="/admin/dashboard" element={<ProtectedRoute role="ADMIN"><Dashboard /></ProtectedRoute>} />
+        <Route path="/unauthorized" element={<Unauthorized />} />
       </Routes>
     </BrowserRouter>
   );
