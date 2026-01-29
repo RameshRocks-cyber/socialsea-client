@@ -1,6 +1,6 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Navbar from "./components/Navbar";
-import Feed from "./pages/Feed";
+import Feed from "./components/Feed";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Upload from "./pages/Upload";
@@ -9,11 +9,11 @@ import Notifications from "./pages/Notifications";
 import Profile from "./pages/Profile";
 import AnonymousFeed from "./pages/AnonymousFeed";
 import AnonymousUpload from "./pages/AnonymousUpload";
-import AdminDashboard from "./pages/admin/AdminDashboard";
-import PendingAnonymousPosts from "./admin/PendingAnonymousPosts";
-import ReportedPosts from "./admin/ReportedPosts";
-import NotificationsPage from "./admin/NotificationsPage";
-import Dashboard from "./admin/Dashboard";
+import AdminDashboard from "./AdminDashboard";
+import PendingAnonymousPosts from "./PendingAnonymousPosts";
+import ReportedPosts from "./ReportedPosts";
+import NotificationsPage from "./NotificationsPage";
+import Dashboard from "./Dashboard";
 import ProtectedRoute from "./components/ProtectedRoute";
 import Unauthorized from "./pages/Unauthorized";
 

@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "react-router-dom";
-import { isAuthenticated, getUserRole, logout } from "../utils/auth";
+import { isAuthenticated, getUserRole, logout } from "../auth";
 
 export default function Navbar() {
   const role = getUserRole();

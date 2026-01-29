@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import api from "../api/axios"
-import { successToast, errorToast } from "../utils/toast"
+import { successToast, errorToast } from "../utils/toast.js"
 
 export default function Login() {
   const [username, setUsername] = useState("")
