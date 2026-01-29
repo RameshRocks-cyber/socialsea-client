@@ -1,3 +1,9 @@
+import api from "./axios";
+
+export const sendOtp = (email) => {
+  return api.post("/auth/send-otp", { email });
+};
+
 export function getRole() {
   const token = localStorage.getItem("accessToken");
   if (!token) return null;
