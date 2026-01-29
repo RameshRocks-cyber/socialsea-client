@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import api from "./api/axios";
-import { successToast, errorToast } from "./utils/toast.js";
+import { successToast, errorToast } from "./toast";
 import PermissionGate from "./PermissionGate";
 
 export default function PendingAnonymousPosts() {
