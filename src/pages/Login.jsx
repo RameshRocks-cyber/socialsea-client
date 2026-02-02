@@ -23,6 +23,8 @@ const Login = () => {
 
   const handleSendOtp = async (e) => {
     e?.preventDefault();
+    if (timer > 0) return;
+
     // Validate email format
     if (!email || !email.includes("@")) {
       alert("Please enter a valid email address");
