@@ -1,140 +1,128 @@
-import { useState, useEffect } from "react"
-import { Link, useNavigate } from "react-router-dom"
-import api from "../api/axios"
-import { successToast, errorToast } from "../toast";
+import React, { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import { sendOtp, verifyOtp } from "../api/auth";
 
-export default function Login() {
-  const [username, setUsername] = useState("")
-  const [password, setPassword] = useState("")
-  const navigate = useNavigate()
+const Login = () => {
+  const [step, setStep] = useState("EMAIL"); // EMAIL | OTP
+  const [email, setEmail] = useState("");
+  const [otp, setOtp] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [timer, setTimer] = useState(0);
+  const navigate = useNavigate();
 
+  // Timer logic
   useEffect(() => {
-    console.log("VITE_API_URL:", import.meta.env.VITE_API_URL)
-    console.log("Axios baseURL:", api.defaults.baseURL)
-    api.get("/health")
-      .then(res => console.log("Health:", res.data))
-      .catch(err => console.error("Health Check Failed:", err))
-  }, [])
-
-  const login = async () => {
-    try {
-      const res = await api.post("/auth/login", { email: username, password })
-      localStorage.setItem("accessToken", res.data.accessToken)
-      localStorage.setItem("refreshToken", res.data.refreshToken)
-      localStorage.setItem("role", res.data.role)
-      localStorage.setItem("auth", JSON.stringify({
-        role: res.data.role,
-        permissions: res.data.permissions
-      }))
-      successToast("Logged in successfully 🎉")
-      navigate("/")
-    } catch (err) {
-      console.error(err)
-      if (err.response) {
-        console.log("Status:", err.response.status)
-        console.log("Data:", err.response.data)
-      }
-      console.log("Request Headers:", err.config?.headers)
-      errorToast("Login failed")
+    let interval;
+    if (timer > 0) {
+      interval = setInterval(() => {
+        setTimer((prev) => (prev > 0 ? prev - 1 : 0));
+      }, 1000);
     }
-  }
+    return () => clearInterval(interval);
+  }, [timer]);
+
+  const handleSendOtp = async (e) => {
+    e?.preventDefault();
+    // Validate email format
+    if (!email || !email.includes("@")) {
+      alert("Please enter a valid email address");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await sendOtp(email);
+      setStep("OTP");
+      setTimer(45); // Start 45s timer
+    } catch (err) {
+      console.error(err);
+      alert("Please try again later");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerifyOtp = async (e) => {
+    e?.preventDefault();
+    setLoading(true);
+    try {
+      const res = await verifyOtp(email, otp);
+      // Save JWT to localStorage (using accessToken to match api/auth.js)
+      const token = res.data.accessToken || res.data.token;
+      const role = res.data.role;
+
+      localStorage.setItem("accessToken", token);
+      localStorage.setItem("role", role);
+
+      if (role === "ADMIN") {
+        navigate("/admin");
+      } else {
+        navigate("/home");
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Invalid or expired OTP");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
-    <div style={styles.container}>
-      <div style={styles.box}>
-        <h1 style={styles.logo}>SocialSea</h1>
-        
-        <input 
-          onChange={e => setUsername(e.target.value)} 
-          placeholder="Phone number, username, or email" 
-          style={styles.input}
-        />
-        <input 
-          type="password" 
-          onChange={e => setPassword(e.target.value)} 
-          placeholder="Password" 
-          style={styles.input}
-        />
-        
-        <button onClick={login} style={styles.button}>Log in</button>
-      </div>
+    <div style={{ maxInlineSize: "400px", margin: "2rem auto", padding: "2rem", border: "1px solid #ccc", borderRadius: "8px" }}>
+      <h2 style={{ textAlign: "center", marginBlockEnd: "1.5rem" }}>
+        {step === "EMAIL" ? "Login" : "Verify OTP"}
+      </h2>
 
-      <div style={styles.box}>
-        <p style={styles.text}>
-          Don't have an account? <Link to="/register" style={styles.link}>Sign up</Link>
-        </p>
-      </div>
+      {step === "EMAIL" && (
+        <div>
+          <input
+            type="email"
+            placeholder="Enter Email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            disabled={loading}
+            style={{ inlineSize: "100%", padding: "10px", marginBlockEnd: "10px", boxSizing: "border-box" }}
+          />
+          <button onClick={handleSendOtp} disabled={loading || !email} style={{ inlineSize: "100%", padding: "10px", cursor: "pointer" }}>
+            {loading ? "Sending..." : "Send OTP"}
+          </button>
+        </div>
+      )}
 
-      <div style={{ display: "flex", gap: 20, marginBlockStart: 20 }}>
-        <Link to="/anonymous-feed" style={{ color: "#8e8e8e", textDecoration: "none", fontSize: "14px" }}>Anonymous Feed</Link>
-        <Link to="/anonymous-upload" style={{ color: "#8e8e8e", textDecoration: "none", fontSize: "14px" }}>Anonymous Upload</Link>
-      </div>
+      {step === "OTP" && (
+        <div>
+          <p style={{ textAlign: "center", marginBlockEnd: "1rem" }}>OTP sent if this email exists</p>
+          <input
+            type="text"
+            value={otp}
+            onChange={(e) => {
+              const val = e.target.value;
+              if (/^\d*$/.test(val) && val.length <= 6) setOtp(val);
+            }}
+            maxLength={6}
+            inputMode="numeric"
+            autoFocus
+            placeholder="000000"
+            disabled={loading}
+            style={{ inlineSize: "100%", padding: "10px", marginBlockEnd: "10px", textAlign: "center", letterSpacing: "5px", fontSize: "1.2rem", boxSizing: "border-box" }}
+          />
+          <button onClick={handleVerifyOtp} disabled={otp.length !== 6 || loading} style={{ inlineSize: "100%", padding: "10px", cursor: "pointer", marginBlockEnd: "10px" }}>
+            {loading ? "Verifying..." : "Verify OTP"}
+          </button>
+
+          <div style={{ textAlign: "center" }}>
+            {timer > 0 ? (
+              <span style={{ color: "gray" }}>Resend in {timer}s</span>
+            ) : (
+              <button onClick={handleSendOtp} disabled={loading} style={{ background: "none", border: "none", color: "blue", cursor: "pointer", textDecoration: "underline" }}>
+                Resend OTP
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
-  )
-}
+  );
+};
 
-const styles = {
-  container: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    minBlockSize: "100vh",
-    backgroundColor: "#000",
-    color: "#fff",
-    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
-    padding: "10px"
-  },
-  box: {
-    border: "1px solid #363636",
-    backgroundColor: "#000",
-    padding: "20px",
-    inlineSize: "100%",
-    maxInlineSize: "350px",
-    marginBlockEnd: "10px",
-    textAlign: "center",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    boxSizing: "border-box"
-  },
-  logo: {
-    fontSize: "3rem",
-    marginBlockEnd: "30px",
-    marginBlockStart: "0",
-    fontFamily: "cursive"
-  },
-  input: {
-    inlineSize: "100%",
-    padding: "9px 8px",
-    marginBlockEnd: "6px",
-    backgroundColor: "#121212",
-    border: "1px solid #363636",
-    borderRadius: "3px",
-    color: "#fff",
-    fontSize: "12px",
-    outline: "none",
-    boxSizing: "border-box"
-  },
-  button: {
-    inlineSize: "100%",
-    backgroundColor: "#0095f6",
-    color: "#fff",
-    border: "none",
-    borderRadius: "4px",
-    padding: "7px 16px",
-    fontWeight: "600",
-    cursor: "pointer",
-    marginBlockStart: "15px",
-    fontSize: "14px"
-  },
-  text: {
-    fontSize: "14px",
-    margin: "15px 0"
-  },
-  link: {
-    color: "#0095f6",
-    textDecoration: "none",
-    fontWeight: "600"
-  }
-}
+export default Login;

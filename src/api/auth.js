@@ -4,6 +4,10 @@ export const sendOtp = (email) => {
   return api.post("/auth/send-otp", { email });
 };
 
+export const verifyOtp = (email, otp) => {
+  return api.post("/auth/verify-otp", { email, otp });
+};
+
 export function getRole() {
   const token = localStorage.getItem("accessToken");
   if (!token) return null;

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { Navigate } from "react-router-dom"
 import api from "../api/axios"
 
 export default function Admin() {
@@ -23,11 +24,10 @@ export default function Admin() {
     api.delete(`/api/admin/posts/${id}`)
   }
 
-  const token = localStorage.getItem("accessToken")
-  if (!token) return null
-
-  const user = JSON.parse(atob(token.split(".")[1]))
-  if (user.role !== "ADMIN") return null
+  const role = localStorage.getItem("role")
+  if (role !== "ADMIN") {
+    return <Navigate to="/home" />
+  }
 
   return (
     <div style={{ padding: 20 }}>
