@@ -51,10 +51,34 @@ const Login = () => {
       const res = await verifyOtp(email, otp);
       // Save JWT to localStorage (using accessToken to match api/auth.js)
       const token = res.data.accessToken || res.data.token;
-      const role = res.data.role;
+      const refreshToken = res.data.refreshToken;
+      const normalizeRole = (roleValue) => {
+        if (!roleValue) return null;
+        const raw = String(roleValue).trim();
+        const noPrefix = raw.startsWith("ROLE_") ? raw.slice(5) : raw;
+        return noPrefix.toUpperCase();
+      };
+      const role = normalizeRole(
+        res.data.role ||
+          res.data.user?.role ||
+          (Array.isArray(res.data.roles) ? res.data.roles[0] : null)
+      );
+
+      if (!token) {
+        alert("Login failed: token missing from server response");
+        return;
+      }
 
       localStorage.setItem("accessToken", token);
-      localStorage.setItem("role", role);
+      localStorage.setItem("token", token);
+      sessionStorage.setItem("accessToken", token);
+      sessionStorage.setItem("token", token);
+      if (refreshToken) {
+        localStorage.setItem("refreshToken", refreshToken);
+      }
+      if (role) {
+        localStorage.setItem("role", role);
+      }
 
       if (role === "ADMIN") {
         navigate("/admin");

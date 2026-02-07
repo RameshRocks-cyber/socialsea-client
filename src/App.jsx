@@ -23,6 +23,7 @@ export default function App() {
       <Navbar />
       <Routes>
         <Route path="/" element={<ProtectedRoute><Feed /></ProtectedRoute>} />
+        <Route path="/home" element={<ProtectedRoute><Feed /></ProtectedRoute>} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
         <Route path="/upload" element={<ProtectedRoute><Upload /></ProtectedRoute>} />

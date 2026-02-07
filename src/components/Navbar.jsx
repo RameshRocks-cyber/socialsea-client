@@ -3,6 +3,7 @@ import { isAuthenticated, getUserRole, logout } from "../auth";
 
 export default function Navbar() {
   const role = getUserRole();
+  const isAdmin = role === "ADMIN";
   const navigate = useNavigate();
 
   if (!isAuthenticated()) return null;
@@ -15,7 +16,7 @@ export default function Navbar() {
 
       <div style={styles.links}>
         {/* USER LINKS */}
-        {role === "USER" && (
+        {!isAdmin && (
           <>
             <Link to="/" style={styles.link}>Feed</Link>
             <Link to="/profile/user1" style={styles.link}>Profile</Link>
@@ -24,7 +25,7 @@ export default function Navbar() {
         )}
 
         {/* ADMIN LINKS */}
-        {role === "ADMIN" && (
+        {isAdmin && (
           <>
             <Link to="/admin/dashboard" style={styles.link}>Dashboard</Link>
             <Link to="/admin/pending" style={styles.link}>

@@ -20,7 +20,8 @@ export default function AnonymousUpload() {
       "type",
       file.type.startsWith("video") ? "VIDEO" : "IMAGE"
     );
-    formData.append("description", description);
+    const safeDescription = description?.trim() || " ";
+    formData.append("description", safeDescription);
 
     try {
       setLoading(true);
