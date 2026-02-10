@@ -8,6 +8,7 @@ const Login = () => {
   const [otp, setOtp] = useState("");
   const [loading, setLoading] = useState(false);
   const [timer, setTimer] = useState(0);
+  const [msg, setMsg] = useState("");
   const navigate = useNavigate();
 
   // Timer logic
@@ -32,13 +33,14 @@ const Login = () => {
     }
 
     setLoading(true);
+    setMsg("");
     try {
       await sendOtp(email);
       setStep("OTP");
       setTimer(45); // Start 45s timer
     } catch (err) {
       console.error(err);
-      alert("Please try again later");
+      setMsg("Send OTP failed. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -47,11 +49,12 @@ const Login = () => {
   const handleVerifyOtp = async (e) => {
     e?.preventDefault();
     setLoading(true);
+    setMsg("");
     try {
       const res = await verifyOtp(email, otp);
       // Save JWT to localStorage (using accessToken to match api/auth.js)
       const token = res.data.accessToken || res.data.token;
-      const refreshToken = res.data.refreshToken;
+      const refreshToken = res.data.refreshToken || res.data.refresh_token;
       const normalizeRole = (roleValue) => {
         if (!roleValue) return null;
         const raw = String(roleValue).trim();
@@ -65,7 +68,7 @@ const Login = () => {
       );
 
       if (!token) {
-        alert("Login failed: token missing from server response");
+        setMsg("Login failed: token missing from server response");
         return;
       }
 
@@ -87,14 +90,17 @@ const Login = () => {
       }
     } catch (err) {
       console.error(err);
-      alert("Invalid or expired OTP");
+      setMsg("Invalid or expired OTP");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div style={{ maxInlineSize: "400px", margin: "2rem auto", padding: "2rem", border: "1px solid #ccc", borderRadius: "8px" }}>
+    <form
+      onSubmit={(e) => e.preventDefault()}
+      style={{ maxInlineSize: "400px", margin: "2rem auto", padding: "2rem", border: "1px solid #ccc", borderRadius: "8px" }}
+    >
       <h2 style={{ textAlign: "center", marginBlockEnd: "1.5rem" }}>
         {step === "EMAIL" ? "Login" : "Verify OTP"}
       </h2>
@@ -109,7 +115,7 @@ const Login = () => {
             disabled={loading}
             style={{ inlineSize: "100%", padding: "10px", marginBlockEnd: "10px", boxSizing: "border-box" }}
           />
-          <button onClick={handleSendOtp} disabled={loading || !email} style={{ inlineSize: "100%", padding: "10px", cursor: "pointer" }}>
+          <button type="button" onClick={handleSendOtp} disabled={loading || !email} style={{ inlineSize: "100%", padding: "10px", cursor: "pointer" }}>
             {loading ? "Sending..." : "Send OTP"}
           </button>
         </div>
@@ -132,7 +138,7 @@ const Login = () => {
             disabled={loading}
             style={{ inlineSize: "100%", padding: "10px", marginBlockEnd: "10px", textAlign: "center", letterSpacing: "5px", fontSize: "1.2rem", boxSizing: "border-box" }}
           />
-          <button onClick={handleVerifyOtp} disabled={otp.length !== 6 || loading} style={{ inlineSize: "100%", padding: "10px", cursor: "pointer", marginBlockEnd: "10px" }}>
+          <button type="button" onClick={handleVerifyOtp} disabled={otp.length !== 6 || loading} style={{ inlineSize: "100%", padding: "10px", cursor: "pointer", marginBlockEnd: "10px" }}>
             {loading ? "Verifying..." : "Verify OTP"}
           </button>
 
@@ -140,14 +146,15 @@ const Login = () => {
             {timer > 0 ? (
               <span style={{ color: "gray" }}>Resend in {timer}s</span>
             ) : (
-              <button onClick={handleSendOtp} disabled={loading} style={{ background: "none", border: "none", color: "blue", cursor: "pointer", textDecoration: "underline" }}>
+              <button type="button" onClick={handleSendOtp} disabled={loading} style={{ background: "none", border: "none", color: "blue", cursor: "pointer", textDecoration: "underline" }}>
                 Resend OTP
               </button>
             )}
           </div>
         </div>
       )}
-    </div>
+      {msg && <p style={{ marginTop: "1rem", color: "#ff6b6b", textAlign: "center" }}>{msg}</p>}
+    </form>
   );
 };
 

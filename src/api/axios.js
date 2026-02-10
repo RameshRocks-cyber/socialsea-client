@@ -50,6 +50,15 @@ api.interceptors.response.use(
       original.headers.Authorization = `Bearer ${newToken}`;
       return api(original);
     } catch (refreshError) {
+      const status = refreshError?.response?.status;
+      if (status === 401) {
+        localStorage.removeItem("accessToken");
+        localStorage.removeItem("token");
+        localStorage.removeItem("refreshToken");
+        sessionStorage.removeItem("accessToken");
+        sessionStorage.removeItem("token");
+        window.location.href = "/login";
+      }
       return Promise.reject(refreshError);
     }
   }

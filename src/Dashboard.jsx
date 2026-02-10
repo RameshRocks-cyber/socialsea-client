@@ -33,21 +33,36 @@ async function downloadFile(url, filename) {
 
 export default function Dashboard() {
   const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [days, setDays] = useState(7);
   const [charts, setCharts] = useState(null);
 
   useEffect(() => {
-    api.get("/admin/dashboard/stats").then(res => {
-      setStats(res.data);
-    });
+    setLoading(true);
+    api
+      .get("/api/admin/dashboard/stats")
+      .then((res) => setStats(res.data))
+      .catch((err) => {
+        console.error(err);
+        setError("Failed to load dashboard stats");
+      })
+      .finally(() => setLoading(false));
   }, []);
 
   useEffect(() => {
-    api.get(`/admin/dashboard/charts?days=${days}`)
-       .then(res => setCharts(res.data));
+    api
+      .get(`/api/admin/dashboard/charts?days=${days}`)
+      .then((res) => setCharts(res.data))
+      .catch((err) => {
+        console.error(err);
+        setError("Failed to load dashboard charts");
+      });
   }, [days]);
 
-  if (!stats) return <p>Loading...</p>;
+  if (loading) return <p>Loading...</p>;
+  if (error) return <p>{error}</p>;
+  if (!stats) return <p>No dashboard data.</p>;
 
   return (
     <div>
@@ -92,7 +107,7 @@ export default function Dashboard() {
         <button
           onClick={() =>
             downloadFile(
-              `${import.meta.env.VITE_API_URL}/admin/dashboard/export/users?days=${days}`,
+              `${import.meta.env.VITE_API_URL}/api/admin/dashboard/export/users?days=${days}`,
               `users_last_${days}_days.csv`
             )
           }
@@ -103,7 +118,7 @@ export default function Dashboard() {
         <button
           onClick={() =>
             downloadFile(
-              `${import.meta.env.VITE_API_URL}/admin/dashboard/export/posts?days=${days}`,
+              `${import.meta.env.VITE_API_URL}/api/admin/dashboard/export/posts?days=${days}`,
               `posts_last_${days}_days.csv`
             )
           }
