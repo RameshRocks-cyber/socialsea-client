@@ -40,7 +40,11 @@ const Login = () => {
       setTimer(45); // Start 45s timer
     } catch (err) {
       console.error(err);
-      setMsg("Send OTP failed. Please try again.");
+      const serverMsg =
+        err?.response?.data?.message ||
+        err?.response?.data?.error ||
+        err?.message;
+      setMsg(serverMsg || "Send OTP failed. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -90,7 +94,11 @@ const Login = () => {
       }
     } catch (err) {
       console.error(err);
-      setMsg("Invalid or expired OTP");
+      const serverMsg =
+        err?.response?.data?.message ||
+        err?.response?.data?.error ||
+        err?.message;
+      setMsg(serverMsg || "Invalid or expired OTP");
     } finally {
       setLoading(false);
     }

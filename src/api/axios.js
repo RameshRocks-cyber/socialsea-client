@@ -11,13 +11,16 @@ const refreshClient = axios.create({
 });
 
 api.interceptors.request.use((config) => {
+  const url = config?.url || "";
+  const isPublicAuth =
+    /\/auth\/(send-otp|verify-otp|refresh|login|register)\b/i.test(url);
   const token =
     localStorage.getItem("accessToken") ||
     localStorage.getItem("token") ||
     sessionStorage.getItem("accessToken") ||
     sessionStorage.getItem("token");
   const normalized = token && token !== "null" && token !== "undefined" ? token.trim() : "";
-  if (normalized) {
+  if (normalized && !isPublicAuth) {
     config.headers.Authorization = `Bearer ${normalized}`;
   }
   return config;
