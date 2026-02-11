@@ -44,7 +44,7 @@ export default function Admin() {
       <h3>Posts</h3>
       {posts.map(p => (
         <div key={p.id}>
-          <img src={`${import.meta.env.VITE_API_URL}${p.mediaUrl}`} width="100" alt="" />
+          <img src={`${import.meta.env.VITE_API_BASE_URL}${p.mediaUrl}`} width="100" alt="" />
           <button onClick={() => del(p.id)}>Delete</button>
         </div>
       ))}

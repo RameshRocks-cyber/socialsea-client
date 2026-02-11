@@ -21,7 +21,7 @@ export default function Reels() {
       {reels.map(reel => (
         <video
           key={reel.id}
-          src={`${import.meta.env.VITE_API_URL}${reel.mediaUrl}`}
+          src={`${import.meta.env.VITE_API_BASE_URL}${reel.mediaUrl}`}
           autoPlay
           loop
           muted

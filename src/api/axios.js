@@ -1,13 +1,19 @@
 import axios from "axios";
 
+const rawBaseUrl = (import.meta.env.VITE_API_BASE_URL || "").trim();
+export const API_BASE_URL =
+  rawBaseUrl && rawBaseUrl !== "undefined" ? rawBaseUrl : "http://localhost:8080";
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL,
+  baseURL: API_BASE_URL,
   withCredentials: true,
+  timeout: 12000,
 });
 
 const refreshClient = axios.create({
-  baseURL: import.meta.env.VITE_API_URL,
+  baseURL: API_BASE_URL,
   withCredentials: true,
+  timeout: 12000,
 });
 
 api.interceptors.request.use((config) => {

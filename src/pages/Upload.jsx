@@ -16,7 +16,7 @@ export default function Upload() {
     form.append("caption", caption);
 
     const res = await fetch(
-      `${import.meta.env.VITE_API_URL}/api/anonymous/upload`,
+      `${import.meta.env.VITE_API_BASE_URL}/api/anonymous/upload`,
       {
         method: "POST",
         body: form

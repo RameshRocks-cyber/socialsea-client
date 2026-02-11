@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { sendOtp, verifyOtp } from "../api/auth";
+import { API_BASE_URL } from "../api/axios";
 
 const Login = () => {
   const [step, setStep] = useState("EMAIL"); // EMAIL | OTP
@@ -25,9 +26,10 @@ const Login = () => {
   const handleSendOtp = async (e) => {
     e?.preventDefault();
     if (timer > 0) return;
+    const normalizedEmail = email.trim();
 
     // Validate email format
-    if (!email || !email.includes("@")) {
+    if (!normalizedEmail || !normalizedEmail.includes("@")) {
       alert("Please enter a valid email address");
       return;
     }
@@ -35,7 +37,8 @@ const Login = () => {
     setLoading(true);
     setMsg("");
     try {
-      await sendOtp(email);
+      await sendOtp(normalizedEmail);
+      setEmail(normalizedEmail);
       setStep("OTP");
       setTimer(45); // Start 45s timer
     } catch (err) {
@@ -44,7 +47,8 @@ const Login = () => {
         err?.response?.data?.message ||
         err?.response?.data?.error ||
         err?.message;
-      setMsg(serverMsg || "Send OTP failed. Please try again.");
+      const timeoutMsg = err?.code === "ECONNABORTED" ? `Request timed out. Check backend at ${API_BASE_URL}` : "";
+      setMsg(serverMsg || timeoutMsg || `Send OTP failed. Check backend at ${API_BASE_URL}`);
     } finally {
       setLoading(false);
     }

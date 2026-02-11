@@ -107,7 +107,7 @@ export default function Dashboard() {
         <button
           onClick={() =>
             downloadFile(
-              `${import.meta.env.VITE_API_URL}/api/admin/dashboard/export/users?days=${days}`,
+              `${import.meta.env.VITE_API_BASE_URL}/api/admin/dashboard/export/users?days=${days}`,
               `users_last_${days}_days.csv`
             )
           }
@@ -118,7 +118,7 @@ export default function Dashboard() {
         <button
           onClick={() =>
             downloadFile(
-              `${import.meta.env.VITE_API_URL}/api/admin/dashboard/export/posts?days=${days}`,
+              `${import.meta.env.VITE_API_BASE_URL}/api/admin/dashboard/export/posts?days=${days}`,
               `posts_last_${days}_days.csv`
             )
           }

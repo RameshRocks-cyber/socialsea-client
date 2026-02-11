@@ -1,11 +1,11 @@
 import api from "./axios";
 
 export const sendOtp = (email) => {
-  return api.post("/auth/send-otp", { email });
+  return api.post("/api/auth/send-otp", { email });
 };
 
 export const verifyOtp = (email, otp) => {
-  return api.post("/auth/verify-otp", { email, otp });
+  return api.post("/api/auth/verify-otp", { email, otp });
 };
 
 export function getRole() {

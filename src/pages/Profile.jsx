@@ -93,7 +93,7 @@ export default function Profile() {
         {posts.map(p => (
           <img
             key={p.id}
-            src={`${import.meta.env.VITE_API_URL}${p.mediaUrl}`}
+            src={`${import.meta.env.VITE_API_BASE_URL}${p.mediaUrl}`}
             alt=""
             style={{ width: "100%" }}
           />
