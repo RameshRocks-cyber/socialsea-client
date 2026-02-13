@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { API_BASE_URL } from "../api/axios";
 
 export default function Upload() {
   const [file, setFile] = useState(null);
@@ -16,7 +17,7 @@ export default function Upload() {
     form.append("caption", caption);
 
     const res = await fetch(
-      `${import.meta.env.VITE_API_BASE_URL}/api/anonymous/upload`,
+      `${API_BASE_URL}/api/anonymous/upload`,
       {
         method: "POST",
         body: form

@@ -1,18 +1,19 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { API_BASE_URL } from "../api/axios";
 
 export default function AnonymousFeed() {
   const [videos, setVideos] = useState([]);
 
   useEffect(() => {
-    fetch(import.meta.env.VITE_API_BASE_URL + "/api/anonymous/feed")
+    fetch(API_BASE_URL + "/api/anonymous/feed")
       .then(res => res.json())
       .then(setVideos)
       .catch(console.error);
   }, []);
 
   function likeVideo(id) {
-    fetch(import.meta.env.VITE_API_BASE_URL + `/api/anonymous/like/${id}`, { method: "POST" });
+    fetch(API_BASE_URL + `/api/anonymous/like/${id}`, { method: "POST" });
   }
 
   return (
@@ -38,7 +39,7 @@ export default function AnonymousFeed() {
             {/* Video */}
             <div style={styles.videoWrapper}>
               <video
-                src={`${import.meta.env.VITE_API_BASE_URL}${v.videoUrl}`}
+                src={`${API_BASE_URL}${v.videoUrl}`}
                 controls
                 style={styles.video}
               />

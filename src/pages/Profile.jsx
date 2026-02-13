@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import api from "../api/axios";
+import api, { API_BASE_URL } from "../api/axios";
 
 export default function Profile() {
   console.log("Profile component rendering");
@@ -93,7 +93,7 @@ export default function Profile() {
         {posts.map(p => (
           <img
             key={p.id}
-            src={`${import.meta.env.VITE_API_BASE_URL}${p.mediaUrl}`}
+            src={`${API_BASE_URL}${p.mediaUrl}`}
             alt=""
             style={{ width: "100%" }}
           />

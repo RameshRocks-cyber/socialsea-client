@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import api from "../api/axios";
+import api, { API_BASE_URL } from "../api/axios";
 
 export default function Reels() {
   const [reels, setReels] = useState([]);
@@ -21,7 +21,7 @@ export default function Reels() {
       {reels.map(reel => (
         <video
           key={reel.id}
-          src={`${import.meta.env.VITE_API_BASE_URL}${reel.mediaUrl}`}
+          src={`${API_BASE_URL}${reel.mediaUrl}`}
           autoPlay
           loop
           muted

@@ -1,22 +1,39 @@
 import axios from "axios";
 
-const rawBaseUrl = (import.meta.env.VITE_API_BASE_URL || "").trim();
+const rawBaseUrl = (
+  import.meta.env.VITE_API_BASE_URL ||
+  import.meta.env.VITE_API_URL ||
+  ""
+).trim();
 
 const normalizeBase = (base) => base.replace(/\/+$/, "");
 
 const resolveApiBaseUrl = () => {
-  if (rawBaseUrl && rawBaseUrl !== "undefined") {
-    return normalizeBase(rawBaseUrl);
-  }
-
   if (typeof window !== "undefined") {
+    const pageProtocol = window.location.protocol;
     const host = window.location.hostname;
     const isLocalHost =
       host === "localhost" || host === "127.0.0.1" || host === "::1";
 
+    if (rawBaseUrl && rawBaseUrl !== "undefined") {
+      const normalizedEnvBase = normalizeBase(rawBaseUrl);
+      if (pageProtocol === "https:" && normalizedEnvBase.startsWith("http://")) {
+        return normalizedEnvBase.replace(/^http:\/\//i, "https://");
+      }
+      return normalizedEnvBase;
+    }
+
+    if (!isLocalHost && host === "socialsea.co.in") {
+      return "https://api.socialsea.co.in";
+    }
+
     if (!isLocalHost) {
       return normalizeBase(window.location.origin);
     }
+  }
+
+  if (rawBaseUrl && rawBaseUrl !== "undefined") {
+    return normalizeBase(rawBaseUrl);
   }
 
   return "http://localhost:8080";
