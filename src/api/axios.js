@@ -41,6 +41,22 @@ const resolveApiBaseUrl = () => {
 
 export const API_BASE_URL = resolveApiBaseUrl();
 
+const isPublicAuthUrl = (url = "") =>
+  /\/auth\/(send-otp|verify-otp|refresh|login|register)\b/i.test(url);
+
+const clearAuthAndRedirectToLogin = () => {
+  localStorage.removeItem("accessToken");
+  localStorage.removeItem("token");
+  localStorage.removeItem("refreshToken");
+  localStorage.removeItem("role");
+  sessionStorage.removeItem("accessToken");
+  sessionStorage.removeItem("token");
+  sessionStorage.removeItem("role");
+  if (typeof window !== "undefined" && window.location.pathname !== "/login") {
+    window.location.href = "/login";
+  }
+};
+
 const api = axios.create({
   baseURL: API_BASE_URL,
   withCredentials: true,
@@ -55,8 +71,7 @@ const refreshClient = axios.create({
 
 api.interceptors.request.use((config) => {
   const url = config?.url || "";
-  const isPublicAuth =
-    /\/auth\/(send-otp|verify-otp|refresh|login|register)\b/i.test(url);
+  const isPublicAuth = isPublicAuthUrl(url);
   const token =
     localStorage.getItem("accessToken") ||
     localStorage.getItem("token") ||
@@ -74,6 +89,7 @@ api.interceptors.response.use(
   async (error) => {
     const original = error.config || {};
     const status = error?.response?.status;
+    const isPublicAuth = isPublicAuthUrl(original?.url || "");
     if ((status !== 401 && status !== 403) || original._retry) {
       return Promise.reject(error);
     }
@@ -81,6 +97,7 @@ api.interceptors.response.use(
     original._retry = true;
     const refreshToken = localStorage.getItem("refreshToken");
     if (!refreshToken) {
+      if (!isPublicAuth) clearAuthAndRedirectToLogin();
       return Promise.reject(error);
     }
 
@@ -96,14 +113,19 @@ api.interceptors.response.use(
       original.headers.Authorization = `Bearer ${newToken}`;
       return api(original);
     } catch (refreshError) {
-      const status = refreshError?.response?.status;
-      if (status === 401) {
-        localStorage.removeItem("accessToken");
-        localStorage.removeItem("token");
-        localStorage.removeItem("refreshToken");
-        sessionStorage.removeItem("accessToken");
-        sessionStorage.removeItem("token");
-        window.location.href = "/login";
+      const refreshStatus = refreshError?.response?.status;
+      const refreshMessage = String(
+        refreshError?.response?.data?.message ||
+        refreshError?.response?.data?.error ||
+        ""
+      ).toLowerCase();
+      const isInvalidRefresh =
+        refreshStatus === 400 ||
+        refreshStatus === 401 ||
+        refreshStatus === 403 ||
+        refreshMessage.includes("refresh token");
+      if (isInvalidRefresh && !isPublicAuth) {
+        clearAuthAndRedirectToLogin();
       }
       return Promise.reject(refreshError);
     }

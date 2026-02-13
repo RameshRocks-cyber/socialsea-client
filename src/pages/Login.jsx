@@ -86,9 +86,15 @@ const Login = () => {
       sessionStorage.setItem("token", token);
       if (refreshToken) {
         localStorage.setItem("refreshToken", refreshToken);
+      } else {
+        localStorage.removeItem("refreshToken");
       }
       if (role) {
         localStorage.setItem("role", role);
+        sessionStorage.setItem("role", role);
+      } else {
+        localStorage.removeItem("role");
+        sessionStorage.removeItem("role");
       }
 
       if (role === "ADMIN") {
