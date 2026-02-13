@@ -1,8 +1,29 @@
 import axios from "axios";
 
 const rawBaseUrl = (import.meta.env.VITE_API_BASE_URL || "").trim();
-export const API_BASE_URL =
-  rawBaseUrl && rawBaseUrl !== "undefined" ? rawBaseUrl : "http://localhost:8080";
+
+const normalizeBase = (base) => base.replace(/\/+$/, "");
+
+const resolveApiBaseUrl = () => {
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname;
+    const isLocalHost =
+      host === "localhost" || host === "127.0.0.1" || host === "::1";
+
+    if (!isLocalHost) {
+      // In deployed environments use same-origin and ignore env host overrides.
+      return normalizeBase(window.location.origin);
+    }
+  }
+
+  if (rawBaseUrl && rawBaseUrl !== "undefined") {
+    return normalizeBase(rawBaseUrl);
+  }
+
+  return "http://localhost:8080";
+};
+
+export const API_BASE_URL = resolveApiBaseUrl();
 
 const api = axios.create({
   baseURL: API_BASE_URL,
