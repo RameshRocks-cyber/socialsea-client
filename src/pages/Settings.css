@@ -1,0 +1,225 @@
+.settings-page {
+  min-height: 100vh;
+  padding: 18px clamp(10px, 3vw, 24px) 30px;
+  color: #edf5ff;
+  background:
+    radial-gradient(850px 300px at 10% -5%, rgba(44, 112, 255, 0.2), transparent 72%),
+    radial-gradient(780px 280px at 100% -12%, rgba(0, 174, 255, 0.1), transparent 72%),
+    #04070f;
+}
+
+.settings-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.settings-top h1 {
+  margin: 0;
+  font-size: clamp(26px, 4vw, 40px);
+  letter-spacing: 0.2px;
+}
+
+.settings-back {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  border: 1px solid rgba(75, 116, 205, 0.44);
+  background: #0e1731;
+  color: #eef6ff;
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.settings-section {
+  margin-top: 14px;
+  border: 1px solid rgba(73, 109, 187, 0.3);
+  border-radius: 14px;
+  overflow: hidden;
+  background: linear-gradient(145deg, rgba(9, 15, 32, 0.9), rgba(8, 12, 23, 0.95));
+}
+
+.settings-section h2 {
+  margin: 0;
+  padding: 14px 14px 10px;
+  color: #9fb5de;
+  font-size: 19px;
+  font-weight: 700;
+  border-bottom: 1px solid rgba(58, 90, 153, 0.24);
+}
+
+.settings-row {
+  width: 100%;
+  border: none;
+  border-bottom: 1px solid rgba(42, 64, 111, 0.3);
+  background: transparent;
+  color: #edf5ff;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto 18px;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 14px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.settings-row:last-child {
+  border-bottom: none;
+}
+
+.settings-row:hover {
+  background: rgba(36, 60, 116, 0.16);
+}
+
+.settings-row-icon {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.settings-row-title {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.settings-row-value {
+  color: #9db2d9;
+  font-size: 15px;
+}
+
+.settings-row-arrow {
+  color: #7f95bf;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.settings-panel {
+  margin-top: 16px;
+  border: 1px solid rgba(83, 122, 205, 0.34);
+  border-radius: 14px;
+  padding: 12px;
+  background: linear-gradient(160deg, rgba(11, 18, 38, 0.93), rgba(9, 13, 25, 0.95));
+}
+
+.settings-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.settings-panel-head h3 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.settings-panel-head button {
+  border: 1px solid rgba(78, 116, 202, 0.45);
+  background: #122047;
+  color: #eaf3ff;
+  border-radius: 8px;
+  padding: 7px 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.settings-panel-head div {
+  display: flex;
+  gap: 8px;
+}
+
+.settings-item {
+  border: 1px solid rgba(73, 103, 174, 0.36);
+  border-radius: 12px;
+  padding: 8px;
+  background: rgba(12, 20, 41, 0.88);
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.settings-thumb-wrap {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #000;
+}
+
+.settings-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.settings-item-text h4 {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.35;
+}
+
+.settings-item-text p {
+  margin: 5px 0 0;
+  color: #a7bcdf;
+  font-size: 14px;
+}
+
+.settings-remove {
+  border: 1px solid rgba(255, 104, 131, 0.54);
+  background: rgba(255, 53, 97, 0.14);
+  color: #ffd4dc;
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.settings-empty {
+  margin: 8px 2px;
+  color: #adbfdf;
+}
+
+.settings-select-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+}
+
+.settings-select-grid button,
+.watch-later-shortcut {
+  border: 1px solid rgba(75, 111, 192, 0.45);
+  background: #122047;
+  color: #edf6ff;
+  border-radius: 9px;
+  padding: 10px 12px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.settings-select-grid button.active {
+  border-color: #5c9aff;
+  background: linear-gradient(135deg, #2a6eff, #214fbe);
+}
+
+.watch-later-shortcut {
+  margin-top: 10px;
+  width: 100%;
+}
+
+@media (max-width: 780px) {
+  .settings-item {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-remove {
+    width: 100%;
+  }
+
+  .settings-row-title {
+    font-size: 17px;
+  }
+}

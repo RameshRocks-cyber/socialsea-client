@@ -1,0 +1,257 @@
+.reels-page {
+  position: relative;
+  height: calc(100vh - 60px);
+  background: #000;
+}
+
+.reels-container {
+  height: 100%;
+  overflow-y: auto;
+  scroll-snap-type: y mandatory;
+}
+
+.reel-item {
+  position: relative;
+  height: calc(100vh - 60px);
+  scroll-snap-align: start;
+  background: #000;
+}
+
+.reel-item::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 42%;
+  background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.72));
+  pointer-events: none;
+  z-index: 4;
+}
+
+.reel-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  cursor: pointer;
+}
+
+.reel-top-bar {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #fff;
+  z-index: 5;
+}
+
+.reel-top-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+}
+
+.reel-top-icons {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 28px;
+  line-height: 1;
+}
+
+.reel-actions {
+  position: absolute;
+  right: 10px;
+  bottom: 106px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  z-index: 5;
+}
+
+.reel-action-btn {
+  border: none;
+  background: transparent;
+  color: #fff;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.reel-action-btn span {
+  font-size: 28px;
+  line-height: 1;
+  text-shadow: 0 3px 12px rgba(0, 0, 0, 0.4);
+}
+
+.reel-action-btn small {
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.reel-action-btn.is-active span {
+  color: #ff7ca1;
+}
+
+.reel-save-btn span {
+  color: #ffffff !important;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.reel-bottom-meta {
+  position: absolute;
+  left: 12px;
+  right: 84px;
+  bottom: 12px;
+  color: #fff;
+  z-index: 5;
+}
+
+.reel-owner-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.reel-owner {
+  font-size: 42px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.reel-follow-btn {
+  border: none;
+  background: #fff;
+  color: #111;
+  border-radius: 999px;
+  padding: 7px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.25);
+}
+
+.reel-follow-btn:disabled {
+  opacity: 0.75;
+  cursor: default;
+}
+
+.reel-caption {
+  margin: 0;
+  font-size: 32px;
+  font-weight: 800;
+  line-height: 1.35;
+  max-width: 95%;
+  text-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+}
+
+.reel-share-status {
+  position: absolute;
+  right: 10px;
+  bottom: 74px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.reel-like-burst {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 74px;
+  color: rgba(255, 255, 255, 0.95);
+  pointer-events: none;
+  animation: reelBurst 0.7s ease-out forwards;
+  z-index: 6;
+}
+
+@keyframes reelBurst {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.5);
+  }
+  30% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.25);
+  }
+}
+
+.reel-comments {
+  position: absolute;
+  left: 12px;
+  right: 70px;
+  bottom: 110px;
+  background: rgba(0, 0, 0, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 10px;
+  padding: 10px;
+  max-height: 42%;
+  overflow-y: auto;
+  z-index: 7;
+}
+
+.reel-comment-input-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.reel-comment-input-row input {
+  flex: 1;
+  border-radius: 8px;
+  border: 1px solid #2f2f2f;
+  background: #141414;
+  color: #f3f3f3;
+  padding: 6px 10px;
+}
+
+.reel-comment-input-row button {
+  border: 1px solid #2f2f2f;
+  background: #1a1a1a;
+  color: #f3f3f3;
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.reel-comment-item {
+  color: #f3f3f3;
+  padding: 6px 0;
+  border-bottom: 1px solid #222;
+  font-size: 13px;
+}
+
+.reel-comment-item:last-child {
+  border-bottom: none;
+}
+
+.reel-state {
+  color: #fff;
+  padding: 16px;
+}
+
+@media (max-width: 740px) {
+  .reel-owner {
+    font-size: 24px;
+  }
+
+  .reel-caption {
+    font-size: 15px;
+  }
+}

@@ -1,0 +1,32 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  min-height: 100%;
+}
+
+body {
+  background: #000;
+  color: #fff;
+  min-width: 320px;
+  overflow-x: hidden;
+}
+
+a {
+  text-decoration: none;
+}
+
+.app-route-wrap {
+  width: 100%;
+}
+
+.app-route-wrap.with-navbar {
+  padding-top: 60px;
+}
