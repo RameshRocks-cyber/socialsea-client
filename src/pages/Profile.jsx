@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import api from "../api/axios";
+import { toApiUrl } from "../api/baseUrl";
 import "./Profile.css";
 
 export default function Profile() {
@@ -71,7 +72,7 @@ export default function Profile() {
 
   const resolveMediaUrl = (url) => {
     if (!url) return "";
-    return url.startsWith("http") ? url : `${import.meta.env.VITE_API_URL}${url}`;
+    return toApiUrl(url);
   };
 
   const logout = () => {

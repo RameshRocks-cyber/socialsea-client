@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import api from "../api/axios";
+import { toApiUrl } from "../api/baseUrl";
 
 export default function AdminAnonymousApproved() {
   const [posts, setPosts] = useState([]);
@@ -13,7 +14,7 @@ export default function AdminAnonymousApproved() {
   const resolveUrl = (url) => {
     if (!url) return "";
     if (url.startsWith("http")) return url;
-    return `${import.meta.env.VITE_API_URL}${url}`;
+    return toApiUrl(url);
   };
 
   return (

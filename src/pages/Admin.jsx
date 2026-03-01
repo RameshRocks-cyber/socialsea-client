@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { Navigate } from "react-router-dom"
 import api from "../api/axios"
+import { toApiUrl } from "../api/baseUrl"
 
 export default function Admin() {
   const [users, setUsers] = useState([])
@@ -44,7 +45,7 @@ export default function Admin() {
       <h3>Posts</h3>
       {posts.map(p => (
         <div key={p.id}>
-          <img src={`${import.meta.env.VITE_API_URL}${p.mediaUrl}`} width="100" alt="" />
+          <img src={toApiUrl(p.mediaUrl)} width="100" alt="" />
           <button onClick={() => del(p.id)}>Delete</button>
         </div>
       ))}

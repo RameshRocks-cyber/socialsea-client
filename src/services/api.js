@@ -1,2 +1,4 @@
-const BASE_URL = "http://43.205.213.14:8080";
+import { getApiBaseUrl } from "../api/baseUrl";
+
+const BASE_URL = getApiBaseUrl();
 export default BASE_URL;

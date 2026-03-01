@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import api from "./api/axios";
+import { toApiUrl } from "./api/baseUrl";
 import DashboardCharts from "./DashboardCharts";
 
 /* ===============================
@@ -107,7 +108,7 @@ export default function Dashboard() {
         <button
           onClick={() =>
             downloadFile(
-              `${import.meta.env.VITE_API_URL}/api/admin/dashboard/export/users?days=${days}`,
+              toApiUrl(`/api/admin/dashboard/export/users?days=${days}`),
               `users_last_${days}_days.csv`
             )
           }
@@ -118,7 +119,7 @@ export default function Dashboard() {
         <button
           onClick={() =>
             downloadFile(
-              `${import.meta.env.VITE_API_URL}/api/admin/dashboard/export/posts?days=${days}`,
+              toApiUrl(`/api/admin/dashboard/export/posts?days=${days}`),
               `posts_last_${days}_days.csv`
             )
           }

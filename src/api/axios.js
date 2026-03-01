@@ -1,11 +1,14 @@
 import axios from "axios";
+import { getApiBaseUrl } from "./baseUrl";
+
+const BASE_URL = getApiBaseUrl();
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL,
+  baseURL: BASE_URL,
 });
 
 const refreshClient = axios.create({
-  baseURL: import.meta.env.VITE_API_URL,
+  baseURL: BASE_URL,
   withCredentials: true,
 });
 
