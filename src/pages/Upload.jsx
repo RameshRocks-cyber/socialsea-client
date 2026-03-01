@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import api from "../api/axios";
 import "./Upload.css";
 
@@ -35,6 +35,7 @@ const PRESETS = {
 };
 
 export default function Upload() {
+  const videoRef = useRef(null);
   const [file, setFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState("");
   const [caption, setCaption] = useState("");
@@ -42,6 +43,29 @@ export default function Upload() {
   const [loading, setLoading] = useState(false);
   const [edits, setEdits] = useState(defaultEdits);
   const [previewOriginal, setPreviewOriginal] = useState(false);
+  const [videoMeta, setVideoMeta] = useState({ duration: 0, width: 0, height: 0 });
+  const [videoEdits, setVideoEdits] = useState({
+    trimStart: 0,
+    trimEnd: 0,
+    playbackSpeed: 1,
+    volume: 100,
+    muted: false,
+    brightness: 100,
+    contrast: 100,
+    saturation: 100,
+    qualityTarget: "1080p",
+    coverMode: "auto"
+  });
+  const [creatorSettings, setCreatorSettings] = useState({
+    audience: "public",
+    allowComments: true,
+    allowRemix: true,
+    allowDownload: false,
+    autoCaptions: true,
+    ageRestriction: "all",
+    category: "general",
+    scheduleAt: ""
+  });
 
   useEffect(() => {
     if (!file) {
@@ -55,6 +79,8 @@ export default function Upload() {
 
   const isImage = useMemo(() => !!file?.type?.startsWith("image/"), [file]);
   const isVideo = useMemo(() => !!file?.type?.startsWith("video/"), [file]);
+  const trimEndMax = Math.max(videoMeta.duration, 0);
+  const trimStartMax = Math.max(0, (videoEdits.trimEnd || videoMeta.duration || 0) - 0.2);
 
   const aspectValue = useMemo(() => {
     switch (edits.aspect) {
@@ -78,6 +104,34 @@ export default function Upload() {
   const resetEdits = () => setEdits(defaultEdits);
 
   const setEdit = (key, value) => setEdits((prev) => ({ ...prev, [key]: value, preset: "custom" }));
+  const setVideoEdit = (key, value) => setVideoEdits((prev) => ({ ...prev, [key]: value }));
+  const setCreatorSetting = (key, value) => setCreatorSettings((prev) => ({ ...prev, [key]: value }));
+
+  const videoFilterStyle = useMemo(() => {
+    return `brightness(${videoEdits.brightness}%) contrast(${videoEdits.contrast}%) saturate(${videoEdits.saturation}%)`;
+  }, [videoEdits]);
+
+  const videoTrimSummary = useMemo(() => {
+    const start = Number(videoEdits.trimStart || 0);
+    const end = Number(videoEdits.trimEnd || 0);
+    const duration = Number(videoMeta.duration || 0);
+    const safeEnd = end > 0 ? end : duration;
+    const clipLen = Math.max(0, safeEnd - start);
+    return {
+      start: start.toFixed(1),
+      end: safeEnd.toFixed(1),
+      clipLen: clipLen.toFixed(1)
+    };
+  }, [videoEdits, videoMeta]);
+
+  useEffect(() => {
+    if (!isVideo) return;
+    const video = videoRef.current;
+    if (!video) return;
+    video.playbackRate = Number(videoEdits.playbackSpeed || 1);
+    video.volume = Math.max(0, Math.min(1, Number(videoEdits.volume || 0) / 100));
+    video.muted = !!videoEdits.muted;
+  }, [isVideo, videoEdits.playbackSpeed, videoEdits.volume, videoEdits.muted]);
 
   const applyPreset = (key) => {
     const preset = PRESETS[key];
@@ -158,6 +212,15 @@ export default function Upload() {
     const uploadFile = isImage ? await processImage(file) : file;
     form.append("file", uploadFile);
     if (caption?.trim()) form.append("caption", caption.trim());
+    if (isVideo) {
+      form.append(
+        "videoSettings",
+        JSON.stringify({
+          edits: videoEdits,
+          creatorSettings
+        })
+      );
+    }
 
     try {
       setLoading(true);
@@ -168,6 +231,29 @@ export default function Upload() {
       setFile(null);
       setCaption("");
       setEdits(defaultEdits);
+      setVideoMeta({ duration: 0, width: 0, height: 0 });
+      setVideoEdits({
+        trimStart: 0,
+        trimEnd: 0,
+        playbackSpeed: 1,
+        volume: 100,
+        muted: false,
+        brightness: 100,
+        contrast: 100,
+        saturation: 100,
+        qualityTarget: "1080p",
+        coverMode: "auto"
+      });
+      setCreatorSettings({
+        audience: "public",
+        allowComments: true,
+        allowRemix: true,
+        allowDownload: false,
+        autoCaptions: true,
+        ageRestriction: "all",
+        category: "general",
+        scheduleAt: ""
+      });
     } catch (err) {
       console.error(err);
       const message = err?.response?.data?.message || err?.response?.data || "Upload failed";
@@ -192,6 +278,7 @@ export default function Upload() {
               setFile(e.target.files?.[0] || null);
               setMsg("");
               setEdits(defaultEdits);
+              setVideoMeta({ duration: 0, width: 0, height: 0 });
             }}
           />
         </label>
@@ -219,7 +306,46 @@ export default function Upload() {
               </div>
             )}
 
-            {isVideo && <video src={previewUrl} className="upload-preview-video" controls />}
+            {isVideo && (
+              <div className="upload-preview-video-wrap">
+                <video
+                  ref={videoRef}
+                  src={previewUrl}
+                  className="upload-preview-video"
+                  controls
+                  style={{ filter: videoFilterStyle }}
+                  onLoadedMetadata={(e) => {
+                    const v = e.currentTarget;
+                    const duration = Number(v.duration || 0);
+                    setVideoMeta({
+                      duration,
+                      width: Number(v.videoWidth || 0),
+                      height: Number(v.videoHeight || 0)
+                    });
+                    setVideoEdits((prev) => ({
+                      ...prev,
+                      trimStart: 0,
+                      trimEnd: duration
+                    }));
+                  }}
+                  onTimeUpdate={(e) => {
+                    const v = e.currentTarget;
+                    const trimStart = Number(videoEdits.trimStart || 0);
+                    const trimEnd = Number(videoEdits.trimEnd || 0);
+                    if (trimEnd > trimStart && v.currentTime > trimEnd) {
+                      v.currentTime = trimStart;
+                      v.play().catch(() => {});
+                    }
+                  }}
+                />
+                <p className="video-meta-line">
+                  {videoMeta.width > 0 && videoMeta.height > 0
+                    ? `${videoMeta.width}x${videoMeta.height}`
+                    : "Video"}{" "}
+                  | Duration: {Number(videoMeta.duration || 0).toFixed(1)}s
+                </p>
+              </div>
+            )}
           </div>
         )}
 
@@ -300,9 +426,203 @@ export default function Upload() {
         )}
 
         {isVideo && (
-          <p className="video-note">
-            Video editing is limited currently. You can preview before upload.
-          </p>
+          <div className="upload-tools video-tools">
+            <h3>Creator Video Studio</h3>
+
+            <div className="tool-row">
+              <span>Trim</span>
+              <div className="slider-grid">
+                <label>
+                  Start: {videoTrimSummary.start}s
+                  <input
+                    type="range"
+                    min="0"
+                    max={trimStartMax || 0}
+                    step="0.1"
+                    value={videoEdits.trimStart}
+                    onChange={(e) => setVideoEdit("trimStart", Number(e.target.value))}
+                  />
+                </label>
+                <label>
+                  End: {videoTrimSummary.end}s
+                  <input
+                    type="range"
+                    min={Math.min(videoEdits.trimStart + 0.2, trimEndMax || 0)}
+                    max={trimEndMax || 0}
+                    step="0.1"
+                    value={videoEdits.trimEnd}
+                    onChange={(e) => setVideoEdit("trimEnd", Number(e.target.value))}
+                  />
+                </label>
+              </div>
+            </div>
+
+            <p className="video-note">Clip length: {videoTrimSummary.clipLen}s</p>
+
+            <div className="tool-row">
+              <span>Playback</span>
+              <div className="pill-group">
+                {[0.5, 0.75, 1, 1.25, 1.5, 2].map((speed) => (
+                  <button
+                    key={speed}
+                    type="button"
+                    className={Number(videoEdits.playbackSpeed) === speed ? "active" : ""}
+                    onClick={() => setVideoEdit("playbackSpeed", speed)}
+                  >
+                    {speed}x
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="slider-grid">
+              <label>
+                Volume: {videoEdits.volume}%
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={videoEdits.volume}
+                  onChange={(e) => setVideoEdit("volume", Number(e.target.value))}
+                />
+              </label>
+              <label>
+                Brightness
+                <input
+                  type="range"
+                  min="60"
+                  max="150"
+                  value={videoEdits.brightness}
+                  onChange={(e) => setVideoEdit("brightness", Number(e.target.value))}
+                />
+              </label>
+              <label>
+                Contrast
+                <input
+                  type="range"
+                  min="70"
+                  max="150"
+                  value={videoEdits.contrast}
+                  onChange={(e) => setVideoEdit("contrast", Number(e.target.value))}
+                />
+              </label>
+              <label>
+                Saturation
+                <input
+                  type="range"
+                  min="0"
+                  max="180"
+                  value={videoEdits.saturation}
+                  onChange={(e) => setVideoEdit("saturation", Number(e.target.value))}
+                />
+              </label>
+            </div>
+
+            <div className="tool-row">
+              <span>Output</span>
+              <div className="pill-group">
+                {["1080p", "720p", "480p", "Auto"].map((q) => (
+                  <button
+                    key={q}
+                    type="button"
+                    className={videoEdits.qualityTarget === q ? "active" : ""}
+                    onClick={() => setVideoEdit("qualityTarget", q)}
+                  >
+                    {q}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  className={videoEdits.muted ? "active" : ""}
+                  onClick={() => setVideoEdit("muted", !videoEdits.muted)}
+                >
+                  {videoEdits.muted ? "Muted" : "Audio On"}
+                </button>
+              </div>
+            </div>
+
+            <h3>Creator Publish Settings</h3>
+            <div className="creator-settings-grid">
+              <label>
+                Audience
+                <select
+                  value={creatorSettings.audience}
+                  onChange={(e) => setCreatorSetting("audience", e.target.value)}
+                >
+                  <option value="public">Public</option>
+                  <option value="followers">Followers</option>
+                  <option value="private">Only Me</option>
+                </select>
+              </label>
+
+              <label>
+                Age Restriction
+                <select
+                  value={creatorSettings.ageRestriction}
+                  onChange={(e) => setCreatorSetting("ageRestriction", e.target.value)}
+                >
+                  <option value="all">All ages</option>
+                  <option value="13+">13+</option>
+                  <option value="18+">18+</option>
+                </select>
+              </label>
+
+              <label>
+                Category
+                <select
+                  value={creatorSettings.category}
+                  onChange={(e) => setCreatorSetting("category", e.target.value)}
+                >
+                  <option value="general">General</option>
+                  <option value="education">Education</option>
+                  <option value="gaming">Gaming</option>
+                  <option value="music">Music</option>
+                  <option value="fitness">Fitness</option>
+                  <option value="vlog">Vlog</option>
+                </select>
+              </label>
+
+              <label>
+                Schedule (optional)
+                <input
+                  type="datetime-local"
+                  value={creatorSettings.scheduleAt}
+                  onChange={(e) => setCreatorSetting("scheduleAt", e.target.value)}
+                />
+              </label>
+            </div>
+
+            <div className="pill-group">
+              <button
+                type="button"
+                className={creatorSettings.allowComments ? "active" : ""}
+                onClick={() => setCreatorSetting("allowComments", !creatorSettings.allowComments)}
+              >
+                Comments {creatorSettings.allowComments ? "On" : "Off"}
+              </button>
+              <button
+                type="button"
+                className={creatorSettings.allowRemix ? "active" : ""}
+                onClick={() => setCreatorSetting("allowRemix", !creatorSettings.allowRemix)}
+              >
+                Remix {creatorSettings.allowRemix ? "On" : "Off"}
+              </button>
+              <button
+                type="button"
+                className={creatorSettings.allowDownload ? "active" : ""}
+                onClick={() => setCreatorSetting("allowDownload", !creatorSettings.allowDownload)}
+              >
+                Download {creatorSettings.allowDownload ? "On" : "Off"}
+              </button>
+              <button
+                type="button"
+                className={creatorSettings.autoCaptions ? "active" : ""}
+                onClick={() => setCreatorSetting("autoCaptions", !creatorSettings.autoCaptions)}
+              >
+                Auto Captions {creatorSettings.autoCaptions ? "On" : "Off"}
+              </button>
+            </div>
+          </div>
         )}
 
         <button className="upload-submit" onClick={upload} disabled={loading}>

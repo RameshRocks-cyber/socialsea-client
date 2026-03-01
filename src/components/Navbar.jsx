@@ -1,65 +1,46 @@
-import { Link, useNavigate } from "react-router-dom";
-import { getUserRole } from "../auth";
+import { Link, useLocation } from "react-router-dom";
+import { FiBell, FiHome, FiMessageSquare, FiSettings, FiUser, FiVideo } from "react-icons/fi";
 import "./Navbar.css";
 
+const ITEMS = [
+  { to: "/feed", icon: FiHome, label: "Feed", match: (p) => p === "/feed" },
+  { to: "/reels", icon: FiVideo, label: "Reels", match: (p) => p === "/reels" },
+  { to: "/chat", icon: FiMessageSquare, label: "Chat", match: (p) => p === "/chat" },
+  { to: "/notifications", icon: FiBell, label: "Alerts", match: (p) => p === "/notifications" },
+  { to: "/settings", icon: FiSettings, label: "Settings", match: (p) => p === "/settings" },
+  { to: "/profile/me", icon: FiUser, label: "Profile", match: (p) => p.startsWith("/profile") },
+];
+
 export default function Navbar() {
-  const isLoggedIn = !!localStorage.getItem("token");
-  const userId = localStorage.getItem("userId");
-  const role = getUserRole();
-  const isAdmin = role === "ADMIN";
-  const navigate = useNavigate();
+  const location = useLocation();
 
   return (
-    <nav className="navbar">
-      <div className="logo" onClick={() => navigate("/")}>
-        <img src="/logo.png?v=3" alt="SocialSea" className="logo-img" />
-        <span className="logo-text">SocialSea</span>
-      </div>
+    <header className="ss-nav-wrap">
+      <nav className="ss-nav" aria-label="Main navigation">
+        <Link to="/feed" className="ss-brand" aria-label="Go to feed">
+          <img src="/logo.png?v=3" alt="SocialSea" className="ss-brand-logo" />
+          <span className="ss-brand-text">SocialSea</span>
+        </Link>
 
-      <div className="links">
-        {!isAdmin && (
-          <>
-            {isLoggedIn && <Link to="/feed" className="nav-icon-link" title="Feed">{"\u2302"}</Link>}
-            {isLoggedIn && <Link to="/reels" className="nav-icon-link" title="Reels">{"\u25B7"}</Link>}
-            {isLoggedIn && (
-              <Link to="/notifications" className="nav-icon-link" title="Notifications">
-                {"\u{1F514}"}
+        <div className="ss-links">
+          {ITEMS.map((item) => {
+            const Icon = item.icon;
+            const active = item.match(location.pathname);
+            return (
+              <Link
+                key={item.to}
+                to={item.to}
+                className={`ss-link ${active ? "is-active" : ""}`}
+                title={item.label}
+                aria-current={active ? "page" : undefined}
+              >
+                <Icon className="ss-link-icon" />
+                <span className="ss-link-text">{item.label}</span>
               </Link>
-            )}
-            {isLoggedIn && (
-              <Link to="/chat" className="nav-icon-link" title="Chat">
-                {"\u2709"}
-              </Link>
-            )}
-            {isLoggedIn && userId && (
-              <Link to={`/profile/${userId}`} className="nav-icon-link" title="Profile">
-                {"\u{1F464}"}
-              </Link>
-            )}
-            {isLoggedIn && (
-              <Link to="/anonymous/upload" className="nav-icon-link" title="Anonymous Upload">
-                {"\u{1F47B}"}
-              </Link>
-            )}
-            {isLoggedIn && (
-              <Link to="/settings" className="nav-icon-link" title="Settings">
-                {"\u2699"}
-              </Link>
-            )}
-          </>
-        )}
-
-        {isAdmin && (
-          <>
-            <Link to="/admin/dashboard">Dashboard</Link>
-            <Link to="/admin/pending">Pending Anonymous</Link>
-            <Link to="/admin/reports">Reports</Link>
-          </>
-        )}
-
-        {!isLoggedIn && <Link to="/login">Login</Link>}
-        {!isLoggedIn && <Link to="/register">Create Account</Link>}
-      </div>
-    </nav>
+            );
+          })}
+        </div>
+      </nav>
+    </header>
   );
 }

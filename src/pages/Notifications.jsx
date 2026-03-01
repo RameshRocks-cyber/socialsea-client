@@ -31,16 +31,15 @@ export default function Notifications() {
   }, [])
 
   return (
-    <div style={{ padding: 20 }}>
+    <div className="max-w-2xl mx-auto space-y-4">
       <h2>Notifications</h2>
       {items.length === 0 && <p>No notifications yet.</p>}
 
       {items.map(n => (
         <div
           key={n.id}
+          className="bg-white/5 backdrop-blur-md p-4 rounded-xl hover:bg-white/10 transition"
           style={{
-            padding: 10,
-            borderBottom: "1px solid #262626",
             opacity: n.read ? 0.6 : 1
           }}
         >

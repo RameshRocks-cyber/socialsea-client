@@ -13,6 +13,9 @@ export default function Chat() {
   const [error, setError] = useState("");
   const [newChatOpen, setNewChatOpen] = useState(false);
   const [newChatQuery, setNewChatQuery] = useState("");
+  const [searchingUsers, setSearchingUsers] = useState(false);
+  const [searchUsers, setSearchUsers] = useState([]);
+  const [sidebarSearchUsers, setSidebarSearchUsers] = useState([]);
 
   const normalizeDisplayName = (value) => {
     const raw = String(value || "").trim();
@@ -84,20 +87,112 @@ export default function Chat() {
   };
 
   const filteredContacts = useMemo(() => {
-    if (!query.trim()) return contacts;
-    const q = query.toLowerCase();
-    return contacts.filter(
-      (c) => c.name.toLowerCase().includes(q) || (c.email || "").toLowerCase().includes(q)
-    );
-  }, [contacts, query]);
+    const q = query.trim().toLowerCase();
+    const local = !q
+      ? contacts
+      : contacts.filter(
+          (c) => c.name.toLowerCase().includes(q) || (c.email || "").toLowerCase().includes(q)
+        );
+
+    const merged = new Map();
+    [...local, ...sidebarSearchUsers].forEach((c) => {
+      if (!c?.id) return;
+      if (!merged.has(c.id)) merged.set(c.id, c);
+    });
+    return Array.from(merged.values());
+  }, [contacts, query, sidebarSearchUsers]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const q = query.trim();
+    if (q.length < 2) {
+      setSidebarSearchUsers([]);
+      return undefined;
+    }
+
+    const timer = setTimeout(async () => {
+      try {
+        const res = await api.get("/api/profile/search", { params: { q } });
+        if (cancelled) return;
+        const data = Array.isArray(res.data) ? res.data : [];
+        const mapped = data.map((u) => {
+          const rawName = u?.name || u?.email || `User ${u?.id ?? ""}`;
+          const displayName = normalizeDisplayName(rawName);
+          return {
+            id: String(u?.id),
+            name: displayName,
+            email: u?.email || "",
+            avatar: (displayName[0] || "U").toUpperCase()
+          };
+        });
+        setSidebarSearchUsers(mapped);
+      } catch {
+        if (!cancelled) setSidebarSearchUsers([]);
+      }
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [query]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const q = newChatQuery.trim();
+
+    if (q.length < 1) {
+      setSearchUsers([]);
+      setSearchingUsers(false);
+      return undefined;
+    }
+
+    const timer = setTimeout(async () => {
+      try {
+        setSearchingUsers(true);
+        const res = await api.get("/api/profile/search", { params: { q } });
+        if (cancelled) return;
+        const data = Array.isArray(res.data) ? res.data : [];
+        const mapped = data.map((u) => {
+          const rawName = u?.name || u?.email || `User ${u?.id ?? ""}`;
+          const displayName = normalizeDisplayName(rawName);
+          return {
+            id: String(u?.id),
+            name: displayName,
+            email: u?.email || "",
+            avatar: (displayName[0] || "U").toUpperCase()
+          };
+        });
+        setSearchUsers(mapped);
+      } catch (err) {
+        console.error(err);
+        if (!cancelled) setSearchUsers([]);
+      } finally {
+        if (!cancelled) setSearchingUsers(false);
+      }
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [newChatQuery]);
 
   const newChatCandidates = useMemo(() => {
-    if (!newChatQuery.trim()) return contacts;
-    const q = newChatQuery.toLowerCase();
-    return contacts.filter(
-      (c) => c.name.toLowerCase().includes(q) || (c.email || "").toLowerCase().includes(q)
-    );
-  }, [contacts, newChatQuery]);
+    const q = newChatQuery.trim().toLowerCase();
+    const local = !q
+      ? contacts
+      : contacts.filter(
+          (c) => c.name.toLowerCase().includes(q) || (c.email || "").toLowerCase().includes(q)
+        );
+
+    const merged = new Map();
+    [...local, ...searchUsers].forEach((c) => {
+      if (!c?.id) return;
+      if (!merged.has(c.id)) merged.set(c.id, c);
+    });
+    return Array.from(merged.values());
+  }, [contacts, newChatQuery, searchUsers]);
 
   const activeContact = contacts.find((c) => c.id === activeContactId) || null;
   const activeMessages = messagesByContact[activeContactId] || [];
@@ -121,10 +216,22 @@ export default function Chat() {
     setInputText("");
   };
 
-  const startNewChat = (contactId) => {
-    setActiveContactId(contactId);
+  const startNewChat = (contact) => {
+    setContacts((prev) => {
+      if (prev.some((x) => x.id === contact.id)) return prev;
+      return [contact, ...prev];
+    });
+    setActiveContactId(contact.id);
     setNewChatOpen(false);
     setNewChatQuery("");
+  };
+
+  const openContact = (contact) => {
+    setContacts((prev) => {
+      if (prev.some((x) => x.id === contact.id)) return prev;
+      return [contact, ...prev];
+    });
+    setActiveContactId(contact.id);
   };
 
   return (
@@ -153,7 +260,7 @@ export default function Chat() {
                 key={c.id}
                 type="button"
                 className={`chat-contact ${activeContactId === c.id ? "active" : ""}`}
-                onClick={() => setActiveContactId(c.id)}
+                onClick={() => openContact(c)}
               >
                 <span className="chat-avatar">{c.avatar}</span>
                 <span className="chat-meta">
@@ -181,21 +288,24 @@ export default function Chat() {
                 onChange={(e) => setNewChatQuery(e.target.value)}
               />
               <div className="new-chat-list">
+                {searchingUsers && <p className="chat-empty">Searching users...</p>}
                 {newChatCandidates.map((c) => (
                   <button
                     key={c.id}
                     type="button"
                     className="chat-contact"
-                    onClick={() => startNewChat(c.id)}
+                    onClick={() => startNewChat(c)}
                   >
                     <span className="chat-avatar">{c.avatar}</span>
                     <span className="chat-meta">
                       <strong>{c.name}</strong>
-                      <small>Start conversation</small>
+                      <small>{c.email || "Start conversation"}</small>
                     </span>
                   </button>
                 ))}
-                {newChatCandidates.length === 0 && <p className="chat-empty">No users found</p>}
+                {!searchingUsers && newChatCandidates.length === 0 && (
+                  <p className="chat-empty">No users found</p>
+                )}
               </div>
             </div>
           </div>

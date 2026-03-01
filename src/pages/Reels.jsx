@@ -1,4 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useLocation } from "react-router-dom";
+import { FiBookmark } from "react-icons/fi";
+import { BsBookmarkFill } from "react-icons/bs";
 import api from "../api/axios";
 import "./Reels.css";
 
@@ -18,10 +21,16 @@ export default function Reels() {
   const [shareMessageByPost, setShareMessageByPost] = useState({});
   const [tapLikeBurstByPost, setTapLikeBurstByPost] = useState({});
   const [followingByKey, setFollowingByKey] = useState({});
+  const [mutedByPost, setMutedByPost] = useState({});
 
   const containerRef = useRef(null);
   const videoRefs = useRef({});
   const tapTrackerRef = useRef({ lastTapTs: 0, singleTapTimer: null });
+  const location = useLocation();
+  const targetPostId = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    return Number(params.get("post") || 0);
+  }, [location.search]);
 
   useEffect(() => {
     api.get("/api/reels")
@@ -62,6 +71,19 @@ export default function Reels() {
 
   useEffect(() => {
     try {
+      const raw = localStorage.getItem("likedPostIds");
+      if (!raw) return;
+      const ids = JSON.parse(raw);
+      if (!Array.isArray(ids)) return;
+      const map = ids.reduce((acc, id) => ({ ...acc, [id]: true }), {});
+      setLikedPostIds(map);
+    } catch {
+      // ignore invalid localStorage payload
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
       const raw = localStorage.getItem("savedReelIds");
       if (!raw) return;
       const ids = JSON.parse(raw);
@@ -90,10 +112,28 @@ export default function Reels() {
     reels.forEach((reel, idx) => {
       const video = videoRefs.current[reel.id];
       if (!video) return;
-      if (idx === currentIndex) video.play().catch(() => {});
-      else video.pause();
+      if (idx === currentIndex) {
+        video.play().catch(() => {
+          video.muted = true;
+          setMutedByPost((prev) => ({ ...prev, [reel.id]: true }));
+          video.play().catch(() => {});
+        });
+      } else {
+        video.pause();
+      }
     });
   }, [currentIndex, reels]);
+
+  useEffect(() => {
+    if (!targetPostId || !reels.length) return;
+    const idx = reels.findIndex((r) => Number(r.id) === Number(targetPostId));
+    if (idx < 0) return;
+    setCurrentIndex(idx);
+    const container = containerRef.current;
+    if (container) {
+      container.scrollTo({ top: idx * container.clientHeight, behavior: "smooth" });
+    }
+  }, [reels, targetPostId]);
 
   useEffect(() => {
     return () => {
@@ -153,11 +193,21 @@ export default function Reels() {
       const res = await api.post(`/api/likes/${postId}`);
       const message = String(res?.data || "").toLowerCase();
       if (message.includes("already")) {
-        setLikedPostIds((prev) => ({ ...prev, [postId]: true }));
+        setLikedPostIds((prev) => {
+          const next = { ...prev, [postId]: true };
+          const ids = Object.keys(next).filter((id) => next[id]).map((id) => Number(id));
+          localStorage.setItem("likedPostIds", JSON.stringify(ids));
+          return next;
+        });
         return;
       }
       setLikeCounts((prev) => ({ ...prev, [postId]: (prev[postId] || 0) + 1 }));
-      setLikedPostIds((prev) => ({ ...prev, [postId]: true }));
+      setLikedPostIds((prev) => {
+        const next = { ...prev, [postId]: true };
+        const ids = Object.keys(next).filter((id) => next[id]).map((id) => Number(id));
+        localStorage.setItem("likedPostIds", JSON.stringify(ids));
+        return next;
+      });
       if (fromDoubleTap) {
         setTapLikeBurstByPost((prev) => ({ ...prev, [postId]: true }));
         setTimeout(() => setTapLikeBurstByPost((prev) => ({ ...prev, [postId]: false })), 700);
@@ -245,11 +295,13 @@ export default function Reels() {
     }
   };
 
-  const togglePlayPause = (postId) => {
+  const toggleMute = (postId) => {
     const video = videoRefs.current[postId];
     if (!video) return;
-    if (video.paused) video.play().catch(() => {});
-    else video.pause();
+    const nextMuted = !video.muted;
+    video.muted = nextMuted;
+    setMutedByPost((prev) => ({ ...prev, [postId]: nextMuted }));
+    if (!nextMuted && video.paused) video.play().catch(() => {});
   };
 
   const handleReelTap = (reel) => {
@@ -266,7 +318,7 @@ export default function Reels() {
     }
     tapTrackerRef.current.lastTapTs = now;
     tapTrackerRef.current.singleTapTimer = setTimeout(() => {
-      togglePlayPause(reel.id);
+      toggleMute(reel.id);
       tapTrackerRef.current.singleTapTimer = null;
     }, 280);
   };
@@ -294,22 +346,38 @@ export default function Reels() {
 
           return (
             <section className="reel-item" key={reel.id} data-reel-idx={idx}>
-              <video
-                ref={(el) => {
-                  if (el) videoRefs.current[reel.id] = el;
-                }}
-                src={videoUrl}
-                loop
-                muted
-                playsInline
-                controls={false}
-                className="reel-video"
-                onClick={() => handleReelTap(reel)}
-              />
+              <div className="reel-frame">
+                <video
+                  ref={(el) => {
+                    if (el) videoRefs.current[reel.id] = el;
+                  }}
+                  src={videoUrl}
+                  loop
+                  muted={mutedByPost[reel.id] ?? false}
+                  playsInline
+                  controls={false}
+                  className="reel-video"
+                  onClick={() => handleReelTap(reel)}
+                />
+                <div className="reel-gradient-top" />
+                <div className="reel-gradient-bottom" />
+                <div className="reel-top-bar">
+                  <h3 className="reel-top-title">Reels</h3>
+                  <span className="reel-top-chip">For You</span>
+                </div>
+              </div>
 
               {tapLikeBurstByPost[reel.id] && <div className="reel-like-burst">{"\u2665"}</div>}
 
               <aside className="reel-actions">
+                <button
+                  type="button"
+                  className="reel-action-btn"
+                  onClick={() => toggleMute(reel.id)}
+                  title={mutedByPost[reel.id] ? "Unmute" : "Mute"}
+                >
+                  <span>{mutedByPost[reel.id] ? "\u{1F507}" : "\u{1F50A}"}</span>
+                </button>
                 <button
                   type="button"
                   className={`reel-action-btn ${likedPostIds[reel.id] ? "is-active" : ""}`}
@@ -337,7 +405,7 @@ export default function Reels() {
                   onClick={() => toggleSave(reel.id)}
                   title="Save"
                 >
-                  <span>{"\u{1F516}"}</span>
+                  <span>{savedPostIds[reel.id] ? <BsBookmarkFill /> : <FiBookmark />}</span>
                 </button>
                 <button
                   type="button"
@@ -351,7 +419,13 @@ export default function Reels() {
 
               <div className="reel-bottom-meta">
                 <div className="reel-owner-row">
-                  <span className="reel-owner">@{ownerName.replace(/\s+/g, "").toLowerCase()}</span>
+                  <span className="reel-owner-avatar">{ownerName.charAt(0).toUpperCase()}</span>
+                  <Link 
+                    to={`/profile/${reel.user?.email || reel.user?.username || reel.username || "me"}`}
+                    className="reel-owner hover:underline"
+                  >
+                    {ownerName}
+                  </Link>
                   {!isOwnReel && (
                     <button
                       type="button"
@@ -359,7 +433,7 @@ export default function Reels() {
                       onClick={() => followOwner(reel)}
                       disabled={isFollowing}
                     >
-                      {isFollowing ? "Following" : "Follow"}
+                      {isFollowing ? "Following" : "Follow +"}
                     </button>
                   )}
                 </div>

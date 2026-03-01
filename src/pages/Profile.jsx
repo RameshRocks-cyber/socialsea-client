@@ -1,50 +1,72 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import api from "../api/axios";
 import "./Profile.css";
 
 export default function Profile() {
-  const { username: userIdFromUrl } = useParams();
+  const { username } = useParams();
   const myUserId = localStorage.getItem("userId");
   const navigate = useNavigate();
   const [profile, setProfile] = useState(null);
   const [posts, setPosts] = useState([]);
   const [error, setError] = useState("");
+  const [isFollowing, setIsFollowing] = useState(false);
+  const [followers, setFollowers] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [requested] = useState(false);
 
-  const isOwnProfile = Number(userIdFromUrl) === Number(myUserId);
+  const isOwnProfile =
+    username === "me" || Number(username) === Number(myUserId) || profile?.id === Number(myUserId);
 
   useEffect(() => {
     setError("");
     setProfile(null);
 
-    if (!userIdFromUrl) {
+    if (!username) {
       setError("User not found");
       return;
     }
 
-    api.get(`/api/profile/${userIdFromUrl}`)
-      .then((res) => setProfile(res.data))
+    api
+      .get(`/api/profile/${username}`)
+      .then((res) => {
+        const data = res.data?.user || res.data;
+        setProfile(data);
+        setIsFollowing(Boolean(res.data?.isFollowing));
+        setFollowers(Number(data?.followers ?? res.data?.followers ?? 0));
+      })
       .catch((err) => {
         console.error(err);
+        if (err?.response?.status === 401) {
+          navigate("/login");
+          return;
+        }
         setError("User not found");
       });
 
-    api.get(`/api/profile/${userIdFromUrl}/posts`)
+    api
+      .get(`/api/profile/${username}/posts`)
       .then((res) => setPosts(Array.isArray(res.data) ? res.data : []))
       .catch((err) => {
         console.error(err);
         setPosts([]);
       });
-  }, [userIdFromUrl]);
+  }, [username, navigate]);
 
-  const follow = () => {
-    if (!profile?.username) return;
-    api.post(`/api/follow/${profile.username}`).catch(console.error);
-  };
+  const handleFollow = async () => {
+    if (loading) return;
+    setLoading(true);
+    const method = isFollowing ? "DELETE" : "POST";
 
-  const unfollow = () => {
-    if (!profile?.username) return;
-    api.delete(`/api/follow/${profile.username}`).catch(console.error);
+    try {
+      await api({ method, url: `/api/follow/${username}` });
+      setIsFollowing(!isFollowing);
+      setFollowers((prev) => (isFollowing ? prev - 1 : prev + 1));
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const resolveMediaUrl = (url) => {
@@ -65,48 +87,60 @@ export default function Profile() {
       {!error && profile && (
         <>
           <section className="profile-header">
-            <img
-              src={profile.profilePicUrl || "/default-avatar.png"}
-              alt="Profile"
-              className="profile-pic"
-            />
+            <img src={profile.profilePicUrl || "/default-avatar.png"} alt="Profile" className="profile-pic" />
 
             <div className="profile-info">
               <h2 className="profile-name">{profile.name || profile.email || profile.username}</h2>
               <p className="bio">{profile.bio || "No bio yet"}</p>
 
               <p className="profile-stats">
-                <b>{profile.followers}</b> followers · <b>{profile.following}</b> following
+                <b>{followers}</b> followers | <b>{profile.following}</b> following
               </p>
 
               {!isOwnProfile && (
                 <div className="profile-actions">
-                  <button className="follow-btn" onClick={follow}>Follow</button>
-                  <button className="unfollow-btn" onClick={unfollow}>
-                    Unfollow
+                  <button
+                    onClick={handleFollow}
+                    disabled={loading}
+                    className={`px-6 py-2 rounded-xl font-semibold ${isFollowing ? "bg-gray-600" : requested ? "bg-yellow-600" : "bg-blue-500"}`}
+                  >
+                    {loading ? "..." : isFollowing ? "Following" : requested ? "Requested" : "Follow"}
                   </button>
                 </div>
               )}
 
               {isOwnProfile && (
-                <div className="profile-actions">
-                  <button
-                    className="edit-profile-btn"
-                    onClick={() => navigate("/profile-setup")}
-                  >
+                <div className="profile-actions-own">
+                  <button className="profile-cta profile-cta-edit" onClick={() => navigate("/profile-setup")}>
                     Edit Profile
                   </button>
-
-                  <button
-                    className="add-post-btn"
-                    onClick={() => navigate("/post-upload")}
-                  >
+                  <button className="profile-cta profile-cta-upload" onClick={() => navigate("/upload")}>
                     Add Post
+                  </button>
+                  <button className="profile-cta profile-cta-settings" onClick={() => navigate("/settings")}>
+                    Settings
                   </button>
                 </div>
               )}
             </div>
           </section>
+
+          {isOwnProfile && (
+            <section className="profile-shortcuts">
+              <button type="button" className="profile-shortcut-card" onClick={() => navigate("/anonymous/upload")}>
+                <h4>Anonymous Upload</h4>
+                <p>Share safely without exposing your profile identity.</p>
+              </button>
+              <button type="button" className="profile-shortcut-card" onClick={() => navigate("/anonymous-feed")}>
+                <h4>Anonymous Feed</h4>
+                <p>See all approved anonymous posts and interactions.</p>
+              </button>
+              <button type="button" className="profile-shortcut-card" onClick={() => navigate("/chat")}>
+                <h4>Messages</h4>
+                <p>Continue conversations and find people faster.</p>
+              </button>
+            </section>
+          )}
 
           <hr className="profile-divider" />
 
@@ -118,7 +152,6 @@ export default function Profile() {
                 {post.type === "IMAGE" && post.contentUrl?.trim() && (
                   <img src={resolveMediaUrl(post.contentUrl)} alt="" />
                 )}
-
                 {post.type === "VIDEO" && post.contentUrl?.trim() && (
                   <video src={resolveMediaUrl(post.contentUrl)} controls />
                 )}

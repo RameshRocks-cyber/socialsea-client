@@ -1,10 +1,7 @@
 import axios from "axios";
 
-console.log("VITE_API_URL:", import.meta.env.VITE_API_URL);
-
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL,
-  withCredentials: true,
 });
 
 const refreshClient = axios.create({
@@ -12,51 +9,62 @@ const refreshClient = axios.create({
   withCredentials: true,
 });
 
+// 🔹 Attach Access Token Automatically
 api.interceptors.request.use((config) => {
   const token =
     localStorage.getItem("accessToken") ||
     sessionStorage.getItem("accessToken");
-  const normalized = token && token !== "null" && token !== "undefined" ? token.trim() : "";
-  if (normalized) {
-    config.headers.Authorization = `Bearer ${normalized}`;
+
+  if (token && token !== "null" && token !== "undefined") {
+    config.headers.Authorization = `Bearer ${token.trim()}`;
   }
+
   return config;
 });
 
+// 🔹 Handle Expired Token (401 ONLY)
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
-    const original = error.config;
-    if (!original) return Promise.reject(error);
+    const originalRequest = error.config;
     const status = error?.response?.status;
-    if ((status !== 401 && status !== 403) || original._retry) {
+
+    // Only retry on 401 (NOT 403)
+    if (status !== 401 || originalRequest._retry) {
       return Promise.reject(error);
     }
 
-    original._retry = true;
+    originalRequest._retry = true;
+
     const refreshToken = localStorage.getItem("refreshToken");
     if (!refreshToken) {
       return Promise.reject(error);
     }
 
     try {
-      const res = await refreshClient.post("/auth/refresh", { refreshToken });
-      const newToken = res?.data?.accessToken || res?.data?.token;
-      if (!newToken) {
-        throw new Error("Missing access token");
+      const response = await refreshClient.post("/api/auth/refresh", {
+        refreshToken,
+      });
+
+      const newAccessToken =
+        response.data?.accessToken || response.data?.token;
+
+      if (!newAccessToken) {
+        throw new Error("No new access token received");
       }
-      localStorage.setItem("accessToken", newToken);
-      original.headers = original.headers || {};
-      original.headers.Authorization = `Bearer ${newToken}`;
-      return api(original);
+
+      localStorage.setItem("accessToken", newAccessToken);
+
+      originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
+
+      return api(originalRequest);
     } catch (refreshError) {
-      const status = refreshError?.response?.status;
-      if (status === 401) {
-        localStorage.removeItem("accessToken");
-        localStorage.removeItem("refreshToken");
-        sessionStorage.removeItem("accessToken");
-        window.location.href = "/login";
-      }
+      // If refresh fails → force logout
+      localStorage.removeItem("accessToken");
+      localStorage.removeItem("refreshToken");
+      sessionStorage.removeItem("accessToken");
+
+      window.location.href = "/login";
       return Promise.reject(refreshError);
     }
   }

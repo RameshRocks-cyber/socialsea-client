@@ -18,7 +18,7 @@ const Feed = () => {
   }, []);
 
   return (
-    <div style={{ padding: "20px", maxWidth: "600px", margin: "0 auto" }}>
+    <div className="max-w-3xl mx-auto space-y-6">
       <h2>Feed</h2>
       {posts.map((post) => (
         <div key={post.id} className="post">

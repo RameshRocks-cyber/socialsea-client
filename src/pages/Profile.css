@@ -125,6 +125,69 @@
   margin-top: 12px;
 }
 
+.profile-actions-own {
+  margin-top: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.profile-cta {
+  border: 1px solid rgba(101, 148, 241, 0.35);
+  color: #fff;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.15s ease, filter 0.15s ease;
+}
+
+.profile-cta:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.07);
+}
+
+.profile-cta-edit {
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+}
+
+.profile-cta-upload {
+  background: linear-gradient(135deg, #16a34a, #15803d);
+}
+
+.profile-cta-settings {
+  background: linear-gradient(135deg, #7c3aed, #5b21b6);
+}
+
+.profile-shortcuts {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.profile-shortcut-card {
+  text-align: left;
+  border: 1px solid rgba(75, 113, 192, 0.35);
+  border-radius: 14px;
+  background: linear-gradient(150deg, rgba(10, 16, 34, 0.92), rgba(7, 11, 22, 0.95));
+  color: #e6efff;
+  padding: 12px;
+  cursor: pointer;
+}
+
+.profile-shortcut-card h4 {
+  margin: 0 0 6px;
+  font-size: 16px;
+}
+
+.profile-shortcut-card p {
+  margin: 0;
+  font-size: 13px;
+  color: #a8bcdf;
+  line-height: 1.35;
+}
+
 .add-post-btn {
   padding: 10px 18px;
   border-radius: 10px;
@@ -170,6 +233,14 @@
   .profile-actions {
     justify-content: center;
     flex-wrap: wrap;
+  }
+
+  .profile-actions-own {
+    justify-content: center;
+  }
+
+  .profile-shortcuts {
+    grid-template-columns: 1fr;
   }
 
   .profile-posts-grid {

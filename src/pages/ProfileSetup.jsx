@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../api/axios";
 
@@ -8,6 +8,25 @@ export default function ProfileSetup() {
   const [bio, setBio] = useState("");
   const [photo, setPhoto] = useState(null);
   const [preview, setPreview] = useState(null);
+
+  const isProfileComplete = (profile) => {
+    const explicit = Boolean(profile?.profileCompleted);
+    const hasName = Boolean(String(profile?.name || "").trim());
+    const hasPic = Boolean(String(profile?.profilePic || profile?.profilePicUrl || "").trim());
+    return explicit || hasName || hasPic;
+  };
+
+  useEffect(() => {
+    api.get("/api/profile/me")
+      .then((res) => {
+        const completed = isProfileComplete(res?.data);
+        if (completed) {
+          const targetId = res?.data?.id || localStorage.getItem("userId");
+          navigate(`/profile/${targetId || "me"}`, { replace: true });
+        }
+      })
+      .catch(() => {});
+  }, [navigate]);
 
   const submit = async () => {
     const userId = localStorage.getItem("userId");
@@ -23,6 +42,7 @@ export default function ProfileSetup() {
     if (photo) form.append("profilePic", photo);
 
     await api.post("/api/profile/setup", form);
+    localStorage.setItem("profileCompleted", "true");
     alert("Profile updated!");
     navigate(`/profile/${userId}`);
   };

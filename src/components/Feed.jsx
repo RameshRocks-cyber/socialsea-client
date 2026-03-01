@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { FiBookmark } from "react-icons/fi";
+import { BsBookmarkFill } from "react-icons/bs";
 import api from "../api/axios";
 import "./Feed.css";
 
 const LONG_VIDEO_SECONDS = 90;
 
 export default function Feed() {
+  const navigate = useNavigate();
   const [posts, setPosts] = useState([]);
   const [likeCounts, setLikeCounts] = useState({});
   const [likedPostIds, setLikedPostIds] = useState({});
@@ -40,6 +44,19 @@ export default function Feed() {
         .catch(() => {});
     });
   }, [posts]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("likedPostIds");
+      if (!raw) return;
+      const ids = JSON.parse(raw);
+      if (!Array.isArray(ids)) return;
+      const map = ids.reduce((acc, id) => ({ ...acc, [id]: true }), {});
+      setLikedPostIds(map);
+    } catch {
+      // ignore invalid localStorage payload
+    }
+  }, []);
 
   useEffect(() => {
     try {
@@ -125,11 +142,21 @@ export default function Feed() {
       const res = await api.post(`/api/likes/${postId}`);
       const message = String(res?.data || "").toLowerCase();
       if (message.includes("already")) {
-        setLikedPostIds((prev) => ({ ...prev, [postId]: true }));
+        setLikedPostIds((prev) => {
+          const next = { ...prev, [postId]: true };
+          const ids = Object.keys(next).filter((id) => next[id]).map((id) => Number(id));
+          localStorage.setItem("likedPostIds", JSON.stringify(ids));
+          return next;
+        });
         return;
       }
       setLikeCounts((prev) => ({ ...prev, [postId]: (prev[postId] || 0) + 1 }));
-      setLikedPostIds((prev) => ({ ...prev, [postId]: true }));
+      setLikedPostIds((prev) => {
+        const next = { ...prev, [postId]: true };
+        const ids = Object.keys(next).filter((id) => next[id]).map((id) => Number(id));
+        localStorage.setItem("likedPostIds", JSON.stringify(ids));
+        return next;
+      });
     } catch {
       // noop
     }
@@ -211,6 +238,17 @@ export default function Feed() {
     await loadComments(postId);
   };
 
+  const openPostFromGrid = async (post) => {
+    const type = mediaTypeFor(post);
+    const duration = videoDurationByPost[post.id] || 0;
+    const isShortVideo = type === "VIDEO" && duration > 0 && duration <= LONG_VIDEO_SECONDS;
+    if (isShortVideo) {
+      navigate(`/reels?post=${post.id}`);
+      return;
+    }
+    await openPost(post.id);
+  };
+
   const activePost = posts.find((p) => p.id === activePostId) || null;
 
   return (
@@ -242,7 +280,7 @@ export default function Feed() {
                 key={`long-${post.id}`}
                 type="button"
                 className="long-feed-card"
-                onClick={() => openPost(post.id)}
+                onClick={() => navigate(`/watch/${post.id}`)}
                 title={user}
               >
                 <div className="long-feed-thumb-wrap">
@@ -288,7 +326,7 @@ export default function Feed() {
               className={`explore-tile ${idx % 7 === 0 && !isLongVideo ? "tall" : ""} ${
                 isLongVideo ? "long-video-tile" : ""
               }`}
-              onClick={() => openPost(post.id)}
+              onClick={() => openPostFromGrid(post)}
               title={usernameFor(post)}
             >
               {type === "VIDEO" ? (
@@ -369,7 +407,9 @@ export default function Feed() {
                 onClick={() => toggleSave(activePost.id)}
                 title="Save"
               >
-                <span className="action-icon">{"\u{1F516}"}</span>
+                <span className="action-icon action-icon-svg">
+                  {savedPostIds[activePost.id] ? <BsBookmarkFill /> : <FiBookmark />}
+                </span>
               </button>
             </div>
 

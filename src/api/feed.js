@@ -1,9 +1,9 @@
 import api from "./axios";
 
 export const getFeed = () => {
-  return api.get("/feed");
+  return api.get("/api/feed");
 };
 
 export const getAnonymousFeed = () => {
-  return api.get("/feed/anonymous");
+  return api.get("/api/feed/anonymous");
 };

@@ -1,15 +1,25 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { sendOtp, verifyOtp } from "../api/auth";
+import api from "../api/axios";
 
 const Login = () => {
+  const showDevOtp = import.meta.env.DEV && String(import.meta.env.VITE_SHOW_DEV_OTP || "false") === "true";
   const [step, setStep] = useState("EMAIL"); // EMAIL | OTP
   const [email, setEmail] = useState("");
   const [otp, setOtp] = useState("");
+  const [debugOtp, setDebugOtp] = useState("");
   const [loading, setLoading] = useState(false);
   const [timer, setTimer] = useState(0);
   const [msg, setMsg] = useState("");
   const navigate = useNavigate();
+
+  const isProfileComplete = (profile) => {
+    const explicit = Boolean(profile?.profileCompleted);
+    const hasName = Boolean(String(profile?.name || "").trim());
+    const hasPic = Boolean(String(profile?.profilePic || profile?.profilePicUrl || "").trim());
+    return explicit || hasName || hasPic;
+  };
 
   // Timer logic
   useEffect(() => {
@@ -34,8 +44,18 @@ const Login = () => {
 
     setLoading(true);
     setMsg("");
+    setDebugOtp("");
     try {
-      await sendOtp(email);
+      const res = await sendOtp(email);
+      const serverOtp =
+        res?.data?.debugOtp ||
+        res?.data?.devOtp ||
+        res?.data?.otp ||
+        res?.data?.data?.debugOtp ||
+        "";
+      if (serverOtp && showDevOtp) {
+        setDebugOtp(String(serverOtp));
+      }
       setStep("OTP");
       setTimer(45); // Start 45s timer
     } catch (err) {
@@ -91,7 +111,18 @@ const Login = () => {
       if (role === "ADMIN") {
         navigate("/admin");
       } else {
-        navigate("/profile-setup");
+        try {
+          const profileRes = await api.get("/api/profile/me");
+          const completed = isProfileComplete(profileRes?.data);
+          localStorage.setItem("profileCompleted", completed ? "true" : "false");
+          if (completed) {
+            navigate("/feed");
+          } else {
+            navigate("/profile-setup");
+          }
+        } catch {
+          navigate("/profile-setup");
+        }
       }
     } catch (err) {
       console.error(err);
@@ -129,6 +160,11 @@ const Login = () => {
       {step === "OTP" && (
         <div>
           <p style={{ textAlign: "center", marginBlockEnd: "1rem" }}>OTP sent if this email exists</p>
+          {showDevOtp && debugOtp && (
+            <p style={{ textAlign: "center", marginBlockEnd: "0.75rem", color: "#0a7a2f", fontWeight: 600 }}>
+              Dev OTP: {debugOtp}
+            </p>
+          )}
           <input
             type="text"
             value={otp}

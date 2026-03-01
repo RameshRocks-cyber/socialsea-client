@@ -1,0 +1,123 @@
+.saved-page {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 10px 8px 24px;
+}
+
+.saved-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.saved-head h1 {
+  margin: 0;
+  font-size: clamp(28px, 4vw, 42px);
+}
+
+.saved-head p {
+  margin: 0;
+  color: #9eb6e6;
+}
+
+.saved-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 12px;
+}
+
+.saved-card {
+  border: 1px solid rgba(74, 110, 188, 0.35);
+  border-radius: 14px;
+  overflow: hidden;
+  background: linear-gradient(150deg, rgba(10, 16, 34, 0.9), rgba(7, 11, 22, 0.94));
+}
+
+.saved-media-btn {
+  width: 100%;
+  border: none;
+  padding: 0;
+  background: #000;
+  cursor: pointer;
+  position: relative;
+}
+
+.saved-media {
+  width: 100%;
+  aspect-ratio: 4 / 5;
+  object-fit: cover;
+  display: block;
+}
+
+.saved-video-tag {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  background: rgba(0, 0, 0, 0.58);
+  color: #fff;
+  font-size: 12px;
+  padding: 3px 8px;
+}
+
+.saved-meta {
+  padding: 10px 10px 6px;
+}
+
+.saved-meta h3 {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.saved-meta p {
+  margin: 5px 0 0;
+  color: #a8bcdf;
+  font-size: 12px;
+}
+
+.saved-actions {
+  display: flex;
+  gap: 8px;
+  padding: 0 10px 10px;
+}
+
+.saved-actions button {
+  flex: 1;
+  border: 1px solid rgba(92, 137, 232, 0.5);
+  background: rgba(23, 52, 112, 0.52);
+  color: #fff;
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.saved-actions button.danger {
+  border-color: rgba(246, 110, 133, 0.5);
+  background: rgba(128, 28, 49, 0.4);
+}
+
+.saved-empty-wrap {
+  border: 1px dashed rgba(95, 139, 233, 0.45);
+  border-radius: 14px;
+  padding: 18px;
+  text-align: center;
+  margin-top: 14px;
+}
+
+.saved-empty {
+  color: #9eb6e6;
+}
+
+.saved-empty-wrap button {
+  border: 1px solid rgba(92, 137, 232, 0.5);
+  background: rgba(23, 52, 112, 0.52);
+  color: #fff;
+  border-radius: 8px;
+  padding: 8px 14px;
+  cursor: pointer;
+}
