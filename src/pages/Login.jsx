@@ -1,13 +1,19 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import api from "../api/axios";
-import { loginWithPassword, sendOtp, verifyOtp } from "../api/auth";
+import { loginWithPassword } from "../api/auth";
 import { clearAuthStorage } from "../auth";
 import "./AuthScreen.css";
 
 function parseErrorMessage(err, fallback) {
   const data = err?.response?.data;
-  if (typeof data === "string" && data.trim()) return data;
+  if (typeof data === "string" && data.trim()) {
+    const text = data.trim();
+    if (/^\s*<!doctype html/i.test(text) || /<html[\s>]/i.test(text)) {
+      return "Server route mismatch (received HTML instead of API JSON). Please retry in a few seconds.";
+    }
+    return text;
+  }
   if (data && typeof data === "object") {
     const candidates = [data.message, data.error, data.details, data.title];
     for (const value of candidates) {
@@ -33,18 +39,6 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState("");
-
-  const [otpMode, setOtpMode] = useState(false);
-  const [otpIdentifier, setOtpIdentifier] = useState("");
-  const [otp, setOtp] = useState("");
-  const [debugOtp, setDebugOtp] = useState("");
-  const [timer, setTimer] = useState(0);
-
-  useEffect(() => {
-    if (timer <= 0) return undefined;
-    const interval = setInterval(() => setTimer((prev) => (prev > 0 ? prev - 1 : 0)), 1000);
-    return () => clearInterval(interval);
-  }, [timer]);
 
   const completeLogin = async (resData) => {
     const token = resData?.accessToken || resData?.token;
@@ -98,45 +92,6 @@ export default function Login() {
     }
   };
 
-  const onSendOtp = async () => {
-    if (timer > 0) return;
-    setMsg("");
-    setDebugOtp("");
-    if (!otpIdentifier.trim()) {
-      setMsg("Enter email/username for OTP login.");
-      return;
-    }
-    setLoading(true);
-    try {
-      const res = await sendOtp(otpIdentifier.trim());
-      const serverOtp = res?.data?.debugOtp || res?.data?.devOtp || res?.data?.otp || "";
-      if (serverOtp) setDebugOtp(String(serverOtp));
-      setTimer(45);
-    } catch (err) {
-      setMsg(parseErrorMessage(err, "Failed to send OTP."));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const onVerifyOtp = async (e) => {
-    e.preventDefault();
-    setMsg("");
-    if (!otpIdentifier.trim() || !otp.trim()) {
-      setMsg("Enter email/username and OTP.");
-      return;
-    }
-    setLoading(true);
-    try {
-      const res = await verifyOtp(otpIdentifier.trim(), otp.trim());
-      await completeLogin(res?.data);
-    } catch (err) {
-      setMsg(parseErrorMessage(err, "Invalid OTP."));
-    } finally {
-      setLoading(false);
-    }
-  };
-
   return (
     <div className="auth-screen auth-login">
       <div className="auth-orb auth-orb-a" />
@@ -156,7 +111,7 @@ export default function Login() {
             type="text"
             value={identifier}
             onChange={(e) => setIdentifier(e.target.value)}
-            placeholder="nookesh or name@email.com"
+            placeholder="username or name@email.com"
             autoComplete="username"
           />
 
@@ -170,44 +125,16 @@ export default function Login() {
             autoComplete="current-password"
           />
 
+          <div className="auth-forgot-row">
+            <Link to="/forgot-password" className="auth-forgot-link">
+              Forgot password?
+            </Link>
+          </div>
+
           <button type="submit" className="auth-primary-btn" disabled={loading}>
             {loading ? "Signing in..." : "Log in"}
           </button>
         </form>
-
-        <button type="button" className="auth-link-btn" onClick={() => setOtpMode((prev) => !prev)}>
-          {otpMode ? "Hide OTP Login" : "Use OTP Login Instead"}
-        </button>
-
-        {otpMode && (
-          <form className="auth-form-new auth-otp-form" onSubmit={onVerifyOtp}>
-            <label htmlFor="otpIdentifier">Email/username for OTP</label>
-            <input
-              id="otpIdentifier"
-              type="text"
-              value={otpIdentifier}
-              onChange={(e) => setOtpIdentifier(e.target.value)}
-              placeholder="Email or username"
-            />
-
-            <div className="auth-inline-row">
-              <input
-                type="text"
-                value={otp}
-                onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                placeholder="6-digit OTP"
-                inputMode="numeric"
-              />
-              <button type="button" className="auth-secondary-btn" onClick={onSendOtp} disabled={loading || timer > 0}>
-                {timer > 0 ? `Resend ${timer}s` : "Send OTP"}
-              </button>
-            </div>
-            {debugOtp && <p className="auth-debug-otp">OTP: {debugOtp}</p>}
-            <button type="submit" className="auth-primary-btn" disabled={loading || otp.length !== 6}>
-              Verify OTP
-            </button>
-          </form>
-        )}
 
         {msg && <p className="auth-error">{msg}</p>}
 

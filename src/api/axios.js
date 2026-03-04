@@ -38,8 +38,18 @@ const refreshClient = axios.create({
   withCredentials: true,
 });
 
+function normalizeApiPath(config) {
+  const base = String(config?.baseURL || "").replace(/\/+$/, "");
+  const url = String(config?.url || "");
+  if (base === "/api" && /^\/api(\/|$)/.test(url)) {
+    config.url = url.replace(/^\/api(?=\/|$)/, "") || "/";
+  }
+  return config;
+}
+
 // 🔹 Attach Access Token Automatically
 api.interceptors.request.use((config) => {
+  normalizeApiPath(config);
   const token =
     sessionStorage.getItem("accessToken") ||
     sessionStorage.getItem("token") ||
@@ -52,6 +62,8 @@ api.interceptors.request.use((config) => {
 
   return config;
 });
+
+refreshClient.interceptors.request.use((config) => normalizeApiPath(config));
 
 // 🔹 Handle Expired Token (401 ONLY)
 api.interceptors.response.use(

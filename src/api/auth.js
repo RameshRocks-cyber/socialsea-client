@@ -130,24 +130,21 @@ export const loginWithPassword = ({ identifier, password }) => {
     typeof window !== "undefined" && window.location.protocol === "https:";
   const baseCandidates = [
     api.defaults.baseURL,
-    "/api",
-    "http://localhost:8080",
     "http://43.205.213.14:8080",
+    "http://localhost:8080",
+    "/api",
     "https://api.socialsea.co.in",
   ]
     .filter((v, i, arr) => v && arr.indexOf(v) === i)
     .filter((v) => !(isHttpsPage && /^http:\/\//i.test(v)));
 
+  // Password-only login flow (NO OTP endpoint probing).
   const payloads = [
-    { identifier: value, password },
     { username: value, password },
+    { identifier: value, password },
     { email: value, password },
-    { identifier: value, username: value, password },
-    { identifier: value, email: value, password },
   ];
-  const endpoints = ["/api/auth/login", "/auth/login"];
-
-  const tryOne = (url, body) => api.post(url, body);
+  const endpoints = ["/api/auth/login"];
 
   const run = async () => {
     let lastError = null;
@@ -155,14 +152,23 @@ export const loginWithPassword = ({ identifier, password }) => {
       for (const url of endpoints) {
         for (const body of payloads) {
           try {
-            return await api.request({ method: "POST", url, data: body, baseURL });
+            return await api.request({
+              method: "POST",
+              url,
+              data: body,
+              baseURL,
+              timeout: 9000,
+            });
           } catch (err) {
             lastError = err;
             const status = err?.response?.status;
             const text = String(err?.response?.data?.message || err?.response?.data || err?.message || "").toLowerCase();
-            const otpRequired = text.includes("otp") && text.includes("required");
-            // retry for contract/path errors, backend 5xx, and OTP-required (to test other backend bases)
-            if (!(status === 400 || status === 404 || status === 405 || (status >= 500 && status <= 599) || otpRequired)) {
+            // If backend asks for OTP here, stop immediately because this screen is password-only.
+            if (text.includes("otp") && text.includes("required")) {
+              throw new Error("Password login endpoint is misconfigured (OTP required). Contact backend admin.");
+            }
+            // Retry only for endpoint/transport failures; auth failures should return immediately.
+            if (!(status === 404 || status === 405 || (status >= 500 && status <= 599) || !status)) {
               throw err;
             }
           }
@@ -175,6 +181,143 @@ export const loginWithPassword = ({ identifier, password }) => {
   return run();
 };
 
+export const forgotPassword = (emailOrUsername) => {
+  const value = String(emailOrUsername || "").trim();
+  const isHttpsPage =
+    typeof window !== "undefined" && window.location.protocol === "https:";
+  const baseCandidates = [
+    api.defaults.baseURL,
+    "http://43.205.213.14:8080",
+    "http://localhost:8080",
+    "/api",
+    "https://api.socialsea.co.in",
+  ]
+    .filter((v, i, arr) => v && arr.indexOf(v) === i)
+    .filter((v) => !(isHttpsPage && /^http:\/\//i.test(v)));
+
+  const payloads = [
+    { email: value },
+    { username: value },
+    { identifier: value },
+    { email: value, username: value, identifier: value },
+  ];
+  const endpoints = [
+    "/api/auth/forgot-password",
+    "/api/auth/forgotPassword",
+    "/api/auth/password/forgot",
+    "/api/auth/reset-password",
+    "/api/auth/resetPassword",
+    "/auth/forgot-password",
+    // Fallback: on some deployments, forgot-password reuses OTP trigger endpoints.
+    "/api/auth/send-otp",
+    "/auth/send-otp",
+  ];
+
+  const run = async () => {
+    let lastError = null;
+    for (const baseURL of baseCandidates) {
+      for (const url of endpoints) {
+        for (const body of payloads) {
+          try {
+            return await api.request({
+              method: "POST",
+              url,
+              data: body,
+              baseURL,
+              timeout: 9000,
+            });
+          } catch (err) {
+            lastError = err;
+            const status = err?.response?.status;
+            if (!(status === 400 || status === 404 || status === 405 || (status >= 500 && status <= 599) || !status)) {
+              throw err;
+            }
+          }
+        }
+      }
+    }
+    if (lastError?.response?.status === 404) {
+      throw new Error("Forgot-password is not configured on the backend yet.");
+    }
+    throw lastError || new Error("Failed to request password reset");
+  };
+
+  return run();
+};
+
+export const resetPasswordWithOtp = ({ identifier, otp, newPassword }) => {
+  const value = String(identifier || "").trim();
+  const code = String(otp || "").trim();
+  const password = String(newPassword || "");
+  const isHttpsPage =
+    typeof window !== "undefined" && window.location.protocol === "https:";
+  const baseCandidates = [
+    api.defaults.baseURL,
+    "http://43.205.213.14:8080",
+    "http://localhost:8080",
+    "/api",
+    "https://api.socialsea.co.in",
+  ]
+    .filter((v, i, arr) => v && arr.indexOf(v) === i)
+    .filter((v) => !(isHttpsPage && /^http:\/\//i.test(v)));
+
+  const endpoints = [
+    "/api/auth/reset-password",
+    "/api/auth/resetPassword",
+    "/api/auth/password/reset",
+    "/api/auth/update-password",
+    "/api/auth/change-password",
+    "/auth/reset-password",
+    // Fallback for deployments that overload registration with OTP.
+    "/api/auth/register",
+    "/auth/register",
+  ];
+
+  const payloads = [
+    { email: value, otp: code, password },
+    { username: value, otp: code, password },
+    { identifier: value, otp: code, password },
+    { email: value, otp: code, newPassword: password },
+    { username: value, otp: code, newPassword: password },
+    { identifier: value, otp: code, newPassword: password },
+    { email: value, otp: code, new_password: password },
+    { username: value, otp: code, new_password: password },
+    { identifier: value, otp: code, new_password: password },
+  ];
+
+  const run = async () => {
+    let lastError = null;
+    for (const baseURL of baseCandidates) {
+      for (const url of endpoints) {
+        for (const body of payloads) {
+          try {
+            return await api.request({
+              method: "POST",
+              url,
+              data: body,
+              baseURL,
+              timeout: 9000,
+            });
+          } catch (err) {
+            lastError = err;
+            const status = err?.response?.status;
+            if (!(status === 400 || status === 404 || status === 405 || (status >= 500 && status <= 599) || !status)) {
+              throw err;
+            }
+          }
+        }
+      }
+    }
+
+    if (lastError?.response?.status === 404 || lastError?.response?.status === 405) {
+      throw new Error("Password reset endpoint is not configured on the backend yet.");
+    }
+    throw lastError || new Error("Failed to reset password");
+  };
+
+  return run();
+};
+
 export function getRole() {
   const token = localStorage.getItem("accessToken");
   if (!token) return null;
@@ -182,7 +325,7 @@ export function getRole() {
   try {
     const payload = JSON.parse(atob(token.split(".")[1]));
     return payload.role || null;
-  } catch (e) {
+  } catch {
     return null;
   }
 }

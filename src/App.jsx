@@ -4,6 +4,7 @@ import Navbar from "./components/Navbar";
 import Feed from "./components/Feed";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
+import ForgotPassword from "./pages/ForgotPassword";
 import Upload from "./pages/Upload";
 import Reels from "./pages/Reels";
 import Notifications from "./pages/Notifications";
@@ -40,7 +41,10 @@ function PublicOnlyRoute({ children }) {
 
 function AppRoutes() {
   const location = useLocation();
-  const isAuthScreen = location.pathname === "/login" || location.pathname === "/register";
+  const isAuthScreen =
+    location.pathname === "/login" ||
+    location.pathname === "/register" ||
+    location.pathname === "/forgot-password";
   const showUserNavbar = isAuthenticated() && !location.pathname.startsWith("/admin") && !isAuthScreen;
   const isReelsRoute = location.pathname === "/reels";
   const isChatRoute = location.pathname === "/chat" || location.pathname.startsWith("/chat/");
@@ -78,6 +82,7 @@ function AppRoutes() {
               <Route path="/feed" element={<ProtectedRoute><Feed /></ProtectedRoute>} />
               <Route path="/login" element={<PublicOnlyRoute><Login /></PublicOnlyRoute>} />
               <Route path="/register" element={<PublicOnlyRoute><Register /></PublicOnlyRoute>} />
+              <Route path="/forgot-password" element={<PublicOnlyRoute><ForgotPassword /></PublicOnlyRoute>} />
               <Route path="/upload" element={<ProtectedRoute><Upload /></ProtectedRoute>} />
               <Route path="/reels" element={<ProtectedRoute><Reels /></ProtectedRoute>} />
               <Route path="/watch/:postId" element={<ProtectedRoute><LongVideos /></ProtectedRoute>} />
