@@ -1,6 +1,7 @@
 function normalizeApiUrl(rawValue) {
   let value = String(rawValue || "").trim();
   if (!value) return "";
+  if (value.startsWith("/")) return value.replace(/\/+$/, "");
 
   // Handle accidental Netlify value like: VITE_API_URL=https://api.socialsea.co.in
   if (value.includes("VITE_API_URL=")) {
@@ -25,7 +26,8 @@ export function getApiBaseUrl() {
   if (typeof window !== "undefined") {
     const host = window.location.hostname;
     if (host === "socialsea.co.in" || host === "www.socialsea.co.in") {
-      return "https://api.socialsea.co.in";
+      // Netlify proxy configured in netlify.toml avoids CORS and mixed-content issues.
+      return "/api";
     }
     if (host === "localhost" || host === "127.0.0.1") {
       return "http://localhost:8080";

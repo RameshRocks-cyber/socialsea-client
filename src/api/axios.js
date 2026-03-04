@@ -4,12 +4,17 @@ import { clearAuthStorage } from "../auth";
 
 const BASE_URL = getApiBaseUrl();
 const AUTH_BASE_KEY = "socialsea_auth_base_url";
+const IS_HTTPS_PAGE =
+  typeof window !== "undefined" && window.location.protocol === "https:";
 const FALLBACK_BASE_URLS = [
   BASE_URL,
   "http://localhost:8080",
   "http://43.205.213.14:8080",
+  "/api",
   "https://api.socialsea.co.in",
-].filter((value, index, arr) => value && arr.indexOf(value) === index);
+]
+  .filter((value, index, arr) => value && arr.indexOf(value) === index)
+  .filter((value) => !(IS_HTTPS_PAGE && /^http:\/\//i.test(value)));
 
 // Tokens from one backend (localhost/remote) are not valid on another backend.
 // If API base changes, clear auth once and force fresh login for this backend.

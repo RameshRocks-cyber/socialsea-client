@@ -126,12 +126,17 @@ export const registerWithPassword = ({ username, email, password, otp }) => {
 
 export const loginWithPassword = ({ identifier, password }) => {
   const value = String(identifier || "").trim();
+  const isHttpsPage =
+    typeof window !== "undefined" && window.location.protocol === "https:";
   const baseCandidates = [
     api.defaults.baseURL,
+    "/api",
     "http://localhost:8080",
     "http://43.205.213.14:8080",
     "https://api.socialsea.co.in",
-  ].filter((v, i, arr) => v && arr.indexOf(v) === i);
+  ]
+    .filter((v, i, arr) => v && arr.indexOf(v) === i)
+    .filter((v) => !(isHttpsPage && /^http:\/\//i.test(v)));
 
   const payloads = [
     { identifier: value, password },
