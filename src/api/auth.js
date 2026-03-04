@@ -130,10 +130,10 @@ export const loginWithPassword = ({ identifier, password }) => {
     typeof window !== "undefined" && window.location.protocol === "https:";
   const baseCandidates = [
     api.defaults.baseURL,
+    "https://api.socialsea.co.in",
+    "/api",
     "http://43.205.213.14:8080",
     "http://localhost:8080",
-    "/api",
-    "https://api.socialsea.co.in",
   ]
     .filter((v, i, arr) => v && arr.indexOf(v) === i)
     .filter((v) => !(isHttpsPage && /^http:\/\//i.test(v)));
@@ -152,13 +152,21 @@ export const loginWithPassword = ({ identifier, password }) => {
       for (const url of endpoints) {
         for (const body of payloads) {
           try {
-            return await api.request({
+            const res = await api.request({
               method: "POST",
               url,
               data: body,
               baseURL,
               timeout: 9000,
             });
+            const textData = typeof res?.data === "string" ? res.data.trim() : "";
+            if (textData && (/^\s*<!doctype html/i.test(textData) || /<html[\s>]/i.test(textData))) {
+              // Web host fallback page instead of API JSON; continue to next base candidate.
+              const htmlErr = new Error("Received HTML instead of API response");
+              htmlErr.response = { status: 404, data: textData };
+              throw htmlErr;
+            }
+            return res;
           } catch (err) {
             lastError = err;
             const status = err?.response?.status;

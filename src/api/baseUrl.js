@@ -26,8 +26,9 @@ export function getApiBaseUrl() {
   if (typeof window !== "undefined") {
     const host = window.location.hostname;
     if (host === "socialsea.co.in" || host === "www.socialsea.co.in") {
-      // Netlify proxy configured in netlify.toml avoids CORS and mixed-content issues.
-      return "/api";
+      // Custom domain can bypass Netlify proxy rules in some deployments.
+      // Use direct API origin to avoid HTML fallback responses from the web app host.
+      return "https://api.socialsea.co.in";
     }
     if (host === "localhost" || host === "127.0.0.1") {
       return "http://localhost:8080";
