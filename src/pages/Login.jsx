@@ -1,202 +1,220 @@
-import React, { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
-import { sendOtp, verifyOtp } from "../api/auth";
+import { useEffect, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import api from "../api/axios";
+import { loginWithPassword, sendOtp, verifyOtp } from "../api/auth";
+import { clearAuthStorage } from "../auth";
+import "./AuthScreen.css";
 
-const Login = () => {
-  const showDevOtp = import.meta.env.DEV && String(import.meta.env.VITE_SHOW_DEV_OTP || "false") === "true";
-  const [step, setStep] = useState("EMAIL"); // EMAIL | OTP
-  const [email, setEmail] = useState("");
-  const [otp, setOtp] = useState("");
-  const [debugOtp, setDebugOtp] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [timer, setTimer] = useState(0);
-  const [msg, setMsg] = useState("");
+function parseErrorMessage(err, fallback) {
+  const data = err?.response?.data;
+  if (typeof data === "string" && data.trim()) return data;
+  if (data && typeof data === "object") {
+    const candidates = [data.message, data.error, data.details, data.title];
+    for (const value of candidates) {
+      if (typeof value === "string" && value.trim()) return value;
+    }
+  }
+  const generic = err?.message;
+  if (typeof generic === "string" && generic.trim()) return generic;
+  return fallback;
+}
+
+function normalizeRole(value) {
+  if (!value) return null;
+  const raw = String(value).trim();
+  const noPrefix = raw.startsWith("ROLE_") ? raw.slice(5) : raw;
+  return noPrefix.toUpperCase();
+}
+
+export default function Login() {
   const navigate = useNavigate();
 
-  const isProfileComplete = (profile) => {
-    const explicit = Boolean(profile?.profileCompleted);
-    const hasName = Boolean(String(profile?.name || "").trim());
-    const hasPic = Boolean(String(profile?.profilePic || profile?.profilePicUrl || "").trim());
-    return explicit || hasName || hasPic;
-  };
+  const [identifier, setIdentifier] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState("");
 
-  // Timer logic
+  const [otpMode, setOtpMode] = useState(false);
+  const [otpIdentifier, setOtpIdentifier] = useState("");
+  const [otp, setOtp] = useState("");
+  const [debugOtp, setDebugOtp] = useState("");
+  const [timer, setTimer] = useState(0);
+
   useEffect(() => {
-    let interval;
-    if (timer > 0) {
-      interval = setInterval(() => {
-        setTimer((prev) => (prev > 0 ? prev - 1 : 0));
-      }, 1000);
-    }
+    if (timer <= 0) return undefined;
+    const interval = setInterval(() => setTimer((prev) => (prev > 0 ? prev - 1 : 0)), 1000);
     return () => clearInterval(interval);
   }, [timer]);
 
-  const handleSendOtp = async (e) => {
-    e?.preventDefault();
-    if (timer > 0) return;
+  const completeLogin = async (resData) => {
+    const token = resData?.accessToken || resData?.token;
+    const refreshToken = resData?.refreshToken || resData?.refresh_token;
+    const userId = resData?.userId || resData?.user?.id;
+    const role = normalizeRole(resData?.role || resData?.user?.role || (Array.isArray(resData?.roles) ? resData.roles[0] : null));
 
-    // Validate email format
-    if (!email || !email.includes("@")) {
-      alert("Please enter a valid email address");
+    if (!token) throw new Error("Login failed: token missing");
+
+    clearAuthStorage();
+    sessionStorage.setItem("accessToken", token);
+    sessionStorage.setItem("token", token);
+    if (userId != null) sessionStorage.setItem("userId", String(userId));
+    if (refreshToken) sessionStorage.setItem("refreshToken", refreshToken);
+    if (role) sessionStorage.setItem("role", role);
+
+    if (role === "ADMIN") {
+      navigate("/admin");
       return;
     }
 
-    setLoading(true);
-    setMsg("");
-    setDebugOtp("");
     try {
-      const res = await sendOtp(email);
-      const serverOtp =
-        res?.data?.debugOtp ||
-        res?.data?.devOtp ||
-        res?.data?.otp ||
-        res?.data?.data?.debugOtp ||
-        "";
-      if (serverOtp && showDevOtp) {
-        setDebugOtp(String(serverOtp));
-      }
-      setStep("OTP");
-      setTimer(45); // Start 45s timer
+      const profileRes = await api.get("/api/profile/me");
+      const profile = profileRes?.data || {};
+      const completed =
+        Boolean(profile?.profileCompleted) ||
+        Boolean(String(profile?.name || "").trim()) ||
+        Boolean(String(profile?.profilePic || profile?.profilePicUrl || "").trim());
+      sessionStorage.setItem("profileCompleted", completed ? "true" : "false");
+    } catch {
+      sessionStorage.setItem("profileCompleted", "false");
+    }
+    navigate("/profile-setup");
+  };
+
+  const onPasswordLogin = async (e) => {
+    e.preventDefault();
+    setMsg("");
+    if (!identifier.trim() || !password) {
+      setMsg("Username/email and password are required.");
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await loginWithPassword({ identifier: identifier.trim(), password });
+      await completeLogin(res?.data);
     } catch (err) {
-      console.error(err);
-      setMsg("Send OTP failed. Please try again.");
+      setMsg(parseErrorMessage(err, "Login failed. Check your credentials."));
     } finally {
       setLoading(false);
     }
   };
 
-  const handleVerifyOtp = async (e) => {
-    e?.preventDefault();
-    setLoading(true);
+  const onSendOtp = async () => {
+    if (timer > 0) return;
     setMsg("");
+    setDebugOtp("");
+    if (!otpIdentifier.trim()) {
+      setMsg("Enter email/username for OTP login.");
+      return;
+    }
+    setLoading(true);
     try {
-      const res = await verifyOtp(email, otp);
-      // Save JWT to localStorage (using accessToken to match api/auth.js)
-      const token = res.data.accessToken || res.data.token;
-      const refreshToken = res.data.refreshToken || res.data.refresh_token;
-      const userId = res.data.userId || res.data.user?.id;
-      const normalizeRole = (roleValue) => {
-        if (!roleValue) return null;
-        const raw = String(roleValue).trim();
-        const noPrefix = raw.startsWith("ROLE_") ? raw.slice(5) : raw;
-        return noPrefix.toUpperCase();
-      };
-      const role = normalizeRole(
-        res.data.role ||
-          res.data.user?.role ||
-          (Array.isArray(res.data.roles) ? res.data.roles[0] : null)
-      );
-
-      if (!token) {
-        setMsg("Login failed: token missing from server response");
-        return;
-      }
-
-      localStorage.setItem("accessToken", token);
-      localStorage.setItem("token", token);
-      sessionStorage.setItem("accessToken", token);
-      sessionStorage.setItem("token", token);
-      if (userId != null) {
-        localStorage.setItem("userId", String(userId));
-        sessionStorage.setItem("userId", String(userId));
-      }
-      if (refreshToken) {
-        localStorage.setItem("refreshToken", refreshToken);
-      }
-      if (role) {
-        localStorage.setItem("role", role);
-      }
-
-      if (role === "ADMIN") {
-        navigate("/admin");
-      } else {
-        try {
-          const profileRes = await api.get("/api/profile/me");
-          const completed = isProfileComplete(profileRes?.data);
-          localStorage.setItem("profileCompleted", completed ? "true" : "false");
-          if (completed) {
-            navigate("/feed");
-          } else {
-            navigate("/profile-setup");
-          }
-        } catch {
-          navigate("/profile-setup");
-        }
-      }
+      const res = await sendOtp(otpIdentifier.trim());
+      const serverOtp = res?.data?.debugOtp || res?.data?.devOtp || res?.data?.otp || "";
+      if (serverOtp) setDebugOtp(String(serverOtp));
+      setTimer(45);
     } catch (err) {
-      console.error(err);
-      setMsg("Invalid or expired OTP");
+      setMsg(parseErrorMessage(err, "Failed to send OTP."));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onVerifyOtp = async (e) => {
+    e.preventDefault();
+    setMsg("");
+    if (!otpIdentifier.trim() || !otp.trim()) {
+      setMsg("Enter email/username and OTP.");
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await verifyOtp(otpIdentifier.trim(), otp.trim());
+      await completeLogin(res?.data);
+    } catch (err) {
+      setMsg(parseErrorMessage(err, "Invalid OTP."));
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <form
-      onSubmit={(e) => e.preventDefault()}
-      style={{ maxInlineSize: "400px", margin: "2rem auto", padding: "2rem", border: "1px solid #ccc", borderRadius: "8px" }}
-    >
-      <h2 style={{ textAlign: "center", marginBlockEnd: "1.5rem" }}>
-        {step === "EMAIL" ? "Login" : "Verify OTP"}
-      </h2>
+    <div className="auth-screen auth-login">
+      <div className="auth-orb auth-orb-a" />
+      <div className="auth-orb auth-orb-b" />
 
-      {step === "EMAIL" && (
-        <div>
-          <input
-            type="email"
-            placeholder="Enter Email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            disabled={loading}
-            style={{ inlineSize: "100%", padding: "10px", marginBlockEnd: "10px", boxSizing: "border-box" }}
-          />
-          <button type="button" onClick={handleSendOtp} disabled={loading || !email} style={{ inlineSize: "100%", padding: "10px", cursor: "pointer" }}>
-            {loading ? "Sending..." : "Send OTP"}
-          </button>
+      <section className="auth-card-new">
+        <div className="auth-brand">
+          <img src="/logo.png?v=3" alt="SocialSea" className="auth-logo" />
+          <h1>SocialSea</h1>
+          <p>Sign in with username or email</p>
         </div>
-      )}
 
-      {step === "OTP" && (
-        <div>
-          <p style={{ textAlign: "center", marginBlockEnd: "1rem" }}>OTP sent if this email exists</p>
-          {showDevOtp && debugOtp && (
-            <p style={{ textAlign: "center", marginBlockEnd: "0.75rem", color: "#0a7a2f", fontWeight: 600 }}>
-              Dev OTP: {debugOtp}
-            </p>
-          )}
+        <form className="auth-form-new" onSubmit={onPasswordLogin}>
+          <label htmlFor="identifier">Username or email</label>
           <input
+            id="identifier"
             type="text"
-            value={otp}
-            onChange={(e) => {
-              const val = e.target.value;
-              if (/^\d*$/.test(val) && val.length <= 6) setOtp(val);
-            }}
-            maxLength={6}
-            inputMode="numeric"
-            autoFocus
-            placeholder="000000"
-            disabled={loading}
-            style={{ inlineSize: "100%", padding: "10px", marginBlockEnd: "10px", textAlign: "center", letterSpacing: "5px", fontSize: "1.2rem", boxSizing: "border-box" }}
+            value={identifier}
+            onChange={(e) => setIdentifier(e.target.value)}
+            placeholder="nookesh or name@email.com"
+            autoComplete="username"
           />
-          <button type="button" onClick={handleVerifyOtp} disabled={otp.length !== 6 || loading} style={{ inlineSize: "100%", padding: "10px", cursor: "pointer", marginBlockEnd: "10px" }}>
-            {loading ? "Verifying..." : "Verify OTP"}
+
+          <label htmlFor="password">Password</label>
+          <input
+            id="password"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Enter your password"
+            autoComplete="current-password"
+          />
+
+          <button type="submit" className="auth-primary-btn" disabled={loading}>
+            {loading ? "Signing in..." : "Log in"}
           </button>
+        </form>
 
-          <div style={{ textAlign: "center" }}>
-            {timer > 0 ? (
-              <span style={{ color: "gray" }}>Resend in {timer}s</span>
-            ) : (
-              <button type="button" onClick={handleSendOtp} disabled={loading} style={{ background: "none", border: "none", color: "blue", cursor: "pointer", textDecoration: "underline" }}>
-                Resend OTP
+        <button type="button" className="auth-link-btn" onClick={() => setOtpMode((prev) => !prev)}>
+          {otpMode ? "Hide OTP Login" : "Use OTP Login Instead"}
+        </button>
+
+        {otpMode && (
+          <form className="auth-form-new auth-otp-form" onSubmit={onVerifyOtp}>
+            <label htmlFor="otpIdentifier">Email/username for OTP</label>
+            <input
+              id="otpIdentifier"
+              type="text"
+              value={otpIdentifier}
+              onChange={(e) => setOtpIdentifier(e.target.value)}
+              placeholder="Email or username"
+            />
+
+            <div className="auth-inline-row">
+              <input
+                type="text"
+                value={otp}
+                onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                placeholder="6-digit OTP"
+                inputMode="numeric"
+              />
+              <button type="button" className="auth-secondary-btn" onClick={onSendOtp} disabled={loading || timer > 0}>
+                {timer > 0 ? `Resend ${timer}s` : "Send OTP"}
               </button>
-            )}
-          </div>
-        </div>
-      )}
-      {msg && <p style={{ marginTop: "1rem", color: "#ff6b6b", textAlign: "center" }}>{msg}</p>}
-    </form>
-  );
-};
+            </div>
+            {debugOtp && <p className="auth-debug-otp">OTP: {debugOtp}</p>}
+            <button type="submit" className="auth-primary-btn" disabled={loading || otp.length !== 6}>
+              Verify OTP
+            </button>
+          </form>
+        )}
 
-export default Login;
+        {msg && <p className="auth-error">{msg}</p>}
+
+        <p className="auth-foot">
+          New here? <Link to="/register">Create account</Link>
+        </p>
+      </section>
+    </div>
+  );
+}

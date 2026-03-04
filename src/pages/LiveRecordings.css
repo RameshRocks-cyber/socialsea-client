@@ -1,0 +1,129 @@
+.live-recordings-page {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 10px 8px 24px;
+}
+
+.live-recordings-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.live-recordings-head h1 {
+  margin: 0;
+  font-size: clamp(28px, 4vw, 42px);
+}
+
+.live-recordings-head p {
+  margin: 4px 0 0;
+  color: #9eb6e6;
+}
+
+.live-recordings-head button {
+  border: 1px solid rgba(92, 137, 232, 0.5);
+  background: rgba(23, 52, 112, 0.52);
+  color: #fff;
+  border-radius: 10px;
+  padding: 8px 14px;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.live-recordings-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr);
+  gap: 12px;
+}
+
+.live-recordings-player-card {
+  border: 1px solid rgba(74, 110, 188, 0.35);
+  border-radius: 14px;
+  overflow: hidden;
+  background: linear-gradient(150deg, rgba(10, 16, 34, 0.9), rgba(7, 11, 22, 0.94));
+}
+
+.live-recordings-player {
+  width: 100%;
+  max-height: 70vh;
+  background: #000;
+}
+
+.live-recordings-meta {
+  padding: 10px;
+  color: #d7e6ff;
+}
+
+.live-recordings-meta p {
+  margin: 6px 0;
+}
+
+.live-recordings-list {
+  border: 1px solid rgba(74, 110, 188, 0.35);
+  border-radius: 14px;
+  background: linear-gradient(150deg, rgba(10, 16, 34, 0.9), rgba(7, 11, 22, 0.94));
+  padding: 10px;
+  max-height: 70vh;
+  overflow: auto;
+  display: grid;
+  gap: 10px;
+}
+
+.live-recording-item {
+  width: 100%;
+  border: 1px solid rgba(92, 137, 232, 0.35);
+  border-radius: 10px;
+  background: rgba(16, 38, 87, 0.45);
+  color: #fff;
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 8px;
+  padding: 8px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.live-recording-item.is-active {
+  border-color: rgba(132, 191, 255, 0.72);
+  box-shadow: 0 0 0 1px rgba(132, 191, 255, 0.24) inset;
+}
+
+.live-recording-item video {
+  width: 100%;
+  height: 68px;
+  object-fit: cover;
+  border-radius: 8px;
+  background: #000;
+}
+
+.live-recording-item p {
+  margin: 0;
+  font-weight: 700;
+}
+
+.live-recording-item small {
+  display: block;
+  margin-top: 4px;
+  color: #a8bcdf;
+}
+
+.live-recordings-empty,
+.live-recordings-error {
+  border: 1px dashed rgba(95, 139, 233, 0.45);
+  border-radius: 14px;
+  padding: 18px;
+  text-align: center;
+  margin-top: 14px;
+}
+
+.live-recordings-error {
+  color: #ff9cae;
+}
+
+@media (max-width: 900px) {
+  .live-recordings-layout {
+    grid-template-columns: 1fr;
+  }
+}

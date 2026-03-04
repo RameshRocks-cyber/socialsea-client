@@ -1,0 +1,178 @@
+.sos-page {
+  width: min(980px, calc(100vw - 24px));
+  margin: 86px auto 24px;
+  color: #eaf3ff;
+}
+
+.sos-card {
+  border: 1px solid rgba(255, 136, 136, 0.35);
+  background: linear-gradient(160deg, rgba(12, 20, 46, 0.95), rgba(28, 8, 8, 0.95));
+  border-radius: 16px;
+  padding: 16px;
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.35);
+}
+
+.sos-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.sos-head h1 {
+  margin: 0;
+  font-size: 1.3rem;
+}
+
+.sos-head button {
+  border: 1px solid rgba(120, 174, 255, 0.5);
+  background: rgba(20, 42, 92, 0.55);
+  color: #dcecff;
+  border-radius: 10px;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+
+.sos-status {
+  border-radius: 10px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  background: rgba(31, 35, 60, 0.7);
+}
+
+.sos-status.active {
+  border: 1px solid rgba(255, 132, 132, 0.6);
+  background: rgba(94, 18, 18, 0.55);
+}
+
+.sos-msg {
+  margin-bottom: 10px;
+  border: 1px solid rgba(255, 173, 173, 0.42);
+  background: rgba(101, 18, 18, 0.55);
+  border-radius: 10px;
+  padding: 9px 10px;
+  font-weight: 700;
+}
+
+.sos-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.sos-grid > div {
+  border: 1px solid rgba(105, 148, 220, 0.35);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(7, 19, 43, 0.55);
+}
+
+.sos-grid h3 {
+  margin-top: 0;
+  margin-bottom: 8px;
+  font-size: 0.98rem;
+}
+
+.sos-grid p,
+.sos-meta p {
+  margin: 4px 0;
+  color: #cbe1ff;
+}
+
+.sos-meta {
+  border: 1px solid rgba(105, 148, 220, 0.35);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(7, 19, 43, 0.55);
+  margin-top: 12px;
+}
+
+.sos-preview-card {
+  border: 1px solid rgba(105, 148, 220, 0.35);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(7, 19, 43, 0.55);
+  margin-top: 12px;
+}
+
+.sos-preview-card h3 {
+  margin: 0 0 8px;
+  font-size: 0.98rem;
+}
+
+.sos-preview-shell {
+  position: relative;
+  border: 1px solid rgba(120, 174, 255, 0.28);
+  background: rgba(2, 10, 26, 0.7);
+  border-radius: 10px;
+  min-height: 180px;
+  overflow: hidden;
+}
+
+.sos-preview-video {
+  width: 100%;
+  min-height: 180px;
+  max-height: 280px;
+  display: block;
+  object-fit: cover;
+  background: #000;
+}
+
+.sos-preview-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: #a9c7f1;
+  padding: 12px;
+}
+
+.sos-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.sos-start,
+.sos-stop {
+  flex: 1;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  padding: 10px 12px;
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.sos-start {
+  background: linear-gradient(135deg, #2471f5, #1b4ccf);
+  border-color: rgba(142, 191, 255, 0.6);
+}
+
+.sos-stop {
+  background: linear-gradient(135deg, #cf3a3a, #991a1a);
+  border-color: rgba(255, 160, 160, 0.6);
+}
+
+.sos-start:disabled,
+.sos-stop:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+@media (max-width: 760px) {
+  .sos-page {
+    margin-top: 16px;
+    width: calc(100vw - 14px);
+  }
+  .sos-grid {
+    grid-template-columns: 1fr;
+  }
+  .sos-preview-shell,
+  .sos-preview-video {
+    min-height: 150px;
+    max-height: 220px;
+  }
+}

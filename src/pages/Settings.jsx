@@ -12,6 +12,7 @@ const defaultPrefs = {
   crossposting: false,
   storyLocationEnabled: true,
   activityInFriendsTab: true,
+  showSosInNavbar: false,
   messageReplies: "Everyone",
   tagsMentions: "People You Follow",
   comments: "Everyone",
@@ -249,10 +250,13 @@ export default function Settings() {
 
   return (
     <div className="settings-page">
-      <div className="max-w-2xl mx-auto space-y-6">
+      <div className="settings-shell">
         <header className="settings-top">
           <button type="button" className="settings-back" onClick={() => navigate(-1)}>{"<"}</button>
-          <h1>Settings and Activity</h1>
+          <div>
+            <h1>Settings and Activity</h1>
+            <p className="settings-subtitle">Control privacy, activity, and experience in one place.</p>
+          </div>
         </header>
 
         <section className="settings-section">
@@ -260,6 +264,18 @@ export default function Settings() {
           <Row icon={"B"} title="Saved" value={savedIds.length} onClick={() => navigate("/saved")} />
           <Row icon={"A"} title="Archive" value={archiveIds.length} onClick={() => setActivePanel("archive")} />
           <Row icon={"Y"} title="Your activity" onClick={() => setActivePanel("activity")} />
+          <Row
+            icon={"SOS"}
+            title="SOS on Navbar"
+            value={prefs.showSosInNavbar ? "On" : "Off"}
+            onClick={() => setToggle("showSosInNavbar")}
+          />
+          <Row
+            icon={"!"}
+            title="SOS Control Center"
+            value="Open"
+            onClick={() => navigate("/sos")}
+          />
           <Row
             icon={"N"}
             title="Notifications"

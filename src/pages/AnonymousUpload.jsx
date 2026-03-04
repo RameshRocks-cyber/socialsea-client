@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { uploadAnonymousPost } from "../api/anonymous";
 
 const AnonymousUpload = () => {
   const [file, setFile] = useState(null);
@@ -6,19 +7,61 @@ const AnonymousUpload = () => {
   const [upiId, setUpiId] = useState("");
   const [accountNumber, setAccountNumber] = useState("");
   const [ifscCode, setIfscCode] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  const parseError = (err) => {
+    const data = err?.response?.data;
+    if (typeof data === "string" && data.trim()) return data;
+    if (data && typeof data === "object") {
+      if (typeof data.message === "string" && data.message.trim()) return data.message;
+      try {
+        return JSON.stringify(data);
+      } catch {
+        return "Anonymous upload failed";
+      }
+    }
+    if (typeof err?.message === "string" && err.message.trim()) return err.message;
+    return "Anonymous upload failed";
+  };
+
+  const onSubmit = async () => {
+    if (!file) {
+      setMsg("File is required");
+      return;
+    }
+    const form = new FormData();
+    form.append("file", file);
+    form.append("description", description || "");
+
+    try {
+      setLoading(true);
+      setMsg("");
+      await uploadAnonymousPost(form);
+      setMsg("Uploaded anonymously. Waiting for admin approval.");
+      setFile(null);
+      setDescription("");
+      setUpiId("");
+      setAccountNumber("");
+      setIfscCode("");
+    } catch (err) {
+      setMsg(parseError(err));
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div style={styles.page}>
       <div style={styles.card}>
-        <h1 style={styles.title}>🕶 Anonymous Upload</h1>
-        <p style={styles.subtitle}>
-          Share your thoughts privately. No identity stored.
-        </p>
+        <h1 style={styles.title}>Anonymous Upload</h1>
+        <p style={styles.subtitle}>Share your thoughts privately. No identity stored.</p>
 
         <label style={styles.uploadBox}>
           <input
             type="file"
-            onChange={(e) => setFile(e.target.files[0])}
+            accept="image/*,video/*"
+            onChange={(e) => setFile(e.target.files?.[0] || null)}
             style={{ display: "none" }}
           />
           {file ? file.name : "Click to choose a file"}
@@ -55,9 +98,11 @@ const AnonymousUpload = () => {
           style={styles.input}
         />
 
-        <button style={styles.button}>
-          🚀 Upload Anonymously
+        <button style={styles.button} onClick={onSubmit} disabled={loading}>
+          {loading ? "Uploading..." : "Upload Anonymously"}
         </button>
+
+        {msg ? <p style={styles.msg}>{msg}</p> : null}
       </div>
     </div>
   );
@@ -69,7 +114,7 @@ const styles = {
     background: "linear-gradient(135deg, #0f2027, #203a43, #2c5364)",
     display: "flex",
     justifyContent: "center",
-    alignItems: "center",
+    alignItems: "center"
   },
   card: {
     background: "rgba(255,255,255,0.08)",
@@ -79,16 +124,16 @@ const styles = {
     width: "400px",
     boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
     textAlign: "center",
-    color: "white",
+    color: "white"
   },
   title: {
     marginBottom: "10px",
-    fontSize: "28px",
+    fontSize: "28px"
   },
   subtitle: {
     fontSize: "14px",
     marginBottom: "25px",
-    opacity: 0.8,
+    opacity: 0.8
   },
   uploadBox: {
     display: "block",
@@ -97,7 +142,7 @@ const styles = {
     borderRadius: "12px",
     marginBottom: "20px",
     cursor: "pointer",
-    transition: "0.3s",
+    transition: "0.3s"
   },
   textarea: {
     width: "100%",
@@ -106,7 +151,7 @@ const styles = {
     border: "none",
     padding: "10px",
     marginBottom: "20px",
-    resize: "none",
+    resize: "none"
   },
   input: {
     width: "100%",
@@ -114,7 +159,7 @@ const styles = {
     marginBottom: "15px",
     borderRadius: "10px",
     border: "none",
-    outline: "none",
+    outline: "none"
   },
   button: {
     width: "100%",
@@ -125,8 +170,13 @@ const styles = {
     color: "white",
     fontWeight: "bold",
     cursor: "pointer",
-    transition: "0.3s",
+    transition: "0.3s"
   },
+  msg: {
+    marginTop: "12px",
+    fontSize: "14px",
+    color: "#dce9ff"
+  }
 };
 
 export default AnonymousUpload;

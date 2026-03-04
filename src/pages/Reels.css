@@ -6,6 +6,59 @@
   overflow: hidden;
 }
 
+.reels-gesture-toggle {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 20;
+  display: grid;
+  justify-items: end;
+  gap: 8px;
+}
+
+.reels-gesture-error {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #ffb9b9;
+  background: rgba(49, 7, 7, 0.62);
+  border: 1px solid rgba(255, 143, 143, 0.36);
+  border-radius: 999px;
+  padding: 5px 10px;
+}
+
+.reels-gesture-btn {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: 1px solid rgba(171, 207, 255, 0.44);
+  background: radial-gradient(circle at 30% 25%, rgba(113, 189, 255, 0.5), rgba(17, 45, 96, 0.92));
+  color: #ffffff;
+  display: inline-grid;
+  place-items: center;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow:
+    0 10px 24px rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgba(138, 176, 255, 0.22) inset;
+  transition: transform 0.18s ease, box-shadow 0.2s ease, filter 0.2s ease;
+}
+
+.reels-gesture-btn:hover {
+  transform: translateY(-2px) scale(1.03);
+  filter: brightness(1.07);
+}
+
+.reels-gesture-btn.is-active {
+  border-color: rgba(150, 255, 205, 0.8);
+  background: radial-gradient(circle at 30% 25%, rgba(89, 235, 173, 0.55), rgba(14, 74, 64, 0.95));
+  box-shadow:
+    0 12px 26px rgba(0, 0, 0, 0.5),
+    0 0 16px rgba(102, 255, 201, 0.35),
+    0 0 0 1px rgba(156, 255, 216, 0.32) inset;
+}
+
 .reels-container {
   height: 100%;
   overflow-y: auto;
@@ -296,6 +349,17 @@
 }
 
 @media (max-width: 560px) {
+  .reels-gesture-toggle {
+    top: 10px;
+    right: 10px;
+  }
+
+  .reels-gesture-btn {
+    width: 44px;
+    height: 44px;
+    font-size: 21px;
+  }
+
   .reels-page,
   .reel-item {
     height: calc(100vh - 140px);

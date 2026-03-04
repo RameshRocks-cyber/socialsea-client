@@ -12,15 +12,9 @@ export default function LongVideos() {
   const playerRef = useRef(null);
   const [allPosts, setAllPosts] = useState([]);
   const [videoDurationByPost, setVideoDurationByPost] = useState({});
+  const [isLoading, setIsLoading] = useState(true);
   const [selectedQuality, setSelectedQuality] = useState("auto");
   const [showQualityMenu, setShowQualityMenu] = useState(false);
-
-  useEffect(() => {
-    api
-      .get("/api/feed")
-      .then((res) => setAllPosts(Array.isArray(res.data) ? res.data : []))
-      .catch(() => setAllPosts([]));
-  }, []);
 
   const resolveUrl = (url) => {
     if (!url) return "";
@@ -29,11 +23,141 @@ export default function LongVideos() {
     return `${base}${url}`;
   };
 
-  const mediaTypeFor = (post) => {
-    const t = (post?.type || "").toUpperCase();
-    if (t) return t;
-    return post?.reel ? "VIDEO" : "IMAGE";
+  const mediaUrlFor = (post) => String(post?.contentUrl || post?.mediaUrl || "").trim();
+
+  const parseDurationLikeValue = (raw) => {
+    if (raw == null) return 0;
+
+    if (typeof raw === "number") {
+      if (!Number.isFinite(raw) || raw <= 0) return 0;
+      // Some APIs send milliseconds.
+      return raw > 10000 ? raw / 1000 : raw;
+    }
+
+    const str = String(raw).trim();
+    if (!str) return 0;
+
+    const asNum = Number(str);
+    if (Number.isFinite(asNum) && asNum > 0) {
+      return asNum > 10000 ? asNum / 1000 : asNum;
+    }
+
+    // Handle "HH:MM:SS" or "MM:SS"
+    if (str.includes(":")) {
+      const parts = str.split(":").map((x) => Number(x));
+      if (parts.every((n) => Number.isFinite(n) && n >= 0)) {
+        if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+        if (parts.length === 2) return parts[0] * 60 + parts[1];
+      }
+    }
+
+    return 0;
   };
+
+  const durationFromPost = (post) => {
+    const candidates = [
+      post?.durationSeconds,
+      post?.videoDurationSeconds,
+      post?.duration,
+      post?.videoDuration,
+      post?.length,
+      post?.videoLength,
+      post?.durationMs,
+      post?.videoDurationMs
+    ];
+    for (const raw of candidates) {
+      const n = parseDurationLikeValue(raw);
+      if (Number.isFinite(n) && n > 0) return n;
+    }
+    return 0;
+  };
+
+  const readVideoDurationOnce = (videoUrl, timeoutMs = 8000) =>
+    new Promise((resolve) => {
+      const video = document.createElement("video");
+      video.preload = "metadata";
+      video.muted = true;
+      video.src = videoUrl;
+      const done = (value) => {
+        resolve(value);
+      };
+      const timer = setTimeout(() => done(0), timeoutMs);
+      video.onloadedmetadata = () => {
+        clearTimeout(timer);
+        done(Number(video.duration) || 0);
+      };
+      video.onerror = () => {
+        clearTimeout(timer);
+        done(0);
+      };
+    });
+
+  const readVideoDuration = async (videoUrl) => {
+    const first = await readVideoDurationOnce(videoUrl);
+    if (first > 0) return first;
+    // Retry once with a cache-buster because some CDNs fail metadata occasionally.
+    const separator = videoUrl.includes("?") ? "&" : "?";
+    return readVideoDurationOnce(`${videoUrl}${separator}metaRetry=1`);
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const load = async () => {
+      setIsLoading(true);
+      try {
+        const endpoints = ["/api/feed", "/api/profile/me/posts", "/api/profile/posts"];
+        const responses = await Promise.allSettled(endpoints.map((url) => api.get(url)));
+        const posts = responses
+          .filter((r) => r.status === "fulfilled" && Array.isArray(r.value?.data))
+          .flatMap((r) => r.value.data)
+          .filter(Boolean);
+        if (cancelled) return;
+        setAllPosts(uniqueByPostKey(posts));
+
+        const candidates = uniqueByPostKey(posts.filter((post) => !!mediaUrlFor(post)));
+        const durations = {};
+
+        const unresolved = [];
+        candidates.forEach((post) => {
+          const known = durationFromPost(post);
+          if (known > 0) {
+            durations[post.id] = known;
+          } else {
+            unresolved.push(post);
+          }
+        });
+
+        const BATCH_SIZE = 4;
+        for (let i = 0; i < unresolved.length; i += BATCH_SIZE) {
+          const batch = unresolved.slice(i, i + BATCH_SIZE);
+          await Promise.all(
+            batch.map(async (post) => {
+              const mediaUrl = resolveUrl(mediaUrlFor(post));
+              if (!mediaUrl) return;
+              const d = await readVideoDuration(mediaUrl);
+              if (d > 0) durations[post.id] = d;
+            })
+          );
+          if (cancelled) return;
+        }
+
+        if (!cancelled) setVideoDurationByPost(durations);
+      } catch {
+        if (!cancelled) {
+          setAllPosts([]);
+          setVideoDurationByPost({});
+        }
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    };
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const usernameFor = (post) => {
     const raw = post?.user?.name || post?.username || post?.user?.email || "User";
@@ -50,12 +174,24 @@ export default function LongVideos() {
 
   const captionFor = (post) => post?.description || post?.content || "Untitled video";
 
-  const longVideos = useMemo(() => {
-    return allPosts.filter((post) => {
-      const isVideo = mediaTypeFor(post) === "VIDEO";
-      return isVideo && (videoDurationByPost[post.id] || 0) > LONG_VIDEO_SECONDS;
+  const uniqueByPostKey = (posts) => {
+    const seen = new Set();
+    return posts.filter((post) => {
+      const key = String(post?.id ?? post?.contentUrl ?? post?.mediaUrl ?? "");
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
     });
-  }, [allPosts, videoDurationByPost]);
+  };
+
+  const videoPosts = useMemo(() => {
+    return uniqueByPostKey(allPosts.filter((post) => !!mediaUrlFor(post)));
+  }, [allPosts]);
+
+  const longVideos = useMemo(() => {
+    const filtered = videoPosts.filter((post) => (videoDurationByPost[post.id] || 0) > LONG_VIDEO_SECONDS);
+    return uniqueByPostKey(filtered);
+  }, [videoPosts, videoDurationByPost]);
 
   const activeVideo =
     longVideos.find((p) => String(p.id) === String(postId)) || longVideos[0] || null;
@@ -80,10 +216,16 @@ export default function LongVideos() {
     return withCloudinaryQuality(url, selectedQuality);
   }, [activeVideo, selectedQuality]);
 
+  const selectVideo = (id) => {
+    if (!id) return;
+    navigate(`/watch/${id}`);
+  };
+
   return (
     <div className="watch-page">
       <section className="watch-main">
-        {!activeVideo && <p className="watch-empty">Loading long videos...</p>}
+        {isLoading && <p className="watch-empty">Loading long videos...</p>}
+        {!isLoading && !activeVideo && <p className="watch-empty">No long videos found.</p>}
 
         {activeVideo && (
           <>
@@ -136,18 +278,39 @@ export default function LongVideos() {
             const url = resolveUrl(String(raw).trim());
             const isActive = String(v.id) === String(activeVideo?.id);
             return (
-              <button
+              <article
                 key={v.id}
-                type="button"
                 className={`watch-item ${isActive ? "is-active" : ""}`}
-                onClick={() => navigate(`/watch/${v.id}`)}
+                role="button"
+                tabIndex={0}
+                onClick={() => selectVideo(v.id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    selectVideo(v.id);
+                  }
+                }}
+                aria-label={`Select video ${captionFor(v)}`}
               >
-                <video src={url} muted playsInline preload="metadata" className="watch-item-thumb" />
+                <video
+                  src={url}
+                  muted
+                  playsInline
+                  preload="metadata"
+                  className="watch-item-thumb"
+                  onPlay={(event) => {
+                    event.currentTarget.pause();
+                    event.currentTarget.currentTime = 0;
+                  }}
+                />
                 <div className="watch-item-text">
                   <p>{captionFor(v)}</p>
                   <small>{usernameFor(v)}</small>
+                  <span className={`watch-item-cta ${isActive ? "is-active" : ""}`}>
+                    {isActive ? "Now Playing" : "Select"}
+                  </span>
                 </div>
-              </button>
+              </article>
             );
           })}
           {!longVideos.length && <p className="watch-empty">No long videos found.</p>}

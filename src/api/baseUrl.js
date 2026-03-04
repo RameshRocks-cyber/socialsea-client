@@ -28,7 +28,7 @@ export function getApiBaseUrl() {
       return "https://api.socialsea.co.in";
     }
     if (host === "localhost" || host === "127.0.0.1") {
-      return "http://43.205.213.14:8080";
+      return "http://localhost:8080";
     }
   }
 
@@ -41,4 +41,3 @@ export function toApiUrl(path = "") {
   if (/^https?:\/\//i.test(path)) return path;
   return `${base}${path.startsWith("/") ? path : `/${path}`}`;
 }
-

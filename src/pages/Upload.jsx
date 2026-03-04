@@ -34,6 +34,22 @@ const PRESETS = {
   soft: { label: "Soft", brightness: 106, contrast: 94, saturation: 92, warmth: 10, blur: 1, grayscale: 0 }
 };
 
+function parseUploadError(err) {
+  const data = err?.response?.data;
+  if (typeof data === "string" && data.trim()) return data;
+  if (data && typeof data === "object") {
+    if (typeof data.message === "string" && data.message.trim()) return data.message;
+    if (typeof data.error === "string" && data.error.trim()) return data.error;
+    try {
+      return JSON.stringify(data);
+    } catch {
+      return "Upload failed";
+    }
+  }
+  if (typeof err?.message === "string" && err.message.trim()) return err.message;
+  return "Upload failed";
+}
+
 export default function Upload() {
   const videoRef = useRef(null);
   const [file, setFile] = useState(null);
@@ -256,8 +272,7 @@ export default function Upload() {
       });
     } catch (err) {
       console.error(err);
-      const message = err?.response?.data?.message || err?.response?.data || "Upload failed";
-      setMsg(String(message));
+      setMsg(parseUploadError(err));
     } finally {
       setLoading(false);
     }
