@@ -5,7 +5,13 @@ import "./AuthScreen.css";
 
 function parseErrorMessage(err, fallback) {
   const data = err?.response?.data;
-  if (typeof data === "string" && data.trim()) return data.trim();
+  if (typeof data === "string" && data.trim()) {
+    const text = data.trim();
+    if (/^\s*<!doctype html/i.test(text) || /<html[\s>]/i.test(text)) {
+      return "Server route mismatch (received HTML instead of API JSON). Please retry in a few seconds.";
+    }
+    return text;
+  }
   if (data && typeof data === "object") {
     const candidates = [data.message, data.error, data.details, data.title];
     for (const value of candidates) {

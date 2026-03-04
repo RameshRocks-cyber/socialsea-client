@@ -1,6 +1,9 @@
 import api from "./axios";
 
 const OTP_BASE_KEY = "socialsea_otp_base_url";
+const looksLikeHtml = (value) =>
+  typeof value === "string" &&
+  (/^\s*<!doctype html/i.test(value) || /<html[\s>]/i.test(value));
 
 export const sendOtp = (email) => {
   const value = String(email || "").trim();
@@ -212,13 +215,20 @@ export const forgotPassword = (emailOrUsername) => {
       for (const url of endpoints) {
         for (const body of payloads) {
           try {
-            return await api.request({
+            const res = await api.request({
               method: "POST",
               url,
               data: body,
               baseURL,
               timeout: 2500,
             });
+            const textData = typeof res?.data === "string" ? res.data.trim() : "";
+            if (looksLikeHtml(textData)) {
+              const htmlErr = new Error("Received HTML instead of API response");
+              htmlErr.response = { status: 404, data: textData };
+              throw htmlErr;
+            }
+            return res;
           } catch (err) {
             lastError = err;
             const status = err?.response?.status;
@@ -275,13 +285,20 @@ export const resetPasswordWithOtp = ({ identifier, otp, newPassword }) => {
       for (const url of endpoints) {
         for (const body of payloads) {
           try {
-            return await api.request({
+            const res = await api.request({
               method: "POST",
               url,
               data: body,
               baseURL,
               timeout: 2500,
             });
+            const textData = typeof res?.data === "string" ? res.data.trim() : "";
+            if (looksLikeHtml(textData)) {
+              const htmlErr = new Error("Received HTML instead of API response");
+              htmlErr.response = { status: 404, data: textData };
+              throw htmlErr;
+            }
+            return res;
           } catch (err) {
             lastError = err;
             const status = err?.response?.status;
