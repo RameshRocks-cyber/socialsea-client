@@ -195,28 +195,13 @@ export const forgotPassword = (emailOrUsername) => {
     typeof window !== "undefined" && window.location.protocol === "https:";
   const baseCandidates = [
     api.defaults.baseURL,
-    "http://43.205.213.14:8080",
-    "http://localhost:8080",
-    "/api",
     "https://api.socialsea.co.in",
   ]
     .filter((v, i, arr) => v && arr.indexOf(v) === i)
     .filter((v) => !(isHttpsPage && /^http:\/\//i.test(v)));
 
-  const payloads = [
-    { email: value },
-    { username: value },
-    { identifier: value },
-    { email: value, username: value, identifier: value },
-  ];
+  const payloads = [{ email: value, username: value, identifier: value }];
   const endpoints = [
-    "/api/auth/forgot-password",
-    "/api/auth/forgotPassword",
-    "/api/auth/password/forgot",
-    "/api/auth/reset-password",
-    "/api/auth/resetPassword",
-    "/auth/forgot-password",
-    // Fallback: on some deployments, forgot-password reuses OTP trigger endpoints.
     "/api/auth/send-otp",
     "/auth/send-otp",
   ];
@@ -232,22 +217,23 @@ export const forgotPassword = (emailOrUsername) => {
               url,
               data: body,
               baseURL,
-              timeout: 9000,
+              timeout: 2500,
             });
           } catch (err) {
             lastError = err;
             const status = err?.response?.status;
-            if (!(status === 400 || status === 404 || status === 405 || (status >= 500 && status <= 599) || !status)) {
+            // Retry only for route/transport failures; return other errors immediately.
+            if (!(status === 404 || status === 405 || (status >= 500 && status <= 599) || !status)) {
               throw err;
             }
           }
         }
       }
     }
-    if (lastError?.response?.status === 404) {
-      throw new Error("Forgot-password is not configured on the backend yet.");
+    if (lastError?.code === "ECONNABORTED" || !lastError?.response) {
+      throw new Error("Server is not reachable right now. Please try again in a minute.");
     }
-    throw lastError || new Error("Failed to request password reset");
+    throw lastError || new Error("Failed to send OTP");
   };
 
   return run();
@@ -261,9 +247,6 @@ export const resetPasswordWithOtp = ({ identifier, otp, newPassword }) => {
     typeof window !== "undefined" && window.location.protocol === "https:";
   const baseCandidates = [
     api.defaults.baseURL,
-    "http://43.205.213.14:8080",
-    "http://localhost:8080",
-    "/api",
     "https://api.socialsea.co.in",
   ]
     .filter((v, i, arr) => v && arr.indexOf(v) === i)
@@ -272,25 +255,18 @@ export const resetPasswordWithOtp = ({ identifier, otp, newPassword }) => {
   const endpoints = [
     "/api/auth/reset-password",
     "/api/auth/resetPassword",
-    "/api/auth/password/reset",
-    "/api/auth/update-password",
-    "/api/auth/change-password",
-    "/auth/reset-password",
-    // Fallback for deployments that overload registration with OTP.
-    "/api/auth/register",
-    "/auth/register",
   ];
 
   const payloads = [
-    { email: value, otp: code, password },
-    { username: value, otp: code, password },
-    { identifier: value, otp: code, password },
-    { email: value, otp: code, newPassword: password },
-    { username: value, otp: code, newPassword: password },
-    { identifier: value, otp: code, newPassword: password },
-    { email: value, otp: code, new_password: password },
-    { username: value, otp: code, new_password: password },
-    { identifier: value, otp: code, new_password: password },
+    {
+      email: value,
+      username: value,
+      identifier: value,
+      otp: code,
+      newPassword: password,
+      password,
+      new_password: password,
+    },
   ];
 
   const run = async () => {
@@ -304,12 +280,12 @@ export const resetPasswordWithOtp = ({ identifier, otp, newPassword }) => {
               url,
               data: body,
               baseURL,
-              timeout: 9000,
+              timeout: 2500,
             });
           } catch (err) {
             lastError = err;
             const status = err?.response?.status;
-            if (!(status === 400 || status === 404 || status === 405 || (status >= 500 && status <= 599) || !status)) {
+            if (!(status === 404 || status === 405 || (status >= 500 && status <= 599) || !status)) {
               throw err;
             }
           }
@@ -317,8 +293,11 @@ export const resetPasswordWithOtp = ({ identifier, otp, newPassword }) => {
       }
     }
 
-    if (lastError?.response?.status === 404 || lastError?.response?.status === 405) {
-      throw new Error("Password reset endpoint is not configured on the backend yet.");
+    if (lastError?.code === "ECONNABORTED" || !lastError?.response) {
+      throw new Error("Server is not reachable right now. Please try again in a minute.");
+    }
+    if (lastError?.response?.status === 404 || lastError?.response?.status === 405 || lastError?.response?.status === 503) {
+      throw new Error("Password reset service is temporarily unavailable.");
     }
     throw lastError || new Error("Failed to reset password");
   };
