@@ -52,7 +52,8 @@ export function getApiBaseUrl() {
   if (typeof window !== "undefined") {
     const host = window.location.hostname;
     if (isFrontendLikeHost(host)) {
-      return "https://api.socialsea.co.in";
+      // Use Netlify same-origin proxy to avoid CORS/domain allowlist issues.
+      return "/api";
     }
     if (host === "localhost" || host === "127.0.0.1") {
       return "http://localhost:8080";
