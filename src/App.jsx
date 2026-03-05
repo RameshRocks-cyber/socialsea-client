@@ -48,6 +48,7 @@ function AppRoutes() {
   const showUserNavbar = isAuthenticated() && !location.pathname.startsWith("/admin") && !isAuthScreen;
   const isReelsRoute = location.pathname === "/reels";
   const isChatRoute = location.pathname === "/chat" || location.pathname.startsWith("/chat/");
+  const isChatConversationRoute = location.pathname.startsWith("/chat/");
 
   useEffect(() => {
     const handleVideoPlay = (event) => {
@@ -71,6 +72,8 @@ function AppRoutes() {
       {showUserNavbar && <Navbar />}
       <main
         className={`app-main ${showUserNavbar ? "with-user-nav" : ""} ${isChatRoute ? "chat-main-route" : ""} ${
+          isChatConversationRoute ? "chat-conversation-route" : ""
+        } ${
           showUserNavbar ? "bg-gradient-to-br from-blue-950 via-slate-900 to-blue-900 text-white" : ""
         }`}
       >

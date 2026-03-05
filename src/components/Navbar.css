@@ -230,6 +230,10 @@
 }
 
 @media (max-width: 560px) {
+  .ss-nav-wrap.is-chat-conversation {
+    display: none;
+  }
+
   .ss-nav-wrap {
     top: auto;
     bottom: 8px;

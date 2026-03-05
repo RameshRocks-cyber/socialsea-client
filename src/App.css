@@ -11,7 +11,9 @@
 
 .app-main.chat-main-route {
   height: 100vh;
+  height: 100dvh;
   min-height: 100vh;
+  min-height: 100dvh;
   overflow: hidden;
   box-sizing: border-box;
 }
@@ -52,6 +54,10 @@
 
   .app-main.chat-main-route.with-user-nav {
     padding-top: 84px;
+    padding-bottom: 90px;
+  }
+
+  .app-main.chat-main-route.chat-conversation-route.with-user-nav {
     padding-bottom: 0;
   }
 

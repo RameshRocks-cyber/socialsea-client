@@ -31,6 +31,7 @@ export default function Navbar() {
   const navigate = useNavigate();
   const myUserId = localStorage.getItem("userId");
   const onChatRoute = location.pathname === "/chat" || location.pathname.startsWith("/chat/");
+  const onChatConversationRoute = location.pathname.startsWith("/chat/");
   const profileTarget = myUserId ? `/profile/${myUserId}` : "/profile/me";
   const [incomingCall, setIncomingCall] = useState(null);
   const [showSosInNavbar, setShowSosInNavbar] = useState(readShowSosInNavbar);
@@ -169,7 +170,7 @@ export default function Navbar() {
   }, [sosPopup]);
 
   return (
-    <header className="ss-nav-wrap">
+    <header className={`ss-nav-wrap ${onChatConversationRoute ? "is-chat-conversation" : ""}`}>
       <nav className="ss-nav" aria-label="Main navigation">
         <Link to="/feed" className="ss-brand" aria-label="Go to feed">
           <img src="/logo.png?v=3" alt="SocialSea" className="ss-brand-logo" />
