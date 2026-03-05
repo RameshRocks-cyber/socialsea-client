@@ -36,29 +36,20 @@ function isFrontendLikeHost(host) {
 }
 
 export function getApiBaseUrl() {
-  const envUrl = normalizeApiUrl(import.meta.env.VITE_API_URL);
-  if (envUrl) {
-    const envHost = hostFromUrl(envUrl);
-    const currentHost =
-      typeof window !== "undefined" ? String(window.location.hostname || "").toLowerCase() : "";
-    // Prevent accidental config where VITE_API_URL points to frontend host,
-    // which returns index.html for API paths.
-    if (!(envHost && envHost === currentHost && isFrontendLikeHost(envHost))) {
-      return envUrl;
-    }
-  }
-
-  // Safe defaults
   if (typeof window !== "undefined") {
-    const host = window.location.hostname;
+    const host = String(window.location.hostname || "").toLowerCase();
     if (isFrontendLikeHost(host)) {
-      // Use Netlify same-origin proxy to avoid CORS/domain allowlist issues.
+      // Always prefer same-origin proxy for deployed frontend hosts.
       return "/api";
     }
     if (host === "localhost" || host === "127.0.0.1") {
-      return "http://localhost:8080";
+      const envUrl = normalizeApiUrl(import.meta.env.VITE_API_URL);
+      return envUrl || "http://localhost:8080";
     }
   }
+
+  const envUrl = normalizeApiUrl(import.meta.env.VITE_API_URL);
+  if (envUrl) return envUrl;
 
   return "https://api.socialsea.co.in";
 }
