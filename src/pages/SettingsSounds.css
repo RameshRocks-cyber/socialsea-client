@@ -1,0 +1,14 @@
+.settings-sounds-page .settings-sound-summary {
+  padding: 14px 16px 16px;
+  color: #c9def8;
+  display: grid;
+  gap: 8px;
+}
+
+.settings-sounds-page .settings-sound-summary p {
+  margin: 0;
+}
+
+.settings-sounds-page .settings-sound-summary strong {
+  color: #f2f8ff;
+}

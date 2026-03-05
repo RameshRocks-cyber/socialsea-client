@@ -5,6 +5,41 @@ const looksLikeHtml = (value) =>
   typeof value === "string" &&
   (/^\s*<!doctype html/i.test(value) || /<html[\s>]/i.test(value));
 
+const buildOtpBaseCandidates = () => {
+  const isHttpsPage =
+    typeof window !== "undefined" && window.location.protocol === "https:";
+  const isLocalPage =
+    typeof window !== "undefined" &&
+    (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+  const storedBase =
+    sessionStorage.getItem(OTP_BASE_KEY) ||
+    localStorage.getItem(OTP_BASE_KEY) ||
+    "";
+  const normalizedStored = String(storedBase || "").trim();
+  const storedLooksRelative = normalizedStored.startsWith("/");
+
+  // Prefer the same base that succeeded for OTP sending, then try known fallbacks.
+  const localCandidates = [
+    storedLooksRelative ? null : normalizedStored,
+    "https://api.socialsea.co.in",
+    "http://43.205.213.14:8080",
+    api.defaults.baseURL,
+    "http://localhost:8080",
+  ];
+  const defaultCandidates = [
+    normalizedStored,
+    api.defaults.baseURL,
+    "https://api.socialsea.co.in",
+    "http://43.205.213.14:8080",
+    "/api",
+    "http://localhost:8080",
+  ];
+
+  return (isLocalPage ? localCandidates : defaultCandidates)
+    .filter((v, i, arr) => v && arr.indexOf(v) === i)
+    .filter((v) => !(isHttpsPage && /^http:\/\//i.test(v)));
+};
+
 export const sendOtp = (email) => {
   const value = String(email || "").trim();
   const payloads = [
@@ -160,6 +195,7 @@ export const loginWithPassword = ({ identifier, password }) => {
               url,
               data: body,
               baseURL,
+              skipAuth: true,
               timeout: 9000,
             });
             const textData = typeof res?.data === "string" ? res.data.trim() : "";
@@ -194,14 +230,7 @@ export const loginWithPassword = ({ identifier, password }) => {
 
 export const forgotPassword = (emailOrUsername) => {
   const value = String(emailOrUsername || "").trim();
-  const isHttpsPage =
-    typeof window !== "undefined" && window.location.protocol === "https:";
-  const baseCandidates = [
-    api.defaults.baseURL,
-    "https://api.socialsea.co.in",
-  ]
-    .filter((v, i, arr) => v && arr.indexOf(v) === i)
-    .filter((v) => !(isHttpsPage && /^http:\/\//i.test(v)));
+  const baseCandidates = buildOtpBaseCandidates();
 
   const payloads = [{ email: value, username: value, identifier: value }];
   const endpoints = [
@@ -220,7 +249,7 @@ export const forgotPassword = (emailOrUsername) => {
               url,
               data: body,
               baseURL,
-              timeout: 2500,
+              timeout: 9000,
             });
             const textData = typeof res?.data === "string" ? res.data.trim() : "";
             if (looksLikeHtml(textData)) {
@@ -228,12 +257,18 @@ export const forgotPassword = (emailOrUsername) => {
               htmlErr.response = { status: 404, data: textData };
               throw htmlErr;
             }
+            try {
+              sessionStorage.setItem(OTP_BASE_KEY, String(baseURL));
+              localStorage.setItem(OTP_BASE_KEY, String(baseURL));
+            } catch {
+              // ignore storage errors
+            }
             return res;
           } catch (err) {
             lastError = err;
             const status = err?.response?.status;
-            // Retry only for route/transport failures; return other errors immediately.
-            if (!(status === 404 || status === 405 || (status >= 500 && status <= 599) || !status)) {
+            // Retry for route/transport failures and auth-gated variants on fallback bases.
+            if (!(status === 401 || status === 403 || status === 404 || status === 405 || (status >= 500 && status <= 599) || !status)) {
               throw err;
             }
           }
@@ -253,18 +288,22 @@ export const resetPasswordWithOtp = ({ identifier, otp, newPassword }) => {
   const value = String(identifier || "").trim();
   const code = String(otp || "").trim();
   const password = String(newPassword || "");
-  const isHttpsPage =
-    typeof window !== "undefined" && window.location.protocol === "https:";
-  const baseCandidates = [
-    api.defaults.baseURL,
-    "https://api.socialsea.co.in",
-  ]
-    .filter((v, i, arr) => v && arr.indexOf(v) === i)
-    .filter((v) => !(isHttpsPage && /^http:\/\//i.test(v)));
+  const baseCandidates = buildOtpBaseCandidates();
 
-  const endpoints = [
+  const primaryEndpoints = [
     "/api/auth/reset-password",
     "/api/auth/resetPassword",
+    "/auth/reset-password",
+    "/auth/resetPassword",
+  ];
+  const fallbackEndpoints = [
+    "/api/auth/password/reset",
+    "/auth/password/reset",
+    "/api/auth/forgot-password/reset",
+    "/auth/forgot-password/reset",
+    "/api/auth/forgot-password",
+    "/auth/forgot-password",
+    "/api/users/reset-password",
   ];
 
   const payloads = [
@@ -274,47 +313,79 @@ export const resetPasswordWithOtp = ({ identifier, otp, newPassword }) => {
       identifier: value,
       otp: code,
       newPassword: password,
+      confirmPassword: password,
       password,
       new_password: password,
+      passwordConfirmation: password,
+      otpCode: code,
+    },
+    {
+      identifier: value,
+      email: value,
+      username: value,
+      code,
+      password,
+      confirmPassword: password,
     },
   ];
 
   const run = async () => {
     let lastError = null;
-    for (const baseURL of baseCandidates) {
-      for (const url of endpoints) {
-        for (const body of payloads) {
-          try {
-            const res = await api.request({
-              method: "POST",
-              url,
-              data: body,
-              baseURL,
-              timeout: 2500,
-            });
-            const textData = typeof res?.data === "string" ? res.data.trim() : "";
-            if (looksLikeHtml(textData)) {
-              const htmlErr = new Error("Received HTML instead of API response");
-              htmlErr.response = { status: 404, data: textData };
-              throw htmlErr;
-            }
-            return res;
-          } catch (err) {
-            lastError = err;
-            const status = err?.response?.status;
-            if (!(status === 404 || status === 405 || (status >= 500 && status <= 599) || !status)) {
-              throw err;
+    const tryEndpoints = async (endpoints) => {
+      for (const baseURL of baseCandidates) {
+        for (const url of endpoints) {
+          for (const body of payloads) {
+            try {
+              const res = await api.request({
+                method: "POST",
+                url,
+                data: body,
+                baseURL,
+                skipAuth: true,
+                timeout: 9000,
+              });
+              const textData = typeof res?.data === "string" ? res.data.trim() : "";
+              if (looksLikeHtml(textData)) {
+                const htmlErr = new Error("Received HTML instead of API response");
+                htmlErr.response = { status: 404, data: textData };
+                throw htmlErr;
+              }
+              try {
+                sessionStorage.setItem(OTP_BASE_KEY, String(baseURL));
+                localStorage.setItem(OTP_BASE_KEY, String(baseURL));
+              } catch {
+                // ignore storage errors
+              }
+              return res;
+            } catch (err) {
+              lastError = err;
+              const status = err?.response?.status;
+              // 400 means route exists but payload/otp failed: surface real backend message.
+              if (status === 400) throw err;
+              // Continue probing other bases/routes only for route/transport/permission variants.
+              if (!(status === 401 || status === 403 || status === 404 || status === 405 || (status >= 500 && status <= 599) || !status)) {
+                throw err;
+              }
             }
           }
         }
       }
-    }
+      return null;
+    };
+
+    const primary = await tryEndpoints(primaryEndpoints);
+    if (primary) return primary;
+    const fallback = await tryEndpoints(fallbackEndpoints);
+    if (fallback) return fallback;
 
     if (lastError?.code === "ECONNABORTED" || !lastError?.response) {
       throw new Error("Server is not reachable right now. Please try again in a minute.");
     }
+    if (lastError?.response?.status === 401 || lastError?.response?.status === 403) {
+      throw new Error("Password reset was blocked on current API route. Please verify backend reset-password permissions.");
+    }
     if (lastError?.response?.status === 404 || lastError?.response?.status === 405 || lastError?.response?.status === 503) {
-      throw new Error("Password reset service is temporarily unavailable.");
+      throw new Error("Password reset endpoint not available on backend. Please verify reset-password API route.");
     }
     throw lastError || new Error("Failed to reset password");
   };

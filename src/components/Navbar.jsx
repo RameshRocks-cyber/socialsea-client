@@ -9,7 +9,7 @@ const ITEMS = [
   { to: "/reels", icon: FiVideo, label: "Reels", match: (p) => p === "/reels" },
   { to: "/chat", icon: FiMessageSquare, label: "Chat", match: (p) => p === "/chat" },
   { to: "/notifications", icon: FiBell, label: "Alerts", match: (p) => p === "/notifications" },
-  { to: "/settings", icon: FiSettings, label: "Settings", match: (p) => p === "/settings" },
+  { to: "/settings", icon: FiSettings, label: "Settings", match: (p) => p.startsWith("/settings") },
   { to: "/profile/me", icon: FiUser, label: "Profile", match: (p) => p.startsWith("/profile") },
 ];
 const CALL_ACCEPT_TARGET_KEY = "socialsea_call_accept_target_v1";

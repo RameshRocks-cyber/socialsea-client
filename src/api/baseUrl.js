@@ -44,7 +44,10 @@ export function getApiBaseUrl() {
     }
     if (host === "localhost" || host === "127.0.0.1") {
       const envUrl = normalizeApiUrl(import.meta.env.VITE_API_URL);
-      return envUrl || "http://localhost:8080";
+      // In local dev, a relative "/api" requires Vite proxy.
+      // If proxy is not configured, use backend host directly.
+      if (envUrl && !envUrl.startsWith("/")) return envUrl;
+      return "http://localhost:8080";
     }
   }
 

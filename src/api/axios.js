@@ -50,6 +50,12 @@ function normalizeApiPath(config) {
 // 🔹 Attach Access Token Automatically
 api.interceptors.request.use((config) => {
   normalizeApiPath(config);
+  if (config?.skipAuth) {
+    if (config.headers?.Authorization) {
+      delete config.headers.Authorization;
+    }
+    return config;
+  }
   const token =
     sessionStorage.getItem("accessToken") ||
     sessionStorage.getItem("token") ||
@@ -71,6 +77,9 @@ api.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
     const status = error?.response?.status;
+    if (originalRequest?.skipAuth) {
+      return Promise.reject(error);
+    }
 
     // Network/CORS failures often come with no HTTP status. Retry on alternate API base URLs.
     if (!error?.response && originalRequest) {

@@ -4,20 +4,51 @@ import api from "../api/axios";
 import { toApiUrl } from "../api/baseUrl";
 import "./FollowConnections.css";
 
+function readAuthHints() {
+  const hints = { ids: [], emails: [] };
+  const addId = (value) => {
+    const v = String(value || "").trim();
+    if (!v) return;
+    if (!hints.ids.includes(v)) hints.ids.push(v);
+  };
+  const addEmail = (value) => {
+    const v = String(value || "").trim();
+    if (!v) return;
+    if (!hints.emails.includes(v)) hints.emails.push(v);
+  };
+
+  addId(sessionStorage.getItem("userId") || localStorage.getItem("userId"));
+  addEmail(sessionStorage.getItem("email") || localStorage.getItem("email"));
+
+  const token =
+    sessionStorage.getItem("accessToken") ||
+    sessionStorage.getItem("token") ||
+    localStorage.getItem("accessToken") ||
+    localStorage.getItem("token");
+
+  if (token && token.includes(".")) {
+    try {
+      const payload = JSON.parse(atob(token.split(".")[1]));
+      addId(payload?.userId || payload?.id || payload?.uid);
+      addEmail(payload?.email);
+      if (String(payload?.sub || "").includes("@")) addEmail(payload.sub);
+      if (String(payload?.username || "").includes("@")) addEmail(payload.username);
+    } catch {
+      // ignore invalid token payload
+    }
+  }
+
+  return hints;
+}
+
 function getPathCandidates(identifier, kind) {
   const safeId = encodeURIComponent(String(identifier || "").trim());
   if (!safeId) return [];
-  const opposite = kind === "followers" ? "following" : "followers";
   return [
-    `/api/follow/${safeId}/${kind}/users`,
     `/api/profile/${safeId}/${kind}`,
+    `/api/follow/${safeId}/${kind}/users`,
     `/api/follow/${safeId}/${kind}`,
-    `/api/follow/${kind}/${safeId}`,
-    `/api/follow/${kind}`,
-    `/api/profile/${safeId}?view=${kind}`,
-    `/api/follow/list?type=${kind}&user=${safeId}`,
-    `/api/follow/${opposite}/${safeId}?reverse=true`,
-    `/api/follow/${safeId}/${kind === "followers" ? "following" : "followers"}/users?reverse=true`
+    `/api/follow/${kind}/${safeId}`
   ];
 }
 
@@ -31,15 +62,27 @@ function pickList(payload, kind) {
   const nestedByKind = payload?.data?.[kind];
   if (Array.isArray(nestedByKind)) return nestedByKind;
 
+  const aliasKey = kind === "followers" ? "follower" : "following";
+  const aliasList = payload?.[`${aliasKey}Users`] || payload?.[`${kind}List`] || payload?.[aliasKey];
+  if (Array.isArray(aliasList)) return aliasList;
+  const nestedAliasList =
+    payload?.data?.[`${aliasKey}Users`] || payload?.data?.[`${kind}List`] || payload?.data?.[aliasKey];
+  if (Array.isArray(nestedAliasList)) return nestedAliasList;
+
   const userList = payload?.users || payload?.data?.users || payload?.content || payload?.data?.content;
   if (Array.isArray(userList)) return userList;
+
+  if (Array.isArray(payload?.results)) return payload.results;
+  if (Array.isArray(payload?.data?.results)) return payload.data.results;
+  if (Array.isArray(payload?.items)) return payload.items;
+  if (Array.isArray(payload?.data?.items)) return payload.data.items;
 
   return null;
 }
 
 function normalizeUser(entry) {
   const user = entry?.user || entry?.sender || entry?.target || entry;
-  const id = String(user?.id ?? user?.userId ?? "");
+  const id = String(user?.id ?? user?.userId ?? user?.username ?? user?.email ?? "");
   const name = String(user?.name || user?.username || user?.email || "User").trim();
   const username = String(user?.username || "").trim();
   const email = String(user?.email || "").trim();
@@ -55,11 +98,41 @@ function normalizeUser(entry) {
   };
 }
 
-const requestWithTimeout = (path, timeoutMs = 4500) =>
-  Promise.race([
-    api.get(path),
-    new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), timeoutMs))
-  ]);
+const IS_HTTPS_PAGE =
+  typeof window !== "undefined" && window.location.protocol === "https:";
+
+const baseCandidates = [
+  api.defaults.baseURL,
+  import.meta.env.VITE_API_URL,
+  "/api",
+  "http://43.205.213.14:8080",
+  "http://localhost:8080"
+]
+  .filter((v, i, arr) => v && arr.indexOf(v) === i)
+  .filter((v) => !(IS_HTTPS_PAGE && /^http:\/\//i.test(v)));
+
+async function requestJson(path, timeoutMs = 10000) {
+  let lastError = null;
+  for (const baseURL of baseCandidates) {
+    try {
+      const res = await api.request({ method: "GET", url: path, baseURL, timeout: timeoutMs });
+      const textData = typeof res?.data === "string" ? res.data.trim() : "";
+      if (textData && (/^\s*<!doctype html/i.test(textData) || /<html[\s>]/i.test(textData))) {
+        const htmlErr = new Error("Received HTML instead of API JSON");
+        htmlErr.response = { status: 404, data: textData };
+        throw htmlErr;
+      }
+      return res;
+    } catch (err) {
+      lastError = err;
+      const status = Number(err?.response?.status || 0);
+      if (!(status === 400 || status === 401 || status === 403 || status === 404 || status === 405 || (status >= 500 && status <= 599) || !status)) {
+        throw err;
+      }
+    }
+  }
+  throw lastError || new Error("Request failed");
+}
 
 export default function FollowConnections() {
   const { username } = useParams();
@@ -79,16 +152,21 @@ export default function FollowConnections() {
       setError("");
       setUsers([]);
       const idCandidates = [String(username || "").trim()].filter(Boolean);
-      const storedUserId = String(sessionStorage.getItem("userId") || localStorage.getItem("userId") || "").trim();
-      const storedEmail = String(sessionStorage.getItem("email") || localStorage.getItem("email") || "").trim();
+      const authHints = readAuthHints();
+      const storedUserId = String(authHints.ids[0] || "").trim();
+      const storedEmail = String(authHints.emails[0] || "").trim();
       const inlineListCandidates = [];
       if ((username || "").toLowerCase() === "me") {
-        if (storedUserId && !idCandidates.includes(storedUserId)) idCandidates.push(storedUserId);
-        if (storedEmail && !idCandidates.includes(storedEmail)) idCandidates.push(storedEmail);
+        authHints.ids.forEach((id) => {
+          if (id && !idCandidates.includes(id)) idCandidates.push(id);
+        });
+        authHints.emails.forEach((email) => {
+          if (email && !idCandidates.includes(email)) idCandidates.push(email);
+        });
       }
 
       try {
-        const profileRes = await requestWithTimeout(`/api/profile/${username}`);
+        const profileRes = await requestJson(`/api/profile/${username}`);
         if (!cancelled) {
           const profile = profileRes?.data?.user || profileRes?.data || {};
           const readable = profile?.name || profile?.username || profile?.email || username;
@@ -111,7 +189,7 @@ export default function FollowConnections() {
         // If /profile/me fails, retry profile by stored userId.
         if ((username || "").toLowerCase() === "me" && storedUserId) {
           try {
-            const profileRes = await requestWithTimeout(`/api/profile/${storedUserId}`);
+            const profileRes = await requestJson(`/api/profile/${storedUserId}`);
             if (!cancelled) {
               const profile = profileRes?.data?.user || profileRes?.data || {};
               const readable = profile?.name || profile?.username || profile?.email || "Me";
@@ -136,31 +214,39 @@ export default function FollowConnections() {
         if (!cancelled) setTitleName(username || "User");
       }
 
-      const candidates = idCandidates
-        .flatMap((id) => getPathCandidates(id, kind))
+      const candidates = [
+        ...(String(username || "").toLowerCase() === "me" ? [`/api/profile/me/${kind}`] : []),
+        ...idCandidates.flatMap((id) => getPathCandidates(id, kind))
+      ]
+        .filter(Boolean)
         .filter((path, index, arr) => arr.indexOf(path) === index);
       let authBlocked = false;
+      let foundListPayload = false;
       const resolvedLists = [];
       for (const list of inlineListCandidates) {
+        foundListPayload = true;
         const normalized = list.map(normalizeUser).filter((u) => u.id);
-        if (normalized.length) resolvedLists.push(normalized);
+        resolvedLists.push(normalized);
       }
 
-      const responses = await Promise.allSettled(candidates.map((path) => requestWithTimeout(path)));
-      responses.forEach((result) => {
-        if (result.status === "fulfilled") {
-          const rawList = pickList(result.value?.data, kind);
-          if (!Array.isArray(rawList)) return;
+      for (const path of candidates) {
+        try {
+          const res = await requestJson(path);
+          const rawList = pickList(res?.data, kind);
+          if (!Array.isArray(rawList)) continue;
+          foundListPayload = true;
           const normalized = rawList.map(normalizeUser).filter((u) => u.id);
-          if (normalized.length) resolvedLists.push(normalized);
-          return;
+          resolvedLists.push(normalized);
+          // A valid payload was found (including empty array), stop probing.
+          break;
+        } catch (err) {
+          const status = Number(err?.response?.status || 0);
+          if (status === 401 || status === 403) authBlocked = true;
         }
-        const status = Number(result.reason?.response?.status || 0);
-        if (status === 401 || status === 403) authBlocked = true;
-      });
+      }
 
       if (!cancelled) {
-        if (resolvedLists.length) {
+        if (foundListPayload) {
           const seen = new Set();
           const merged = [];
           resolvedLists.flat().forEach((u) => {

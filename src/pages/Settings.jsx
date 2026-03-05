@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../api/axios";
+import { DEFAULT_SOUND_PREFS, SETTINGS_KEY, getSoundLabel, readSoundPrefs } from "./soundPrefs";
 import "./Settings.css";
 
-const SETTINGS_KEY = "socialsea_settings_v1";
 const CLOSE_FRIENDS_KEY = "socialsea_close_friends_v1";
 const BLOCKED_KEY = "socialsea_blocked_users_v1";
 
@@ -17,7 +17,9 @@ const defaultPrefs = {
   tagsMentions: "People You Follow",
   comments: "Everyone",
   notifications: true,
-  dailyTimeLimit: "2h/day"
+  dailyTimeLimit: "2h/day",
+  notificationSound: DEFAULT_SOUND_PREFS.notificationSound,
+  ringtoneSound: DEFAULT_SOUND_PREFS.ringtoneSound
 };
 
 const readIds = (key) => {
@@ -44,11 +46,11 @@ const readJsonArray = (key) => {
 const readPrefs = () => {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
-    if (!raw) return defaultPrefs;
+    if (!raw) return { ...defaultPrefs, ...readSoundPrefs() };
     const parsed = JSON.parse(raw);
-    return { ...defaultPrefs, ...(parsed || {}) };
+    return { ...defaultPrefs, ...(parsed || {}), ...readSoundPrefs() };
   } catch {
-    return defaultPrefs;
+    return { ...defaultPrefs, ...readSoundPrefs() };
   }
 };
 
@@ -281,6 +283,18 @@ export default function Settings() {
             title="Notifications"
             value={prefs.notifications ? "On" : "Off"}
             onClick={() => navigate("/notifications")}
+          />
+          <Row
+            icon={"NS"}
+            title="Notification sound"
+            value={getSoundLabel("notification", prefs.notificationSound)}
+            onClick={() => navigate("/settings/sounds")}
+          />
+          <Row
+            icon={"R"}
+            title="Ringtone"
+            value={getSoundLabel("ringtone", prefs.ringtoneSound)}
+            onClick={() => navigate("/settings/sounds")}
           />
           <Row icon={"T"} title="Time management" value={prefs.dailyTimeLimit} onClick={() => setActivePanel("time")} />
         </section>

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../api/axios";
+import { getApiBaseUrl } from "../api/baseUrl";
 import "./LiveRecordings.css";
 
 const formatDuration = (ms) => {
@@ -38,12 +39,23 @@ export default function LiveRecordings() {
       setLoading(true);
       setError("");
       try {
+        const host = typeof window !== "undefined" ? String(window.location.hostname || "").toLowerCase() : "";
+        const storedBase =
+          typeof window !== "undefined"
+            ? localStorage.getItem("socialsea_auth_base_url") || sessionStorage.getItem("socialsea_auth_base_url")
+            : "";
         const baseCandidates = [
           api.defaults.baseURL,
-          "http://localhost:8080",
+          storedBase,
+          getApiBaseUrl(),
+          import.meta.env.VITE_API_URL,
           "http://43.205.213.14:8080",
-          "https://api.socialsea.co.in",
-        ].filter((v, i, arr) => v && arr.indexOf(v) === i);
+          "http://localhost:8080",
+          "/api",
+        ]
+          .filter((v, i, arr) => v && arr.indexOf(v) === i)
+          .filter((base) => !(host === "localhost" || host === "127.0.0.1") || String(base) !== "/api");
+
         const endpoints = [
           "/api/profile/live-recordings",
           "/api/profile/me/live-recordings",
@@ -55,12 +67,20 @@ export default function LiveRecordings() {
         for (const baseURL of baseCandidates) {
           for (const url of endpoints) {
             try {
-              res = await api.request({ method: "GET", url, baseURL });
+              res = await api.request({ method: "GET", url, baseURL, timeout: 10000 });
+              const body = res?.data;
+              const looksLikeHtml =
+                typeof body === "string" && (/^\s*<!doctype html/i.test(body) || /<html[\s>]/i.test(body));
+              if (looksLikeHtml) {
+                const htmlErr = new Error("Received HTML instead of API JSON");
+                htmlErr.response = { status: 404, data: body };
+                throw htmlErr;
+              }
               if (res) break;
             } catch (err) {
               lastError = err;
               const status = err?.response?.status;
-              if (!(status === 400 || status === 401 || status === 403 || status === 404 || status === 405 || (status >= 500 && status <= 599))) {
+              if (!(status === 400 || status === 401 || status === 403 || status === 404 || status === 405 || (status >= 500 && status <= 599) || !status)) {
                 throw err;
               }
             }
@@ -85,7 +105,7 @@ export default function LiveRecordings() {
       } catch (err) {
         if (cancelled) return;
         const status = err?.response?.status;
-        setError(status === 401 ? "Please login again." : "Failed to load recordings.");
+        setError(status === 401 || status === 403 ? "Please login again." : "Failed to load recordings.");
         setItems([]);
       } finally {
         if (!cancelled) setLoading(false);

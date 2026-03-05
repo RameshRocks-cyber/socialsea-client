@@ -10,12 +10,14 @@ import {
   FiPhone,
   FiPhoneOff,
   FiSmile,
+  FiVolume2,
   FiVideo,
   FiVideoOff
 } from "react-icons/fi";
 import api from "../api/axios";
 import { getApiBaseUrl, toApiUrl } from "../api/baseUrl";
 import { clearAuthStorage } from "../auth";
+import { SETTINGS_KEY, readSoundPrefs } from "./soundPrefs";
 import "./Chat.css";
 
 const POLL_MS = 1200;
@@ -167,6 +169,10 @@ export default function Chat() {
   const [isRecordingAudio, setIsRecordingAudio] = useState(false);
   const [speechLang, setSpeechLang] = useState("en-IN");
   const [nowTick, setNowTick] = useState(Date.now());
+  const [soundPrefs, setSoundPrefs] = useState(readSoundPrefs);
+  const [hasRemoteVideo, setHasRemoteVideo] = useState(false);
+  const [beautyMode, setBeautyMode] = useState(true);
+  const [callPhaseNote, setCallPhaseNote] = useState("");
 
   const stompRef = useRef(null);
   const peerRef = useRef(null);
@@ -181,6 +187,7 @@ export default function Chat() {
   const audioCtxRef = useRef(null);
   const ringtoneTimerRef = useRef(null);
   const outgoingRingTimerRef = useRef(null);
+  const disconnectGuardTimerRef = useRef(null);
   const historyRef = useRef({});
   const seenSignalsRef = useRef(new Set());
   const longPressTimerRef = useRef(null);
@@ -257,14 +264,51 @@ export default function Chat() {
     osc.stop(now + durationMs / 1000);
   };
 
-  const playNotificationBeep = () => {
+  const playNotificationPattern = (profile) => {
+    if (profile === "off") return;
+    if (profile === "soft") {
+      void playTone(620, 130, 0.06, "sine");
+      window.setTimeout(() => void playTone(760, 140, 0.06, "sine"), 150);
+      return;
+    }
+    if (profile === "digital") {
+      void playTone(980, 95, 0.08, "square");
+      window.setTimeout(() => void playTone(1240, 95, 0.08, "square"), 110);
+      return;
+    }
+    if (profile === "sparkle") {
+      void playTone(740, 90, 0.08, "triangle");
+      window.setTimeout(() => void playTone(980, 90, 0.08, "triangle"), 120);
+      window.setTimeout(() => void playTone(1320, 120, 0.06, "sine"), 240);
+      return;
+    }
+    if (profile === "bubble") {
+      void playTone(420, 80, 0.09, "sine");
+      window.setTimeout(() => void playTone(520, 85, 0.08, "sine"), 90);
+      window.setTimeout(() => void playTone(640, 95, 0.08, "triangle"), 180);
+      return;
+    }
+    if (profile === "twinkle") {
+      void playTone(880, 85, 0.08, "sine");
+      window.setTimeout(() => void playTone(1175, 85, 0.07, "sine"), 110);
+      window.setTimeout(() => void playTone(1568, 100, 0.06, "sine"), 220);
+      return;
+    }
+    if (profile === "pop") {
+      void playTone(360, 65, 0.09, "square");
+      window.setTimeout(() => void playTone(960, 105, 0.08, "triangle"), 90);
+      return;
+    }
     void playTone(820, 120, 0.08, "triangle");
     window.setTimeout(() => void playTone(980, 120, 0.07, "triangle"), 140);
   };
 
+  const playNotificationBeep = () => {
+    playNotificationPattern(soundPrefs.notificationSound);
+  };
+
   const playMessageAlert = () => {
-    void playTone(920, 130, 0.1, "triangle");
-    window.setTimeout(() => void playTone(1120, 140, 0.09, "triangle"), 150);
+    playNotificationPattern(soundPrefs.notificationSound);
     if (typeof navigator !== "undefined" && typeof navigator.vibrate === "function") {
       navigator.vibrate([40, 40, 40]);
     }
@@ -298,8 +342,36 @@ export default function Chat() {
 
   const startRingtone = (force = false) => {
     if (ringtoneMuted && !force) return;
+    if (soundPrefs.ringtoneSound === "off") return;
     stopRingtone();
     const ring = () => {
+      if (soundPrefs.ringtoneSound === "bell") {
+        void playTone(700, 200, 0.2, "sine");
+        window.setTimeout(() => void playTone(880, 200, 0.2, "sine"), 210);
+        return;
+      }
+      if (soundPrefs.ringtoneSound === "pulse") {
+        void playTone(560, 240, 0.2, "triangle");
+        window.setTimeout(() => void playTone(620, 240, 0.18, "triangle"), 260);
+        return;
+      }
+      if (soundPrefs.ringtoneSound === "marimba") {
+        void playTone(523, 180, 0.16, "sine");
+        window.setTimeout(() => void playTone(659, 180, 0.15, "sine"), 210);
+        window.setTimeout(() => void playTone(784, 220, 0.14, "sine"), 420);
+        return;
+      }
+      if (soundPrefs.ringtoneSound === "chime") {
+        void playTone(660, 220, 0.16, "triangle");
+        window.setTimeout(() => void playTone(990, 260, 0.14, "triangle"), 250);
+        return;
+      }
+      if (soundPrefs.ringtoneSound === "birdsong") {
+        void playTone(940, 120, 0.12, "sine");
+        window.setTimeout(() => void playTone(1260, 120, 0.11, "sine"), 140);
+        window.setTimeout(() => void playTone(1020, 140, 0.11, "sine"), 290);
+        return;
+      }
       void playTone(640, 320, 0.22, "square");
       window.setTimeout(() => void playTone(760, 360, 0.2, "square"), 280);
     };
@@ -308,8 +380,36 @@ export default function Chat() {
   };
 
   const startOutgoingRing = () => {
+    if (soundPrefs.ringtoneSound === "off") return;
     stopOutgoingRing();
     const ring = () => {
+      if (soundPrefs.ringtoneSound === "bell") {
+        void playTone(680, 190, 0.18, "sine");
+        window.setTimeout(() => void playTone(840, 190, 0.18, "sine"), 210);
+        return;
+      }
+      if (soundPrefs.ringtoneSound === "pulse") {
+        void playTone(540, 220, 0.18, "triangle");
+        window.setTimeout(() => void playTone(600, 220, 0.17, "triangle"), 250);
+        return;
+      }
+      if (soundPrefs.ringtoneSound === "marimba") {
+        void playTone(494, 170, 0.15, "sine");
+        window.setTimeout(() => void playTone(659, 180, 0.14, "sine"), 190);
+        window.setTimeout(() => void playTone(784, 200, 0.13, "sine"), 390);
+        return;
+      }
+      if (soundPrefs.ringtoneSound === "chime") {
+        void playTone(620, 210, 0.14, "triangle");
+        window.setTimeout(() => void playTone(930, 250, 0.13, "triangle"), 230);
+        return;
+      }
+      if (soundPrefs.ringtoneSound === "birdsong") {
+        void playTone(900, 110, 0.11, "sine");
+        window.setTimeout(() => void playTone(1180, 110, 0.1, "sine"), 120);
+        window.setTimeout(() => void playTone(980, 130, 0.1, "sine"), 260);
+        return;
+      }
       void playTone(520, 320, 0.2, "triangle");
       window.setTimeout(() => void playTone(620, 320, 0.18, "triangle"), 280);
     };
@@ -365,6 +465,16 @@ export default function Chat() {
   useEffect(() => {
     const timer = setInterval(() => setNowTick(Date.now()), 30000);
     return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const onStorage = (event) => {
+      if (!event || event.key === SETTINGS_KEY) {
+        setSoundPrefs(readSoundPrefs());
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
   }, []);
 
   const localThreadKey = (a, b) => [String(a || ""), String(b || "")].sort().join(":");
@@ -484,6 +594,7 @@ export default function Chat() {
       receiverId: receiverId || undefined,
       text: String(message?.text ?? message?.message ?? message?.content ?? ""),
       audioUrl: String(message?.audioUrl || ""),
+      speechTyped: Boolean(message?.speechTyped),
       mediaUrl: String(message?.mediaUrl || ""),
       mediaType: String(message?.mediaType || ""),
       fileName: String(message?.fileName || ""),
@@ -590,6 +701,13 @@ export default function Chat() {
     }
   };
 
+  const clearDisconnectGuardTimer = () => {
+    if (disconnectGuardTimerRef.current) {
+      clearTimeout(disconnectGuardTimerRef.current);
+      disconnectGuardTimerRef.current = null;
+    }
+  };
+
   const stopStream = (stream) => {
     if (!stream) return;
     stream.getTracks().forEach((track) => {
@@ -602,12 +720,15 @@ export default function Chat() {
   };
 
   const resetMedia = () => {
+    clearDisconnectGuardTimer();
     stopStream(localStreamRef.current);
     stopStream(remoteStreamRef.current);
     localStreamRef.current = null;
     remoteStreamRef.current = null;
     if (localVideoRef.current) localVideoRef.current.srcObject = null;
     if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
+    setHasRemoteVideo(false);
+    setCallPhaseNote("");
     setIsMuted(false);
     setIsCameraOff(false);
   };
@@ -683,6 +804,7 @@ export default function Chat() {
     }
 
     const markConnected = () => {
+      clearDisconnectGuardTimer();
       setCallState((prev) => {
         if (!callConnectedLoggedRef.current && prev.peerId) {
           callConnectedLoggedRef.current = true;
@@ -695,6 +817,15 @@ export default function Chat() {
         }
         return { ...prev, phase: "in-call" };
       });
+      setCallPhaseNote("Connected");
+    };
+
+    const markReconnecting = () => {
+      setCallState((prev) => {
+        if (prev.phase === "idle") return prev;
+        return { ...prev, phase: "connecting" };
+      });
+      setCallPhaseNote("Reconnecting...");
     };
 
     pc.onicecandidate = (event) => {
@@ -709,6 +840,12 @@ export default function Chat() {
     };
 
     pc.ontrack = (event) => {
+      if (event?.track?.kind === "video") {
+        setHasRemoteVideo(true);
+        event.track.onmute = () => setHasRemoteVideo(false);
+        event.track.onunmute = () => setHasRemoteVideo(true);
+        event.track.onended = () => setHasRemoteVideo(false);
+      }
       if (event.track) {
         remoteStream.addTrack(event.track);
       } else {
@@ -730,8 +867,33 @@ export default function Chat() {
         markConnected();
         return;
       }
-      if (state === "failed" || state === "closed" || state === "disconnected") {
+      if (state === "disconnected") {
+        markReconnecting();
+        clearDisconnectGuardTimer();
+        disconnectGuardTimerRef.current = setTimeout(() => {
+          const currentState = peerRef.current?.connectionState;
+          if (currentState === "disconnected") {
+            finishCall(false, "Call disconnected");
+          }
+        }, 6500);
+        return;
+      }
+      if (state === "failed" || state === "closed") {
         finishCall(false, "Call ended");
+      }
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      const ice = pc.iceConnectionState;
+      if (ice === "connected" || ice === "completed") {
+        markConnected();
+        return;
+      }
+      if (ice === "disconnected") {
+        markReconnecting();
+      }
+      if (ice === "failed") {
+        finishCall(false, "Network issue ended the call");
       }
     };
 
@@ -1575,6 +1737,8 @@ export default function Chat() {
   const sendMessage = async () => {
     const text = inputText.trim();
     if (!text || !activeContactId) return;
+    const fromSpeechInput =
+      Boolean(speechRecognitionRef.current) || Boolean(String(speechFinalTextRef.current || "").trim());
     if (activeContactId === myUserId) {
       setError("Cannot send message to your own account.");
       return;
@@ -1596,6 +1760,7 @@ export default function Chat() {
           senderId: Number(myUserId) || null,
           receiverId: Number(activeContactId) || null,
           text,
+          speechTyped: fromSpeechInput,
           createdAt: new Date().toISOString(),
           mine: true
         }, activeContactId);
@@ -1614,7 +1779,15 @@ export default function Chat() {
 
       const res = await api.post(`/api/chat/${activeContactId}/send`, { text });
       const sent = normalizeMessage(
-        { ...(res?.data || {}), text, mine: true, senderId: myUserId, receiverId: activeContactId, createdAt: (res?.data || {})?.createdAt || new Date().toISOString() },
+        {
+          ...(res?.data || {}),
+          text,
+          speechTyped: fromSpeechInput,
+          mine: true,
+          senderId: myUserId,
+          receiverId: activeContactId,
+          createdAt: (res?.data || {})?.createdAt || new Date().toISOString()
+        },
         activeContactId
       );
       setMessagesByContact((prev) => ({
@@ -1881,6 +2054,7 @@ export default function Chat() {
 
   const callActive = callState.phase !== "idle";
   const showVideoCallScreen = callActive && callState.mode === "video";
+  const callStatusText = callPhaseNote || (callState.phase === "in-call" ? "Connected" : "Connecting...");
   const callLabel = incomingCall
     ? `${incomingCall.mode === "video" ? "Video" : "Audio"} call from ${incomingCall.fromName}`
     : callActive
@@ -1958,6 +2132,38 @@ export default function Chat() {
     } catch {
       return "";
     }
+  };
+
+  const getMessageTickState = (message) => {
+    if (!message || !message.mine) return null;
+    const rawStatus = String(message.status || message.deliveryStatus || "").toLowerCase();
+    const messageTs = new Date(normalizeTimestamp(message.createdAt || 0)).getTime();
+    const peerHasNewerMessage =
+      Number.isFinite(messageTs) && peerLatestMessageTs > 0 && peerLatestMessageTs >= messageTs;
+    const isRead =
+      Boolean(message.readAt || message.seenAt) ||
+      message.read === true ||
+      message.seen === true ||
+      rawStatus === "read" ||
+      rawStatus === "seen" ||
+      peerHasNewerMessage;
+    if (isRead) return "read";
+
+    const idText = String(message.id || "");
+    const isLocalPendingId =
+      idText.startsWith("local_") ||
+      idText.startsWith("tmp_") ||
+      idText.startsWith("temp_");
+    const oldEnough = Number.isFinite(messageTs) ? Date.now() - messageTs > 1500 : true;
+    const isDelivered =
+      Boolean(message.deliveredAt || message.receivedAt) ||
+      message.delivered === true ||
+      rawStatus === "delivered" ||
+      rawStatus === "received" ||
+      (idText && !isLocalPendingId && oldEnough);
+    if (isDelivered) return "delivered";
+
+    return "sent";
   };
 
   const formatDayLabel = (value) => {
@@ -2296,7 +2502,7 @@ export default function Chat() {
               {callState.mode === "video" ? "Video call" : "Audio call"} with {callState.peerName || "User"}
             </p>
             <p className="active-call-popup-subtitle">
-              {callState.phase === "in-call" ? "Connected" : "Connecting..."} • Total {formatCallDuration(callDurationSec)}
+              {callStatusText} • Total {formatCallDuration(callDurationSec)}
             </p>
             <div className="active-call-popup-actions">
               <button type="button" className="call-ring-toggle" onClick={toggleMute}>
@@ -2310,12 +2516,31 @@ export default function Chat() {
         )}
         {showVideoCallScreen && (
           <div className="wa-video-call-screen" role="dialog" aria-live="polite" aria-label="Video call screen">
-            <video ref={remoteVideoRef} autoPlay playsInline className="wa-video-remote" data-allow-simultaneous="true" />
-            <video ref={localVideoRef} autoPlay playsInline muted className="wa-video-local" data-allow-simultaneous="true" />
+            <video
+              ref={remoteVideoRef}
+              autoPlay
+              playsInline
+              className={`wa-video-remote ${beautyMode ? "beauty-on" : ""}`}
+              data-allow-simultaneous="true"
+            />
+            {!hasRemoteVideo && (
+              <div className="wa-video-remote-fallback" aria-live="polite">
+                <div className="wa-video-avatar">{(callState.peerName || "U").charAt(0).toUpperCase()}</div>
+                <p>{callState.peerName || "User"} camera is off or still connecting</p>
+              </div>
+            )}
+            <video
+              ref={localVideoRef}
+              autoPlay
+              playsInline
+              muted
+              className={`wa-video-local ${beautyMode ? "beauty-on" : ""}`}
+              data-allow-simultaneous="true"
+            />
             <div className="wa-video-top">
               <p className="wa-video-peer">{callState.peerName || "User"}</p>
               <p className="wa-video-state">
-                {callState.phase === "in-call" ? "Connected" : "Connecting..."} • {formatCallDuration(callDurationSec)}
+                {callStatusText} • {formatCallDuration(callDurationSec)}
               </p>
             </div>
             <div className="wa-video-controls">
@@ -2324,6 +2549,14 @@ export default function Chat() {
               </button>
               <button type="button" className="call-control" onClick={toggleCamera} title="Camera on/off">
                 {isCameraOff ? <FiVideoOff /> : <FiVideo />}
+              </button>
+              <button
+                type="button"
+                className={`call-control ${beautyMode ? "is-active" : ""}`}
+                title="Beauty mode"
+                onClick={() => setBeautyMode((prev) => !prev)}
+              >
+                <FiSmile />
               </button>
               <button type="button" className="call-hangup" onClick={() => finishCall(true)}>
                 <FiPhoneOff />
@@ -2446,7 +2679,14 @@ export default function Chat() {
                   >
                     <div className={`chat-bubble-line ${item.kind === "call" ? "call-line" : ""}`}>
                       {item.kind === "message" && item.raw?.audioUrl ? (
-                        <audio controls preload="metadata" className="chat-audio" src={toApiUrl(item.raw.audioUrl)} />
+                        <div className={`chat-voice-note ${item.mine ? "mine" : "their"}`}>
+                          {item.mine && (
+                            <span className="chat-voice-note-icon" aria-hidden="true">
+                              <FiVolume2 />
+                            </span>
+                          )}
+                          <audio controls preload="metadata" className="chat-audio" src={toApiUrl(item.raw.audioUrl)} />
+                        </div>
                       ) : item.kind === "message" && item.raw?.mediaUrl ? (
                         item.raw?.mediaType === "image" ? (
                           <img
@@ -2475,7 +2715,23 @@ export default function Chat() {
                         <span>{item.text}</span>
                       )}
                     </div>
-                    <small className="chat-bubble-time">{formatMessageTime(item.createdAt)}</small>
+                    <small className="chat-bubble-time">
+                      {formatMessageTime(item.createdAt)}
+                      {item.kind === "message" && item.mine && (item.raw?.audioUrl || item.raw?.speechTyped) && (
+                        <span className="chat-voice-status-icon" title="Voice note" aria-label="Voice note">
+                          <FiVolume2 />
+                        </span>
+                      )}
+                      {item.kind === "message" && item.mine && (() => {
+                        const tickState = getMessageTickState(item.raw);
+                        if (!tickState) return null;
+                        return (
+                          <span className={`chat-read-ticks ${tickState}`} aria-label={tickState}>
+                            {tickState === "sent" ? "✓" : "✓✓"}
+                          </span>
+                        );
+                      })()}
+                    </small>
                   </div>
                 );
               })}
@@ -2643,10 +2899,11 @@ export default function Chat() {
             )}
 
             <div className="chat-input-row wa-input-row">
-              <button type="button" className="input-icon" title="Emoji" onClick={toggleEmojiTray}>
+              <button type="button" className="input-icon composer-emoji-btn" title="Emoji" onClick={toggleEmojiTray}>
                 <FiSmile />
               </button>
               <input
+                className="composer-input"
                 ref={composerInputRef}
                 type="text"
                 placeholder="Message..."
@@ -2656,14 +2913,14 @@ export default function Chat() {
                   if (e.key === "Enter") sendMessage();
                 }}
               />
-              <button type="button" className="input-icon" title="Attach" onClick={openAttachPicker}>
+              <button type="button" className="input-icon composer-attach-btn" title="Attach" onClick={openAttachPicker}>
                 <FiPaperclip />
               </button>
-              <button type="button" className="input-icon" title="Camera" onClick={openCameraPicker}>
+              <button type="button" className="input-icon composer-camera-btn" title="Camera" onClick={openCameraPicker}>
                 <FiCamera />
               </button>
               <select
-                className="speech-lang-select"
+                className="speech-lang-select composer-lang-select"
                 value={speechLang}
                 onChange={(e) => setSpeechLang(e.target.value)}
                 title="Speech language"
@@ -2675,13 +2932,13 @@ export default function Chat() {
                 ))}
               </select>
               {hasDraft ? (
-                <button type="button" className="chat-send-btn" onClick={sendMessage}>
+                <button type="button" className="chat-send-btn composer-send-btn" onClick={sendMessage}>
                   Send
                 </button>
               ) : (
                 <button
                   type="button"
-                  className={`mic-fab ${isRecordingAudio ? "active" : ""}`}
+                  className={`mic-fab composer-send-btn ${isRecordingAudio ? "active" : ""}`}
                   title={isRecordingAudio ? "Stop speech typing" : "Speak to type message"}
                   onClick={toggleAudioRecording}
                 >
