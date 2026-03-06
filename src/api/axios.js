@@ -16,13 +16,10 @@ const FALLBACK_BASE_URLS = [
   .filter((value, index, arr) => value && arr.indexOf(value) === index)
   .filter((value) => !(IS_HTTPS_PAGE && /^http:\/\//i.test(value)));
 
-// Tokens from one backend (localhost/remote) are not valid on another backend.
-// If API base changes, clear auth once and force fresh login for this backend.
+// Keep the last used API base for diagnostics/fallback continuity.
+// Do NOT force-clear auth on base change; fallback retries can temporarily switch base
+// and would otherwise log users out on refresh.
 try {
-  const prevBase = localStorage.getItem(AUTH_BASE_KEY) || sessionStorage.getItem(AUTH_BASE_KEY);
-  if (prevBase && prevBase !== BASE_URL) {
-    clearAuthStorage();
-  }
   localStorage.setItem(AUTH_BASE_KEY, BASE_URL);
   sessionStorage.setItem(AUTH_BASE_KEY, BASE_URL);
 } catch {
@@ -135,6 +132,8 @@ api.interceptors.response.use(
       // Keep auth tab-scoped to avoid cross-window account collisions.
       sessionStorage.setItem("accessToken", newAccessToken);
       sessionStorage.setItem("token", newAccessToken);
+      localStorage.setItem("accessToken", newAccessToken);
+      localStorage.setItem("token", newAccessToken);
 
       originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
 

@@ -16,18 +16,32 @@ const buildOtpBaseCandidates = () => {
     localStorage.getItem(OTP_BASE_KEY) ||
     "";
   const normalizedStored = String(storedBase || "").trim();
-  const storedLooksRelative = normalizedStored.startsWith("/");
+  const storedHost =
+    normalizedStored && /^https?:\/\//i.test(normalizedStored)
+      ? new URL(normalizedStored).hostname.toLowerCase()
+      : "";
+  const safeStoredForLocal =
+    isLocalPage && storedHost === "api.socialsea.co.in" ? "" : normalizedStored;
+  const storedLooksRelative = safeStoredForLocal.startsWith("/");
+  const defaultBase = String(api.defaults.baseURL || "").trim();
+  const defaultLooksRelative = defaultBase.startsWith("/");
+  const envBaseRaw = String(import.meta.env.VITE_API_URL || "").trim();
+  const envLooksRelative = envBaseRaw.startsWith("/");
+  const wantsLocalBackend =
+    /localhost:8080|127\.0\.0\.1:8080/i.test(normalizedStored);
 
   // Prefer the same base that succeeded for OTP sending, then try known fallbacks.
   const localCandidates = [
-    storedLooksRelative ? null : normalizedStored,
-    "https://api.socialsea.co.in",
+    storedLooksRelative ? null : safeStoredForLocal,
+    defaultLooksRelative ? null : (!/localhost:8080|127\.0\.0\.1:8080/i.test(defaultBase) ? defaultBase : null),
+    envLooksRelative ? null : envBaseRaw,
     "http://43.205.213.14:8080",
-    api.defaults.baseURL,
-    "http://localhost:8080",
+    "/api",
+    wantsLocalBackend ? "http://localhost:8080" : null,
+    "https://api.socialsea.co.in",
   ];
   const defaultCandidates = [
-    normalizedStored,
+    safeStoredForLocal,
     api.defaults.baseURL,
     "https://api.socialsea.co.in",
     "http://43.205.213.14:8080",
@@ -249,6 +263,7 @@ export const forgotPassword = (emailOrUsername) => {
               url,
               data: body,
               baseURL,
+              skipAuth: true,
               timeout: 9000,
             });
             const textData = typeof res?.data === "string" ? res.data.trim() : "";

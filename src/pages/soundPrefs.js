@@ -18,12 +18,15 @@ export const RINGTONE_OPTIONS = [
   { value: "marimba", label: "Marimba" },
   { value: "chime", label: "Dream Chime" },
   { value: "birdsong", label: "Birdsong" },
+  { value: "custom", label: "My Song" },
   { value: "off", label: "Off" }
 ];
 
 export const DEFAULT_SOUND_PREFS = {
   notificationSound: "classic",
-  ringtoneSound: "classic"
+  ringtoneSound: "classic",
+  customRingtoneDataUrl: "",
+  customRingtoneName: ""
 };
 
 const validNotificationSound = (value) =>
@@ -38,11 +41,15 @@ export const readSoundPrefs = () => {
     const parsed = raw ? JSON.parse(raw) : {};
     const notificationSound = String(parsed?.notificationSound || DEFAULT_SOUND_PREFS.notificationSound);
     const ringtoneSound = String(parsed?.ringtoneSound || DEFAULT_SOUND_PREFS.ringtoneSound);
+    const customRingtoneDataUrl = String(parsed?.customRingtoneDataUrl || "");
+    const customRingtoneName = String(parsed?.customRingtoneName || "");
     return {
       notificationSound: validNotificationSound(notificationSound)
         ? notificationSound
         : DEFAULT_SOUND_PREFS.notificationSound,
-      ringtoneSound: validRingtoneSound(ringtoneSound) ? ringtoneSound : DEFAULT_SOUND_PREFS.ringtoneSound
+      ringtoneSound: validRingtoneSound(ringtoneSound) ? ringtoneSound : DEFAULT_SOUND_PREFS.ringtoneSound,
+      customRingtoneDataUrl,
+      customRingtoneName
     };
   } catch {
     return { ...DEFAULT_SOUND_PREFS };
@@ -62,5 +69,15 @@ export const writeSoundPrefs = (nextPrefs) => {
 
 export const getSoundLabel = (type, value) => {
   const pool = type === "ringtone" ? RINGTONE_OPTIONS : NOTIFICATION_SOUND_OPTIONS;
+  if (type === "ringtone" && value === "custom") {
+    try {
+      const raw = localStorage.getItem(SETTINGS_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      const name = String(parsed?.customRingtoneName || "").trim();
+      return name ? `My Song (${name})` : "My Song";
+    } catch {
+      return "My Song";
+    }
+  }
   return pool.find((item) => item.value === value)?.label || pool[0]?.label || "";
 };

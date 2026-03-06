@@ -32,6 +32,13 @@ function normalizeRole(value) {
   return noPrefix.toUpperCase();
 }
 
+function persistAuthValue(key, value) {
+  if (value == null) return;
+  const safe = String(value);
+  sessionStorage.setItem(key, safe);
+  localStorage.setItem(key, safe);
+}
+
 export default function Login() {
   const navigate = useNavigate();
 
@@ -49,11 +56,11 @@ export default function Login() {
     if (!token) throw new Error("Login failed: token missing");
 
     clearAuthStorage();
-    sessionStorage.setItem("accessToken", token);
-    sessionStorage.setItem("token", token);
-    if (userId != null) sessionStorage.setItem("userId", String(userId));
-    if (refreshToken) sessionStorage.setItem("refreshToken", refreshToken);
-    if (role) sessionStorage.setItem("role", role);
+    persistAuthValue("accessToken", token);
+    persistAuthValue("token", token);
+    if (userId != null) persistAuthValue("userId", userId);
+    if (refreshToken) persistAuthValue("refreshToken", refreshToken);
+    if (role) persistAuthValue("role", role);
 
     if (role === "ADMIN") {
       navigate("/admin");
@@ -67,9 +74,9 @@ export default function Login() {
         Boolean(profile?.profileCompleted) ||
         Boolean(String(profile?.name || "").trim()) ||
         Boolean(String(profile?.profilePic || profile?.profilePicUrl || "").trim());
-      sessionStorage.setItem("profileCompleted", completed ? "true" : "false");
+      persistAuthValue("profileCompleted", completed ? "true" : "false");
     } catch {
-      sessionStorage.setItem("profileCompleted", "false");
+      persistAuthValue("profileCompleted", "false");
     }
     navigate("/profile-setup");
   };

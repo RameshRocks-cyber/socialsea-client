@@ -1,14 +1,167 @@
+.settings-sounds-page {
+  --snd-pill-bg: linear-gradient(140deg, rgba(24, 58, 110, 0.8), rgba(10, 30, 63, 0.78));
+  --snd-pill-border: rgba(127, 188, 255, 0.35);
+}
+
+.settings-sounds-page .settings-top {
+  position: relative;
+  overflow: hidden;
+}
+
+.settings-sounds-page .settings-top::after {
+  content: "";
+  position: absolute;
+  right: -80px;
+  top: -80px;
+  width: 220px;
+  height: 220px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(76, 160, 255, 0.25), rgba(76, 160, 255, 0));
+  pointer-events: none;
+}
+
+.settings-sounds-page .settings-section,
+.settings-sounds-page .settings-panel {
+  border-color: rgba(122, 182, 255, 0.28);
+  box-shadow:
+    0 18px 36px rgba(0, 0, 0, 0.26),
+    inset 0 1px 0 rgba(198, 224, 255, 0.06);
+}
+
 .settings-sounds-page .settings-sound-summary {
-  padding: 14px 16px 16px;
-  color: #c9def8;
+  padding: 16px;
+  color: #d0e4ff;
   display: grid;
-  gap: 8px;
+  gap: 10px;
 }
 
 .settings-sounds-page .settings-sound-summary p {
   margin: 0;
+  padding: 11px 13px;
+  border-radius: 12px;
+  border: 1px solid var(--snd-pill-border);
+  background: var(--snd-pill-bg);
+  font-weight: 600;
 }
 
 .settings-sounds-page .settings-sound-summary strong {
-  color: #f2f8ff;
+  color: #ffffff;
+}
+
+.settings-sounds-page .settings-panel-head h3 {
+  letter-spacing: 0.2px;
+}
+
+.settings-sounds-page .settings-select-grid {
+  gap: 10px;
+}
+
+.settings-sounds-page .settings-select-grid button {
+  min-height: 46px;
+  border-radius: 12px;
+  border: 1px solid rgba(118, 178, 255, 0.45);
+  background:
+    radial-gradient(120% 130% at 8% -30%, rgba(67, 145, 255, 0.22), transparent 55%),
+    linear-gradient(145deg, rgba(22, 49, 93, 0.95), rgba(14, 34, 67, 0.95));
+  font-size: 0.96rem;
+  letter-spacing: 0.2px;
+}
+
+.settings-sounds-page .settings-select-grid button:hover {
+  transform: translateY(-1px);
+  border-color: rgba(146, 201, 255, 0.72);
+  box-shadow: 0 10px 18px rgba(5, 20, 47, 0.35);
+}
+
+.settings-sounds-page .settings-select-grid button.active {
+  border-color: rgba(134, 232, 235, 0.85);
+  background:
+    radial-gradient(120% 140% at 0% -20%, rgba(93, 170, 255, 0.4), transparent 50%),
+    linear-gradient(135deg, #2f78ff 0%, #2167df 46%, #14889f 100%);
+  box-shadow: 0 14px 24px rgba(23, 91, 173, 0.4);
+}
+
+.settings-sounds-page .watch-later-shortcut {
+  margin-top: 12px;
+  min-height: 46px;
+  border-radius: 12px;
+  border: 1px solid rgba(125, 189, 255, 0.42);
+  background:
+    radial-gradient(120% 120% at 90% -40%, rgba(80, 173, 255, 0.24), transparent 58%),
+    linear-gradient(145deg, #1b3f78, #132f5a);
+  font-size: 0.98rem;
+}
+
+.settings-custom-ringtone-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.settings-custom-ringtone-upload {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 0 14px;
+  border-radius: 12px;
+  border: 1px dashed rgba(133, 196, 255, 0.58);
+  background: linear-gradient(145deg, rgba(25, 53, 96, 0.85), rgba(15, 36, 69, 0.85));
+  color: #eaf5ff;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.2s ease, border-color 0.2s ease, filter 0.2s ease;
+}
+
+.settings-custom-ringtone-upload:hover {
+  transform: translateY(-1px);
+  border-color: rgba(168, 215, 255, 0.82);
+  filter: brightness(1.06);
+}
+
+.settings-custom-ringtone-upload input[type="file"] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.settings-custom-ringtone-clear {
+  min-height: 42px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 149, 170, 0.52);
+  background: linear-gradient(140deg, rgba(152, 35, 62, 0.45), rgba(109, 20, 48, 0.45));
+  color: #ffe9ee;
+  font-weight: 700;
+  padding: 0 14px;
+  cursor: pointer;
+}
+
+.settings-custom-ringtone-name {
+  margin: 0 0 12px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(129, 188, 255, 0.35);
+  background: linear-gradient(145deg, rgba(22, 49, 90, 0.75), rgba(14, 35, 65, 0.75));
+  color: #d5e8ff;
+}
+
+.settings-custom-ringtone-name strong {
+  color: #ffffff;
+}
+
+@media (max-width: 780px) {
+  .settings-sounds-page .settings-select-grid button {
+    min-height: 44px;
+    font-size: 0.9rem;
+  }
+
+  .settings-custom-ringtone-upload,
+  .settings-custom-ringtone-clear {
+    width: 100%;
+    justify-content: center;
+  }
 }

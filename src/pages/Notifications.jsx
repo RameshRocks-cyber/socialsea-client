@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { FiBell, FiHeart, FiMessageCircle, FiUserPlus } from "react-icons/fi";
+import { FiAlertTriangle, FiBell, FiHeart, FiMapPin, FiMessageCircle, FiUserPlus, FiVideo } from "react-icons/fi";
 import api from "../api/axios";
 import "./Notifications.css";
 
@@ -50,10 +50,25 @@ export default function Notifications() {
   };
 
   const kindMeta = (kind) => {
+    if (kind === "emergency") return { Icon: FiAlertTriangle, label: "Emergency", tone: "emergency" };
     if (kind === "like") return { Icon: FiHeart, label: "Like", tone: "like" };
     if (kind === "follow") return { Icon: FiUserPlus, label: "Follow", tone: "follow" };
     if (kind === "comment") return { Icon: FiMessageCircle, label: "Comment", tone: "comment" };
     return { Icon: FiBell, label: "Alert", tone: "system" };
+  };
+
+  const extractEmergencyLinks = (item, message) => {
+    const text = String(message || "");
+    const urls = text.match(/https?:\/\/\S+/g) || [];
+    const pick = (marker) => {
+      const found = urls.find((u) => u.includes(marker));
+      return found ? found.replace(/[),.;]+$/g, "") : "";
+    };
+    return {
+      liveUrl: String(item?.liveUrl || pick("/sos/live/") || "").trim(),
+      navigateUrl: String(item?.navigateUrl || pick("/sos/navigate/") || "").trim(),
+      mapsUrl: String(item?.mapsUrl || pick("google.com/maps") || "").trim(),
+    };
   };
 
   const formatWhen = (value) => {
@@ -70,22 +85,28 @@ export default function Notifications() {
 
   useEffect(() => {
     let active = true;
-    setLoading(true);
-    api
-      .get("/api/notifications")
-      .then((res) => {
-        if (!active) return;
-        const list = Array.isArray(res.data) ? res.data : [];
-        setItems(list);
-      })
-      .catch(() => {
-        if (active) setItems([]);
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
+    const load = (showLoader = false) => {
+      if (showLoader) setLoading(true);
+      api
+        .get("/api/notifications")
+        .then((res) => {
+          if (!active) return;
+          const list = Array.isArray(res.data) ? res.data : [];
+          setItems(list);
+        })
+        .catch(() => {
+          if (active) setItems([]);
+        })
+        .finally(() => {
+          if (active && showLoader) setLoading(false);
+        });
+    };
+
+    load(true);
+    const timer = setInterval(() => load(false), 7000);
     return () => {
       active = false;
+      clearInterval(timer);
     };
   }, []);
 
@@ -142,6 +163,8 @@ export default function Notifications() {
           const following = !!followedById[n?.id];
           const followBusy = !!followBusyById[n?.id];
           const canFollow = kind === "follow" && !!actorIdentifier;
+          const emergency = extractEmergencyLinks(n, content);
+          const emergencyNav = emergency.navigateUrl || emergency.mapsUrl;
 
           return (
             <article key={n.id} className={`notify-card ${n.read ? "is-read" : "is-unread"}`}>
@@ -180,6 +203,20 @@ export default function Notifications() {
                   )}
                 </div>
                 <p className="notify-message">{content}</p>
+                {kind === "emergency" && (
+                  <div className="notify-emergency-actions">
+                    {emergency.liveUrl && (
+                      <a className="notify-emergency-btn live" href={emergency.liveUrl}>
+                        <FiVideo /> Open Live
+                      </a>
+                    )}
+                    {emergencyNav && (
+                      <a className="notify-emergency-btn navigate" href={emergencyNav} target="_blank" rel="noreferrer">
+                        <FiMapPin /> Navigate
+                      </a>
+                    )}
+                  </div>
+                )}
                 <small className="notify-time">{formatWhen(n?.createdAt || n?.time || n?.at)}</small>
               </div>
             </article>

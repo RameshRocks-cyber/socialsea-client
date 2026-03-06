@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../api/axios";
-import { getApiBaseUrl } from "../api/baseUrl";
+import { getApiBaseUrl, toApiUrl } from "../api/baseUrl";
 import "./LiveRecordings.css";
 
 const formatDuration = (ms) => {
@@ -28,9 +28,14 @@ export default function LiveRecordings() {
 
   const resolveUrl = (url) => {
     if (!url) return "";
-    if (url.startsWith("http")) return url;
-    const base = mediaBaseUrl || api.defaults.baseURL || "";
-    return `${base}${url}`;
+    const value = String(url).trim();
+    if (!value) return "";
+    if (/^(https?:)?\/\//i.test(value) || value.startsWith("blob:") || value.startsWith("data:")) return value;
+    const base = String(mediaBaseUrl || api.defaults.baseURL || "").replace(/\/+$/, "");
+    if (base && /^https?:\/\//i.test(base)) {
+      return `${base}${value.startsWith("/") ? value : `/${value}`}`;
+    }
+    return toApiUrl(value);
   };
 
   useEffect(() => {
@@ -49,17 +54,19 @@ export default function LiveRecordings() {
           storedBase,
           getApiBaseUrl(),
           import.meta.env.VITE_API_URL,
+          "/api",
           "http://43.205.213.14:8080",
           "http://localhost:8080",
-          "/api",
         ]
-          .filter((v, i, arr) => v && arr.indexOf(v) === i)
-          .filter((base) => !(host === "localhost" || host === "127.0.0.1") || String(base) !== "/api");
+          .filter((v, i, arr) => v && arr.indexOf(v) === i);
 
         const endpoints = [
           "/api/profile/live-recordings",
           "/api/profile/me/live-recordings",
           "/api/emergency/my-recordings",
+          "/profile/live-recordings",
+          "/profile/me/live-recordings",
+          "/emergency/my-recordings",
         ];
 
         let res = null;
@@ -94,14 +101,35 @@ export default function LiveRecordings() {
 
         if (cancelled) return;
         const payload = res?.data;
-        const list = Array.isArray(payload)
+        const rawList = Array.isArray(payload)
           ? payload
           : Array.isArray(payload?.recordings)
           ? payload.recordings
+          : Array.isArray(payload?.items)
+          ? payload.items
+          : Array.isArray(payload?.data)
+          ? payload.data
+          : Array.isArray(payload?.content)
+          ? payload.content
           : [];
+        const list = rawList
+          .map((item) => ({
+            id: item?.alertId ?? item?.id ?? item?.recordingId ?? null,
+            mediaUrl:
+              item?.mediaUrl ||
+              item?.videoUrl ||
+              item?.recordingUrl ||
+              item?.fileUrl ||
+              item?.url ||
+              "",
+            startedAt: item?.startedAt || item?.createdAt || item?.createdOn || item?.timestamp || null,
+            endedAt: item?.endedAt || item?.stoppedAt || null,
+            durationMs: item?.durationMs ?? item?.duration ?? 0,
+          }))
+          .filter((item) => item.id != null && String(item.mediaUrl || "").trim());
         setMediaBaseUrl(res?.config?.baseURL || api.defaults.baseURL || "");
         setItems(list);
-        setActiveId(list[0]?.alertId || null);
+        setActiveId(list[0]?.id || null);
       } catch (err) {
         if (cancelled) return;
         const status = err?.response?.status;
@@ -118,7 +146,7 @@ export default function LiveRecordings() {
   }, []);
 
   const active = useMemo(() => {
-    return items.find((x) => String(x.alertId) === String(activeId)) || items[0] || null;
+    return items.find((x) => String(x.id) === String(activeId)) || items[0] || null;
   }, [items, activeId]);
 
   return (
@@ -143,7 +171,7 @@ export default function LiveRecordings() {
             {active && (
               <>
                 <video
-                  key={active.alertId}
+                  key={active.id}
                   src={resolveUrl(active.mediaUrl)}
                   controls
                   autoPlay
@@ -160,17 +188,17 @@ export default function LiveRecordings() {
 
           <aside className="live-recordings-list">
             {items.map((item) => {
-              const isActive = String(item.alertId) === String(active?.alertId);
+              const isActive = String(item.id) === String(active?.id);
               return (
                 <button
-                  key={item.alertId}
+                  key={item.id}
                   type="button"
                   className={`live-recording-item ${isActive ? "is-active" : ""}`}
-                  onClick={() => setActiveId(item.alertId)}
+                  onClick={() => setActiveId(item.id)}
                 >
                   <video src={resolveUrl(item.mediaUrl)} muted playsInline preload="metadata" />
                   <div>
-                    <p>Alert #{item.alertId}</p>
+                    <p>Alert #{item.id}</p>
                     <small>{formatDateTime(item.startedAt)}</small>
                   </div>
                 </button>

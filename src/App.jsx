@@ -25,6 +25,7 @@ import ProfileSetup from "./pages/ProfileSetup";
 import Settings from "./pages/Settings";
 import SettingsSounds from "./pages/SettingsSounds";
 import SOSPage from "./pages/SOSPage";
+import SOSNavigate from "./pages/SOSNavigate";
 import AdminLayout from "./AdminLayout";
 import Saved from "./pages/Saved";
 import FollowRequests from "./pages/FollowRequests";
@@ -32,6 +33,7 @@ import LongVideos from "./pages/LongVideos";
 import FollowConnections from "./pages/FollowConnections";
 import LiveRecordings from "./pages/LiveRecordings";
 import { getUserRole, isAuthenticated } from "./auth";
+import api from "./api/axios";
 import PageErrorBoundary from "./components/PageErrorBoundary";
 import "./App.css";
 
@@ -42,11 +44,12 @@ function PublicOnlyRoute({ children }) {
 
 function AppRoutes() {
   const location = useLocation();
+  const authed = isAuthenticated();
   const isAuthScreen =
     location.pathname === "/login" ||
     location.pathname === "/register" ||
     location.pathname === "/forgot-password";
-  const showUserNavbar = isAuthenticated() && !location.pathname.startsWith("/admin") && !isAuthScreen;
+  const showUserNavbar = authed && !location.pathname.startsWith("/admin") && !isAuthScreen;
   const isReelsRoute = location.pathname === "/reels";
   const isChatRoute = location.pathname === "/chat" || location.pathname.startsWith("/chat/");
   const isChatConversationRoute = location.pathname.startsWith("/chat/");
@@ -68,13 +71,52 @@ function AppRoutes() {
     return () => document.removeEventListener("play", handleVideoPlay, true);
   }, []);
 
+  useEffect(() => {
+    if (!authed || isAuthScreen || !navigator.geolocation) return undefined;
+    let active = true;
+    let watchId = null;
+    let lastSentAt = 0;
+    const minSendGapMs = 60000;
+
+    const sendPresence = (latitude, longitude) => {
+      if (!active) return;
+      if (typeof latitude !== "number" || typeof longitude !== "number") return;
+      const now = Date.now();
+      if (now - lastSentAt < minSendGapMs) return;
+      lastSentAt = now;
+      api.post("/api/emergency/presence", { latitude, longitude }).catch(() => {});
+    };
+
+    const onPos = (pos) => {
+      sendPresence(pos?.coords?.latitude, pos?.coords?.longitude);
+    };
+
+    navigator.geolocation.getCurrentPosition(onPos, () => {}, {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 30000
+    });
+    watchId = navigator.geolocation.watchPosition(onPos, () => {}, {
+      enableHighAccuracy: true,
+      timeout: 12000,
+      maximumAge: 60000
+    });
+
+    return () => {
+      active = false;
+      if (watchId != null && navigator.geolocation) {
+        navigator.geolocation.clearWatch(watchId);
+      }
+    };
+  }, [authed, isAuthScreen]);
+
   return (
     <>
       {showUserNavbar && <Navbar />}
       <main
         className={`app-main ${showUserNavbar ? "with-user-nav" : ""} ${isChatRoute ? "chat-main-route" : ""} ${
           isChatConversationRoute ? "chat-conversation-route" : ""
-        } ${
+        } ${isReelsRoute ? "reels-main-route" : ""} ${
           showUserNavbar ? "bg-gradient-to-br from-blue-950 via-slate-900 to-blue-900 text-white" : ""
         }`}
       >
@@ -119,6 +161,7 @@ function AppRoutes() {
               <Route path="/settings/sounds" element={<ProtectedRoute><SettingsSounds /></ProtectedRoute>} />
               <Route path="/sos" element={<ProtectedRoute><SOSPage /></ProtectedRoute>} />
               <Route path="/sos/live/:alertId" element={<ProtectedRoute><SOSPage /></ProtectedRoute>} />
+              <Route path="/sos/navigate/:alertId" element={<ProtectedRoute><SOSNavigate /></ProtectedRoute>} />
               <Route path="/saved" element={<ProtectedRoute><Saved /></ProtectedRoute>} />
               <Route path="/follow-requests" element={<ProtectedRoute><FollowRequests /></ProtectedRoute>} />
               <Route path="/profile-setup" element={<ProtectedRoute><ProfileSetup /></ProtectedRoute>} />
@@ -136,7 +179,7 @@ function AppRoutes() {
               </Route>
 
               <Route path="/unauthorized" element={<Unauthorized />} />
-              <Route path="*" element={<Navigate to={isAuthenticated() ? "/feed" : "/login"} replace />} />
+              <Route path="*" element={<Navigate to={authed ? "/feed" : "/login"} replace />} />
             </Routes>
           </PageErrorBoundary>
         </div>

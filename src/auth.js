@@ -17,10 +17,14 @@ const parseJwt = (token) => {
 const isTokenUsable = (token) => {
   if (!token) return false;
   const payload = parseJwt(token);
-  if (!payload) return false;
+  // Some environments may return opaque/non-JWT access tokens.
+  // Treat them as usable and rely on backend 401 to invalidate.
+  if (!payload) return true;
   if (!payload.exp) return true;
   const nowSec = Math.floor(Date.now() / 1000);
-  return payload.exp > nowSec;
+  const exp = Number(payload.exp);
+  if (!Number.isFinite(exp)) return true;
+  return exp > nowSec;
 };
 
 export const isAuthenticated = () => {

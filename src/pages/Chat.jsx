@@ -27,9 +27,17 @@ const CALL_SIGNAL_LOCAL_KEY = "socialsea_call_signal_local_v1";
 const CALL_ACCEPT_TARGET_KEY = "socialsea_call_accept_target_v1";
 const CALL_RING_MS = 30000;
 const CALL_POLL_MS = 1200;
-const RTC_CONFIG = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
+const RTC_CONFIG = {
+  iceServers: [
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:stun1.l.google.com:19302" },
+    { urls: "stun:stun2.l.google.com:19302" }
+  ],
+  iceCandidatePoolSize: 10
+};
 const CHAT_FAVORITES_KEY = "socialsea_chat_favorites_v1";
 const CHAT_CUSTOM_STICKERS_KEY = "socialsea_chat_custom_stickers_v1";
+const CHAT_TRANSLATOR_KEY = "socialsea_chat_translator_v1";
 const DELETE_FOR_EVERYONE_TOKEN = "__SS_DELETE_EVERYONE__:";
 const EMOJI_GROUPS = [
   { name: "Smileys", items: ["😀", "😁", "😂", "🤣", "😊", "😍", "😘", "😎", "🤩", "🥳", "😭", "😡"] },
@@ -167,11 +175,32 @@ export default function Chat() {
     }
   });
   const [isRecordingAudio, setIsRecordingAudio] = useState(false);
+  const [isSpeechTyping, setIsSpeechTyping] = useState(false);
   const [speechLang, setSpeechLang] = useState("en-IN");
+  const [showHeaderMenu, setShowHeaderMenu] = useState(false);
+  const [translatorEnabled, setTranslatorEnabled] = useState(() => {
+    try {
+      const raw = localStorage.getItem(CHAT_TRANSLATOR_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      return Boolean(parsed?.enabled);
+    } catch {
+      return false;
+    }
+  });
+  const [translatorLang, setTranslatorLang] = useState(() => {
+    try {
+      const raw = localStorage.getItem(CHAT_TRANSLATOR_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      return String(parsed?.lang || "en");
+    } catch {
+      return "en";
+    }
+  });
+  const [translatedIncomingById, setTranslatedIncomingById] = useState({});
+  const [translatorError, setTranslatorError] = useState("");
   const [nowTick, setNowTick] = useState(Date.now());
   const [soundPrefs, setSoundPrefs] = useState(readSoundPrefs);
   const [hasRemoteVideo, setHasRemoteVideo] = useState(false);
-  const [beautyMode, setBeautyMode] = useState(true);
   const [callPhaseNote, setCallPhaseNote] = useState("");
 
   const stompRef = useRef(null);
@@ -187,6 +216,7 @@ export default function Chat() {
   const audioCtxRef = useRef(null);
   const ringtoneTimerRef = useRef(null);
   const outgoingRingTimerRef = useRef(null);
+  const customRingtoneAudioRef = useRef(null);
   const disconnectGuardTimerRef = useRef(null);
   const historyRef = useRef({});
   const seenSignalsRef = useRef(new Set());
@@ -198,10 +228,13 @@ export default function Chat() {
   const attachInputRef = useRef(null);
   const cameraInputRef = useRef(null);
   const stickerInputRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const recordingStreamRef = useRef(null);
+  const recordingChunksRef = useRef([]);
   const speechRecognitionRef = useRef(null);
-  const speechBaseTextRef = useRef("");
-  const speechFinalTextRef = useRef("");
-  const suppressSpeechWriteRef = useRef(false);
+  const headerMenuWrapRef = useRef(null);
+  const headerMenuRef = useRef(null);
+  const translationCacheRef = useRef({});
   const threadRef = useRef(null);
   const shouldStickToBottomRef = useRef(true);
   const lastThreadItemCountRef = useRef(0);
@@ -212,11 +245,19 @@ export default function Chat() {
     { value: "hi-IN", label: "हिन्दी" },
     { value: "ta-IN", label: "தமிழ்" },
     { value: "kn-IN", label: "ಕನ್ನಡ" },
-    { value: "ml-IN", label: "മലയാളം" },
-    { value: "ru-RU", label: "Русский" },
-    { value: "ur-PK", label: "اردو" },
-    { value: "ja-JP", label: "日本語" },
-    { value: "fr-FR", label: "Français" }
+    { value: "ml-IN", label: "മലയാളം" }
+  ];
+  const TRANSLATE_LANG_OPTIONS = [
+    { value: "en", label: "English" },
+    { value: "te", label: "Telugu" },
+    { value: "hi", label: "Hindi" },
+    { value: "ta", label: "Tamil" },
+    { value: "kn", label: "Kannada" },
+    { value: "ml", label: "Malayalam" },
+    { value: "ur", label: "Urdu" },
+    { value: "ar", label: "Arabic" },
+    { value: "es", label: "Spanish" },
+    { value: "fr", label: "French" }
   ];
 
   useEffect(() => {
@@ -226,6 +267,17 @@ export default function Chat() {
   useEffect(() => {
     safeSetItem(CHAT_CUSTOM_STICKERS_KEY, JSON.stringify(customStickers));
   }, [customStickers]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        CHAT_TRANSLATOR_KEY,
+        JSON.stringify({ enabled: translatorEnabled, lang: translatorLang })
+      );
+    } catch {
+      // ignore
+    }
+  }, [translatorEnabled, translatorLang]);
 
   const ensureAudioContext = () => {
     if (audioCtxRef.current) return audioCtxRef.current;
@@ -331,6 +383,14 @@ export default function Chat() {
       clearInterval(ringtoneTimerRef.current);
       ringtoneTimerRef.current = null;
     }
+    try {
+      if (customRingtoneAudioRef.current) {
+        customRingtoneAudioRef.current.pause();
+        customRingtoneAudioRef.current.currentTime = 0;
+      }
+    } catch {
+      // ignore audio stop errors
+    }
   };
 
   const stopOutgoingRing = () => {
@@ -338,12 +398,40 @@ export default function Chat() {
       clearInterval(outgoingRingTimerRef.current);
       outgoingRingTimerRef.current = null;
     }
+    try {
+      if (customRingtoneAudioRef.current) {
+        customRingtoneAudioRef.current.pause();
+        customRingtoneAudioRef.current.currentTime = 0;
+      }
+    } catch {
+      // ignore audio stop errors
+    }
+  };
+
+  const playCustomRingtoneLoop = () => {
+    if (soundPrefs.ringtoneSound !== "custom") return false;
+    const src = String(soundPrefs.customRingtoneDataUrl || "").trim();
+    if (!src) return false;
+    try {
+      if (!customRingtoneAudioRef.current) {
+        customRingtoneAudioRef.current = new Audio(src);
+      }
+      const audio = customRingtoneAudioRef.current;
+      if (audio.src !== src) audio.src = src;
+      audio.loop = true;
+      audio.volume = 0.95;
+      void audio.play();
+      return true;
+    } catch {
+      return false;
+    }
   };
 
   const startRingtone = (force = false) => {
     if (ringtoneMuted && !force) return;
     if (soundPrefs.ringtoneSound === "off") return;
     stopRingtone();
+    if (playCustomRingtoneLoop()) return;
     const ring = () => {
       if (soundPrefs.ringtoneSound === "bell") {
         void playTone(700, 200, 0.2, "sine");
@@ -382,6 +470,7 @@ export default function Chat() {
   const startOutgoingRing = () => {
     if (soundPrefs.ringtoneSound === "off") return;
     stopOutgoingRing();
+    if (playCustomRingtoneLoop()) return;
     const ring = () => {
       if (soundPrefs.ringtoneSound === "bell") {
         void playTone(680, 190, 0.18, "sine");
@@ -783,8 +872,20 @@ export default function Chat() {
 
   const ensureLocalStream = async (mode) => {
     const stream = await navigator.mediaDevices.getUserMedia({
-      audio: true,
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        channelCount: 2,
+        sampleRate: 48000
+      },
       video: mode === "video"
+        ? {
+            width: { ideal: 1280, max: 1920 },
+            height: { ideal: 720, max: 1080 },
+            frameRate: { ideal: 30, max: 30 }
+          }
+        : false
     });
     localStreamRef.current = stream;
     if (localVideoRef.current) {
@@ -898,6 +999,40 @@ export default function Chat() {
     };
 
     return pc;
+  };
+
+  const applySdpQualityHints = (sdp, mode) => {
+    let next = String(sdp || "");
+    next = next.replace(
+      /a=fmtp:111 ([^\r\n]*)/g,
+      (all, cfg) => `a=fmtp:111 ${cfg};stereo=1;sprop-stereo=1;maxaveragebitrate=128000;cbr=1;usedtx=0`
+    );
+    if (mode === "video" && /m=video/.test(next) && !/b=AS:1800/.test(next)) {
+      next = next.replace(/m=video[^\r\n]*\r?\n/, (line) => `${line}b=AS:1800\r\n`);
+    }
+    return next;
+  };
+
+  const tuneSendersForQuality = (pc, mode) => {
+    try {
+      pc.getSenders().forEach((sender) => {
+        if (!sender?.track || typeof sender.getParameters !== "function" || typeof sender.setParameters !== "function") return;
+        const params = sender.getParameters() || {};
+        params.encodings = Array.isArray(params.encodings) && params.encodings.length ? params.encodings : [{}];
+        const enc = params.encodings[0];
+        if (sender.track.kind === "audio") {
+          enc.maxBitrate = 128000;
+          enc.dtx = false;
+        }
+        if (mode === "video" && sender.track.kind === "video") {
+          enc.maxBitrate = 1800000;
+          enc.maxFramerate = 30;
+        }
+        void sender.setParameters(params).catch(() => {});
+      });
+    } catch {
+      // ignore unsupported sender parameter tuning
+    }
   };
 
   const ensureSignalContact = (signal) => {
@@ -1040,9 +1175,24 @@ export default function Chat() {
       receiverId: Number(myUserId) || null,
       text,
       audioUrl: payload?.audioUrl || "",
+      mediaUrl: payload?.mediaUrl || "",
+      mediaType: payload?.mediaType || "",
+      fileName: payload?.fileName || "",
       createdAt: payload?.createdAt || new Date().toISOString(),
       mine: false
     }, senderId);
+    const preview =
+      nextMessage.audioUrl
+        ? "🎤 Voice message"
+        : nextMessage.mediaType === "image"
+          ? "📷 Photo"
+          : nextMessage.mediaType === "video"
+            ? "🎬 Video"
+            : nextMessage.mediaType === "audio"
+              ? "🎤 Voice message"
+              : nextMessage.mediaUrl
+                ? `📎 ${nextMessage.fileName || "File"}`
+                : text;
 
     setMessagesByContact((prev) => {
       const existing = Array.isArray(prev[senderId]) ? prev[senderId] : [];
@@ -1068,13 +1218,12 @@ export default function Chat() {
           }
         ]);
       }
-      const preview = nextMessage.audioUrl ? "🎤 Voice message" : text;
       return next.map((c) => (c.id === senderId ? { ...c, lastMessage: preview || c.lastMessage } : c));
     });
 
     playMessageAlert();
     const senderName = normalizeDisplayName(payload?.senderName || payload?.senderEmail || "New message");
-    maybeShowBrowserNotification(senderName, text || "You have a new message");
+    maybeShowBrowserNotification(senderName, preview || "You have a new message");
     shouldStickToBottomRef.current = true;
     setTimeout(() => scrollThreadToBottom("smooth"), 50);
   };
@@ -1104,8 +1253,10 @@ export default function Chat() {
       const stream = await ensureLocalStream(mode);
       const pc = createPeerConnection(targetId, mode);
       stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+      tuneSendersForQuality(pc, mode);
 
       const offer = await pc.createOffer();
+      offer.sdp = applySdpQualityHints(offer.sdp, mode);
       await pc.setLocalDescription(offer);
 
       setCallState({
@@ -1158,9 +1309,11 @@ export default function Chat() {
       const stream = await ensureLocalStream(call.mode);
       const pc = createPeerConnection(call.fromUserId, call.mode);
       stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+      tuneSendersForQuality(pc, call.mode);
 
       await pc.setRemoteDescription({ type: "offer", sdp: call.sdp });
       const answer = await pc.createAnswer();
+      answer.sdp = applySdpQualityHints(answer.sdp, call.mode);
       await pc.setLocalDescription(answer);
 
       sendSignal(call.fromUserId, {
@@ -1211,7 +1364,6 @@ export default function Chat() {
   };
 
   useEffect(() => {
-    if (!incomingCall?.fromUserId) return;
     let target = null;
     try {
       const raw = sessionStorage.getItem(CALL_ACCEPT_TARGET_KEY);
@@ -1220,6 +1372,16 @@ export default function Chat() {
       target = null;
     }
     if (!target?.fromUserId) return;
+    if ((!incomingCall || !incomingCall?.sdp) && target?.sdp) {
+      setIncomingCall({
+        fromUserId: String(target.fromUserId),
+        fromName: String(target.fromName || "User"),
+        mode: target.mode === "video" ? "video" : "audio",
+        sdp: String(target.sdp || "")
+      });
+      return;
+    }
+    if (!incomingCall?.fromUserId) return;
     const isSameCaller = String(target.fromUserId) === String(incomingCall.fromUserId);
     const isRecent = Date.now() - Number(target.at || 0) < 45000;
     if (!isSameCaller || !isRecent) return;
@@ -1363,6 +1525,7 @@ export default function Chat() {
       cancelled = true;
       stopRingtone();
       stopOutgoingRing();
+      stopSpeechTyping();
       stopAudioRecording();
     };
   }, []);
@@ -1737,20 +1900,14 @@ export default function Chat() {
   const sendMessage = async () => {
     const text = inputText.trim();
     if (!text || !activeContactId) return;
-    const fromSpeechInput =
-      Boolean(speechRecognitionRef.current) || Boolean(String(speechFinalTextRef.current || "").trim());
+    if (isSpeechTyping) stopSpeechTyping();
     if (activeContactId === myUserId) {
       setError("Cannot send message to your own account.");
       return;
     }
 
-    // Clear composer immediately on send and stop live speech updates
-    suppressSpeechWriteRef.current = true;
     setInputText("");
     setShowEmojiTray(false);
-    stopAudioRecording();
-    speechBaseTextRef.current = "";
-    speechFinalTextRef.current = "";
     setTimeout(() => composerInputRef.current?.focus(), 0);
 
     try {
@@ -1760,7 +1917,7 @@ export default function Chat() {
           senderId: Number(myUserId) || null,
           receiverId: Number(activeContactId) || null,
           text,
-          speechTyped: fromSpeechInput,
+          speechTyped: false,
           createdAt: new Date().toISOString(),
           mine: true
         }, activeContactId);
@@ -1782,7 +1939,7 @@ export default function Chat() {
         {
           ...(res?.data || {}),
           text,
-          speechTyped: fromSpeechInput,
+          speechTyped: false,
           mine: true,
           senderId: myUserId,
           receiverId: activeContactId,
@@ -1811,11 +1968,6 @@ export default function Chat() {
       } else {
         setError("Message failed to send");
       }
-    } finally {
-      // let any queued speech events finish without rewriting input
-      setTimeout(() => {
-        suppressSpeechWriteRef.current = false;
-      }, 300);
     }
   };
 
@@ -1911,16 +2063,34 @@ export default function Chat() {
       .filter(Boolean);
   }, [favoritePicks, customStickers]);
 
-  const sendMediaFile = async (file) => {
+  const sendMediaFile = async (file, options = {}) => {
     if (!file || !activeContactId) return;
     const type = String(file.type || "").toLowerCase();
-    const kind = type.startsWith("image/") ? "image" : type.startsWith("video/") ? "video" : "file";
+    const forcedKind = String(options?.forcedKind || "").toLowerCase();
+    const kind = forcedKind || (
+      type.startsWith("image/")
+        ? "image"
+        : type.startsWith("video/")
+          ? "video"
+          : type.startsWith("audio/")
+            ? "audio"
+            : "file"
+    );
+    const previewText =
+      String(options?.previewText || "").trim() ||
+      (kind === "image"
+        ? "[Image]"
+        : kind === "video"
+          ? "[Video]"
+          : kind === "audio"
+            ? "🎤 Voice message"
+            : "[File]");
     const localTempId = `local_media_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const localPreview = normalizeMessage({
       id: localTempId,
       senderId: Number(myUserId) || null,
       receiverId: Number(activeContactId) || null,
-      text: kind === "image" ? "[Image]" : kind === "video" ? "[Video]" : "[File]",
+      text: previewText,
       mediaUrl: URL.createObjectURL(file),
       mediaType: kind,
       fileName: file.name || "",
@@ -1949,7 +2119,13 @@ export default function Chat() {
         ...prev,
         [activeContactId]: (prev[activeContactId] || []).map((m) => String(m?.id) === localTempId ? sent : m)
       }));
-      setContacts((prev) => prev.map((c) => (c.id === activeContactId ? { ...c, lastMessage: sent.text || "[File]" } : c)));
+      setContacts((prev) =>
+        prev.map((c) => (
+          c.id === activeContactId
+            ? { ...c, lastMessage: sent.text || (kind === "audio" ? "🎤 Voice message" : "[File]") }
+            : c
+        ))
+      );
       shouldStickToBottomRef.current = true;
       setTimeout(() => scrollThreadToBottom("smooth"), 50);
     } catch {
@@ -1967,88 +2143,202 @@ export default function Chat() {
   const openAttachPicker = () => attachInputRef.current?.click();
   const openCameraPicker = () => cameraInputRef.current?.click();
 
-  const stopAudioRecording = () => {
+  const stopSpeechTyping = () => {
     const recognition = speechRecognitionRef.current;
-    if (recognition) {
-      try {
-        recognition.stop();
-      } catch {
-        // ignore stop errors
-      }
+    if (!recognition) {
+      setIsSpeechTyping(false);
+      return;
     }
+    try {
+      recognition.stop();
+    } catch {
+      // ignore
+    }
+    speechRecognitionRef.current = null;
+    setIsSpeechTyping(false);
   };
 
-  const toggleAudioRecording = () => {
+  const toggleSpeechTyping = () => {
+    if (isSpeechTyping) {
+      stopSpeechTyping();
+      return;
+    }
+
     if (isRecordingAudio) {
-      stopAudioRecording();
+      setError("Stop voice-note recording first.");
       return;
     }
 
     const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognitionCtor) {
-      setError("Speech typing is not supported in this browser. Use Chrome/Edge.");
+      setError("Speech typing is not supported in this browser.");
       return;
     }
 
     try {
       const recognition = new SpeechRecognitionCtor();
-      speechRecognitionRef.current = recognition;
-      speechBaseTextRef.current = String(inputText || "").trim();
-      speechFinalTextRef.current = "";
-
       recognition.lang = speechLang || navigator.language || "en-IN";
       recognition.interimResults = true;
       recognition.continuous = true;
       recognition.maxAlternatives = 1;
 
       recognition.onresult = (event) => {
-        if (suppressSpeechWriteRef.current) return;
-        let interim = "";
-        for (let i = event.resultIndex; i < event.results.length; i += 1) {
+        const chunks = [];
+        for (let i = 0; i < event.results.length; i += 1) {
           const part = String(event.results[i]?.[0]?.transcript || "").trim();
-          if (!part) continue;
-          if (event.results[i].isFinal) {
-            speechFinalTextRef.current = `${speechFinalTextRef.current} ${part}`.trim();
-          } else {
-            interim = `${interim} ${part}`.trim();
-          }
+          if (part) chunks.push(part);
         }
-        const merged = [speechBaseTextRef.current, speechFinalTextRef.current, interim]
-          .filter(Boolean)
-          .join(" ")
-          .replace(/\s+/g, " ")
-          .trim();
-        setInputText(merged);
+        setInputText(chunks.join(" ").replace(/\s+/g, " ").trim());
       };
 
       recognition.onerror = (event) => {
         const code = String(event?.error || "");
-        if (code !== "aborted") {
-          if (code === "not-allowed" || code === "service-not-allowed") {
-            setError("Microphone permission is blocked. Allow mic access for speech typing.");
-          } else if (code === "no-speech") {
-            setError("No speech detected. Try speaking again.");
-          } else {
-            setError("Speech typing failed. Please try again.");
-          }
+        if (code === "not-allowed" || code === "service-not-allowed") {
+          setError("Microphone permission blocked. Allow microphone access.");
+        } else if (code && code !== "aborted") {
+          setError("Speech typing failed. Try again.");
         }
       };
 
       recognition.onend = () => {
         speechRecognitionRef.current = null;
-        speechBaseTextRef.current = "";
-        speechFinalTextRef.current = "";
+        setIsSpeechTyping(false);
+      };
+
+      speechRecognitionRef.current = recognition;
+      recognition.start();
+      setError("");
+      setIsSpeechTyping(true);
+      setTimeout(() => composerInputRef.current?.focus(), 0);
+    } catch {
+      speechRecognitionRef.current = null;
+      setIsSpeechTyping(false);
+      setError("Unable to start speech typing.");
+    }
+  };
+
+  const releaseRecordingStream = () => {
+    const stream = recordingStreamRef.current;
+    if (stream) {
+      stream.getTracks().forEach((track) => {
+        try {
+          track.stop();
+        } catch {
+          // ignore
+        }
+      });
+    }
+    recordingStreamRef.current = null;
+  };
+
+  const stopAudioRecording = () => {
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== "inactive") {
+      try {
+        recorder.stop();
+      } catch {
+        // ignore stop errors
+      }
+      return;
+    }
+    releaseRecordingStream();
+    recordingChunksRef.current = [];
+    mediaRecorderRef.current = null;
+    setIsRecordingAudio(false);
+  };
+
+  const toggleAudioRecording = async () => {
+    if (isRecordingAudio) {
+      stopAudioRecording();
+      return;
+    }
+
+    if (isSpeechTyping) {
+      setError("Stop speech typing first.");
+      return;
+    }
+
+    if (!activeContactId) {
+      setError("Open a chat first to send a voice note.");
+      return;
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia || typeof window.MediaRecorder === "undefined") {
+      setError("Voice notes are not supported in this browser.");
+      return;
+    }
+
+    const mimeCandidates = [
+      "audio/webm;codecs=opus",
+      "audio/webm",
+      "audio/ogg;codecs=opus",
+      "audio/mp4"
+    ];
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          sampleRate: 48000
+        }
+      });
+      recordingStreamRef.current = stream;
+
+      const preferredMime = mimeCandidates.find((candidate) => {
+        try {
+          return typeof MediaRecorder.isTypeSupported === "function" && MediaRecorder.isTypeSupported(candidate);
+        } catch {
+          return false;
+        }
+      });
+
+      const recorder = preferredMime
+        ? new MediaRecorder(stream, { mimeType: preferredMime })
+        : new MediaRecorder(stream);
+
+      mediaRecorderRef.current = recorder;
+      recordingChunksRef.current = [];
+
+      recorder.ondataavailable = (event) => {
+        if (event?.data?.size) recordingChunksRef.current.push(event.data);
+      };
+
+      recorder.onerror = () => {
+        setError("Voice recording failed. Please try again.");
+        releaseRecordingStream();
+        recordingChunksRef.current = [];
+        mediaRecorderRef.current = null;
         setIsRecordingAudio(false);
+      };
+
+      recorder.onstop = async () => {
+        const chunks = [...recordingChunksRef.current];
+        const mimeType = recorder.mimeType || preferredMime || "audio/webm";
+        recordingChunksRef.current = [];
+        mediaRecorderRef.current = null;
+        releaseRecordingStream();
+        setIsRecordingAudio(false);
+
+        const blob = new Blob(chunks, { type: mimeType });
+        if (!blob.size) return;
+
+        const ext = mimeType.includes("mp4") ? "m4a" : mimeType.includes("ogg") ? "ogg" : "webm";
+        const file = new File([blob], `voice-note-${Date.now()}.${ext}`, { type: mimeType });
+        await sendMediaFile(file, { forcedKind: "audio", previewText: "🎤 Voice message" });
         setTimeout(() => composerInputRef.current?.focus(), 0);
       };
 
-      recognition.start();
+      recorder.start(200);
       setError("");
       setIsRecordingAudio(true);
     } catch {
-      speechRecognitionRef.current = null;
+      releaseRecordingStream();
+      recordingChunksRef.current = [];
+      mediaRecorderRef.current = null;
       setIsRecordingAudio(false);
-      setError("Unable to start speech typing. Check microphone access.");
+      setError("Unable to record voice note. Allow microphone access and try again.");
     }
   };
 
@@ -2132,6 +2422,59 @@ export default function Chat() {
     } catch {
       return "";
     }
+  };
+
+  const canTranslateMessage = (msg) => {
+    if (!msg || msg.mine) return false;
+    if (msg.audioUrl || msg.mediaUrl) return false;
+    const text = String(msg.text || "").trim();
+    if (!text) return false;
+    if (/^\[Attachment:\s*.+\]$/i.test(text)) return false;
+    if (/^This message was deleted$/i.test(text)) return false;
+    return true;
+  };
+
+  const translateText = async (text, targetLang) => {
+    const raw = String(text || "").trim();
+    const lang = String(targetLang || "").trim().toLowerCase();
+    if (!raw || !lang) return raw;
+    const cacheKey = `${lang}|${raw}`;
+    if (translationCacheRef.current[cacheKey]) return translationCacheRef.current[cacheKey];
+    const providers = [
+      async () => {
+        const url =
+          `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${encodeURIComponent(lang)}&dt=t&q=${encodeURIComponent(raw)}`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`google translate failed: ${res.status}`);
+        const data = await res.json();
+        const translated = Array.isArray(data?.[0])
+          ? data[0].map((chunk) => String(chunk?.[0] || "")).join("").trim()
+          : "";
+        return translated || "";
+      },
+      async () => {
+        const url =
+          `https://api.mymemory.translated.net/get?q=${encodeURIComponent(raw)}&langpair=auto|${encodeURIComponent(lang)}`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`mymemory failed: ${res.status}`);
+        const data = await res.json();
+        const translated = String(data?.responseData?.translatedText || "").trim();
+        return translated || "";
+      }
+    ];
+
+    for (const provider of providers) {
+      try {
+        const translated = await provider();
+        if (translated) {
+          translationCacheRef.current[cacheKey] = translated;
+          return translated;
+        }
+      } catch {
+        // try next provider
+      }
+    }
+    throw new Error("all translation providers failed");
   };
 
   const getMessageTickState = (message) => {
@@ -2241,6 +2584,64 @@ export default function Chat() {
     });
     return out;
   }, [threadItems]);
+
+  useEffect(() => {
+    setShowHeaderMenu(false);
+  }, [activeContactId]);
+
+  useEffect(() => {
+    const onDocClick = (event) => {
+      const wrap = headerMenuWrapRef.current;
+      if (!wrap) return;
+      if (wrap.contains(event.target)) return;
+      setShowHeaderMenu(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, []);
+
+  useEffect(() => {
+    setTranslatedIncomingById({});
+    setTranslatorError("");
+  }, [activeContactId, translatorEnabled, translatorLang]);
+
+  useEffect(() => {
+    if (!translatorEnabled) return;
+    if (!activeContactId) return;
+    const messages = Array.isArray(activeMessages) ? activeMessages : [];
+    const pending = messages.filter((m) => {
+      if (!canTranslateMessage(m)) return false;
+      const key = String(m.id || `${m.createdAt}_${m.text}`);
+      return !translatedIncomingById[key];
+    });
+    if (!pending.length) return;
+
+    let cancelled = false;
+    let failed = false;
+    const run = async () => {
+      for (const msg of pending) {
+        if (cancelled) break;
+        const sourceText = String(msg.text || "");
+        const msgKey = String(msg.id || `${msg.createdAt}_${sourceText}`);
+        try {
+          const translated = await translateText(sourceText, translatorLang);
+          if (cancelled) break;
+          setTranslatedIncomingById((prev) =>
+            prev[msgKey] ? prev : { ...prev, [msgKey]: translated }
+          );
+        } catch {
+          failed = true;
+        }
+      }
+      if (!cancelled) {
+        setTranslatorError(failed ? "Translation service unavailable. Showing original text." : "");
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeMessages, activeContactId, translatorEnabled, translatorLang, translatedIncomingById]);
 
   useEffect(() => {
     if (!isConversationRoute) return;
@@ -2520,7 +2921,7 @@ export default function Chat() {
               ref={remoteVideoRef}
               autoPlay
               playsInline
-              className={`wa-video-remote ${beautyMode ? "beauty-on" : ""}`}
+              className="wa-video-remote beauty-on"
               data-allow-simultaneous="true"
             />
             {!hasRemoteVideo && (
@@ -2534,7 +2935,7 @@ export default function Chat() {
               autoPlay
               playsInline
               muted
-              className={`wa-video-local ${beautyMode ? "beauty-on" : ""}`}
+              className="wa-video-local beauty-on"
               data-allow-simultaneous="true"
             />
             <div className="wa-video-top">
@@ -2549,14 +2950,6 @@ export default function Chat() {
               </button>
               <button type="button" className="call-control" onClick={toggleCamera} title="Camera on/off">
                 {isCameraOff ? <FiVideoOff /> : <FiVideo />}
-              </button>
-              <button
-                type="button"
-                className={`call-control ${beautyMode ? "is-active" : ""}`}
-                title="Beauty mode"
-                onClick={() => setBeautyMode((prev) => !prev)}
-              >
-                <FiSmile />
               </button>
               <button type="button" className="call-hangup" onClick={() => finishCall(true)}>
                 <FiPhoneOff />
@@ -2591,7 +2984,7 @@ export default function Chat() {
                 </button>
               </div>
 
-              <div className="chat-header-actions">
+              <div className="chat-header-actions" ref={headerMenuWrapRef}>
                 <button
                   type="button"
                   className="call-action"
@@ -2610,9 +3003,56 @@ export default function Chat() {
                 >
                   <FiVideo />
                 </button>
-                <button type="button" className="call-action" title="More options">
+                <button
+                  type="button"
+                  className="call-action"
+                  title="More options"
+                  onClick={() => setShowHeaderMenu((prev) => !prev)}
+                >
                   <FiMoreVertical />
                 </button>
+                {showHeaderMenu && (
+                  <div className="chat-header-menu" ref={headerMenuRef}>
+                    <div className="chat-translate-card">
+                      <label className="chat-header-menu-row chat-switch-row">
+                        <span className="chat-menu-label-group">
+                          <strong>Translator</strong>
+                          <small>Auto-translate incoming messages</small>
+                        </span>
+                        <span className="chat-switch">
+                          <input
+                            type="checkbox"
+                            checked={translatorEnabled}
+                            onChange={(e) => setTranslatorEnabled(e.target.checked)}
+                          />
+                          <span className="chat-switch-track" />
+                        </span>
+                      </label>
+                    </div>
+                    {translatorEnabled && (
+                      <>
+                        <label className="chat-header-menu-row chat-language-row">
+                          <span className="chat-menu-label-group">
+                            <strong>Language</strong>
+                            <small>Select target language</small>
+                          </span>
+                          <select
+                            className="chat-translate-select"
+                            value={translatorLang}
+                            onChange={(e) => setTranslatorLang(e.target.value)}
+                          >
+                            {TRANSLATE_LANG_OPTIONS.map((opt) => (
+                              <option key={opt.value} value={opt.value}>
+                                {opt.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        {translatorError && <p className="chat-translate-error">{translatorError}</p>}
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
             </header>
 
@@ -2696,6 +3136,15 @@ export default function Chat() {
                           />
                         ) : item.raw?.mediaType === "video" ? (
                           <video controls preload="metadata" className="chat-media-video" src={resolveMediaUrl(item.raw.mediaUrl)} />
+                        ) : item.raw?.mediaType === "audio" ? (
+                          <div className={`chat-voice-note ${item.mine ? "mine" : "their"}`}>
+                            {item.mine && (
+                              <span className="chat-voice-note-icon" aria-hidden="true">
+                                <FiVolume2 />
+                              </span>
+                            )}
+                            <audio controls preload="metadata" className="chat-audio" src={resolveMediaUrl(item.raw.mediaUrl)} />
+                          </div>
                         ) : (
                           <a className="chat-file-link" href={resolveMediaUrl(item.raw.mediaUrl)} target="_blank" rel="noreferrer">
                             📎 {item.raw?.fileName || "Download file"}
@@ -2712,12 +3161,25 @@ export default function Chat() {
                           </span>
                         </div>
                       ) : (
-                        <span>{item.text}</span>
+                        <>
+                          <span>{item.text}</span>
+                          {item.kind === "message" && canTranslateMessage(item.raw) && translatorEnabled && (() => {
+                            const msgKey = String(item.raw?.id || `${item.raw?.createdAt}_${item.raw?.text}`);
+                            const translated = String(translatedIncomingById[msgKey] || "").trim();
+                            if (!translated) return null;
+                            if (translated.toLowerCase() === String(item.text || "").trim().toLowerCase()) return null;
+                            return (
+                              <small className="chat-translated-text" title="Translated">
+                                {translated}
+                              </small>
+                            );
+                          })()}
+                        </>
                       )}
                     </div>
                     <small className="chat-bubble-time">
                       {formatMessageTime(item.createdAt)}
-                      {item.kind === "message" && item.mine && (item.raw?.audioUrl || item.raw?.speechTyped) && (
+                      {item.kind === "message" && item.mine && (item.raw?.audioUrl || item.raw?.mediaType === "audio") && (
                         <span className="chat-voice-status-icon" title="Voice note" aria-label="Voice note">
                           <FiVolume2 />
                         </span>
@@ -2936,14 +3398,24 @@ export default function Chat() {
                   Send
                 </button>
               ) : (
-                <button
-                  type="button"
-                  className={`mic-fab composer-send-btn ${isRecordingAudio ? "active" : ""}`}
-                  title={isRecordingAudio ? "Stop speech typing" : "Speak to type message"}
-                  onClick={toggleAudioRecording}
-                >
-                  {isRecordingAudio ? <FiMicOff /> : <FiMic />}
-                </button>
+                <div className="composer-voice-actions">
+                  <button
+                    type="button"
+                    className={`mic-fab composer-send-btn ${isSpeechTyping ? "active" : ""}`}
+                    title={isSpeechTyping ? "Stop speech typing" : "Mic: speak to type"}
+                    onClick={toggleSpeechTyping}
+                  >
+                    {isSpeechTyping ? <FiMicOff /> : <FiMic />}
+                  </button>
+                  <button
+                    type="button"
+                    className={`mic-fab composer-send-btn ${isRecordingAudio ? "active" : ""}`}
+                    title={isRecordingAudio ? "Stop and send voice note" : "Speaker: record voice note"}
+                    onClick={toggleAudioRecording}
+                  >
+                    {isRecordingAudio ? <FiMicOff /> : <FiVolume2 />}
+                  </button>
+                </div>
               )}
               <input
                 ref={attachInputRef}

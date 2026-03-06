@@ -13,6 +13,7 @@ import "./SettingsSounds.css";
 export default function SettingsSounds() {
   const navigate = useNavigate();
   const audioCtxRef = useRef(null);
+  const customPreviewAudioRef = useRef(null);
   const [prefs, setPrefs] = useState(readSoundPrefs);
 
   useEffect(() => {
@@ -92,6 +93,22 @@ export default function SettingsSounds() {
 
   const previewRingtone = (profile) => {
     if (profile === "off") return;
+    if (profile === "custom") {
+      const src = String(prefs.customRingtoneDataUrl || "").trim();
+      if (!src) return;
+      try {
+        if (!customPreviewAudioRef.current) {
+          customPreviewAudioRef.current = new Audio(src);
+        }
+        const audio = customPreviewAudioRef.current;
+        if (audio.src !== src) audio.src = src;
+        audio.currentTime = 0;
+        void audio.play();
+      } catch {
+        // ignore preview playback errors
+      }
+      return;
+    }
     if (profile === "bell") {
       void playTone(700, 200, 0.2, "sine", 0);
       void playTone(880, 200, 0.2, "sine", 210);
@@ -131,6 +148,40 @@ export default function SettingsSounds() {
   const onPickRingtone = (value) => {
     setPrefs((prev) => ({ ...prev, ringtoneSound: value }));
     previewRingtone(value);
+  };
+
+  const onCustomRingtonePicked = (event) => {
+    const file = event?.target?.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = String(reader.result || "");
+      setPrefs((prev) => ({
+        ...prev,
+        ringtoneSound: "custom",
+        customRingtoneDataUrl: dataUrl,
+        customRingtoneName: file.name || "Custom ringtone"
+      }));
+    };
+    reader.readAsDataURL(file);
+    event.target.value = "";
+  };
+
+  const clearCustomRingtone = () => {
+    try {
+      if (customPreviewAudioRef.current) {
+        customPreviewAudioRef.current.pause();
+        customPreviewAudioRef.current.currentTime = 0;
+      }
+    } catch {
+      // ignore
+    }
+    setPrefs((prev) => ({
+      ...prev,
+      ringtoneSound: prev.ringtoneSound === "custom" ? "classic" : prev.ringtoneSound,
+      customRingtoneDataUrl: "",
+      customRingtoneName: ""
+    }));
   };
 
   return (
@@ -187,6 +238,22 @@ export default function SettingsSounds() {
           <header className="settings-panel-head">
             <h3>Ringtone</h3>
           </header>
+          <div className="settings-custom-ringtone-row">
+            <label className="settings-custom-ringtone-upload">
+              Upload My Song
+              <input type="file" accept="audio/*" onChange={onCustomRingtonePicked} />
+            </label>
+            {!!prefs.customRingtoneDataUrl && (
+              <button type="button" className="settings-custom-ringtone-clear" onClick={clearCustomRingtone}>
+                Remove Song
+              </button>
+            )}
+          </div>
+          {!!prefs.customRingtoneName && (
+            <p className="settings-custom-ringtone-name">
+              Current song: <strong>{prefs.customRingtoneName}</strong>
+            </p>
+          )}
           <div className="settings-select-grid">
             {RINGTONE_OPTIONS.map((opt) => (
               <button

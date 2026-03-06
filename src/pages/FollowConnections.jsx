@@ -63,10 +63,22 @@ function pickList(payload, kind) {
   if (Array.isArray(nestedByKind)) return nestedByKind;
 
   const aliasKey = kind === "followers" ? "follower" : "following";
-  const aliasList = payload?.[`${aliasKey}Users`] || payload?.[`${kind}List`] || payload?.[aliasKey];
+  const aliasPluralKey = kind === "followers" ? "followers" : "followings";
+  const aliasList =
+    payload?.[`${aliasKey}Users`] ||
+    payload?.[`${aliasPluralKey}Users`] ||
+    payload?.[`${kind}Users`] ||
+    payload?.[`${kind}List`] ||
+    payload?.[aliasKey] ||
+    payload?.[aliasPluralKey];
   if (Array.isArray(aliasList)) return aliasList;
   const nestedAliasList =
-    payload?.data?.[`${aliasKey}Users`] || payload?.data?.[`${kind}List`] || payload?.data?.[aliasKey];
+    payload?.data?.[`${aliasKey}Users`] ||
+    payload?.data?.[`${aliasPluralKey}Users`] ||
+    payload?.data?.[`${kind}Users`] ||
+    payload?.data?.[`${kind}List`] ||
+    payload?.data?.[aliasKey] ||
+    payload?.data?.[aliasPluralKey];
   if (Array.isArray(nestedAliasList)) return nestedAliasList;
 
   const userList = payload?.users || payload?.data?.users || payload?.content || payload?.data?.content;
@@ -81,15 +93,50 @@ function pickList(payload, kind) {
 }
 
 function normalizeUser(entry) {
-  const user = entry?.user || entry?.sender || entry?.target || entry;
-  const id = String(user?.id ?? user?.userId ?? user?.username ?? user?.email ?? "");
-  const name = String(user?.name || user?.username || user?.email || "User").trim();
-  const username = String(user?.username || "").trim();
-  const email = String(user?.email || "").trim();
-  const profilePicRaw = user?.profilePicUrl || user?.profilePic || user?.avatar || "";
+  const user =
+    entry?.user ||
+    entry?.sender ||
+    entry?.target ||
+    entry?.follower ||
+    entry?.following ||
+    entry?.fromUser ||
+    entry?.toUser ||
+    entry;
+  const id = String(
+    user?.id ??
+      user?.userId ??
+      entry?.followerId ??
+      entry?.followingId ??
+      entry?.sourceUserId ??
+      entry?.targetUserId ??
+      entry?.fromUserId ??
+      entry?.toUserId ??
+      user?.username ??
+      user?.email ??
+      ""
+  ).trim();
+  const name = String(
+    user?.name ||
+      entry?.followerName ||
+      entry?.followingName ||
+      user?.username ||
+      user?.email ||
+      "User"
+  ).trim();
+  const username = String(user?.username || entry?.followerUsername || entry?.followingUsername || "").trim();
+  const email = String(user?.email || entry?.followerEmail || entry?.followingEmail || "").trim();
+  const profilePicRaw =
+    user?.profilePicUrl ||
+    user?.profilePic ||
+    user?.avatar ||
+    entry?.followerProfilePicUrl ||
+    entry?.followingProfilePicUrl ||
+    "";
+
+  const stableKey = String(id || username || email || name || "").trim();
 
   return {
-    id,
+    id: stableKey,
     name,
     username,
     email,
@@ -237,8 +284,8 @@ export default function FollowConnections() {
           foundListPayload = true;
           const normalized = rawList.map(normalizeUser).filter((u) => u.id);
           resolvedLists.push(normalized);
-          // A valid payload was found (including empty array), stop probing.
-          break;
+          // Prefer non-empty payloads; keep probing if this endpoint returned an empty list.
+          if (normalized.length > 0) break;
         } catch (err) {
           const status = Number(err?.response?.status || 0);
           if (status === 401 || status === 403) authBlocked = true;

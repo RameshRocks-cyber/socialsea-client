@@ -114,6 +114,10 @@
   background: linear-gradient(145deg, #60738e, #44566f);
 }
 
+.notify-avatar.emergency {
+  background: linear-gradient(145deg, #ff5f6d, #db2f3f);
+}
+
 .notify-main {
   min-width: 0;
   flex: 1;
@@ -187,6 +191,12 @@
   border-color: rgba(96, 115, 142, 0.36);
 }
 
+.notify-type.emergency {
+  color: #ffe4e8;
+  background: rgba(235, 61, 83, 0.2);
+  border-color: rgba(255, 114, 132, 0.44);
+}
+
 .notify-message {
   margin: 4px 0 0;
   color: #dce9fb;
@@ -200,6 +210,37 @@
   margin-top: 3px;
   color: #9fb9de;
   font-size: 0.7rem;
+}
+
+.notify-emergency-actions {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.notify-emergency-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  text-decoration: none;
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  border: 1px solid transparent;
+}
+
+.notify-emergency-btn.live {
+  color: #ecf6ff;
+  background: rgba(41, 120, 238, 0.24);
+  border-color: rgba(92, 164, 255, 0.48);
+}
+
+.notify-emergency-btn.navigate {
+  color: #eafff1;
+  background: rgba(14, 156, 94, 0.24);
+  border-color: rgba(74, 207, 144, 0.46);
 }
 
 @media (max-width: 560px) {
