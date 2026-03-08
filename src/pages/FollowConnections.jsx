@@ -4,6 +4,8 @@ import api from "../api/axios";
 import { toApiUrl } from "../api/baseUrl";
 import "./FollowConnections.css";
 
+const FOLLOWING_CACHE_KEY = "socialsea_following_cache_v1";
+
 function readAuthHints() {
   const hints = { ids: [], emails: [] };
   const addId = (value) => {
@@ -41,53 +43,102 @@ function readAuthHints() {
   return hints;
 }
 
+function readFollowingCacheKeys() {
+  try {
+    const raw = localStorage.getItem(FOLLOWING_CACHE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    if (!parsed || typeof parsed !== "object") return [];
+    return Object.entries(parsed)
+      .filter(([, value]) => value === true)
+      .map(([key]) => String(key || "").trim())
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function makeFallbackUserFromKey(key) {
+  const raw = String(key || "").trim();
+  if (!raw) return null;
+  const emailLike = raw.includes("@");
+  const looksNumeric = /^\d+$/.test(raw);
+  const name = emailLike
+    ? raw.split("@")[0].replace(/[._-]+/g, " ").trim()
+    : raw.replace(/[._-]+/g, " ").trim();
+  const readableName = name
+    ? name
+        .split(" ")
+        .filter(Boolean)
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(" ")
+    : raw;
+
+  return {
+    id: `cached:${raw.toLowerCase()}`,
+    name: readableName || "User",
+    username: !emailLike && !looksNumeric ? raw : "",
+    email: emailLike ? raw : "",
+    bio: "",
+    profilePic: "",
+    initials: (readableName?.[0] || raw[0] || "U").toUpperCase()
+  };
+}
+
 function getPathCandidates(identifier, kind) {
   const safeId = encodeURIComponent(String(identifier || "").trim());
   if (!safeId) return [];
+  const kindAliases =
+    kind === "followers"
+      ? ["followers", "follower"]
+      : kind === "following"
+        ? ["following", "followings"]
+        : [kind];
+
   return [
-    `/api/profile/${safeId}/${kind}`,
-    `/api/follow/${safeId}/${kind}/users`,
-    `/api/follow/${safeId}/${kind}`,
-    `/api/follow/${kind}/${safeId}`
-  ];
+    ...kindAliases.map((alias) => `/api/follow/list?type=${alias}&user=${safeId}`),
+    ...kindAliases.map((alias) => `/api/profile/${safeId}/${alias}`),
+    ...kindAliases.map((alias) => `/api/follow/${safeId}/${alias}/users`),
+    ...kindAliases.map((alias) => `/api/follow/${safeId}/${alias}`),
+    ...kindAliases.map((alias) => `/api/follow/${alias}/${safeId}`)
+  ].filter((path, index, arr) => arr.indexOf(path) === index);
 }
 
 function pickList(payload, kind) {
   if (Array.isArray(payload)) return payload;
   if (!payload || typeof payload !== "object") return null;
 
-  const byKind = payload?.[kind];
-  if (Array.isArray(byKind)) return byKind;
-
-  const nestedByKind = payload?.data?.[kind];
-  if (Array.isArray(nestedByKind)) return nestedByKind;
-
   const aliasKey = kind === "followers" ? "follower" : "following";
   const aliasPluralKey = kind === "followers" ? "followers" : "followings";
-  const aliasList =
-    payload?.[`${aliasKey}Users`] ||
-    payload?.[`${aliasPluralKey}Users`] ||
-    payload?.[`${kind}Users`] ||
-    payload?.[`${kind}List`] ||
-    payload?.[aliasKey] ||
-    payload?.[aliasPluralKey];
-  if (Array.isArray(aliasList)) return aliasList;
-  const nestedAliasList =
-    payload?.data?.[`${aliasKey}Users`] ||
-    payload?.data?.[`${aliasPluralKey}Users`] ||
-    payload?.data?.[`${kind}Users`] ||
-    payload?.data?.[`${kind}List`] ||
-    payload?.data?.[aliasKey] ||
-    payload?.data?.[aliasPluralKey];
-  if (Array.isArray(nestedAliasList)) return nestedAliasList;
+  const candidates = [
+    payload?.[kind],
+    payload?.data?.[kind],
+    payload?.[`${aliasKey}Users`],
+    payload?.data?.[`${aliasKey}Users`],
+    payload?.[`${aliasPluralKey}Users`],
+    payload?.data?.[`${aliasPluralKey}Users`],
+    payload?.[`${kind}Users`],
+    payload?.data?.[`${kind}Users`],
+    payload?.[`${kind}List`],
+    payload?.data?.[`${kind}List`],
+    payload?.[`${aliasKey}List`],
+    payload?.data?.[`${aliasKey}List`],
+    payload?.[aliasKey],
+    payload?.data?.[aliasKey],
+    payload?.[aliasPluralKey],
+    payload?.data?.[aliasPluralKey],
+    payload?.users,
+    payload?.data?.users,
+    payload?.content,
+    payload?.data?.content,
+    payload?.results,
+    payload?.data?.results,
+    payload?.items,
+    payload?.data?.items
+  ];
 
-  const userList = payload?.users || payload?.data?.users || payload?.content || payload?.data?.content;
-  if (Array.isArray(userList)) return userList;
-
-  if (Array.isArray(payload?.results)) return payload.results;
-  if (Array.isArray(payload?.data?.results)) return payload.data.results;
-  if (Array.isArray(payload?.items)) return payload.items;
-  if (Array.isArray(payload?.data?.items)) return payload.data.items;
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) return candidate;
+  }
 
   return null;
 }
@@ -125,12 +176,26 @@ function normalizeUser(entry) {
   ).trim();
   const username = String(user?.username || entry?.followerUsername || entry?.followingUsername || "").trim();
   const email = String(user?.email || entry?.followerEmail || entry?.followingEmail || "").trim();
+  const bio = String(
+    user?.bio ||
+      entry?.bio ||
+      entry?.followerBio ||
+      entry?.followingBio ||
+      ""
+  ).trim();
   const profilePicRaw =
     user?.profilePicUrl ||
     user?.profilePic ||
+    user?.profileImage ||
+    user?.image ||
     user?.avatar ||
+    user?.avatarUrl ||
     entry?.followerProfilePicUrl ||
+    entry?.followerProfilePic ||
     entry?.followingProfilePicUrl ||
+    entry?.followingProfilePic ||
+    entry?.profilePicUrl ||
+    entry?.profilePic ||
     "";
 
   const stableKey = String(id || username || email || name || "").trim();
@@ -140,9 +205,61 @@ function normalizeUser(entry) {
     name,
     username,
     email,
+    bio,
     profilePic: profilePicRaw ? toApiUrl(profilePicRaw) : "",
     initials: (name[0] || "U").toUpperCase()
   };
+}
+
+function buildIdentityKeys(user) {
+  const idKey = String(user?.id || "").trim().toLowerCase();
+  const emailKey = String(user?.email || "").trim().toLowerCase();
+  const usernameKey = String(user?.username || "").trim().toLowerCase();
+  const nameKey = String(user?.name || "").trim().toLowerCase();
+  const bioKey = String(user?.bio || "").trim().toLowerCase();
+  const keys = [];
+  if (idKey) keys.push(`id:${idKey}`);
+  if (emailKey) keys.push(`email:${emailKey}`);
+  if (usernameKey) keys.push(`username:${usernameKey}`);
+  if (nameKey || bioKey) keys.push(`profile:${nameKey}|${bioKey}`);
+  return keys;
+}
+
+function dedupeUsers(list) {
+  const users = Array.isArray(list) ? list : [];
+  const keyToIndex = new Map();
+  const result = [];
+
+  users.forEach((user) => {
+    const keys = buildIdentityKeys(user);
+    if (!keys.length) return;
+    const existingIndex = keys
+      .map((k) => keyToIndex.get(k))
+      .find((idx) => Number.isInteger(idx));
+
+    if (Number.isInteger(existingIndex)) {
+      const prev = result[existingIndex];
+      result[existingIndex] = {
+        ...prev,
+        ...user,
+        id: prev?.id || user?.id || "",
+        name: prev?.name && prev.name !== "User" ? prev.name : user?.name || prev?.name || "User",
+        username: prev?.username || user?.username || "",
+        email: prev?.email || user?.email || "",
+        bio: prev?.bio || user?.bio || "",
+        profilePic: prev?.profilePic || user?.profilePic || "",
+        initials: prev?.initials || user?.initials || "U"
+      };
+      keys.forEach((k) => keyToIndex.set(k, existingIndex));
+      return;
+    }
+
+    const nextIndex = result.length;
+    result.push(user);
+    keys.forEach((k) => keyToIndex.set(k, nextIndex));
+  });
+
+  return result;
 }
 
 const IS_HTTPS_PAGE =
@@ -151,9 +268,7 @@ const IS_HTTPS_PAGE =
 const baseCandidates = [
   api.defaults.baseURL,
   import.meta.env.VITE_API_URL,
-  "/api",
-  "http://43.205.213.14:8080",
-  "http://localhost:8080"
+  "/api"
 ]
   .filter((v, i, arr) => v && arr.indexOf(v) === i)
   .filter((v) => !(IS_HTTPS_PAGE && /^http:\/\//i.test(v)));
@@ -181,6 +296,90 @@ async function requestJson(path, timeoutMs = 10000) {
   throw lastError || new Error("Request failed");
 }
 
+async function loadUsersFromFollowCache() {
+  const cacheKeys = readFollowingCacheKeys();
+  if (!cacheKeys.length) return [];
+
+  const seen = new Set();
+  const users = [];
+  for (const key of cacheKeys) {
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    try {
+      const res = await requestJson(`/api/profile/${encodeURIComponent(key)}`, 3000);
+      const profile = res?.data?.user || res?.data || {};
+      const normalized = normalizeUser(profile);
+      if (normalized.id) {
+        users.push(normalized);
+        continue;
+      }
+    } catch {
+      // Fall back to the cached identifier when profile lookup fails.
+    }
+    const fallbackUser = makeFallbackUserFromKey(key);
+    if (fallbackUser?.id) users.push(fallbackUser);
+  }
+  return users;
+}
+
+async function loadFollowersFromNotifications() {
+  try {
+    const res = await requestJson("/api/notifications", 4500);
+    const list = Array.isArray(res?.data) ? res.data : [];
+    const followItems = list.filter((entry) => {
+      const kind = String(entry?.kind || "").toLowerCase();
+      const message = String(entry?.message || "").toLowerCase();
+      return kind === "follow" || message.includes("started following");
+    });
+
+    const seen = new Set();
+    const users = [];
+
+    for (const entry of followItems) {
+      const rawIdentifier =
+        entry?.actorIdentifier ||
+        entry?.actorUsername ||
+        entry?.actorEmail ||
+        entry?.actor?.id ||
+        entry?.actor?.username ||
+        entry?.actor?.email ||
+        "";
+
+      let person = normalizeUser({
+        ...entry,
+        user: {
+          ...(entry?.actor || {}),
+          id: entry?.actor?.id ?? rawIdentifier,
+          username: entry?.actor?.username ?? entry?.actorUsername ?? rawIdentifier,
+          email: entry?.actor?.email ?? entry?.actorEmail,
+          name: entry?.actor?.name ?? entry?.actorName,
+          profilePicUrl: entry?.actorProfilePic ?? entry?.actor?.profilePicUrl ?? entry?.actor?.profilePic,
+          bio: entry?.actor?.bio ?? "",
+        },
+      });
+
+      const identifier = String(person?.id || rawIdentifier || "").trim();
+      if (!person?.bio && identifier) {
+        try {
+          const profileRes = await requestJson(`/api/profile/${encodeURIComponent(identifier)}`, 2500);
+          person = normalizeUser(profileRes?.data?.user || profileRes?.data || person);
+        } catch {
+          // keep notification-derived user
+        }
+      }
+
+      const key = String(person?.id || identifier || "").trim();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      users.push(person);
+    }
+
+    return users;
+  } catch {
+    return [];
+  }
+}
+
 export default function FollowConnections() {
   const { username } = useParams();
   const location = useLocation();
@@ -202,6 +401,20 @@ export default function FollowConnections() {
       const authHints = readAuthHints();
       const storedUserId = String(authHints.ids[0] || "").trim();
       const storedEmail = String(authHints.emails[0] || "").trim();
+      const isOwnConnections =
+        (username || "").toLowerCase() === "me" ||
+        (!!storedUserId && String(username || "").trim() === storedUserId) ||
+        (!!storedEmail && String(username || "").trim().toLowerCase() === storedEmail.toLowerCase());
+      if (kind === "following" && isOwnConnections) {
+        const cachedUsers = await loadUsersFromFollowCache();
+        if (!cancelled && cachedUsers.length) {
+          setTitleName((prev) => prev || username || "You");
+          setUsers(cachedUsers);
+          setError("");
+          setLoading(false);
+          return;
+        }
+      }
       const inlineListCandidates = [];
       if ((username || "").toLowerCase() === "me") {
         authHints.ids.forEach((id) => {
@@ -262,7 +475,9 @@ export default function FollowConnections() {
       }
 
       const candidates = [
-        ...(String(username || "").toLowerCase() === "me" ? [`/api/profile/me/${kind}`] : []),
+        ...(String(username || "").toLowerCase() === "me"
+          ? getPathCandidates("me", kind)
+          : []),
         ...idCandidates.flatMap((id) => getPathCandidates(id, kind))
       ]
         .filter(Boolean)
@@ -278,7 +493,7 @@ export default function FollowConnections() {
 
       for (const path of candidates) {
         try {
-          const res = await requestJson(path);
+          const res = await requestJson(path, 4500);
           const rawList = pickList(res?.data, kind);
           if (!Array.isArray(rawList)) continue;
           foundListPayload = true;
@@ -294,16 +509,17 @@ export default function FollowConnections() {
 
       if (!cancelled) {
         if (foundListPayload) {
-          const seen = new Set();
-          const merged = [];
-          resolvedLists.flat().forEach((u) => {
-            const key = String(u.id || "").trim();
-            if (!key || seen.has(key)) return;
-            seen.add(key);
-            merged.push(u);
-          });
+          const merged = dedupeUsers(resolvedLists.flat());
           setUsers(merged);
           setError("");
+        } else if (kind === "following" && isOwnConnections) {
+          const cachedUsers = await loadUsersFromFollowCache();
+          setUsers(dedupeUsers(cachedUsers));
+          setError(cachedUsers.length ? "" : `Could not load ${kind}. Please check backend ${kind} endpoint.`);
+        } else if (kind === "followers" && isOwnConnections) {
+          const fallbackUsers = await loadFollowersFromNotifications();
+          setUsers(dedupeUsers(fallbackUsers));
+          setError(fallbackUsers.length ? "" : `Could not load ${kind}. Please check backend ${kind} endpoint.`);
         } else {
           setUsers([]);
           setError(
@@ -373,7 +589,7 @@ export default function FollowConnections() {
                 )}
                 <span className="follow-text">
                   <strong>{person.name}</strong>
-                  <small>{person.username || person.email || `id: ${person.id}`}</small>
+                  <small>{person.bio || person.username || person.email || "No bio yet"}</small>
                 </span>
               </button>
               <button type="button" className="follow-chat-btn" onClick={() => openChat(person)}>

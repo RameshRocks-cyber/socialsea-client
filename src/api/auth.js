@@ -5,53 +5,62 @@ const looksLikeHtml = (value) =>
   typeof value === "string" &&
   (/^\s*<!doctype html/i.test(value) || /<html[\s>]/i.test(value));
 
+const BAD_OTP_HOSTS = new Set(["api.socialsea.co.in", "43.205.213.14"]);
+
+const normalizeBaseCandidate = (rawValue) => {
+  const value = String(rawValue || "").trim().replace(/\/+$/, "");
+  if (!value) return "";
+  if (value.startsWith("/")) return value;
+  if (!/^https?:\/\//i.test(value)) return "";
+
+  try {
+    const host = new URL(value).hostname.toLowerCase();
+    if (BAD_OTP_HOSTS.has(host)) return "https://socialsea.co.in";
+  } catch {
+    return "";
+  }
+
+  return value;
+};
+
 const buildOtpBaseCandidates = () => {
   const isHttpsPage =
     typeof window !== "undefined" && window.location.protocol === "https:";
   const isLocalPage =
     typeof window !== "undefined" &&
     (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
-  const storedBase =
+
+  const storedRaw =
     sessionStorage.getItem(OTP_BASE_KEY) ||
     localStorage.getItem(OTP_BASE_KEY) ||
     "";
-  const normalizedStored = String(storedBase || "").trim();
-  const storedHost =
-    normalizedStored && /^https?:\/\//i.test(normalizedStored)
-      ? new URL(normalizedStored).hostname.toLowerCase()
-      : "";
-  const safeStoredForLocal =
-    isLocalPage && storedHost === "api.socialsea.co.in" ? "" : normalizedStored;
-  const storedLooksRelative = safeStoredForLocal.startsWith("/");
-  const defaultBase = String(api.defaults.baseURL || "").trim();
-  const defaultLooksRelative = defaultBase.startsWith("/");
-  const envBaseRaw = String(import.meta.env.VITE_API_URL || "").trim();
-  const envLooksRelative = envBaseRaw.startsWith("/");
-  const wantsLocalBackend =
-    /localhost:8080|127\.0\.0\.1:8080/i.test(normalizedStored);
 
-  // Prefer the same base that succeeded for OTP sending, then try known fallbacks.
+  const stored = normalizeBaseCandidate(storedRaw);
+  const defaultBase = normalizeBaseCandidate(api.defaults.baseURL);
+  const envBase = normalizeBaseCandidate(import.meta.env.VITE_API_URL);
+
   const localCandidates = [
-    storedLooksRelative ? null : safeStoredForLocal,
-    defaultLooksRelative ? null : (!/localhost:8080|127\.0\.0\.1:8080/i.test(defaultBase) ? defaultBase : null),
-    envLooksRelative ? null : envBaseRaw,
-    "http://43.205.213.14:8080",
-    "/api",
-    wantsLocalBackend ? "http://localhost:8080" : null,
-    "https://api.socialsea.co.in",
-  ];
-  const defaultCandidates = [
-    safeStoredForLocal,
-    api.defaults.baseURL,
-    "https://api.socialsea.co.in",
-    "http://43.205.213.14:8080",
-    "/api",
     "http://localhost:8080",
+    "/api",
+    defaultBase,
+    envBase,
   ];
+  const deployedCandidates = [stored, defaultBase, envBase, "/api", "https://socialsea.co.in"];
 
-  return (isLocalPage ? localCandidates : defaultCandidates)
+  const candidates = (isLocalPage ? localCandidates : deployedCandidates)
     .filter((v, i, arr) => v && arr.indexOf(v) === i)
     .filter((v) => !(isHttpsPage && /^http:\/\//i.test(v)));
+
+  if (storedRaw && stored && stored !== String(storedRaw).trim().replace(/\/+$/, "")) {
+    try {
+      sessionStorage.setItem(OTP_BASE_KEY, stored);
+      localStorage.setItem(OTP_BASE_KEY, stored);
+    } catch {
+      // ignore storage errors
+    }
+  }
+
+  return candidates;
 };
 
 export const sendOtp = (email) => {
@@ -181,11 +190,9 @@ export const loginWithPassword = ({ identifier, password }) => {
   const isHttpsPage =
     typeof window !== "undefined" && window.location.protocol === "https:";
   const baseCandidates = [
-    api.defaults.baseURL,
-    "https://api.socialsea.co.in",
-    "/api",
-    "http://43.205.213.14:8080",
-    "http://localhost:8080",
+    normalizeBaseCandidate(api.defaults.baseURL),
+    normalizeBaseCandidate(import.meta.env.VITE_API_URL),
+    "https://socialsea.co.in",
   ]
     .filter((v, i, arr) => v && arr.indexOf(v) === i)
     .filter((v) => !(isHttpsPage && /^http:\/\//i.test(v)));
@@ -245,12 +252,50 @@ export const loginWithPassword = ({ identifier, password }) => {
 export const forgotPassword = (emailOrUsername) => {
   const value = String(emailOrUsername || "").trim();
   const baseCandidates = buildOtpBaseCandidates();
-
-  const payloads = [{ email: value, username: value, identifier: value }];
+  const looksLikeEmail = /@/.test(value);
+  const payloads = looksLikeEmail
+    ? [
+        { email: value },
+        { identifier: value },
+        { email: value, identifier: value },
+        { username: value },
+      ]
+    : [
+        { username: value },
+        { identifier: value },
+        { username: value, identifier: value },
+        { email: value },
+      ];
   const endpoints = [
     "/api/auth/send-otp",
     "/auth/send-otp",
+    "/api/auth/forgot-password",
+    "/auth/forgot-password",
+    "/api/auth/forgotPassword",
   ];
+
+  const isOtpAccepted = (payload) => {
+    if (payload == null) return true;
+    if (typeof payload === "string") {
+      const text = payload.trim().toLowerCase();
+      if (!text) return true;
+      if (looksLikeHtml(payload)) return false;
+      if (text.includes("failed") || text.includes("invalid") || text.includes("not found") || text.includes("error")) {
+        return false;
+      }
+      return true;
+    }
+    if (typeof payload === "object") {
+      if (payload.success === false || payload.sent === false || payload.otpSent === false) return false;
+      const status = String(payload.status || "").toLowerCase();
+      if (status === "error" || status === "failed") return false;
+      const msg = String(payload.message || payload.error || "").toLowerCase();
+      if (msg.includes("not found") || msg.includes("invalid") || msg.includes("failed") || msg.includes("error")) {
+        return false;
+      }
+    }
+    return true;
+  };
 
   const run = async () => {
     let lastError = null;
@@ -272,6 +317,17 @@ export const forgotPassword = (emailOrUsername) => {
               htmlErr.response = { status: 404, data: textData };
               throw htmlErr;
             }
+            if (!isOtpAccepted(res?.data)) {
+              const bodyError = new Error(
+                String(
+                  res?.data?.message ||
+                  res?.data?.error ||
+                  "OTP request was not accepted by backend."
+                )
+              );
+              bodyError.response = { status: 400, data: res?.data };
+              throw bodyError;
+            }
             try {
               sessionStorage.setItem(OTP_BASE_KEY, String(baseURL));
               localStorage.setItem(OTP_BASE_KEY, String(baseURL));
@@ -291,7 +347,13 @@ export const forgotPassword = (emailOrUsername) => {
       }
     }
     if (lastError?.code === "ECONNABORTED" || !lastError?.response) {
-      throw new Error("Server is not reachable right now. Please try again in a minute.");
+      const isLocalPage =
+        typeof window !== "undefined" &&
+        (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+      if (isLocalPage) {
+        throw new Error("Local backend is not running on http://localhost:8080. Start backend and retry.");
+      }
+      throw new Error("Cannot reach backend API. Please check your API URL/server.");
     }
     throw lastError || new Error("Failed to send OTP");
   };
@@ -307,19 +369,8 @@ export const resetPasswordWithOtp = ({ identifier, otp, newPassword }) => {
 
   const primaryEndpoints = [
     "/api/auth/reset-password",
-    "/api/auth/resetPassword",
-    "/auth/reset-password",
-    "/auth/resetPassword",
-  ];
-  const fallbackEndpoints = [
-    "/api/auth/password/reset",
-    "/auth/password/reset",
-    "/api/auth/forgot-password/reset",
-    "/auth/forgot-password/reset",
-    "/api/auth/forgot-password",
-    "/auth/forgot-password",
-    "/api/users/reset-password",
-  ];
+    "/api/auth/resetPassword",  ];
+  const fallbackEndpoints = [];
 
   const payloads = [
     {
@@ -349,7 +400,9 @@ export const resetPasswordWithOtp = ({ identifier, otp, newPassword }) => {
     const tryEndpoints = async (endpoints) => {
       for (const baseURL of baseCandidates) {
         for (const url of endpoints) {
+          let routeUnavailable = false;
           for (const body of payloads) {
+            if (routeUnavailable) break;
             try {
               const res = await api.request({
                 method: "POST",
@@ -375,9 +428,21 @@ export const resetPasswordWithOtp = ({ identifier, otp, newPassword }) => {
             } catch (err) {
               lastError = err;
               const status = err?.response?.status;
-              // 400 means route exists but payload/otp failed: surface real backend message.
-              if (status === 400) throw err;
-              // Continue probing other bases/routes only for route/transport/permission variants.
+              // 400 means the route exists and rejected this payload/OTP. Try the next shape.
+              if (status === 400) {
+                continue;
+              }
+              // 401/403/404/405 indicate the route itself is blocked or missing, so stop
+              // retrying payload variants for this exact base+endpoint combination.
+              if (status === 401 || status === 403 || status === 404 || status === 405) {
+                routeUnavailable = true;
+                continue;
+              }
+              // Continue probing other bases/routes for transport/server variants only.
+              if ((status >= 500 && status <= 599) || !status) {
+                routeUnavailable = true;
+                continue;
+              }
               if (!(status === 401 || status === 403 || status === 404 || status === 405 || (status >= 500 && status <= 599) || !status)) {
                 throw err;
               }
@@ -394,13 +459,19 @@ export const resetPasswordWithOtp = ({ identifier, otp, newPassword }) => {
     if (fallback) return fallback;
 
     if (lastError?.code === "ECONNABORTED" || !lastError?.response) {
-      throw new Error("Server is not reachable right now. Please try again in a minute.");
+      const isLocalPage =
+        typeof window !== "undefined" &&
+        (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+      if (isLocalPage) {
+        throw new Error("Local backend is not running on http://localhost:8080. Start backend and retry.");
+      }
+      throw new Error("Cannot reach backend API. Please check your API URL/server.");
     }
     if (lastError?.response?.status === 401 || lastError?.response?.status === 403) {
-      throw new Error("Password reset was blocked on current API route. Please verify backend reset-password permissions.");
+      throw new Error("Reset endpoint exists but is blocked (403). Backend must allow OTP-based password reset without login.");
     }
     if (lastError?.response?.status === 404 || lastError?.response?.status === 405 || lastError?.response?.status === 503) {
-      throw new Error("Password reset endpoint not available on backend. Please verify reset-password API route.");
+      throw new Error("OTP send works, but reset-password endpoint is missing on backend deployment.");
     }
     throw lastError || new Error("Failed to reset password");
   };
@@ -419,3 +490,8 @@ export function getRole() {
     return null;
   }
 }
+
+
+
+
+

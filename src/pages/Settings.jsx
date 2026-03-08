@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../api/axios";
 import { DEFAULT_SOUND_PREFS, SETTINGS_KEY, getSoundLabel, readSoundPrefs } from "./soundPrefs";
+import { COLOR_THEME_OPTIONS, readTheme, setTheme, readCustomThemeColors, setCustomThemeColors } from "../theme";
 import "./Settings.css";
 
 const CLOSE_FRIENDS_KEY = "socialsea_close_friends_v1";
@@ -66,11 +67,17 @@ export default function Settings() {
   const [archiveIds, setArchiveIds] = useState(() => readIds("archivedPostIds"));
   const [prefs, setPrefs] = useState(readPrefs);
   const [activePanel, setActivePanel] = useState("");
+  const [colorTheme, setColorTheme] = useState(readTheme);
+  const [customThemeColors, setCustomThemeColorsState] = useState(readCustomThemeColors);
 
   const [closeFriends, setCloseFriends] = useState(() => readJsonArray(CLOSE_FRIENDS_KEY));
   const [blockedUsers, setBlockedUsers] = useState(() => readJsonArray(BLOCKED_KEY));
   const [userQuery, setUserQuery] = useState("");
   const [userResults, setUserResults] = useState([]);
+  const colorThemeLabel = useMemo(() => {
+    const match = COLOR_THEME_OPTIONS.find((opt) => opt.id === colorTheme);
+    return match ? match.label : "Ocean";
+  }, [colorTheme]);
 
   useEffect(() => {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(prefs));
@@ -83,6 +90,14 @@ export default function Settings() {
   useEffect(() => {
     localStorage.setItem(BLOCKED_KEY, JSON.stringify(blockedUsers));
   }, [blockedUsers]);
+
+  useEffect(() => {
+    setTheme(colorTheme);
+  }, [colorTheme]);
+
+  useEffect(() => {
+    setCustomThemeColors(customThemeColors);
+  }, [customThemeColors]);
 
   useEffect(() => {
     let mounted = true;
@@ -263,6 +278,7 @@ export default function Settings() {
 
         <section className="settings-section">
           <h2>How you use SocialSea</h2>
+          <Row icon={"AP"} title="Appearance" value={colorThemeLabel} onClick={() => setActivePanel("theme")} />
           <Row icon={"B"} title="Saved" value={savedIds.length} onClick={() => navigate("/saved")} />
           <Row icon={"A"} title="Archive" value={archiveIds.length} onClick={() => setActivePanel("archive")} />
           <Row icon={"Y"} title="Your activity" onClick={() => setActivePanel("activity")} />
@@ -331,6 +347,7 @@ export default function Settings() {
 
         <section className="settings-section">
           <h2>How others can interact with you</h2>
+          <Row icon={"AP"} title="Appearance" value={colorThemeLabel} onClick={() => setActivePanel("theme")} />
           <Row icon={"M"} title="Messages and story replies" value={prefs.messageReplies} onClick={() => setActivePanel("messages")} />
           <Row icon={"@"} title="Tags and mentions" value={prefs.tagsMentions} onClick={() => setActivePanel("tags")} />
           <Row icon={"C"} title="Comments" value={prefs.comments} onClick={() => setActivePanel("comments")} />
@@ -461,6 +478,37 @@ export default function Settings() {
           </section>
         )}
 
+        {activePanel === "theme" && (
+          <section className="settings-panel">
+            <header className="settings-panel-head">
+              <h3>Color Theme</h3>
+              <button type="button" onClick={() => setActivePanel("")}>Close</button>
+            </header>
+            <div className="settings-select-grid">
+              {COLOR_THEME_OPTIONS.map((theme) => (
+                <button
+                  key={theme.id}
+                  type="button"
+                  className={colorTheme === theme.id ? "active" : ""}
+                  onClick={() => setColorTheme(theme.id)}
+                >
+                  {theme.label}
+                </button>
+              ))}
+            </div>
+            {colorTheme === "custom" && (
+              <div className="settings-custom-theme">
+                <label><span>Primary</span><input type="color" value={customThemeColors.accent} onChange={(e) => setCustomThemeColorsState((prev) => ({ ...prev, accent: e.target.value }))} /></label>
+                <label><span>Secondary</span><input type="color" value={customThemeColors.accent2} onChange={(e) => setCustomThemeColorsState((prev) => ({ ...prev, accent2: e.target.value }))} /></label>
+                <label><span>Background</span><input type="color" value={customThemeColors.bg} onChange={(e) => setCustomThemeColorsState((prev) => ({ ...prev, bg: e.target.value }))} /></label>
+                <label><span>Surface</span><input type="color" value={customThemeColors.bgSoft} onChange={(e) => setCustomThemeColorsState((prev) => ({ ...prev, bgSoft: e.target.value }))} /></label>
+                <label><span>Border</span><input type="color" value={customThemeColors.border} onChange={(e) => setCustomThemeColorsState((prev) => ({ ...prev, border: e.target.value }))} /></label>
+                <label><span>Text</span><input type="color" value={customThemeColors.text} onChange={(e) => setCustomThemeColorsState((prev) => ({ ...prev, text: e.target.value }))} /></label>
+              </div>
+            )}
+          </section>
+        )}
+
         {(activePanel === "closeFriends" || activePanel === "blocked") && (
           <section className="settings-panel">
             <header className="settings-panel-head">
@@ -523,3 +571,11 @@ export default function Settings() {
     </div>
   );
 }
+
+
+
+
+
+
+
+

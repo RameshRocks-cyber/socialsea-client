@@ -24,6 +24,12 @@ function parseErrorMessage(err, fallback) {
 }
 
 export default function ForgotPassword() {
+  const isLocalHost =
+    typeof window !== "undefined" &&
+    ["localhost", "127.0.0.1"].includes(String(window.location.hostname || "").toLowerCase());
+  const envWantsDebugOtp = String(import.meta.env.VITE_SHOW_DEV_OTP || "").toLowerCase() === "true";
+  const canShowDebugOtp = isLocalHost || envWantsDebugOtp;
+
   const [identifier, setIdentifier] = useState("");
   const [otp, setOtp] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -32,20 +38,41 @@ export default function ForgotPassword() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [debugOtp, setDebugOtp] = useState("");
 
   const onSendOtp = async (e) => {
     e.preventDefault();
     setError("");
     setSuccess("");
+    setDebugOtp("");
     if (!identifier.trim()) {
       setError("Email or username is required.");
       return;
     }
     setLoading(true);
     try {
-      await forgotPassword(identifier.trim());
+      const res = await forgotPassword(identifier.trim());
+      const payload = res?.data || {};
+      const serverDebugOtp = String(payload?.debugOtp || "").trim();
+      const deliveryFailed = payload?.deliveryFailed === true;
       setOtpSent(true);
-      setSuccess("OTP sent. Enter OTP and your new password.");
+      if (canShowDebugOtp && serverDebugOtp) {
+        setDebugOtp(serverDebugOtp);
+        setOtp(serverDebugOtp);
+      }
+      if (deliveryFailed) {
+        setSuccess(
+          serverDebugOtp
+            ? "Email delivery failed. Debug OTP has been auto-filled for local testing."
+            : "Email delivery failed on server."
+        );
+      } else {
+        setSuccess(
+          serverDebugOtp
+            ? "OTP sent. Debug OTP was auto-filled. Enter your new password."
+            : "OTP sent. Check Inbox/Spam, then enter OTP and your new password."
+        );
+      }
     } catch (err) {
       setError(parseErrorMessage(err, "Failed to send OTP."));
     } finally {
@@ -109,7 +136,12 @@ export default function ForgotPassword() {
             id="identifier"
             type="text"
             value={identifier}
-            onChange={(e) => setIdentifier(e.target.value)}
+            onChange={(e) => {
+              setIdentifier(e.target.value);
+              setOtpSent(false);
+              setOtp("");
+              setDebugOtp("");
+            }}
             placeholder="username or name@email.com"
             autoComplete="username"
           />
@@ -159,6 +191,7 @@ export default function ForgotPassword() {
 
         {error && <p className="auth-error">{error}</p>}
         {success && <p className="auth-success">{success}</p>}
+        {canShowDebugOtp && !!debugOtp && <p className="auth-debug-otp">Debug OTP: {debugOtp}</p>}
 
         <p className="auth-foot">
           Remembered it? <Link to="/login">Back to login</Link>

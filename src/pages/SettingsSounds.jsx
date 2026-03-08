@@ -94,16 +94,25 @@ export default function SettingsSounds() {
   const previewRingtone = (profile) => {
     if (profile === "off") return;
     if (profile === "custom") {
-      const src = String(prefs.customRingtoneDataUrl || "").trim();
+      const src = String(prefs.customRingtoneDataUrl || prefs.customRingtoneUrl || "").trim();
       if (!src) return;
+      const startSec = Math.max(0, Number(prefs.customRingtoneStartSec) || 0);
+      const durationSec = Math.max(2, Number(prefs.customRingtoneDurationSec) || 20);
       try {
         if (!customPreviewAudioRef.current) {
           customPreviewAudioRef.current = new Audio(src);
         }
         const audio = customPreviewAudioRef.current;
         if (audio.src !== src) audio.src = src;
-        audio.currentTime = 0;
+        audio.currentTime = startSec;
         void audio.play();
+        window.setTimeout(() => {
+          try {
+            audio.pause();
+          } catch {
+            // ignore
+          }
+        }, durationSec * 1000);
       } catch {
         // ignore preview playback errors
       }
@@ -160,7 +169,10 @@ export default function SettingsSounds() {
         ...prev,
         ringtoneSound: "custom",
         customRingtoneDataUrl: dataUrl,
-        customRingtoneName: file.name || "Custom ringtone"
+        customRingtoneName: file.name || "Custom ringtone",
+        customRingtoneUrl: "",
+        customRingtoneStartSec: 0,
+        customRingtoneDurationSec: 20
       }));
     };
     reader.readAsDataURL(file);
@@ -180,7 +192,10 @@ export default function SettingsSounds() {
       ...prev,
       ringtoneSound: prev.ringtoneSound === "custom" ? "classic" : prev.ringtoneSound,
       customRingtoneDataUrl: "",
-      customRingtoneName: ""
+      customRingtoneName: "",
+      customRingtoneUrl: "",
+      customRingtoneStartSec: 0,
+      customRingtoneDurationSec: 20
     }));
   };
 

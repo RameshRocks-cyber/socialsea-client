@@ -14,6 +14,7 @@ import {
   FiVideo,
   FiVideoOff
 } from "react-icons/fi";
+import { MdSignLanguage } from "react-icons/md";
 import api from "../api/axios";
 import { getApiBaseUrl, toApiUrl } from "../api/baseUrl";
 import { clearAuthStorage } from "../auth";
@@ -38,27 +39,149 @@ const RTC_CONFIG = {
 const CHAT_FAVORITES_KEY = "socialsea_chat_favorites_v1";
 const CHAT_CUSTOM_STICKERS_KEY = "socialsea_chat_custom_stickers_v1";
 const CHAT_TRANSLATOR_KEY = "socialsea_chat_translator_v1";
+const BLOCKED_USERS_KEY = "socialsea_blocked_users_v1";
 const DELETE_FOR_EVERYONE_TOKEN = "__SS_DELETE_EVERYONE__:";
+const SIGN_ASSIST_TOKEN = "__SS_SIGN_ASSIST__:";
+const SIGN_VOICE_GENDERS = ["neutral", "female", "male"];
+const SIGN_LOCAL_TF_SCRIPT = "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js";
+const SIGN_LOCAL_HANDPOSE_SCRIPT =
+  "https://cdn.jsdelivr.net/npm/@tensorflow-models/handpose@0.0.7/dist/handpose.min.js";
+
+const encodeSignAssistText = (text, voiceGender = "neutral", source = "manual") => {
+  const cleanText = String(text || "").trim();
+  if (!cleanText) return "";
+  const gender = SIGN_VOICE_GENDERS.includes(String(voiceGender || "").toLowerCase())
+    ? String(voiceGender || "").toLowerCase()
+    : "neutral";
+  const payload = {
+    text: cleanText,
+    voiceGender: gender,
+    source: String(source || "manual").trim().toLowerCase(),
+    ts: new Date().toISOString()
+  };
+  return `${SIGN_ASSIST_TOKEN}${JSON.stringify(payload)}`;
+};
+
+const decodeSignAssistText = (rawText) => {
+  const raw = String(rawText || "");
+  if (!raw.startsWith(SIGN_ASSIST_TOKEN)) return null;
+  try {
+    const parsed = JSON.parse(raw.slice(SIGN_ASSIST_TOKEN.length));
+    const text = String(parsed?.text || "").trim();
+    if (!text) return null;
+    const gender = SIGN_VOICE_GENDERS.includes(String(parsed?.voiceGender || "").toLowerCase())
+      ? String(parsed.voiceGender).toLowerCase()
+      : "neutral";
+    return {
+      text,
+      voiceGender: gender,
+      source: String(parsed?.source || "manual"),
+      ts: parsed?.ts || ""
+    };
+  } catch {
+    return null;
+  }
+};
+
+const loadExternalScript = (src, id) => {
+  if (typeof document === "undefined") return Promise.reject(new Error("No document"));
+  if (document.getElementById(id)) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = src;
+    script.id = id;
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error(`Failed to load ${src}`));
+    document.head.appendChild(script);
+  });
+};
+
+const inferLocalSignText = (landmarks) => {
+  if (!Array.isArray(landmarks) || landmarks.length < 21) return "";
+  const wrist = landmarks[0];
+  const indexTip = landmarks[8];
+  const indexPip = landmarks[6];
+  const indexMcp = landmarks[5];
+  const middleTip = landmarks[12];
+  const middlePip = landmarks[10];
+  const middleMcp = landmarks[9];
+  const ringTip = landmarks[16];
+  const ringPip = landmarks[14];
+  const ringMcp = landmarks[13];
+  const pinkyTip = landmarks[20];
+  const pinkyPip = landmarks[18];
+  const pinkyMcp = landmarks[17];
+  const thumbTip = landmarks[4];
+  const thumbIp = landmarks[3];
+
+  const handSize = Math.hypot(middleMcp[0] - wrist[0], middleMcp[1] - wrist[1]) || 1;
+  const extMargin = handSize * 0.1;
+  const foldMargin = handSize * 0.03;
+  const isUp = (tip, pip) => tip[1] < pip[1] - extMargin;
+  const isFolded = (tip, pip, mcp) => tip[1] >= pip[1] - foldMargin || tip[1] > mcp[1] + foldMargin;
+
+  const indexUp = isUp(indexTip, indexPip);
+  const middleUp = isUp(middleTip, middlePip);
+  const ringUp = isUp(ringTip, ringPip);
+  const pinkyUp = isUp(pinkyTip, pinkyPip);
+  const indexDown = indexTip[1] > indexPip[1] + extMargin && indexPip[1] > indexMcp[1] + handSize * 0.02;
+
+  const middleFolded = isFolded(middleTip, middlePip, middleMcp);
+  const ringFolded = isFolded(ringTip, ringPip, ringMcp);
+  const pinkyFolded = isFolded(pinkyTip, pinkyPip, pinkyMcp);
+
+  const thumbRaised = thumbTip[1] < thumbIp[1] && thumbTip[1] < wrist[1] - handSize * 0.1;
+
+  const isolatedIndexUp = indexUp && middleFolded && ringFolded && pinkyFolded;
+  const isolatedIndexDown = indexDown && middleFolded && ringFolded && pinkyFolded;
+  const victory = indexUp && middleUp && !ringUp && !pinkyUp;
+  const openPalm = indexUp && middleUp && ringUp && pinkyUp;
+  const fist = !indexUp && middleFolded && ringFolded && pinkyFolded;
+  const thumbsUp = thumbRaised && !indexUp && middleFolded && ringFolded && pinkyFolded;
+
+  if (isolatedIndexUp) return "I need help.";
+  if (isolatedIndexDown) return "I am okay.";
+  if (thumbsUp) return "Okay, understood.";
+  if (victory) return "Yes.";
+  if (fist) return "No.";
+  if (openPalm) return "Please wait.";
+  return "";
+};
 const EMOJI_GROUPS = [
-  { name: "Smileys", items: ["😀", "😁", "😂", "🤣", "😊", "😍", "😘", "😎", "🤩", "🥳", "😭", "😡"] },
-  { name: "Gestures", items: ["🙏", "👍", "👎", "👏", "🙌", "🤝", "✌️", "🤟", "👌", "💪", "👀", "👋"] },
-  { name: "Hearts", items: ["❤️", "🩷", "🧡", "💛", "💚", "🩵", "💙", "💜", "🖤", "🤍", "💖", "💯"] },
-  { name: "Fun", items: ["🎉", "🔥", "✨", "🌈", "⚡", "🎵", "🎶", "🍿", "☕", "🍕", "🧠", "🎯"] }
+  { name: "Smileys", items: ["??", "??", "??", "??", "??", "??", "??", "??", "??", "??", "??", "??"] },
+  { name: "Gestures", items: ["??", "??", "??", "??", "??", "??", "??", "??", "??", "??", "??", "??"] },
+  { name: "Hearts", items: ["??", "??", "??", "??", "??", "??", "??", "??", "??", "??", "??", "??"] },
+  { name: "Fun", items: ["??", "??", "?", "??", "?", "??", "??", "??", "?", "??", "??", "??"] }
 ];
 const QUICK_EMOJIS = EMOJI_GROUPS.flatMap((group) => group.items);
 const STICKER_PACKS = [
-  { id: "party", label: "Party", value: "🎉🥳🎊" },
-  { id: "love", label: "Love", value: "💖🥰❤️" },
-  { id: "thanks", label: "Thanks", value: "🙏✨😊" },
-  { id: "wow", label: "Wow", value: "🤯🔥👏" },
-  { id: "laugh", label: "LOL", value: "😂🤣😆" },
-  { id: "angry", label: "Angry", value: "😤⚡😡" },
-  { id: "sleepy", label: "Sleepy", value: "😴🌙💤" },
-  { id: "food", label: "Food", value: "🍕🍔🍟" },
-  { id: "coffee", label: "Break", value: "☕🍪🙂" },
-  { id: "victory", label: "Victory", value: "🏆💯🎯" },
-  { id: "coding", label: "Coding", value: "💻⚙️🚀" },
-  { id: "travel", label: "Travel", value: "✈️🌍📸" }
+  { id: "party", label: "Party", value: "??????" },
+  { id: "love", label: "Love", value: "??????" },
+  { id: "thanks", label: "Thanks", value: "?????" },
+  { id: "wow", label: "Wow", value: "??????" },
+  { id: "laugh", label: "LOL", value: "??????" },
+  { id: "angry", label: "Angry", value: "?????" },
+  { id: "sleepy", label: "Sleepy", value: "??????" },
+  { id: "food", label: "Food", value: "??????" },
+  { id: "coffee", label: "Break", value: "?????" },
+  { id: "victory", label: "Victory", value: "??????" },
+  { id: "coding", label: "Coding", value: "??????" },
+  { id: "travel", label: "Travel", value: "??????" }
+];
+const VIDEO_FILTER_PRESETS = [
+  { id: "beauty_soft", label: "Beauty", css: "brightness(1.06) saturate(1.14) contrast(1.05)" },
+  { id: "studio_clear", label: "Studio", css: "brightness(1.08) contrast(1.1) saturate(1.06)" },
+  { id: "porcelain", label: "Porcelain", css: "brightness(1.12) contrast(0.96) saturate(1.08)" },
+  { id: "warm_glow", label: "Warm Glow", css: "brightness(1.08) saturate(1.16) sepia(0.14)" },
+  { id: "golden_hour", label: "Golden Hour", css: "brightness(1.09) saturate(1.2) sepia(0.18) hue-rotate(-8deg)" },
+  { id: "cool_luxe", label: "Cool Luxe", css: "brightness(1.04) contrast(1.1) saturate(0.95) hue-rotate(10deg)" },
+  { id: "vivid_pop", label: "Vivid Pop", css: "brightness(1.08) contrast(1.16) saturate(1.32)" },
+  { id: "cute_blush", label: "Cute Blush", css: "brightness(1.1) contrast(1.02) saturate(1.22) hue-rotate(-12deg)" },
+  { id: "comic_pop", label: "Comic Pop", css: "contrast(1.35) saturate(1.4) brightness(1.05)" },
+  { id: "retro_film", label: "Retro Film", css: "sepia(0.28) contrast(1.08) saturate(0.96) brightness(1.05)" },
+  { id: "mono_classic", label: "Mono Classic", css: "grayscale(1) contrast(1.12) brightness(1.05)" },
+  { id: "cinema_noir", label: "Cinema Noir", css: "grayscale(1) contrast(1.28) brightness(0.92)" }
 ];
 
 const fileToDataUrl = (file) =>
@@ -153,6 +276,8 @@ export default function Chat() {
   const [ringtoneMuted, setRingtoneMuted] = useState(false);
   const [callDurationSec, setCallDurationSec] = useState(0);
   const [callHistoryByContact, setCallHistoryByContact] = useState({});
+  const [videoFilterId, setVideoFilterId] = useState("beauty_soft");
+  const [showVideoFilters, setShowVideoFilters] = useState(false);
   const [bubbleMenu, setBubbleMenu] = useState(null);
   const [showEmojiTray, setShowEmojiTray] = useState(false);
   const [pickerTab, setPickerTab] = useState("emoji");
@@ -202,6 +327,21 @@ export default function Chat() {
   const [soundPrefs, setSoundPrefs] = useState(readSoundPrefs);
   const [hasRemoteVideo, setHasRemoteVideo] = useState(false);
   const [callPhaseNote, setCallPhaseNote] = useState("");
+  const [signAssistEnabled, setSignAssistEnabled] = useState(false);
+  const [signAssistText, setSignAssistText] = useState("");
+  const [signAssistVoiceGender, setSignAssistVoiceGender] = useState("female");
+  const [signAssistAutoSpeak, setSignAssistAutoSpeak] = useState(true);
+  const [signAssistBusy, setSignAssistBusy] = useState(false);
+  const [signAssistStatus, setSignAssistStatus] = useState("");
+  const [blockedUsers, setBlockedUsers] = useState(() => {
+    try {
+      const raw = localStorage.getItem(BLOCKED_USERS_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
 
   const stompRef = useRef(null);
   const peerRef = useRef(null);
@@ -209,6 +349,7 @@ export default function Chat() {
   const remoteStreamRef = useRef(null);
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
+  const remoteAudioRef = useRef(null);
   const callTimeoutRef = useRef(null);
   const callStateRef = useRef(callState);
   const callStartedAtRef = useRef(null);
@@ -232,20 +373,27 @@ export default function Chat() {
   const recordingStreamRef = useRef(null);
   const recordingChunksRef = useRef([]);
   const speechRecognitionRef = useRef(null);
+  const speechFinalTranscriptRef = useRef("");
+  const speechInterimTranscriptRef = useRef("");
+  const speechLastAppliedTextRef = useRef("");
   const headerMenuWrapRef = useRef(null);
   const headerMenuRef = useRef(null);
   const translationCacheRef = useRef({});
   const threadRef = useRef(null);
   const shouldStickToBottomRef = useRef(true);
   const lastThreadItemCountRef = useRef(0);
+  const spokenSignMessageIdsRef = useRef(new Set());
+  const signApiUnavailableRef = useRef(false);
+  const signLocalModelRef = useRef(null);
+  const signLocalModelLoadingRef = useRef(null);
 
   const SPEECH_LANG_OPTIONS = [
     { value: "en-IN", label: "English" },
-    { value: "te-IN", label: "తెలుగు" },
-    { value: "hi-IN", label: "हिन्दी" },
-    { value: "ta-IN", label: "தமிழ்" },
-    { value: "kn-IN", label: "ಕನ್ನಡ" },
-    { value: "ml-IN", label: "മലയാളം" }
+    { value: "te-IN", label: "Telugu" },
+    { value: "hi-IN", label: "Hindi" },
+    { value: "ta-IN", label: "Tamil" },
+    { value: "kn-IN", label: "Kannada" },
+    { value: "ml-IN", label: "Malayalam" }
   ];
   const TRANSLATE_LANG_OPTIONS = [
     { value: "en", label: "English" },
@@ -254,10 +402,25 @@ export default function Chat() {
     { value: "ta", label: "Tamil" },
     { value: "kn", label: "Kannada" },
     { value: "ml", label: "Malayalam" },
+    { value: "mr", label: "Marathi" },
+    { value: "bn", label: "Bengali" },
+    { value: "gu", label: "Gujarati" },
+    { value: "pa", label: "Punjabi" },
     { value: "ur", label: "Urdu" },
     { value: "ar", label: "Arabic" },
     { value: "es", label: "Spanish" },
-    { value: "fr", label: "French" }
+    { value: "fr", label: "French" },
+    { value: "pt", label: "Portuguese" },
+    { value: "de", label: "German" },
+    { value: "it", label: "Italian" },
+    { value: "tr", label: "Turkish" },
+    { value: "ru", label: "Russian" },
+    { value: "id", label: "Indonesian" },
+    { value: "vi", label: "Vietnamese" },
+    { value: "th", label: "Thai" },
+    { value: "ja", label: "Japanese" },
+    { value: "ko", label: "Korean" },
+    { value: "zh", label: "Chinese (Simplified)" }
   ];
 
   useEffect(() => {
@@ -278,6 +441,14 @@ export default function Chat() {
       // ignore
     }
   }, [translatorEnabled, translatorLang]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(BLOCKED_USERS_KEY, JSON.stringify(blockedUsers));
+    } catch {
+      // ignore
+    }
+  }, [blockedUsers]);
 
   const ensureAudioContext = () => {
     if (audioCtxRef.current) return audioCtxRef.current;
@@ -410,16 +581,26 @@ export default function Chat() {
 
   const playCustomRingtoneLoop = () => {
     if (soundPrefs.ringtoneSound !== "custom") return false;
-    const src = String(soundPrefs.customRingtoneDataUrl || "").trim();
+    const src = String(soundPrefs.customRingtoneDataUrl || soundPrefs.customRingtoneUrl || "").trim();
     if (!src) return false;
+    const startSec = Math.max(0, Number(soundPrefs.customRingtoneStartSec) || 0);
+    const durationSec = Math.max(2, Number(soundPrefs.customRingtoneDurationSec) || 20);
+    const endSec = startSec + durationSec;
     try {
       if (!customRingtoneAudioRef.current) {
         customRingtoneAudioRef.current = new Audio(src);
       }
       const audio = customRingtoneAudioRef.current;
       if (audio.src !== src) audio.src = src;
-      audio.loop = true;
+      audio.loop = false;
       audio.volume = 0.95;
+      audio.currentTime = startSec;
+      audio.ontimeupdate = () => {
+        if (audio.currentTime >= endSec) {
+          audio.currentTime = startSec;
+          void audio.play();
+        }
+      };
       void audio.play();
       return true;
     } catch {
@@ -532,6 +713,34 @@ export default function Chat() {
 
     return () => clearInterval(timer);
   }, [callState.phase]);
+
+  useEffect(() => {
+    if (callState.phase === "idle" || callState.mode !== "video") {
+      setShowVideoFilters(false);
+    }
+  }, [callState.phase, callState.mode]);
+
+  useEffect(() => {
+    const localStream = localStreamRef.current;
+    const localEl = localVideoRef.current;
+    if (localEl && localStream && localEl.srcObject !== localStream) {
+      localEl.srcObject = localStream;
+      localEl.play?.().catch(() => {});
+    }
+
+    const remoteStream = remoteStreamRef.current;
+    const remoteVideoEl = remoteVideoRef.current;
+    if (remoteVideoEl && remoteStream && remoteVideoEl.srcObject !== remoteStream) {
+      remoteVideoEl.srcObject = remoteStream;
+      remoteVideoEl.play?.().catch(() => {});
+    }
+
+    const remoteAudioEl = remoteAudioRef.current;
+    if (remoteAudioEl && remoteStream && remoteAudioEl.srcObject !== remoteStream) {
+      remoteAudioEl.srcObject = remoteStream;
+      remoteAudioEl.play?.().catch(() => {});
+    }
+  }, [callState.phase, callState.mode]);
 
   useEffect(() => {
     const unlockAudio = () => {
@@ -816,6 +1025,7 @@ export default function Chat() {
     remoteStreamRef.current = null;
     if (localVideoRef.current) localVideoRef.current.srcObject = null;
     if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
+    if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
     setHasRemoteVideo(false);
     setCallPhaseNote("");
     setIsMuted(false);
@@ -833,7 +1043,7 @@ export default function Chat() {
 
   const finishCall = (notifyPeer = false, reason = "") => {
     const current = callStateRef.current;
-    const hasActiveCall = current.phase !== "idle" || !!current.peerId;
+
     if (current.peerId) {
       const normalized = String(reason || "").toLowerCase();
       const status = normalized.includes("no answer")
@@ -859,10 +1069,7 @@ export default function Chat() {
     closePeer();
     resetMedia();
     callConnectedLoggedRef.current = false;
-    // Keep pending incoming offer visible when stale callbacks try to end a non-active call.
-    if (hasActiveCall) {
-      setIncomingCall(null);
-    }
+        setIncomingCall(null);
     setCallState({ phase: "idle", mode: "audio", peerId: "", peerName: "", initiatedByMe: false });
     if (reason) {
       setCallError(reason);
@@ -902,6 +1109,10 @@ export default function Chat() {
     if (remoteVideoRef.current) {
       remoteVideoRef.current.srcObject = remoteStream;
       remoteVideoRef.current.play?.().catch(() => {});
+    }
+    if (remoteAudioRef.current) {
+      remoteAudioRef.current.srcObject = remoteStream;
+      remoteAudioRef.current.play?.().catch(() => {});
     }
 
     const markConnected = () => {
@@ -958,6 +1169,10 @@ export default function Chat() {
       if (remoteVideoRef.current) {
         remoteVideoRef.current.srcObject = remoteStream;
         remoteVideoRef.current.play?.().catch(() => {});
+      }
+      if (remoteAudioRef.current) {
+        remoteAudioRef.current.srcObject = remoteStream;
+        remoteAudioRef.current.play?.().catch(() => {});
       }
       markConnected();
     };
@@ -1183,15 +1398,15 @@ export default function Chat() {
     }, senderId);
     const preview =
       nextMessage.audioUrl
-        ? "🎤 Voice message"
+        ? "?? Voice message"
         : nextMessage.mediaType === "image"
-          ? "📷 Photo"
+          ? "?? Photo"
           : nextMessage.mediaType === "video"
-            ? "🎬 Video"
+            ? "?? Video"
             : nextMessage.mediaType === "audio"
-              ? "🎤 Voice message"
+              ? "?? Voice message"
               : nextMessage.mediaUrl
-                ? `📎 ${nextMessage.fileName || "File"}`
+                ? `?? ${nextMessage.fileName || "File"}`
                 : text;
 
     setMessagesByContact((prev) => {
@@ -1796,6 +2011,16 @@ export default function Chat() {
     };
   }, [newChatQuery]);
 
+  const isBlockedContact = (contact) => {
+    const contactIdValue = String(contact?.id || "").trim();
+    const emailValue = String(contact?.email || "").trim().toLowerCase();
+    return blockedUsers.some((user) => {
+      const blockedId = String(user?.id || "").trim();
+      const blockedEmail = String(user?.email || "").trim().toLowerCase();
+      return (contactIdValue && blockedId && contactIdValue === blockedId) || (emailValue && blockedEmail && emailValue === blockedEmail);
+    });
+  };
+
   const filteredContacts = useMemo(() => {
     const q = query.trim().toLowerCase();
     const local = !q
@@ -1811,9 +2036,10 @@ export default function Chat() {
     return Array.from(merged.values()).filter((c) => {
       if (c.id === myUserId) return false;
       if (lowerEmail && String(c.email || "").toLowerCase() === lowerEmail) return false;
+      if (isBlockedContact(c)) return false;
       return true;
     });
-  }, [contacts, query, sidebarSearchUsers, myUserId, myEmail]);
+  }, [contacts, query, sidebarSearchUsers, myUserId, myEmail, blockedUsers]);
 
   const newChatCandidates = useMemo(() => {
     const q = newChatQuery.trim().toLowerCase();
@@ -1830,14 +2056,19 @@ export default function Chat() {
     return Array.from(merged.values()).filter((c) => {
       if (c.id === myUserId) return false;
       if (lowerEmail && String(c.email || "").toLowerCase() === lowerEmail) return false;
+      if (isBlockedContact(c)) return false;
       return true;
     });
-  }, [contacts, newChatQuery, searchUsers, myUserId, myEmail]);
+  }, [contacts, newChatQuery, searchUsers, myUserId, myEmail, blockedUsers]);
 
   const openContact = (contact) => {
     const c = mapUserToContact(contact);
     if (!c.id || c.id === myUserId || (myEmail && c.email && c.email.toLowerCase() === myEmail.toLowerCase())) {
       setError("Cannot chat/call with your own account.");
+      return;
+    }
+    if (isBlockedContact(c)) {
+      setError("This user is blocked.");
       return;
     }
     setContacts((prev) => mergeContacts(prev, [c]));
@@ -1852,6 +2083,7 @@ export default function Chat() {
   };
 
   const activeContact = contacts.find((c) => c.id === activeContactId) || null;
+  const activeContactBlocked = activeContact ? isBlockedContact(activeContact) : false;
   const activeMessages = messagesByContact[activeContactId] || [];
   const isConversationRoute = Boolean(contactId);
   const activeCallHistory = Array.isArray(callHistoryByContact[activeContactId])
@@ -1897,18 +2129,26 @@ export default function Chat() {
       ? formatLastSeen(peerLatestActivityTs)
       : "lastseen recently";
 
-  const sendMessage = async () => {
-    const text = inputText.trim();
-    if (!text || !activeContactId) return;
-    if (isSpeechTyping) stopSpeechTyping();
+  const sendTextPayload = async (text, options = {}) => {
+    const cleanText = String(text || "").trim();
+    if (!cleanText || !activeContactId) return false;
     if (activeContactId === myUserId) {
       setError("Cannot send message to your own account.");
-      return;
+      return false;
     }
 
-    setInputText("");
-    setShowEmojiTray(false);
-    setTimeout(() => composerInputRef.current?.focus(), 0);
+    const {
+      clearComposer = false,
+      previewText = cleanText,
+      onSent = null
+    } = options;
+
+    if (clearComposer) {
+      if (isSpeechTyping) stopSpeechTyping();
+      setInputText("");
+      setShowEmojiTray(false);
+      setTimeout(() => composerInputRef.current?.focus(), 0);
+    }
 
     try {
       if (chatFallbackMode) {
@@ -1916,7 +2156,7 @@ export default function Chat() {
           id: Date.now(),
           senderId: Number(myUserId) || null,
           receiverId: Number(activeContactId) || null,
-          text,
+          text: cleanText,
           speechTyped: false,
           createdAt: new Date().toISOString(),
           mine: true
@@ -1927,18 +2167,19 @@ export default function Chat() {
         all[key] = nextList;
         writeLocalChat(all);
         setMessagesByContact((prev) => ({ ...prev, [activeContactId]: nextList }));
-        setContacts((prev) => prev.map((c) => (c.id === activeContactId ? { ...c, lastMessage: text } : c)));
+        setContacts((prev) => prev.map((c) => (c.id === activeContactId ? { ...c, lastMessage: previewText } : c)));
         setError("Server chat unavailable on this backend. Using local chat mode.");
         shouldStickToBottomRef.current = true;
         setTimeout(() => scrollThreadToBottom("smooth"), 50);
-        return;
+        if (typeof onSent === "function") onSent();
+        return true;
       }
 
-      const res = await api.post(`/api/chat/${activeContactId}/send`, { text });
+      const res = await api.post(`/api/chat/${activeContactId}/send`, { text: cleanText });
       const sent = normalizeMessage(
         {
           ...(res?.data || {}),
-          text,
+          text: cleanText,
           speechTyped: false,
           mine: true,
           senderId: myUserId,
@@ -1951,9 +2192,11 @@ export default function Chat() {
         ...prev,
         [activeContactId]: [...(prev[activeContactId] || []), sent]
       }));
-      setContacts((prev) => prev.map((c) => (c.id === activeContactId ? { ...c, lastMessage: text } : c)));
+      setContacts((prev) => prev.map((c) => (c.id === activeContactId ? { ...c, lastMessage: previewText } : c)));
       shouldStickToBottomRef.current = true;
       setTimeout(() => scrollThreadToBottom("smooth"), 50);
+      if (typeof onSent === "function") onSent();
+      return true;
     } catch (err) {
       console.error(err);
       const status = err?.response?.status;
@@ -1968,12 +2211,269 @@ export default function Chat() {
       } else {
         setError("Message failed to send");
       }
+      return false;
     }
   };
+
+  const sendMessage = async () => {
+    const text = inputText.trim();
+    if (!text) return;
+    await sendTextPayload(text, { clearComposer: true });
+  };
+
+  const sendSignAssistMessage = async () => {
+    const plainText = String(signAssistText || "").trim();
+    if (!plainText) {
+      setSignAssistStatus("Type translated sign text first.");
+      return;
+    }
+    const payloadText = encodeSignAssistText(plainText, signAssistVoiceGender, "video-call");
+    if (!payloadText) {
+      setSignAssistStatus("Unable to prepare sign message.");
+      return;
+    }
+
+    const ok = await sendTextPayload(payloadText, {
+      previewText: `Sign: ${plainText}`,
+      onSent: () => {
+        setSignAssistStatus("Sign message sent.");
+        setSignAssistText("");
+      }
+    });
+
+    if (!ok) {
+      setSignAssistStatus("Failed to send sign message.");
+    }
+  };
+
+  const detectLocalSignText = async (videoEl) => {
+    if (!videoEl || !videoEl.videoWidth || !videoEl.videoHeight) return "";
+    try {
+      await loadExternalScript(SIGN_LOCAL_TF_SCRIPT, "tfjs-chat-sign");
+      await loadExternalScript(SIGN_LOCAL_HANDPOSE_SCRIPT, "handpose-chat-sign");
+      if (!window?.handpose) return "";
+
+      if (!signLocalModelRef.current) {
+        if (!signLocalModelLoadingRef.current) {
+          signLocalModelLoadingRef.current = window.handpose.load();
+        }
+        signLocalModelRef.current = await signLocalModelLoadingRef.current;
+      }
+
+      const predictions = await signLocalModelRef.current.estimateHands(videoEl, true);
+      if (!Array.isArray(predictions) || predictions.length === 0) return "";
+      return inferLocalSignText(predictions[0]?.landmarks || []);
+    } catch {
+      return "";
+    }
+  };
+
+  const captureSignAssistFromVideo = async () => {
+    const video = localVideoRef.current;
+    if (!video || !video.videoWidth || !video.videoHeight) {
+      setSignAssistStatus("Camera feed not ready. Keep camera on and try again.");
+      return;
+    }
+
+    setSignAssistBusy(true);
+    setSignAssistStatus("Capturing sign frame...");
+
+    try {
+      const canvas = document.createElement("canvas");
+      const maxW = 640;
+      const scale = Math.min(1, maxW / video.videoWidth);
+      canvas.width = Math.max(160, Math.floor(video.videoWidth * scale));
+      canvas.height = Math.max(120, Math.floor(video.videoHeight * scale));
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("No canvas context");
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const data = img?.data || [];
+      let sum = 0;
+      for (let i = 0; i < data.length; i += 16) {
+        sum += (data[i] + data[i + 1] + data[i + 2]) / 3;
+      }
+      const samples = Math.max(1, Math.floor(data.length / 16));
+      const avg = sum / samples;
+      const draft =
+        avg < 45
+          ? "Please turn on more light. I am trying to sign."
+          : avg < 85
+            ? "I am signing now. Please watch and confirm."
+            : "I am signing a message. Please review and respond.";
+
+      if (signApiUnavailableRef.current) {
+        const localDetected = await detectLocalSignText(video);
+        if (localDetected) {
+          setSignAssistText(localDetected);
+          setSignAssistStatus("Sign detected locally. Review and send.");
+        } else {
+          setSignAssistText((prev) => String(prev || "").trim() || draft);
+          setSignAssistStatus("Sign draft ready. Edit and send.");
+        }
+        return;
+      }
+
+      const blob = await new Promise((resolve, reject) => {
+        canvas.toBlob((b) => {
+          if (b) resolve(b);
+          else reject(new Error("Frame capture failed"));
+        }, "image/jpeg", 0.9);
+      });
+
+      const defaultBase = String(api?.defaults?.baseURL || "").replace(/\/+$/, "");
+      const envBase = String(getApiBaseUrl() || "").replace(/\/+$/, "");
+      const baseCandidates = [
+        defaultBase,
+        envBase,
+        "http://localhost:8080",
+        "http://127.0.0.1:8080",
+        "https://socialsea.co.in"
+      ].filter((v, i, arr) => v && arr.indexOf(v) === i);
+
+      const endpointCandidates = [
+        "/api/accessibility/sign-to-text",
+        "/api/sign-language/translate",
+        "/api/sign-to-text"
+      ];
+
+      let translated = "";
+      let success = false;
+      let onlyMissingRoutes = true;
+
+      for (const base of baseCandidates) {
+        if (success) break;
+        for (const endpoint of endpointCandidates) {
+          const form = new FormData();
+          form.append("frame", blob, "sign-frame.jpg");
+          form.append("lang", speechLang || "en-IN");
+          form.append("contactId", String(activeContactId || ""));
+          try {
+            const res = await api.post(endpoint, form, {
+              baseURL: base,
+              headers: { "Content-Type": "multipart/form-data" },
+              suppressAuthRedirect: true
+            });
+            translated = String(
+              res?.data?.text ||
+              res?.data?.translation ||
+              res?.data?.message ||
+              ""
+            ).trim();
+            success = true;
+            signApiUnavailableRef.current = false;
+            break;
+          } catch (err) {
+            const status = Number(err?.response?.status || 0);
+            if (!(status === 404 || status === 405 || status === 0)) {
+              onlyMissingRoutes = false;
+            }
+          }
+        }
+      }
+
+      if (translated) {
+        setSignAssistText(translated);
+        setSignAssistStatus("Sign translated. Review and send.");
+      } else {
+        if (success) {
+          setSignAssistStatus("No text detected. Try better lighting/hand visibility.");
+        } else {
+          const localDetected = await detectLocalSignText(video);
+          if (localDetected) {
+            setSignAssistText(localDetected);
+            setSignAssistStatus("Sign detected locally. Review and send.");
+            return;
+          }
+          setSignAssistText((prev) => String(prev || "").trim() || draft);
+          if (onlyMissingRoutes) {
+            signApiUnavailableRef.current = true;
+            setSignAssistStatus("Sign draft ready. Edit and send.");
+          } else {
+            setSignAssistStatus("Sign draft ready. Edit and send.");
+          }
+        }
+      }
+    } catch {
+      setSignAssistStatus("Capture complete. Edit the draft and send.");
+    } finally {
+      setSignAssistBusy(false);
+    }
+  };
+
+  const speakSignAssistText = (text, voiceGender = "neutral") => {
+    const cleanText = String(text || "").trim();
+    if (!cleanText || !("speechSynthesis" in window)) return;
+
+    const synth = window.speechSynthesis;
+    const utter = new SpeechSynthesisUtterance(cleanText);
+    utter.lang = speechLang || "en-IN";
+
+    const voices = synth.getVoices ? synth.getVoices() : [];
+    const gender = String(voiceGender || "neutral").toLowerCase();
+    const femaleHints = ["female", "woman", "zira", "susan", "samantha", "heera", "kalpana"];
+    const maleHints = ["male", "man", "david", "mark", "alex", "ravi", "hemant"];
+    const hints = gender === "female" ? femaleHints : gender === "male" ? maleHints : [];
+
+    let picked = null;
+    if (hints.length) {
+      picked = voices.find((v) => hints.some((h) => String(v?.name || "").toLowerCase().includes(h)));
+    }
+    if (!picked) {
+      picked = voices.find((v) => String(v?.lang || "").toLowerCase().startsWith("en")) || voices[0] || null;
+    }
+    if (picked) utter.voice = picked;
+
+    try {
+      synth.speak(utter);
+    } catch {
+      // ignore speech failures
+    }
+  };
+
+  useEffect(() => {
+    if (!signAssistAutoSpeak || !activeContactId) return;
+
+    activeMessages.forEach((msg) => {
+      if (!msg || msg.mine) return;
+      const msgId = String(msg?.id || "");
+      if (!msgId || spokenSignMessageIdsRef.current.has(msgId)) return;
+      const payload = decodeSignAssistText(msg?.text || "");
+      if (!payload?.text) return;
+
+      spokenSignMessageIdsRef.current.add(msgId);
+      speakSignAssistText(payload.text, payload.voiceGender || "neutral");
+    });
+  }, [activeMessages, activeContactId, signAssistAutoSpeak, speechLang]);
 
   const goToProfile = (contact) => {
     if (!contact?.id) return;
     navigate(`/profile/${contact.id}`);
+  };
+
+  const blockActiveContact = () => {
+    if (!activeContact?.id) return;
+    const payload = {
+      id: Number(activeContact.id) || activeContact.id,
+      name: activeContact.name || "User",
+      email: activeContact.email || "",
+      profilePic: activeContact.profilePic || ""
+    };
+    setBlockedUsers((prev) => {
+      if (prev.some((user) => String(user?.id || "") === String(payload.id))) return prev;
+      return [payload, ...prev];
+    });
+    setContacts((prev) => prev.filter((contact) => String(contact?.id || "") !== String(activeContact.id)));
+    setMessagesByContact((prev) => {
+      const next = { ...prev };
+      delete next[String(activeContact.id)];
+      return next;
+    });
+    setShowHeaderMenu(false);
+    setActiveContactId("");
+    navigate("/chat");
+    setError(`${payload.name} blocked. Manage blocked users in Settings.`);
   };
 
   const addComposerText = (text) => {
@@ -2083,7 +2583,7 @@ export default function Chat() {
         : kind === "video"
           ? "[Video]"
           : kind === "audio"
-            ? "🎤 Voice message"
+            ? "?? Voice message"
             : "[File]");
     const localTempId = `local_media_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const localPreview = normalizeMessage({
@@ -2122,7 +2622,7 @@ export default function Chat() {
       setContacts((prev) =>
         prev.map((c) => (
           c.id === activeContactId
-            ? { ...c, lastMessage: sent.text || (kind === "audio" ? "🎤 Voice message" : "[File]") }
+            ? { ...c, lastMessage: sent.text || (kind === "audio" ? "?? Voice message" : "[File]") }
             : c
         ))
       );
@@ -2183,12 +2683,36 @@ export default function Chat() {
       recognition.maxAlternatives = 1;
 
       recognition.onresult = (event) => {
-        const chunks = [];
-        for (let i = 0; i < event.results.length; i += 1) {
-          const part = String(event.results[i]?.[0]?.transcript || "").trim();
-          if (part) chunks.push(part);
+        let interim = "";
+
+        for (let i = event.resultIndex; i < event.results.length; i += 1) {
+          const result = event.results[i];
+          const part = String(result?.[0]?.transcript || "").trim();
+          if (!part) continue;
+
+          if (result.isFinal) {
+            const currentFinal = speechFinalTranscriptRef.current;
+            const normalizedCurrent = currentFinal.toLowerCase();
+            const normalizedPart = part.toLowerCase();
+
+            // Avoid appending duplicated final chunks produced by continuous recognition.
+            if (!normalizedCurrent.endsWith(normalizedPart)) {
+              speechFinalTranscriptRef.current = `${currentFinal} ${part}`.replace(/\s+/g, " ").trim();
+            }
+          } else {
+            interim = `${interim} ${part}`.replace(/\s+/g, " ").trim();
+          }
         }
-        setInputText(chunks.join(" ").replace(/\s+/g, " ").trim());
+
+        speechInterimTranscriptRef.current = interim;
+        const combined = `${speechFinalTranscriptRef.current} ${speechInterimTranscriptRef.current}`
+          .replace(/\s+/g, " ")
+          .trim();
+
+        if (combined !== speechLastAppliedTextRef.current) {
+          speechLastAppliedTextRef.current = combined;
+          setInputText(combined);
+        }
       };
 
       recognition.onerror = (event) => {
@@ -2205,6 +2729,9 @@ export default function Chat() {
         setIsSpeechTyping(false);
       };
 
+      speechFinalTranscriptRef.current = "";
+      speechInterimTranscriptRef.current = "";
+      speechLastAppliedTextRef.current = "";
       speechRecognitionRef.current = recognition;
       recognition.start();
       setError("");
@@ -2326,7 +2853,7 @@ export default function Chat() {
 
         const ext = mimeType.includes("mp4") ? "m4a" : mimeType.includes("ogg") ? "ogg" : "webm";
         const file = new File([blob], `voice-note-${Date.now()}.${ext}`, { type: mimeType });
-        await sendMediaFile(file, { forcedKind: "audio", previewText: "🎤 Voice message" });
+        await sendMediaFile(file, { forcedKind: "audio", previewText: "?? Voice message" });
         setTimeout(() => composerInputRef.current?.focus(), 0);
       };
 
@@ -2344,19 +2871,16 @@ export default function Chat() {
 
   const callActive = callState.phase !== "idle";
   const showVideoCallScreen = callActive && callState.mode === "video";
+  const activeVideoFilter = useMemo(
+    () => VIDEO_FILTER_PRESETS.find((preset) => preset.id === videoFilterId) || VIDEO_FILTER_PRESETS[0],
+    [videoFilterId]
+  );
   const callStatusText = callPhaseNote || (callState.phase === "in-call" ? "Connected" : "Connecting...");
   const callLabel = incomingCall
     ? `${incomingCall.mode === "video" ? "Video" : "Audio"} call from ${incomingCall.fromName}`
     : callActive
       ? `${callState.mode === "video" ? "Video" : "Audio"} call with ${callState.peerName || "User"}`
       : "";
-  const formatCallTime = (iso) => {
-    try {
-      return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    } catch {
-      return "";
-    }
-  };
   const formatCallStatus = (entry) => {
     const mode = entry?.mode === "video" ? "video call" : "voice call";
     const status = String(entry?.status || "ended");
@@ -2370,47 +2894,62 @@ export default function Chat() {
       busy: "busy",
       ended: "ended"
     };
-    return `${mode} • ${suffixMap[status] || status}`;
+    return `${mode} ? ${suffixMap[status] || status}`;
   };
 
   const formatCallCard = (entry) => {
     const incoming = entry?.direction === "incoming";
-    const modeLabel = entry?.mode === "video" ? "video call" : "voice call";
-    const status = String(entry?.status || "ended");
+    const isVideo = entry?.mode === "video";
+    const modeLabel = isVideo ? "video call" : "voice call";
+    const status = String(entry?.status || "ended").toLowerCase();
+    const title = modeLabel[0].toUpperCase() + modeLabel.slice(1);
 
     if (status === "missed") {
       return {
         title: `Missed ${modeLabel}`,
-        subtitle: incoming ? "Tap to call back" : "No answer"
+        subtitle: incoming ? "Tap to call back" : "No answer",
+        tone: "danger",
+        icon: "off"
       };
     }
     if (status === "declined") {
       return {
         title: `Declined ${modeLabel}`,
-        subtitle: incoming ? "You declined" : "Declined by recipient"
+        subtitle: incoming ? "You declined" : "Declined by recipient",
+        tone: "danger",
+        icon: "off"
       };
     }
     if (status === "connected" || status === "accepted") {
       return {
-        title: modeLabel[0].toUpperCase() + modeLabel.slice(1),
-        subtitle: "Connected"
+        title,
+        subtitle: "Connected",
+        tone: "info",
+        icon: isVideo ? "video" : "phone"
       };
     }
     if (status === "calling" || status === "ringing") {
       return {
-        title: modeLabel[0].toUpperCase() + modeLabel.slice(1),
-        subtitle: status === "calling" ? "Calling..." : "Ringing..."
+        title,
+        subtitle: status === "calling" ? "Calling..." : "Ringing...",
+        tone: "success",
+        icon: isVideo ? "video" : "phone"
       };
     }
     if (status === "busy") {
       return {
-        title: `${modeLabel[0].toUpperCase() + modeLabel.slice(1)} busy`,
-        subtitle: "User is busy"
+        title: `${title} busy`,
+        subtitle: "User is busy",
+        tone: "danger",
+        icon: "off"
       };
     }
+
     return {
-      title: modeLabel[0].toUpperCase() + modeLabel.slice(1),
-      subtitle: "Ended"
+      title,
+      subtitle: "Ended",
+      tone: "danger",
+      icon: "off"
     };
   };
   const formatMessageTime = (value) => {
@@ -2440,26 +2979,89 @@ export default function Chat() {
     if (!raw || !lang) return raw;
     const cacheKey = `${lang}|${raw}`;
     if (translationCacheRef.current[cacheKey]) return translationCacheRef.current[cacheKey];
+
+    const decodeHtmlEntities = (value) =>
+      String(value || "")
+        .replace(/&quot;/g, "\"")
+        .replace(/&#39;/g, "'")
+        .replace(/&amp;/g, "&")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">");
+
+    const protectPattern = /(https?:\/\/\S+|www\.\S+|[\w.+-]+@[\w.-]+\.\w+|[@#][\w_]+)/g;
+    const protectedParts = [];
+    const protectedRaw = raw.replace(protectPattern, (match) => {
+      const token = `__SS_TOKEN_${protectedParts.length}__`;
+      protectedParts.push(match);
+      return token;
+    });
+
+    const splitText = (value, maxLen = 900) => {
+      const input = String(value || "").trim();
+      if (!input) return [];
+      if (input.length <= maxLen) return [input];
+      const chunks = [];
+      let remaining = input;
+      while (remaining.length > maxLen) {
+        const piece = remaining.slice(0, maxLen);
+        const splitAt = Math.max(
+          piece.lastIndexOf(". "),
+          piece.lastIndexOf("! "),
+          piece.lastIndexOf("? "),
+          piece.lastIndexOf(", "),
+          piece.lastIndexOf(" ")
+        );
+        const end = splitAt > 160 ? splitAt + 1 : maxLen;
+        chunks.push(remaining.slice(0, end).trim());
+        remaining = remaining.slice(end).trim();
+      }
+      if (remaining) chunks.push(remaining);
+      return chunks;
+    };
+
+    const restoreProtected = (value) => {
+      let out = String(value || "");
+      protectedParts.forEach((part, idx) => {
+        out = out.replace(new RegExp(`__SS_TOKEN_${idx}__`, "g"), part);
+      });
+      return out;
+    };
+
+    const translateChunks = async (translatorFn) => {
+      const chunks = splitText(protectedRaw, 900);
+      if (!chunks.length) return "";
+      const translatedParts = [];
+      for (const chunk of chunks) {
+        const next = await translatorFn(chunk);
+        translatedParts.push(next);
+      }
+      return translatedParts.join(" ").replace(/\s+/g, " ").trim();
+    };
+
     const providers = [
       async () => {
-        const url =
-          `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${encodeURIComponent(lang)}&dt=t&q=${encodeURIComponent(raw)}`;
-        const res = await fetch(url);
-        if (!res.ok) throw new Error(`google translate failed: ${res.status}`);
-        const data = await res.json();
-        const translated = Array.isArray(data?.[0])
-          ? data[0].map((chunk) => String(chunk?.[0] || "")).join("").trim()
-          : "";
-        return translated || "";
+        return translateChunks(async (chunk) => {
+          const url =
+            `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${encodeURIComponent(lang)}&dt=t&q=${encodeURIComponent(chunk)}`;
+          const res = await fetch(url);
+          if (!res.ok) throw new Error(`google translate failed: ${res.status}`);
+          const data = await res.json();
+          const translated = Array.isArray(data?.[0])
+            ? data[0].map((item) => String(item?.[0] || "")).join("").trim()
+            : "";
+          return translated || "";
+        });
       },
       async () => {
-        const url =
-          `https://api.mymemory.translated.net/get?q=${encodeURIComponent(raw)}&langpair=auto|${encodeURIComponent(lang)}`;
-        const res = await fetch(url);
-        if (!res.ok) throw new Error(`mymemory failed: ${res.status}`);
-        const data = await res.json();
-        const translated = String(data?.responseData?.translatedText || "").trim();
-        return translated || "";
+        return translateChunks(async (chunk) => {
+          const url =
+            `https://api.mymemory.translated.net/get?q=${encodeURIComponent(chunk)}&langpair=auto|${encodeURIComponent(lang)}`;
+          const res = await fetch(url);
+          if (!res.ok) throw new Error(`mymemory failed: ${res.status}`);
+          const data = await res.json();
+          const translated = decodeHtmlEntities(String(data?.responseData?.translatedText || "").trim());
+          return translated || "";
+        });
       }
     ];
 
@@ -2467,8 +3069,9 @@ export default function Chat() {
       try {
         const translated = await provider();
         if (translated) {
-          translationCacheRef.current[cacheKey] = translated;
-          return translated;
+          const restored = restoreProtected(translated);
+          translationCacheRef.current[cacheKey] = restored;
+          return restored;
         }
       } catch {
         // try next provider
@@ -2878,6 +3481,7 @@ export default function Chat() {
 
       {isConversationRoute && (
       <section className="chat-main">
+        <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: "none" }} aria-hidden="true" />
         {incomingCall && (
           <div className="incoming-call-popup" role="dialog" aria-live="polite" aria-label="Incoming call controls">
             <p className="incoming-call-popup-title">
@@ -2903,7 +3507,7 @@ export default function Chat() {
               {callState.mode === "video" ? "Video call" : "Audio call"} with {callState.peerName || "User"}
             </p>
             <p className="active-call-popup-subtitle">
-              {callStatusText} • Total {formatCallDuration(callDurationSec)}
+              {callStatusText} ? Total {formatCallDuration(callDurationSec)}
             </p>
             <div className="active-call-popup-actions">
               <button type="button" className="call-ring-toggle" onClick={toggleMute}>
@@ -2915,13 +3519,25 @@ export default function Chat() {
             </div>
           </div>
         )}
+        {callActive && !incomingCall && (
+          <button
+            type="button"
+            className="call-floating-end"
+            onClick={() => finishCall(true)}
+            title="End call"
+          >
+            <FiPhoneOff /> End call
+          </button>
+        )}
+
         {showVideoCallScreen && (
           <div className="wa-video-call-screen" role="dialog" aria-live="polite" aria-label="Video call screen">
             <video
               ref={remoteVideoRef}
               autoPlay
               playsInline
-              className="wa-video-remote beauty-on"
+              className="wa-video-remote"
+              style={{ filter: activeVideoFilter.css }}
               data-allow-simultaneous="true"
             />
             {!hasRemoteVideo && (
@@ -2935,21 +3551,112 @@ export default function Chat() {
               autoPlay
               playsInline
               muted
-              className="wa-video-local beauty-on"
+              className="wa-video-local"
+              style={{ filter: activeVideoFilter.css }}
               data-allow-simultaneous="true"
             />
             <div className="wa-video-top">
               <p className="wa-video-peer">{callState.peerName || "User"}</p>
               <p className="wa-video-state">
-                {callStatusText} • {formatCallDuration(callDurationSec)}
+                {callStatusText} ? {formatCallDuration(callDurationSec)}
               </p>
             </div>
+            {signAssistEnabled && (
+              <div className="wa-sign-assist-panel" role="region" aria-label="Sign assist">
+                <div className="wa-sign-assist-head">
+                  <strong>Sign Assist</strong>
+                  <label className="wa-sign-assist-auto">
+                    <input
+                      type="checkbox"
+                      checked={signAssistAutoSpeak}
+                      onChange={(e) => setSignAssistAutoSpeak(e.target.checked)}
+                    />
+                    Auto-speak incoming
+                  </label>
+                </div>
+                <div className="wa-sign-assist-row">
+                  <button
+                    type="button"
+                    className="wa-sign-assist-capture"
+                    onClick={captureSignAssistFromVideo}
+                    disabled={signAssistBusy}
+                  >
+                    {signAssistBusy ? "Capturing..." : "Capture Sign"}
+                  </button>
+                  <select
+                    className="wa-sign-assist-gender"
+                    value={signAssistVoiceGender}
+                    onChange={(e) => setSignAssistVoiceGender(e.target.value)}
+                    title="Voice gender"
+                  >
+                    <option value="female">Female voice</option>
+                    <option value="male">Male voice</option>
+                    <option value="neutral">Neutral voice</option>
+                  </select>
+                </div>
+                <textarea
+                  className="wa-sign-assist-input"
+                  rows={2}
+                  placeholder="Type or edit translated sign text..."
+                  value={signAssistText}
+                  onChange={(e) => setSignAssistText(e.target.value)}
+                />
+                <div className="wa-sign-assist-actions">
+                  <button type="button" className="wa-sign-assist-send" onClick={sendSignAssistMessage}>
+                    Send Sign Message
+                  </button>
+                  <button
+                    type="button"
+                    className="wa-sign-assist-toggle"
+                    onClick={() => setSignAssistEnabled(false)}
+                  >
+                    Hide
+                  </button>
+                </div>
+                {signAssistStatus && <p className="wa-sign-assist-status">{signAssistStatus}</p>}
+              </div>
+            )}
+            {showVideoFilters && (
+              <div className="wa-video-filter-panel" role="listbox" aria-label="Video filters">
+                {VIDEO_FILTER_PRESETS.map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    role="option"
+                    aria-selected={videoFilterId === preset.id}
+                    className={`wa-filter-chip ${videoFilterId === preset.id ? "is-selected" : ""}`}
+                    onClick={() => {
+                      setVideoFilterId(preset.id);
+                      setShowVideoFilters(false);
+                    }}
+                    title={preset.label}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="wa-video-controls">
               <button type="button" className="call-control" onClick={toggleMute} title="Mute/Unmute">
                 {isMuted ? <FiMicOff /> : <FiMic />}
               </button>
               <button type="button" className="call-control" onClick={toggleCamera} title="Camera on/off">
                 {isCameraOff ? <FiVideoOff /> : <FiVideo />}
+              </button>
+              <button
+                type="button"
+                className={`call-control ${showVideoFilters ? "is-active" : ""}`}
+                onClick={() => setShowVideoFilters((prev) => !prev)}
+                title="Video filters"
+              >
+                <FiSmile />
+              </button>
+              <button
+                type="button"
+                className={`call-control ${signAssistEnabled ? "is-active" : ""}`}
+                onClick={() => setSignAssistEnabled((prev) => !prev)}
+                title="Sign assist">
+                <MdSignLanguage />
               </button>
               <button type="button" className="call-hangup" onClick={() => finishCall(true)}>
                 <FiPhoneOff />
@@ -3051,6 +3758,14 @@ export default function Chat() {
                         {translatorError && <p className="chat-translate-error">{translatorError}</p>}
                       </>
                     )}
+                    <button
+                      type="button"
+                      className="chat-header-menu-row chat-header-danger-btn"
+                      onClick={blockActiveContact}
+                      disabled={activeContactBlocked}
+                    >
+                      {activeContactBlocked ? "User blocked" : "Block user"}
+                    </button>
                   </div>
                 )}
               </div>
@@ -3147,14 +3862,16 @@ export default function Chat() {
                           </div>
                         ) : (
                           <a className="chat-file-link" href={resolveMediaUrl(item.raw.mediaUrl)} target="_blank" rel="noreferrer">
-                            📎 {item.raw?.fileName || "Download file"}
+                            ?? {item.raw?.fileName || "Download file"}
                           </a>
                         )
                       ) : item.kind === "message" && /^\[Attachment:\s*.+\]$/i.test(String(item.raw?.text || "")) ? (
                         <span className="chat-attachment-text">{String(item.raw?.text || "")}</span>
                       ) : item.kind === "call" ? (
                         <div className="call-card">
-                          <span className="call-dot" aria-hidden="true">📞</span>
+                          <span className={`call-dot ${callCard?.tone ? `is-${callCard.tone}` : ""}`} aria-hidden="true">
+                            {callCard?.icon === "video" ? <FiVideo /> : callCard?.icon === "off" ? <FiPhoneOff /> : <FiPhone />}
+                          </span>
                           <span className="call-card-text">
                             <strong>{callCard?.title || "Call"}</strong>
                             <small>{callCard?.subtitle || ""}</small>
@@ -3162,7 +3879,12 @@ export default function Chat() {
                         </div>
                       ) : (
                         <>
-                          <span>{item.text}</span>
+                          <span>{decodeSignAssistText(item.raw?.text || item.text)?.text || item.text}</span>
+                          {item.kind === "message" && decodeSignAssistText(item.raw?.text || item.text) && (
+                            <small className="chat-sign-assist-badge">
+                              Sign Assist - Voice: {decodeSignAssistText(item.raw?.text || item.text)?.voiceGender || "neutral"}
+                            </small>
+                          )}
                           {item.kind === "message" && canTranslateMessage(item.raw) && translatorEnabled && (() => {
                             const msgKey = String(item.raw?.id || `${item.raw?.createdAt}_${item.raw?.text}`);
                             const translated = String(translatedIncomingById[msgKey] || "").trim();
@@ -3189,7 +3911,7 @@ export default function Chat() {
                         if (!tickState) return null;
                         return (
                           <span className={`chat-read-ticks ${tickState}`} aria-label={tickState}>
-                            {tickState === "sent" ? "✓" : "✓✓"}
+                            {tickState === "sent" ? "?" : "??"}
                           </span>
                         );
                       })()}
@@ -3248,7 +3970,7 @@ export default function Chat() {
                             toggleFavoritePick({ type: "emoji", value: emoji, label: emoji });
                           }}
                         >
-                          ★
+                          ?
                         </button>
                       </div>
                     ))}
@@ -3275,7 +3997,7 @@ export default function Chat() {
                             toggleFavoritePick({ type: "customSticker", value: sticker.id, label: sticker.name || "My sticker" });
                           }}
                         >
-                          ★
+                          ?
                         </button>
                         <button
                           type="button"
@@ -3286,7 +4008,7 @@ export default function Chat() {
                             removeCustomSticker(sticker.id);
                           }}
                         >
-                          ×
+                          ?
                         </button>
                       </div>
                     ))}
@@ -3305,7 +4027,7 @@ export default function Chat() {
                             toggleFavoritePick({ type: "sticker", value: sticker.value, label: sticker.label });
                           }}
                         >
-                          ★
+                          ?
                         </button>
                       </div>
                     ))}
@@ -3315,7 +4037,7 @@ export default function Chat() {
                 {pickerTab === "favorite" && (
                   <div className="sticker-grid" role="listbox" aria-label="Favorite picks">
                     {favoriteItemsForTray.length === 0 && (
-                      <p className="emoji-empty">No favorites yet. Tap ★ to save emojis and stickers.</p>
+                      <p className="emoji-empty">No favorites yet. Tap ? to save emojis and stickers.</p>
                     )}
                     {favoriteItemsForTray.map((fav, idx) => (
                       <div key={`${fav.type}-${fav.value}-${idx}`} className="sticker-chip-wrap">
@@ -3351,7 +4073,7 @@ export default function Chat() {
                             toggleFavoritePick(fav);
                           }}
                         >
-                          ★
+                          ?
                         </button>
                       </div>
                     ))}
@@ -3465,5 +4187,11 @@ export default function Chat() {
     </div>
   );
 }
+
+
+
+
+
+
 
 

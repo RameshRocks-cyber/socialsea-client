@@ -1,4 +1,4 @@
-function normalizeApiUrl(rawValue) {
+﻿function normalizeApiUrl(rawValue) {
   let value = String(rawValue || "").trim();
   if (!value) return "";
   if (value.startsWith("/")) return value.replace(/\/+$/, "");
@@ -36,6 +36,9 @@ function isFrontendLikeHost(host) {
 }
 
 export function getApiBaseUrl() {
+  const forcedUrl = normalizeApiUrl(import.meta.env.VITE_API_BASE_URL);
+  if (forcedUrl && !forcedUrl.startsWith("/")) return forcedUrl;
+
   if (typeof window !== "undefined") {
     const host = String(window.location.hostname || "").toLowerCase();
     if (isFrontendLikeHost(host)) {
@@ -44,17 +47,19 @@ export function getApiBaseUrl() {
     }
     if (host === "localhost" || host === "127.0.0.1") {
       const envUrl = normalizeApiUrl(import.meta.env.VITE_API_URL);
-      // In local dev, a relative "/api" requires Vite proxy.
-      // If proxy is not configured, use backend host directly.
-      if (envUrl && !envUrl.startsWith("/")) return envUrl;
-      return "http://localhost:8080";
+      const envHost = hostFromUrl(envUrl);
+      // In local dev, prefer local backend by default unless forced override is used.
+      if (!envUrl || envUrl.startsWith("/") || isFrontendLikeHost(envHost)) {
+        return "http://localhost:8080";
+      }
+      return envUrl;
     }
   }
 
   const envUrl = normalizeApiUrl(import.meta.env.VITE_API_URL);
   if (envUrl) return envUrl;
 
-  return "https://api.socialsea.co.in";
+  return "https://socialsea.co.in";
 }
 
 export function toApiUrl(path = "") {

@@ -70,6 +70,21 @@ const normalizeUserId = (entry) => {
   return String(user?.id ?? user?.userId ?? "").trim();
 };
 
+const getConnectionIdentityKeys = (entry) => {
+  const user = entry?.user || entry?.sender || entry?.target || entry;
+  const id = String(user?.id ?? user?.userId ?? entry?.id ?? entry?.userId ?? "").trim();
+  const email = String(user?.email ?? entry?.email ?? "").trim().toLowerCase();
+  const username = String(user?.username ?? entry?.username ?? "").trim().toLowerCase();
+  const name = String(user?.name ?? entry?.name ?? "").trim().toLowerCase();
+  const bio = String(user?.bio ?? entry?.bio ?? "").trim().toLowerCase();
+  const keys = [];
+  if (id) keys.push(`id:${id}`);
+  if (email) keys.push(`email:${email}`);
+  if (username) keys.push(`username:${username}`);
+  if (name || bio) keys.push(`profile:${name}|${bio}`);
+  return keys;
+};
+
 const requestWithTimeout = (path, timeoutMs = 4500) =>
   Promise.race([
     api.get(path),
@@ -112,9 +127,12 @@ export default function Profile() {
   const [error, setError] = useState("");
   const [isFollowing, setIsFollowing] = useState(false);
   const [followers, setFollowers] = useState(0);
+  const [followingCount, setFollowingCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [requested] = useState(false);
   const [followError, setFollowError] = useState("");
+  const [postActionError, setPostActionError] = useState("");
+  const [deletingPostIds, setDeletingPostIds] = useState({});
 
   const isOwnProfile =
     username === "me" || Number(username) === Number(myUserId) || profile?.id === Number(myUserId);
@@ -122,85 +140,241 @@ export default function Profile() {
   useEffect(() => {
     let cancelled = false;
     setError("");
+    setPostActionError("");
     setProfile(null);
+    setPosts([]);
 
     if (!username) {
       setError("User not found");
       return undefined;
     }
 
+    const defaultBase = String(api?.defaults?.baseURL || "").replace(/\/+$/, "");
+    const baseCandidates = [
+      defaultBase,
+      "http://localhost:8080",
+      "http://127.0.0.1:8080",
+      "https://socialsea.co.in"
+    ].filter((value, index, arr) => value && arr.indexOf(value) === index);
+
+    const normalizePosts = (items) => {
+      const list = Array.isArray(items) ? items : [];
+      return list
+        .map((post) => {
+          const contentUrl =
+            post?.contentUrl ||
+            post?.mediaUrl ||
+            post?.imageUrl ||
+            post?.videoUrl ||
+            post?.media?.url ||
+            "";
+          const typeRaw = String(post?.type || post?.mediaType || post?.mimeType || "").toLowerCase();
+          const isVideo =
+            post?.reel === true ||
+            typeRaw.includes("video") ||
+            /\.(mp4|webm|ogg|mov|m4v)(\?|$)/i.test(contentUrl);
+          return { ...post, contentUrl, isVideo };
+        })
+        .filter((post) => String(post?.contentUrl || "").trim());
+    };
+
     const loadProfile = async () => {
-      try {
-        const res = await api.get(`/api/profile/${username}`);
-        if (cancelled) return;
-        const data = res.data?.user || res.data || {};
-        setProfile(data);
+      let lastError = null;
+      for (const base of baseCandidates) {
+        try {
+          const res = await api.get(`/api/profile/${username}`, {
+            baseURL: base,
+            suppressAuthRedirect: true
+          });
+          const data = res.data?.user || res.data || {};
+          if (!data || typeof data !== "object" || Object.keys(data).length === 0) {
+            continue;
+          }
 
-        const followKeys = [data?.id, data?.email, data?.username, username];
-        const extracted = extractFollowingFlag(res, data);
-        if (extracted === null) {
-          setIsFollowing(getCachedFollowing(followKeys));
-        } else {
-          setIsFollowing(extracted);
-          updateFollowCache(followKeys, extracted);
-        }
+          if (cancelled) return null;
+          setProfile(data);
 
-        const followerCount = Number(
-          data?.followers ??
-          data?.followersCount ??
-          res.data?.followers ??
-          res.data?.followersCount ??
-          0
-        ) || 0;
-        setFollowers(Math.max(0, followerCount));
+          const followKeys = [data?.id, data?.email, data?.username, username];
+          const extracted = extractFollowingFlag(res, data);
+          if (extracted === null) {
+            setIsFollowing(getCachedFollowing(followKeys));
+          } else {
+            setIsFollowing(extracted);
+            updateFollowCache(followKeys, extracted);
+          }
 
-        // Fallback: if API profile payload does not include following relationship,
-        // infer it from viewer's following list.
-        if (extracted === null && !isOwnProfile && myUserId) {
-          const viewerCandidates = [myUserId, myEmail].filter(Boolean);
-          const targetId = String(data?.id || "").trim();
-          const paths = viewerCandidates
-            .flatMap((id) => getPathCandidates(id, "following"))
-            .filter((path, index, arr) => arr.indexOf(path) === index);
-          const responses = await Promise.allSettled(paths.map((path) => requestWithTimeout(path)));
-          for (const result of responses) {
-            if (result.status !== "fulfilled") continue;
-            const list = pickList(result.value?.data, "following");
-            if (!Array.isArray(list)) continue;
-            const found = list.some((entry) => normalizeUserId(entry) === targetId);
-            if (found) {
-              if (!cancelled) setIsFollowing(true);
-              updateFollowCache(followKeys, true);
-              break;
+          const followerCount = Number(
+            data?.followers ??
+            data?.followersCount ??
+            res.data?.followers ??
+            res.data?.followersCount ??
+            0
+          ) || 0;
+          setFollowers(Math.max(0, followerCount));
+          const initialFollowingCount = Number(
+            data?.following ??
+            data?.followingCount ??
+            res.data?.following ??
+            res.data?.followingCount ??
+            0
+          ) || 0;
+          setFollowingCount(Math.max(0, initialFollowingCount));
+
+          const ownProfile =
+            username === "me" || Number(username) === Number(myUserId) || data?.id === Number(myUserId);
+
+          if (extracted === null && !ownProfile && myUserId) {
+            const viewerCandidates = [myUserId, myEmail].filter(Boolean);
+            const targetId = String(data?.id || "").trim();
+            const paths = viewerCandidates
+              .flatMap((id) => getPathCandidates(id, "following"))
+              .filter((path, index, arr) => arr.indexOf(path) === index);
+            const responses = await Promise.allSettled(paths.map((path) => requestWithTimeout(path)));
+            for (const result of responses) {
+              if (result.status !== "fulfilled") continue;
+              const list = pickList(result.value?.data, "following");
+              if (!Array.isArray(list)) continue;
+              const found = list.some((entry) => normalizeUserId(entry) === targetId);
+              if (found) {
+                if (!cancelled) setIsFollowing(true);
+                updateFollowCache(followKeys, true);
+                break;
+              }
             }
           }
+
+          return { base, profileId: data?.id, profileData: data };
+        } catch (err) {
+          lastError = err;
         }
-      } catch (err) {
-        console.error(err);
-        if (err?.response?.status === 401) {
-          navigate("/login");
-          return;
-        }
-        if (!cancelled) setError("User not found");
       }
+
+      if (lastError?.response?.status === 401) {
+        navigate("/login");
+        return null;
+      }
+      if (!cancelled) setError("User not found");
+      return null;
     };
 
-    const loadPosts = async () => {
-      try {
-        const res = await api.get(`/api/profile/${username}/posts`);
-        if (!cancelled) setPosts(Array.isArray(res.data) ? res.data : []);
-      } catch (err) {
-        console.error(err);
-        if (!cancelled) setPosts([]);
+    const fetchConnectionCount = async (kind, profileData) => {
+      const ids = [
+        username,
+        profileData?.id,
+        profileData?.email,
+        profileData?.username,
+        username === "me" ? "me" : null,
+        username === "me" ? myUserId : null,
+        username === "me" ? myEmail : null
+      ]
+        .map((v) => String(v || "").trim())
+        .filter(Boolean)
+        .filter((v, i, arr) => arr.indexOf(v) === i);
+
+      const endpoints = ids.flatMap((id) => getPathCandidates(id, kind))
+        .filter((path, i, arr) => arr.indexOf(path) === i);
+
+      let bestCount = 0;
+      let hasPayload = false;
+      for (const base of baseCandidates) {
+        for (const endpoint of endpoints) {
+          try {
+            const res = await api.get(endpoint, {
+              baseURL: base,
+              suppressAuthRedirect: true,
+              skipAuth: true,
+              skipRefresh: true
+            });
+            const list = pickList(res?.data, kind);
+            if (!Array.isArray(list)) continue;
+            hasPayload = true;
+            const unique = new Set(list.flatMap((entry) => getConnectionIdentityKeys(entry)).filter(Boolean));
+            if (unique.size > bestCount) bestCount = unique.size;
+          } catch {
+            // continue
+          }
+        }
       }
+      return hasPayload ? bestCount : null;
     };
 
-    loadProfile();
-    loadPosts();
+    const loadPosts = async (preferredBase, profileId) => {
+      const orderedBases = [preferredBase, ...baseCandidates.filter((b) => b !== preferredBase)].filter(Boolean);
+      const endpointCandidates = [
+        `/api/profile/${username}/posts`,
+        profileId ? `/api/profile/${profileId}/posts` : null,
+        username === "me" ? "/api/profile/me/posts" : null
+      ].filter(Boolean);
+
+      let bestPosts = [];
+      for (const base of orderedBases) {
+        for (const endpoint of endpointCandidates) {
+          try {
+            const res = await api.get(endpoint, {
+              baseURL: base,
+              suppressAuthRedirect: true,
+              skipAuth: true,
+              skipRefresh: true
+            });
+            const normalized = normalizePosts(res?.data);
+            if (normalized.length > bestPosts.length) {
+              bestPosts = normalized;
+            }
+          } catch {
+            // continue
+          }
+        }
+      }
+
+      if (!cancelled) setPosts(bestPosts);
+    };
+
+    const run = async () => {
+      const profileResult = await loadProfile();
+      if (profileResult?.profileId && !cancelled) {
+        const profileData = profileResult?.profileData || { id: profileResult.profileId };
+        const isOwn =
+          username === "me" ||
+          Number(username) === Number(myUserId) ||
+          Number(profileData?.id) === Number(myUserId);
+        const [followersResolved, followingResolved] = await Promise.all([
+          fetchConnectionCount("followers", profileData),
+          fetchConnectionCount("following", profileData)
+        ]);
+        const cache = readFollowingCache();
+        const myId = String(myUserId || "").trim().toLowerCase();
+        const myEmailLower = String(myEmail || "").trim().toLowerCase();
+        const myUsernameLower = String(profileData?.username || "").trim().toLowerCase();
+        const cachedFollowingCount = Object.entries(cache || {})
+          .filter(([k, v]) => {
+            const key = String(k || "").trim().toLowerCase();
+            if (!v || !key) return false;
+            if (key === "me") return false;
+            if (myId && key === myId) return false;
+            if (myEmailLower && key === myEmailLower) return false;
+            if (myUsernameLower && key === myUsernameLower) return false;
+            return true;
+          })
+          .length;
+        if (!cancelled) {
+          if (followersResolved !== null) setFollowers(followersResolved);
+          const resolvedFollowingCount = followingResolved === null ? 0 : followingResolved;
+          const nextFollowingCount = isOwn
+            ? Math.max(resolvedFollowingCount, cachedFollowingCount)
+            : resolvedFollowingCount;
+          if (followingResolved !== null || (isOwn && cachedFollowingCount > 0)) {
+            setFollowingCount(nextFollowingCount);
+          }
+        }
+      }
+      await loadPosts(profileResult?.base, profileResult?.profileId);
+    };
+
+    run();
     return () => {
       cancelled = true;
     };
-  }, [username, navigate, isOwnProfile, myUserId, myEmail]);
+  }, [username, navigate, myUserId, myEmail]);
 
   const handleFollow = async () => {
     if (loading) return;
@@ -230,6 +404,51 @@ export default function Profile() {
     }
   };
 
+  const deletePost = async (postId) => {
+    if (!isOwnProfile || postId == null) return;
+    const ok = window.confirm("Delete this post?");
+    if (!ok) return;
+
+    setPostActionError("");
+    setDeletingPostIds((prev) => ({ ...prev, [postId]: true }));
+
+    const defaultBase = String(api?.defaults?.baseURL || "").replace(/\/+$/, "");
+    const baseCandidates = [
+      defaultBase,
+      "http://localhost:8080",
+      "http://127.0.0.1:8080",
+      "https://socialsea.co.in"
+    ].filter((value, index, arr) => value && arr.indexOf(value) === index);
+
+    const endpointCandidates = [
+      `/api/posts/${postId}`,
+      `/api/admin/posts/${postId}`,
+      `/api/profile/posts/${postId}`
+    ];
+
+    let lastError = null;
+
+    for (const base of baseCandidates) {
+      for (const endpoint of endpointCandidates) {
+        try {
+          await api.delete(endpoint, {
+            baseURL: base,
+            suppressAuthRedirect: true
+          });
+          setPosts((prev) => prev.filter((p) => String(p?.id) !== String(postId)));
+          setDeletingPostIds((prev) => ({ ...prev, [postId]: false }));
+          return;
+        } catch (err) {
+          lastError = err;
+        }
+      }
+    }
+
+    const status = lastError?.response?.status;
+    const msg = lastError?.response?.data?.message || lastError?.message || "Unable to delete post";
+    setPostActionError(status ? `Delete failed (${status}): ${msg}` : `Delete failed: ${msg}`);
+    setDeletingPostIds((prev) => ({ ...prev, [postId]: false }));
+  };
   const resolveMediaUrl = (url) => {
     if (!url) return "";
     return toApiUrl(url);
@@ -268,7 +487,7 @@ export default function Profile() {
                   className="profile-stat-link"
                   onClick={() => navigate(`/profile/${username}/following`)}
                 >
-                  <b>{profile.following}</b> following
+                  <b>{followingCount}</b> following
                 </button>
               </p>
 
@@ -315,7 +534,7 @@ export default function Profile() {
                 <h4>Messages</h4>
                 <p>Continue conversations and find people faster.</p>
               </button>
-              <button type="button" className="profile-shortcut-card" onClick={() => navigate("/profile/live-recordings")}>
+              <button type="button" className="profile-shortcut-card" onClick={() => navigate("/live-recordings")}>
                 <h4>Recorded Live (Private)</h4>
                 <p>View SOS recorded live videos. These are private and not shared in feed.</p>
               </button>
@@ -325,15 +544,29 @@ export default function Profile() {
           <hr className="profile-divider" />
 
           <h3 className="profile-posts-title">Posts</h3>
+          {postActionError && <p className="profile-posts-error">{postActionError}</p>}
           <div className="profile-posts-grid">
             {posts.length === 0 && <p>No posts yet</p>}
-            {posts.map((post) => (
-              <div key={post.id} className="profile-post-card">
-                {post.type === "IMAGE" && post.contentUrl?.trim() && (
+            {posts.map((post, index) => (
+              <div key={`${String(post?.id ?? "post")}-${index}`} className="profile-post-card">
+                {!post.isVideo && post.contentUrl?.trim() && (
                   <img src={resolveMediaUrl(post.contentUrl)} alt="" />
                 )}
-                {post.type === "VIDEO" && post.contentUrl?.trim() && (
-                  <video src={resolveMediaUrl(post.contentUrl)} controls />
+                {post.isVideo && post.contentUrl?.trim() && (
+                  <video src={resolveMediaUrl(post.contentUrl)} controls controlsList="nodownload noplaybackrate noremoteplayback" disablePictureInPicture onContextMenu={(e) => e.preventDefault()} />
+                )}
+                {isOwnProfile && (
+                  <div className="profile-post-actions">
+                    <button
+                      type="button"
+                      className="profile-post-delete-inline"
+                      onClick={() => deletePost(post?.id)}
+                      disabled={Boolean(deletingPostIds[post?.id])}
+                      title="Delete post"
+                    >
+                      {deletingPostIds[post?.id] ? "Deleting..." : "Delete"}
+                    </button>
+                  </div>
                 )}
               </div>
             ))}
@@ -349,3 +582,11 @@ export default function Profile() {
     </div>
   );
 }
+
+
+
+
+
+
+
+

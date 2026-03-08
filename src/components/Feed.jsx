@@ -23,14 +23,41 @@ export default function Feed() {
   const [videoDurationByPost, setVideoDurationByPost] = useState({});
 
   useEffect(() => {
-    api.get("/api/feed")
-      .then((res) => setPosts(Array.isArray(res.data) ? res.data : []))
-      .catch((err) => {
+    let mounted = true;
+    const load = async () => {
+      try {
+        const res = await api.get("/api/feed");
+        const list = Array.isArray(res.data) ? res.data : [];
+        if (!mounted) return;
+        setPosts(list);
+
+        if (list.length === 0) {
+          try {
+            const healthRes = await api.get("/actuator/health", {
+              skipAuth: true,
+              suppressAuthRedirect: true,
+              timeout: 4000
+            });
+            const health = String(healthRes?.data?.status || "").toUpperCase();
+            if (health && health !== "UP") {
+              setError(`Backend health is ${health}. Feed may be empty due to backend DB/service issue.`);
+            }
+          } catch {
+            // ignore health probe failure
+          }
+        }
+      } catch (err) {
         console.error(err);
+        if (!mounted) return;
         const status = err?.response?.status;
         const message = err?.response?.data?.message || err?.response?.data || "";
         setError(status ? `Failed to load feed (${status}) ${message}` : "Failed to load feed");
-      });
+      }
+    };
+    void load();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -137,15 +164,22 @@ export default function Feed() {
   };
 
   const likePost = async (postId) => {
+    const persistLikedMap = (next) => {
+      const ids = Object.keys(next)
+        .filter((id) => next[id])
+        .map((id) => Number(id));
+      localStorage.setItem("likedPostIds", JSON.stringify(ids));
+    };
+
     if (likedPostIds[postId]) return;
+
     try {
       const res = await api.post(`/api/likes/${postId}`);
       const message = String(res?.data || "").toLowerCase();
       if (message.includes("already")) {
         setLikedPostIds((prev) => {
           const next = { ...prev, [postId]: true };
-          const ids = Object.keys(next).filter((id) => next[id]).map((id) => Number(id));
-          localStorage.setItem("likedPostIds", JSON.stringify(ids));
+          persistLikedMap(next);
           return next;
         });
         return;
@@ -153,8 +187,7 @@ export default function Feed() {
       setLikeCounts((prev) => ({ ...prev, [postId]: (prev[postId] || 0) + 1 }));
       setLikedPostIds((prev) => {
         const next = { ...prev, [postId]: true };
-        const ids = Object.keys(next).filter((id) => next[id]).map((id) => Number(id));
-        localStorage.setItem("likedPostIds", JSON.stringify(ids));
+        persistLikedMap(next);
         return next;
       });
     } catch {

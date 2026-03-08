@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+﻿import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { FiBell, FiHome, FiMessageSquare, FiSettings, FiUser, FiVideo } from "react-icons/fi";
 import api from "../api/axios";
+import { getApiBaseUrl } from "../api/baseUrl";
 import "./Navbar.css";
 
 const ITEMS = [
@@ -14,6 +15,44 @@ const ITEMS = [
 ];
 const CALL_ACCEPT_TARGET_KEY = "socialsea_call_accept_target_v1";
 const SETTINGS_KEY = "socialsea_settings_v1";
+const SOS_SIGNAL_KEY = "socialsea_sos_signal_v1";
+const SOS_SIGNAL_CHANNEL = "socialsea_sos_signal_channel_v1";
+const SOS_LAST_SEEN_TS_KEY = "socialsea_sos_last_seen_ts_v1";
+const SOS_SIGNAL_TTL_MS = 12000;
+const uniqueNonEmpty = (arr) =>
+  arr.filter((v, i) => {
+    if (!v) return false;
+    return arr.indexOf(v) === i;
+  });
+
+const emergencyBaseCandidates = () => {
+  const isLocalDev =
+    typeof window !== "undefined" &&
+    ["localhost", "127.0.0.1"].includes(String(window.location.hostname || "").toLowerCase());
+  const storedBase =
+    typeof window !== "undefined"
+      ? localStorage.getItem("socialsea_auth_base_url") || sessionStorage.getItem("socialsea_auth_base_url")
+      : "";
+  return uniqueNonEmpty(
+    isLocalDev
+      ? [
+          "http://localhost:8080",
+          "http://127.0.0.1:8080",
+          "/api",
+          api.defaults.baseURL,
+          storedBase,
+          getApiBaseUrl(),
+          import.meta.env.VITE_API_URL,
+        ]
+      : [
+          api.defaults.baseURL,
+          storedBase,
+          getApiBaseUrl(),
+          import.meta.env.VITE_API_URL,
+          "https://socialsea.co.in",
+        ]
+  );
+};
 
 const readShowSosInNavbar = () => {
   try {
@@ -29,7 +68,7 @@ const readShowSosInNavbar = () => {
 export default function Navbar() {
   const location = useLocation();
   const navigate = useNavigate();
-  const myUserId = localStorage.getItem("userId");
+  const myUserId = String(sessionStorage.getItem("userId") || localStorage.getItem("userId") || "").trim();
   const onChatRoute = location.pathname === "/chat" || location.pathname.startsWith("/chat/");
   const onChatConversationRoute = location.pathname.startsWith("/chat/");
   const profileTarget = myUserId ? `/profile/${myUserId}` : "/profile/me";
@@ -38,6 +77,10 @@ export default function Navbar() {
   const [sosPopup, setSosPopup] = useState("");
   const seenSignalRef = useRef(new Set());
   const sosTapRef = useRef({ count: 0, lastAt: 0 });
+  const seenEmergencyAlertsRef = useRef(new Set());
+  const seenLocalSignalsRef = useRef(new Set());
+  const sosSignalChannelRef = useRef(null);
+  const lastSeenSignalTsRef = useRef(0);
 
   const items = ITEMS.map((item) =>
     item.label === "Profile" ? { ...item, to: profileTarget } : item
@@ -75,11 +118,26 @@ export default function Navbar() {
         .join(" ");
     };
 
-    const pollCalls = async () => {
+        const pollCalls = async () => {
       try {
         const res = await api.get("/api/calls/inbox");
         if (disposed) return;
         const list = Array.isArray(res.data) ? res.data : [];
+
+        if (incomingCall?.fromUserId) {
+          const staleSignal = list.find((signal) => {
+            const type = String(signal?.type || "").toLowerCase();
+            const fromId = String(signal?.fromUserId || "");
+            return (
+              fromId === String(incomingCall.fromUserId) &&
+              ["hangup", "reject", "busy", "answer", "accepted", "ended"].includes(type)
+            );
+          });
+          if (staleSignal) {
+            setIncomingCall(null);
+          }
+        }
+
         for (const signal of list) {
           const type = String(signal?.type || "").toLowerCase();
           const fromId = String(signal?.fromUserId || "");
@@ -91,7 +149,8 @@ export default function Navbar() {
           setIncomingCall({
             fromUserId: fromId,
             fromName: normalizeName(signal?.fromName || signal?.fromEmail || `User ${fromId}`),
-            mode: signal?.mode === "video" ? "video" : "audio"
+            mode: signal?.mode === "video" ? "video" : "audio",
+            at: Date.now()
           });
           break;
         }
@@ -126,6 +185,12 @@ export default function Navbar() {
     navigate(`/chat/${incomingCall.fromUserId}`);
   };
 
+
+  useEffect(() => {
+    if (!incomingCall?.at) return undefined;
+    const timer = setTimeout(() => setIncomingCall(null), 35000);
+    return () => clearTimeout(timer);
+  }, [incomingCall?.fromUserId, incomingCall?.at]);
   const declineIncomingCall = async () => {
     if (!incomingCall?.fromUserId) return;
     try {
@@ -165,9 +230,155 @@ export default function Navbar() {
 
   useEffect(() => {
     if (!sosPopup) return undefined;
-    const timer = setTimeout(() => setSosPopup(""), 3500);
+    const timer = setTimeout(() => setSosPopup(""), 9000);
     return () => clearTimeout(timer);
   }, [sosPopup]);
+
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(SOS_LAST_SEEN_TS_KEY) || localStorage.getItem(SOS_LAST_SEEN_TS_KEY) || "0";
+      const parsed = Number(raw);
+      lastSeenSignalTsRef.current = Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+    } catch {
+      lastSeenSignalTsRef.current = 0;
+    }
+
+    const processSignal = (payload) => {
+      if (!payload || typeof payload !== "object") return;
+      const signalId = String(payload.id || "");
+      if (!signalId || seenLocalSignalsRef.current.has(signalId)) return;
+
+      const signalTs = new Date(payload.at || 0).getTime();
+      const now = Date.now();
+      if (!Number.isFinite(signalTs) || signalTs <= 0) return;
+      if (now - signalTs > SOS_SIGNAL_TTL_MS) return;
+      if (signalTs <= lastSeenSignalTsRef.current) return;
+
+      seenLocalSignalsRef.current.add(signalId);
+      if (seenLocalSignalsRef.current.size > 1000) seenLocalSignalsRef.current.clear();
+      lastSeenSignalTsRef.current = signalTs;
+      try {
+        const safe = String(signalTs);
+        sessionStorage.setItem(SOS_LAST_SEEN_TS_KEY, safe);
+        localStorage.setItem(SOS_LAST_SEEN_TS_KEY, safe);
+      } catch {
+        // ignore storage issues
+      }
+
+      // Keep SOS page itself clean; show popup in other pages/windows for fast visibility.
+      if (location.pathname.startsWith("/sos")) {
+        return;
+      }
+
+      const kind = String(payload.type || "").toLowerCase();
+      if (kind === "stopped") {
+        setSosPopup(`[EMERGENCY] ${payload.reporterEmail || "Nearby user"} stopped SOS`);
+        return;
+      }
+      setSosPopup(`[EMERGENCY] ${payload.reporterEmail || "Nearby user"} triggered SOS`);
+    };
+
+    const onStorage = (event) => {
+      if (event?.key !== SOS_SIGNAL_KEY || !event.newValue) return;
+      try {
+        processSignal(JSON.parse(event.newValue));
+      } catch {
+        // ignore malformed events
+      }
+    };
+
+    const onBroadcastMessage = (event) => {
+      processSignal(event?.data);
+    };
+
+    const pollLatestSignal = () => {
+      try {
+        const raw = localStorage.getItem(SOS_SIGNAL_KEY);
+        if (!raw) return;
+        processSignal(JSON.parse(raw));
+      } catch {
+        // ignore parse/storage issues
+      }
+    };
+
+    window.addEventListener("storage", onStorage);
+    try {
+      if (typeof BroadcastChannel !== "undefined") {
+        sosSignalChannelRef.current = new BroadcastChannel(SOS_SIGNAL_CHANNEL);
+        sosSignalChannelRef.current.addEventListener("message", onBroadcastMessage);
+      }
+    } catch {
+      sosSignalChannelRef.current = null;
+    }
+
+    pollLatestSignal();
+    const pollTimer = setInterval(pollLatestSignal, 1000);
+
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      clearInterval(pollTimer);
+      if (sosSignalChannelRef.current) {
+        sosSignalChannelRef.current.removeEventListener("message", onBroadcastMessage);
+        sosSignalChannelRef.current.close();
+        sosSignalChannelRef.current = null;
+      }
+    };
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (!myUserId) return undefined;
+    let disposed = false;
+
+    const pollEmergency = async () => {
+      try {
+        let res = null;
+        let lastErr = null;
+        const emergencyEndpoints = ["/api/emergency/active", "/emergency/active"];
+        const baseCandidates = emergencyBaseCandidates();
+        for (const baseURL of baseCandidates) {
+          for (const endpoint of emergencyEndpoints) {
+            try {
+              res = await api.get(endpoint, { baseURL, skipAuth: true, suppressAuthRedirect: true });
+              lastErr = null;
+              break;
+            } catch (err) {
+              lastErr = err;
+            }
+          }
+          if (res) break;
+        }
+        if (lastErr) throw lastErr;
+        if (disposed) return;
+        const data = res?.data;
+        const alerts = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.alerts)
+            ? data.alerts
+            : Array.isArray(data?.items)
+              ? data.items
+              : [];
+        const myEmail = String(sessionStorage.getItem("email") || localStorage.getItem("email") || "").trim().toLowerCase();
+        for (const a of alerts) {
+          const id = String(a?.alertId || "");
+          if (!id || seenEmergencyAlertsRef.current.has(id)) continue;
+          seenEmergencyAlertsRef.current.add(id);
+          const reporter = String(a?.reporterEmail || "").trim();
+          if (myEmail && reporter.toLowerCase() === myEmail) continue;
+          setSosPopup(`[EMERGENCY] ${reporter || "Nearby user"} triggered SOS`);
+          break;
+        }
+      } catch {
+        // ignore transient poll failures
+      }
+    };
+
+    pollEmergency();
+    const timer = setInterval(pollEmergency, 3000);
+    return () => {
+      disposed = true;
+      clearInterval(timer);
+    };
+  }, [myUserId]);
 
   return (
     <header className={`ss-nav-wrap ${onChatConversationRoute ? "is-chat-conversation" : ""}`}>
@@ -235,3 +446,6 @@ export default function Navbar() {
     </header>
   );
 }
+
+
+

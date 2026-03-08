@@ -51,6 +51,18 @@
   background: #000;
 }
 
+.live-recordings-player-empty {
+  width: 100%;
+  min-height: 280px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  text-align: center;
+  color: #afc3e8;
+  background: #050a14;
+}
+
 .live-recordings-meta {
   padding: 10px;
   color: #d7e6ff;
@@ -96,6 +108,19 @@
   object-fit: cover;
   border-radius: 8px;
   background: #000;
+}
+
+.live-recording-item-empty {
+  width: 100%;
+  height: 68px;
+  border-radius: 8px;
+  background: #050a14;
+  color: #9fb6de;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.82rem;
+  font-weight: 600;
 }
 
 .live-recording-item p {

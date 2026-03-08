@@ -6,12 +6,15 @@ const BASE_URL = getApiBaseUrl();
 const AUTH_BASE_KEY = "socialsea_auth_base_url";
 const IS_HTTPS_PAGE =
   typeof window !== "undefined" && window.location.protocol === "https:";
+const IS_LOCAL_DEV =
+  typeof window !== "undefined" &&
+  ["localhost", "127.0.0.1"].includes(String(window.location.hostname || "").toLowerCase());
+
 const FALLBACK_BASE_URLS = [
   BASE_URL,
-  "https://api.socialsea.co.in",
-  "/api",
-  "http://localhost:8080",
-  "http://43.205.213.14:8080",
+  ...(IS_LOCAL_DEV
+    ? ["/api", "http://localhost:8080", "http://127.0.0.1:8080"]
+    : ["https://api.socialsea.co.in", "/api", "http://localhost:8080", "http://43.205.213.14:8080"]),
 ]
   .filter((value, index, arr) => value && arr.indexOf(value) === index)
   .filter((value) => !(IS_HTTPS_PAGE && /^http:\/\//i.test(value)));
@@ -107,6 +110,9 @@ api.interceptors.response.use(
     if (status !== 401 || originalRequest._retry) {
       return Promise.reject(error);
     }
+    if (originalRequest?.skipRefresh) {
+      return Promise.reject(error);
+    }
 
     originalRequest._retry = true;
 
@@ -139,7 +145,9 @@ api.interceptors.response.use(
 
       return api(originalRequest);
     } catch (refreshError) {
-      // If refresh fails → force logout
+      if (originalRequest?.suppressAuthRedirect) {
+        return Promise.reject(refreshError);
+      }
       clearAuthStorage();
       window.location.href = "/login";
       return Promise.reject(refreshError);
@@ -148,3 +156,4 @@ api.interceptors.response.use(
 );
 
 export default api;
+

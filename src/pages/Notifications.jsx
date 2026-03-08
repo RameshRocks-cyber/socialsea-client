@@ -5,6 +5,68 @@ import api from "../api/axios";
 import "./Notifications.css";
 
 const EMAIL_REGEX = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
+const FOLLOWING_CACHE_KEY = "socialsea_following_cache_v1";
+
+const readFollowingCache = () => {
+  try {
+    const raw = localStorage.getItem(FOLLOWING_CACHE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
+const writeFollowingCache = (value) => {
+  localStorage.setItem(FOLLOWING_CACHE_KEY, JSON.stringify(value || {}));
+};
+
+const updateFollowCache = (identifiers, following) => {
+  const keys = identifiers
+    .map((value) => String(value || "").trim().toLowerCase())
+    .filter(Boolean);
+  if (!keys.length) return;
+  const cache = readFollowingCache();
+  keys.forEach((key) => {
+    cache[key] = Boolean(following);
+  });
+  writeFollowingCache(cache);
+};
+
+const getCachedFollowing = (identifiers) => {
+  const cache = readFollowingCache();
+  return identifiers
+    .map((value) => String(value || "").trim().toLowerCase())
+    .filter(Boolean)
+    .some((key) => cache[key] === true);
+};
+
+const extractFollowingFlag = (item) => {
+  const booleanCandidates = [
+    item?.isFollowing,
+    item?.followState?.isFollowing,
+    item?.followInfo?.isFollowing,
+    item?.actor?.isFollowing,
+    item?.user?.isFollowing
+  ];
+  if (booleanCandidates.some((value) => value === true)) return true;
+  if (booleanCandidates.some((value) => value === false)) return false;
+
+  const statusCandidates = [
+    item?.followStatus,
+    item?.relationship,
+    item?.followState?.status,
+    item?.followInfo?.status,
+    item?.actor?.followStatus,
+    item?.user?.followStatus
+  ]
+    .map((value) => String(value || "").toLowerCase())
+    .filter(Boolean);
+
+  if (statusCandidates.some((value) => value.includes("follow"))) return true;
+  if (statusCandidates.some((value) => value.includes("request"))) return false;
+  return null;
+};
 
 export default function Notifications() {
   const navigate = useNavigate();
@@ -93,6 +155,39 @@ export default function Notifications() {
           if (!active) return;
           const list = Array.isArray(res.data) ? res.data : [];
           setItems(list);
+          setFollowedById((prev) => {
+            const next = { ...prev };
+            list.forEach((entry) => {
+              const actor = entry?.actorName || deriveActor(entry?.message);
+              const identifiers = [
+                entry?.id,
+                entry?.actorIdentifier,
+                entry?.actorEmail,
+                entry?.actorUsername,
+                entry?.actor?.id,
+                entry?.actor?.email,
+                entry?.actor?.username,
+                entry?.user?.id,
+                entry?.user?.email,
+                entry?.user?.username,
+                actor
+              ];
+              const extracted = extractFollowingFlag(entry);
+              if (extracted === true) {
+                next[entry?.id] = true;
+                updateFollowCache(identifiers, true);
+                return;
+              }
+              if (extracted === false) {
+                next[entry?.id] = false;
+                return;
+              }
+              if (getCachedFollowing(identifiers)) {
+                next[entry?.id] = true;
+              }
+            });
+            return next;
+          });
         })
         .catch(() => {
           if (active) setItems([]);
@@ -128,6 +223,10 @@ export default function Notifications() {
       const res = await api.post(`/api/follow/${encodeURIComponent(target)}`);
       const msg = String(res?.data || "").toLowerCase();
       if (res?.status >= 200 && res?.status < 300 && !msg.includes("cannot follow")) {
+        updateFollowCache(
+          [item?.id, item?.actorIdentifier, item?.actorEmail, item?.actorUsername, item?.actorName, target],
+          true
+        );
         setFollowedById((prev) => ({ ...prev, [id]: true }));
       }
     } catch {

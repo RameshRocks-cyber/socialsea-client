@@ -7,7 +7,8 @@ const NAV_ITEMS = [
   { to: "/admin/users", label: "Users" },
   { to: "/admin/posts", label: "Posts" },
   { to: "/admin/reports", label: "Reports" },
-  { to: "/admin/anonymous/pending", label: "Pending Anonymous" }
+  { to: "/admin/anonymous/pending", label: "Pending Anonymous" },
+  { to: "/admin/notifications", label: "Alerts" }
 ];
 
 export default function AdminLayout() {
@@ -18,7 +19,10 @@ export default function AdminLayout() {
       <aside className={`admin-sidebar ${sidebarOpen ? "open" : ""}`}>
         <div className="admin-brand">
           <span className="admin-brand-dot" />
-          <h1>SocialSea Admin</h1>
+          <div>
+            <h1>SocialSea Command</h1>
+            <p>Moderation and growth intelligence</p>
+          </div>
         </div>
         <nav className="admin-nav">
           {NAV_ITEMS.map((item) => (
@@ -40,8 +44,8 @@ export default function AdminLayout() {
             Menu
           </button>
           <div className="admin-topbar-title">
-            <h2>Admin Control Center</h2>
-            <p>Users, posts, reports and moderation analytics</p>
+            <h2>Trust, Safety and Growth Console</h2>
+            <p>Search users, monitor posts, issue notices and control platform risk</p>
           </div>
         </header>
 

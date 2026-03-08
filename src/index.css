@@ -5,6 +5,51 @@
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 
+:root {
+  --ss-theme-accent: #4da2ff;
+  --ss-theme-accent-2: #36e2d1;
+  --ss-theme-bg: #05152b;
+  --ss-theme-bg-soft: #0d274a;
+  --ss-theme-border: rgba(120, 194, 255, 0.48);
+  --ss-theme-text: #edf7ff;
+}
+
+body.ss-theme-pink {
+  --ss-theme-accent: #ff5fae;
+  --ss-theme-accent-2: #ff9ad6;
+  --ss-theme-bg: #250a1b;
+  --ss-theme-bg-soft: #4f1a3c;
+  --ss-theme-border: rgba(255, 164, 215, 0.55);
+  --ss-theme-text: #fff4fb;
+}
+
+body.ss-theme-yellow {
+  --ss-theme-accent: #ffc83d;
+  --ss-theme-accent-2: #ffe98b;
+  --ss-theme-bg: #241b06;
+  --ss-theme-bg-soft: #4b3810;
+  --ss-theme-border: rgba(255, 223, 135, 0.55);
+  --ss-theme-text: #fff9e8;
+}
+
+body.ss-theme-black {
+  --ss-theme-accent: #4b4b4b;
+  --ss-theme-accent-2: #8a8a8a;
+  --ss-theme-bg: #07090d;
+  --ss-theme-bg-soft: #1a1f29;
+  --ss-theme-border: rgba(171, 184, 208, 0.4);
+  --ss-theme-text: #f6f8fc;
+}
+
+body.ss-theme-white {
+  --ss-theme-accent: #58b3ff;
+  --ss-theme-accent-2: #7dffda;
+  --ss-theme-bg: #0b1c35;
+  --ss-theme-bg-soft: #143157;
+  --ss-theme-border: rgba(158, 222, 255, 0.58);
+  --ss-theme-text: #f5fbff;
+}
+
 html,
 body,
 #root {
@@ -17,6 +62,49 @@ body {
   color: #fff;
   min-width: 320px;
   overflow-x: hidden;
+}
+
+body.ss-themed .app-main.with-user-nav {
+  background:
+    radial-gradient(65% 55% at 10% -12%, color-mix(in srgb, var(--ss-theme-accent) 28%, transparent), transparent 70%),
+    radial-gradient(70% 58% at 100% 0%, color-mix(in srgb, var(--ss-theme-accent-2) 24%, transparent), transparent 72%),
+    linear-gradient(160deg, color-mix(in srgb, var(--ss-theme-bg) 78%, black), var(--ss-theme-bg));
+  color: var(--ss-theme-text);
+}
+
+body.ss-themed .auth-screen,
+body.ss-themed .chat-page,
+body.ss-themed .settings-page {
+  color: var(--ss-theme-text);
+}
+
+body.ss-themed .auth-primary-btn,
+body.ss-themed .auth-secondary-btn,
+body.ss-themed .new-chat-btn,
+body.ss-themed .call-action,
+body.ss-themed .settings-back,
+body.ss-themed .settings-panel-head button,
+body.ss-themed .settings-select-grid button,
+body.ss-themed .watch-later-shortcut,
+body.ss-themed .chat-send-btn,
+body.ss-themed .mic-fab {
+  background: linear-gradient(135deg, var(--ss-theme-accent), var(--ss-theme-accent-2)) !important;
+  border-color: var(--ss-theme-border) !important;
+  color: var(--ss-theme-text) !important;
+}
+
+body.ss-themed .settings-section,
+body.ss-themed .settings-panel,
+body.ss-themed .auth-card-new,
+body.ss-themed .chat-page.chat-single-pane,
+body.ss-themed .chat-header-menu {
+  border-color: var(--ss-theme-border) !important;
+}
+
+body.ss-themed .settings-row-icon,
+body.ss-themed .chat-avatar,
+body.ss-themed .settings-user-avatar {
+  background: linear-gradient(145deg, color-mix(in srgb, var(--ss-theme-accent) 78%, #ffffff 22%), var(--ss-theme-accent-2)) !important;
 }
 
 a {

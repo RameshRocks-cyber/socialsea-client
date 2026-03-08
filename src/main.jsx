@@ -6,6 +6,9 @@ import { AuthProvider } from "./context/AuthContext";
 import { NotificationProvider } from "./context/NotificationContext";
 import { ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
+import { applyStoredTheme } from "./theme";
+
+applyStoredTheme();
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>

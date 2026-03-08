@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import api from "../api/axios";
-import { loginWithPassword } from "../api/auth";
+import { loginWithPassword, registerWithPassword, sendOtp, verifyOtp } from "../api/auth";
 import { clearAuthStorage } from "../auth";
 import "./AuthScreen.css";
 
@@ -41,10 +41,22 @@ function persistAuthValue(key, value) {
 
 export default function Login() {
   const navigate = useNavigate();
+  const isLocalHost =
+    typeof window !== "undefined" &&
+    ["localhost", "127.0.0.1"].includes(String(window.location.hostname || "").toLowerCase());
+  const envWantsDebugOtp = String(import.meta.env.VITE_SHOW_DEV_OTP || "").toLowerCase() === "true";
+  const canShowDebugOtp = isLocalHost || envWantsDebugOtp;
 
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
+  const [otp, setOtp] = useState("");
+  const [loginMode, setLoginMode] = useState("password");
   const [loading, setLoading] = useState(false);
+  const [sendingOtp, setSendingOtp] = useState(false);
+  const [otpSent, setOtpSent] = useState(false);
+  const [debugOtp, setDebugOtp] = useState("");
+  const [showQuickCreate, setShowQuickCreate] = useState(false);
+  const [creatingAccount, setCreatingAccount] = useState(false);
   const [msg, setMsg] = useState("");
 
   const completeLogin = async (resData) => {
@@ -84,6 +96,7 @@ export default function Login() {
   const onPasswordLogin = async (e) => {
     e.preventDefault();
     setMsg("");
+    setShowQuickCreate(false);
     if (!identifier.trim() || !password) {
       setMsg("Username/email and password are required.");
       return;
@@ -93,7 +106,90 @@ export default function Login() {
       const res = await loginWithPassword({ identifier: identifier.trim(), password });
       await completeLogin(res?.data);
     } catch (err) {
-      setMsg(parseErrorMessage(err, "Login failed. Check your credentials."));
+      const text = parseErrorMessage(err, "Login failed. Check your credentials.");
+      setMsg(text);
+      if (isLocalHost && /invalid credentials/i.test(text)) {
+        setShowQuickCreate(true);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onQuickCreateAccount = async () => {
+    setMsg("");
+    if (!identifier.trim() || !password) {
+      setMsg("Username/email and password are required.");
+      return;
+    }
+    setCreatingAccount(true);
+    try {
+      const id = identifier.trim();
+      const looksLikeEmail = id.includes("@");
+      const res = await registerWithPassword({
+        username: looksLikeEmail ? undefined : id,
+        email: looksLikeEmail ? id : undefined,
+        password
+      });
+      await completeLogin(res?.data);
+    } catch (err) {
+      setMsg(parseErrorMessage(err, "Could not create account with these credentials."));
+    } finally {
+      setCreatingAccount(false);
+    }
+  };
+
+  const onSendOtp = async () => {
+    setMsg("");
+    setDebugOtp("");
+    if (!identifier.trim()) {
+      setMsg("Username/email is required.");
+      return;
+    }
+    setSendingOtp(true);
+    try {
+      const res = await sendOtp(identifier.trim());
+      const payload = res?.data || {};
+      const serverDebugOtp = String(payload?.debugOtp || "").trim();
+      const deliveryFailed = payload?.deliveryFailed === true;
+      setOtpSent(true);
+      if (canShowDebugOtp && serverDebugOtp) {
+        setDebugOtp(serverDebugOtp);
+        setOtp(serverDebugOtp);
+      }
+      if (deliveryFailed) {
+        setMsg(
+          serverDebugOtp
+            ? "Email delivery failed. Debug OTP has been auto-filled for local testing."
+            : "Email delivery failed on server."
+        );
+      } else {
+        setMsg(serverDebugOtp ? "OTP sent. Debug OTP was auto-filled." : "OTP sent. Check Inbox/Spam.");
+      }
+    } catch (err) {
+      setMsg(parseErrorMessage(err, "Failed to send OTP."));
+    } finally {
+      setSendingOtp(false);
+    }
+  };
+
+  const onOtpLogin = async (e) => {
+    e.preventDefault();
+    setMsg("");
+    if (!identifier.trim()) {
+      setMsg("Username/email is required.");
+      return;
+    }
+    if (!otp.trim()) {
+      setMsg("OTP is required.");
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await verifyOtp(identifier.trim(), otp.trim());
+      await completeLogin(res?.data);
+    } catch (err) {
+      setMsg(parseErrorMessage(err, "OTP login failed."));
     } finally {
       setLoading(false);
     }
@@ -111,26 +207,75 @@ export default function Login() {
           <p>Sign in with username or email</p>
         </div>
 
-        <form className="auth-form-new" onSubmit={onPasswordLogin}>
+        <div className="auth-login-mode-row">
+          <button
+            type="button"
+            className={`auth-login-mode-btn ${loginMode === "password" ? "is-active" : ""}`}
+            onClick={() => {
+              setLoginMode("password");
+              setMsg("");
+            }}
+          >
+            Password
+          </button>
+          <button
+            type="button"
+            className={`auth-login-mode-btn ${loginMode === "otp" ? "is-active" : ""}`}
+            onClick={() => {
+              setLoginMode("otp");
+              setMsg("");
+            }}
+          >
+            OTP
+          </button>
+        </div>
+
+        <form className="auth-form-new" onSubmit={loginMode === "otp" ? onOtpLogin : onPasswordLogin}>
           <label htmlFor="identifier">Username or email</label>
           <input
             id="identifier"
             type="text"
             value={identifier}
-            onChange={(e) => setIdentifier(e.target.value)}
+            onChange={(e) => {
+              setIdentifier(e.target.value);
+              if (loginMode === "otp") {
+                setOtpSent(false);
+                setOtp("");
+                setDebugOtp("");
+              }
+            }}
             placeholder="username or name@email.com"
             autoComplete="username"
           />
 
-          <label htmlFor="password">Password</label>
-          <input
-            id="password"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="Enter your password"
-            autoComplete="current-password"
-          />
+          {loginMode === "password" ? (
+            <>
+              <label htmlFor="password">Password</label>
+              <input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Enter your password"
+                autoComplete="current-password"
+              />
+            </>
+          ) : (
+            <>
+              <label htmlFor="otp">OTP</label>
+              <input
+                id="otp"
+                type="text"
+                value={otp}
+                onChange={(e) => setOtp(e.target.value)}
+                placeholder="Enter OTP"
+                autoComplete="one-time-code"
+              />
+              <button type="button" className="auth-secondary-btn" disabled={sendingOtp} onClick={onSendOtp}>
+                {sendingOtp ? "Sending..." : otpSent ? "Resend OTP" : "Send OTP"}
+              </button>
+            </>
+          )}
 
           <div className="auth-forgot-row">
             <Link to="/forgot-password" className="auth-forgot-link">
@@ -139,11 +284,19 @@ export default function Login() {
           </div>
 
           <button type="submit" className="auth-primary-btn" disabled={loading}>
-            {loading ? "Signing in..." : "Log in"}
+            {loading ? "Signing in..." : loginMode === "otp" ? "Verify OTP & Log in" : "Log in"}
           </button>
         </form>
 
         {msg && <p className="auth-error">{msg}</p>}
+        {showQuickCreate && loginMode === "password" && (
+          <button type="button" className="auth-secondary-btn auth-quick-create-btn" onClick={onQuickCreateAccount} disabled={creatingAccount}>
+            {creatingAccount ? "Creating account..." : "Create account & Log in (Local)"}
+          </button>
+        )}
+        {loginMode === "otp" && canShowDebugOtp && !!debugOtp && (
+          <p className="auth-debug-otp">Debug OTP: {debugOtp}</p>
+        )}
 
         <p className="auth-foot">
           New here? <Link to="/register">Create account</Link>

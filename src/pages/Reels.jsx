@@ -6,10 +6,14 @@ import api from "../api/axios";
 import "./Reels.css";
 
 const MAX_REEL_SECONDS = 90;
-const GESTURE_SCROLL_COOLDOWN_MS = 450;
-const GESTURE_LIKE_COOLDOWN_MS = 900;
-const GESTURE_POSE_HOLD_FRAMES = 3;
-const GESTURE_OK_HOLD_FRAMES = 2;
+const GESTURE_SCROLL_COOLDOWN_MS = 200;
+const GESTURE_LIKE_COOLDOWN_MS = 200;
+const GESTURE_PLAY_TOGGLE_COOLDOWN_MS = 200;
+const GESTURE_POSE_HOLD_FRAMES = 2;
+const GESTURE_TWO_FINGER_HOLD_FRAMES = 2;
+const GESTURE_RESET_HOLD_FRAMES = 3;
+const GESTURE_PALM_SWIPE_MIN_PX = 24;
+const GESTURE_SWIPE_STABLE_FRAMES = 1;
 const GESTURE_SCRIPT_TF = "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js";
 const GESTURE_SCRIPT_HANDPOSE =
   "https://cdn.jsdelivr.net/npm/@tensorflow-models/handpose@0.0.7/dist/handpose.min.js";
@@ -44,6 +48,7 @@ export default function Reels() {
   const [shareMessageByPost, setShareMessageByPost] = useState({});
   const [tapLikeBurstByPost, setTapLikeBurstByPost] = useState({});
   const [followingByKey, setFollowingByKey] = useState({});
+  const [likeBusyByPost, setLikeBusyByPost] = useState({});
   const [mutedByPost, setMutedByPost] = useState({});
 
   const containerRef = useRef(null);
@@ -56,11 +61,20 @@ export default function Reels() {
   const gestureRunningRef = useRef(false);
   const lastScrollAtRef = useRef(0);
   const lastLikeAtRef = useRef(0);
+  const lastPlayToggleAtRef = useRef(0);
   const poseFramesRef = useRef(0);
+  const noPoseFramesRef = useRef(0);
   const activePoseRef = useRef("none");
   const poseConsumedRef = useRef(false);
+  const prevPalmXRef = useRef(null);
+  const palmMotionLockRef = useRef(false);
+  const swipeStableFramesRef = useRef(0);
   const reelsRef = useRef([]);
   const currentIndexRef = useRef(0);
+  const pendingScrollIndexRef = useRef(null);
+  const gestureScrollLockRef = useRef(false);
+  const likedPostIdsRef = useRef({});
+  const likeBusyByPostRef = useRef({});
   const location = useLocation();
   const targetPostId = useMemo(() => {
     const params = new URLSearchParams(location.search);
@@ -220,6 +234,14 @@ export default function Reels() {
   }, [currentIndex]);
 
   useEffect(() => {
+    likedPostIdsRef.current = likedPostIds;
+  }, [likedPostIds]);
+
+  useEffect(() => {
+    likeBusyByPostRef.current = likeBusyByPost;
+  }, [likeBusyByPost]);
+
+  useEffect(() => {
     if (!gestureEnabled) {
       setGestureStatus("Hand signals are off");
       setGestureError("");
@@ -290,7 +312,12 @@ export default function Reels() {
     const el = containerRef.current;
     if (!el) return;
     const idx = Math.round(el.scrollTop / el.clientHeight);
-    if (idx !== currentIndex) setCurrentIndex(Math.max(0, Math.min(reels.length - 1, idx)));
+    const bounded = Math.max(0, Math.min(reels.length - 1, idx));
+    if (bounded !== currentIndex) setCurrentIndex(bounded);
+    if (pendingScrollIndexRef.current != null && bounded === pendingScrollIndexRef.current) {
+      pendingScrollIndexRef.current = null;
+      gestureScrollLockRef.current = false;
+    }
   };
 
   const likeReel = async (postId) => {
@@ -306,54 +333,57 @@ export default function Reels() {
       setTimeout(() => setTapLikeBurstByPost((prev) => ({ ...prev, [postId]: false })), 700);
     };
 
-    if (likedPostIds[postId]) {
-      let unliked = false;
-      try {
-        await api.delete(`/api/likes/${postId}`);
-        unliked = true;
-      } catch {
-        try {
-          const res = await api.post(`/api/likes/${postId}`);
-          const message = String(res?.data || "").toLowerCase();
-          if (message.includes("unlike") || message.includes("removed") || message.includes("dislike")) {
-            unliked = true;
-          }
-        } catch {
-          // noop
-        }
-      }
-      if (!unliked) {
-        return;
-      }
-      setLikeCounts((prev) => ({ ...prev, [postId]: Math.max(0, (prev[postId] || 0) - 1) }));
-      setLikedPostIds((prev) => {
-        const next = { ...prev, [postId]: false };
-        persistLikedMap(next);
-        return next;
-      });
-      return;
-    }
+    if (likeBusyByPostRef.current[postId]) return;
+
+    const wasLiked = !!likedPostIdsRef.current[postId];
+    const nextLiked = !wasLiked;
+    likeBusyByPostRef.current = { ...likeBusyByPostRef.current, [postId]: true };
+    setLikeBusyByPost((prev) => ({ ...prev, [postId]: true }));
 
     try {
-      const res = await api.post(`/api/likes/${postId}`);
+      let res;
+      if (nextLiked) {
+        res = await api.post(`/api/likes/${postId}`);
+      } else {
+        try {
+          res = await api.delete(`/api/likes/${postId}`);
+        } catch (err) {
+          const status = Number(err?.response?.status || 0);
+          if (status === 400 || status === 404 || status === 405) {
+            res = await api.post(`/api/likes/${postId}`);
+          } else {
+            throw err;
+          }
+        }
+      }
+
       const message = String(res?.data || "").toLowerCase();
-      if (message.includes("already")) {
+      if (nextLiked && message.includes("already")) {
         setLikedPostIds((prev) => {
           const next = { ...prev, [postId]: true };
+          likedPostIdsRef.current = next;
           persistLikedMap(next);
           return next;
         });
-        return;
+      } else {
+        setLikedPostIds((prev) => {
+          const next = { ...prev, [postId]: nextLiked };
+          likedPostIdsRef.current = next;
+          persistLikedMap(next);
+          return next;
+        });
       }
-      setLikeCounts((prev) => ({ ...prev, [postId]: (prev[postId] || 0) + 1 }));
-      setLikedPostIds((prev) => {
-        const next = { ...prev, [postId]: true };
-        persistLikedMap(next);
-        return next;
-      });
-      triggerLikeBurst();
+      setLikeCounts((prev) => ({
+        ...prev,
+        [postId]: Math.max(0, (prev[postId] || 0) + (nextLiked ? 1 : -1))
+      }));
+
+      if (nextLiked) triggerLikeBurst();
     } catch {
-      // noop
+      // keep prior UI state on failure
+    } finally {
+      likeBusyByPostRef.current = { ...likeBusyByPostRef.current, [postId]: false };
+      setLikeBusyByPost((prev) => ({ ...prev, [postId]: false }));
     }
   };
 
@@ -444,12 +474,36 @@ export default function Reels() {
     if (!nextMuted && video.paused) video.play().catch(() => {});
   };
 
+  const togglePlayPause = (postId) => {
+    const video = videoRefs.current[postId];
+    if (!video) return null;
+    if (video.paused) {
+      video.play().catch(() => {});
+      return "playing";
+    }
+    video.pause();
+    return "paused";
+  };
+
   const scrollToIndex = (idx) => {
     const container = containerRef.current;
     if (!container || !reels.length) return;
     const bounded = Math.max(0, Math.min(reels.length - 1, idx));
+    if (bounded === currentIndexRef.current) {
+      gestureScrollLockRef.current = false;
+      pendingScrollIndexRef.current = null;
+      return;
+    }
+    pendingScrollIndexRef.current = bounded;
+    gestureScrollLockRef.current = true;
     setCurrentIndex(bounded);
     container.scrollTo({ top: bounded * container.clientHeight, behavior: "smooth" });
+    window.setTimeout(() => {
+      if (pendingScrollIndexRef.current === bounded) {
+        pendingScrollIndexRef.current = null;
+        gestureScrollLockRef.current = false;
+      }
+    }, 550);
   };
 
   const handleReelTap = (reel) => {
@@ -474,47 +528,65 @@ export default function Reels() {
   const readHandState = (landmarks) => {
     if (!landmarks || landmarks.length < 21) return null;
     const wrist = landmarks[0];
-    const thumbTip = landmarks[4];
     const indexTip = landmarks[8];
     const indexPip = landmarks[6];
+    const indexMcp = landmarks[5];
     const middleMcp = landmarks[9];
     const middleTip = landmarks[12];
     const middlePip = landmarks[10];
+    const ringMcp = landmarks[13];
     const ringTip = landmarks[16];
     const ringPip = landmarks[14];
+    const pinkyMcp = landmarks[17];
     const pinkyTip = landmarks[20];
     const pinkyPip = landmarks[18];
+    const thumbTip = landmarks[4];
+    const thumbIp = landmarks[3];
 
     const handSize = Math.hypot(middleMcp[0] - wrist[0], middleMcp[1] - wrist[1]) || 1;
-    const indexMcp = landmarks[5];
-    const extMargin = handSize * 0.11;
-    const isExtended = (tip, pip) => tip[1] < pip[1] - extMargin;
+    const extMargin = handSize * 0.1;
+    const foldMargin = handSize * 0.03;
+    const isUp = (tip, pip) => tip[1] < pip[1] - extMargin;
+    const isFolded = (tip, pip, mcp) => tip[1] >= pip[1] - foldMargin || tip[1] > mcp[1] + foldMargin;
 
-    const indexUp = isExtended(indexTip, indexPip);
-    const middleUp = isExtended(middleTip, middlePip);
-    const ringUp = isExtended(ringTip, ringPip);
-    const pinkyUp = isExtended(pinkyTip, pinkyPip);
+    const indexUp = isUp(indexTip, indexPip);
+    const middleUp = isUp(middleTip, middlePip);
+    const ringUp = isUp(ringTip, ringPip);
+    const pinkyUp = isUp(pinkyTip, pinkyPip);
+    const thumbUp = thumbTip[1] < thumbIp[1] - handSize * 0.02;
 
-    const oneFingerMode = indexUp && !middleUp && !ringUp && !pinkyUp;
-    const twoFingerMode = indexUp && middleUp && !ringUp && !pinkyUp;
-    const thumbIndexDistance = Math.hypot(thumbTip[0] - indexTip[0], thumbTip[1] - indexTip[1]);
-    const indexBaseDistance = Math.hypot(thumbTip[0] - indexMcp[0], thumbTip[1] - indexMcp[1]) || 1;
-    const pinchRatio = thumbIndexDistance / indexBaseDistance;
-    const thumbIndexTouching = thumbIndexDistance < handSize * 0.55 || pinchRatio < 0.62;
-    const raisedCount = [middleUp, ringUp, pinkyUp].filter(Boolean).length;
-    const okLike = thumbIndexTouching && raisedCount >= 2;
+    const openPalm = indexUp && middleUp && ringUp && pinkyUp;
+    const twoFingers = indexUp && middleUp && !ringUp && !pinkyUp;
+    const thumbsUpLike =
+      thumbUp &&
+      isFolded(indexTip, indexPip, indexMcp) &&
+      isFolded(middleTip, middlePip, middleMcp) &&
+      isFolded(ringTip, ringPip, ringMcp) &&
+      isFolded(pinkyTip, pinkyPip, pinkyMcp);
+    const fistClosed =
+      isFolded(indexTip, indexPip, indexMcp) &&
+      isFolded(middleTip, middlePip, middleMcp) &&
+      isFolded(ringTip, ringPip, ringMcp) &&
+      isFolded(pinkyTip, pinkyPip, pinkyMcp);
 
-    if (okLike) return { pose: "ok" };
-    if (oneFingerMode) return { pose: "one" };
-    if (twoFingerMode) return { pose: "two" };
+    const palmX = (wrist[0] + indexMcp[0] + middleMcp[0] + ringMcp[0] + pinkyMcp[0]) / 5;
+
+    if (openPalm) return { pose: "openPalm", palmX, handSize };
+    if (thumbsUpLike) return { pose: "thumbsUp", palmX, handSize };
+    if (twoFingers) return { pose: "twoFingers", palmX, handSize };
+    if (fistClosed) return { pose: "none", palmX, handSize };
     return { pose: "none" };
   };
 
   const stopGestureControl = () => {
     gestureRunningRef.current = false;
     poseFramesRef.current = 0;
+    noPoseFramesRef.current = 0;
     activePoseRef.current = "none";
     poseConsumedRef.current = false;
+    prevPalmXRef.current = null;
+    palmMotionLockRef.current = false;
+    swipeStableFramesRef.current = 0;
     if (detectFrameRef.current) {
       cancelAnimationFrame(detectFrameRef.current);
       detectFrameRef.current = 0;
@@ -579,51 +651,115 @@ export default function Reels() {
           if (pose !== activePoseRef.current) {
             activePoseRef.current = pose;
             poseFramesRef.current = pose === "none" ? 0 : 1;
-            poseConsumedRef.current = false;
+            if (pose === "none") {
+              noPoseFramesRef.current = 1;
+              prevPalmXRef.current = null;
+              palmMotionLockRef.current = false;
+              swipeStableFramesRef.current = 0;
+            } else {
+              noPoseFramesRef.current = 0;
+              poseConsumedRef.current = false;
+            }
           } else if (pose !== "none") {
             poseFramesRef.current += 1;
+            noPoseFramesRef.current = 0;
           } else {
             poseFramesRef.current = 0;
-            poseConsumedRef.current = false;
+            noPoseFramesRef.current += 1;
+            if (noPoseFramesRef.current >= GESTURE_RESET_HOLD_FRAMES) {
+              poseConsumedRef.current = false;
+            }
+            prevPalmXRef.current = null;
+            palmMotionLockRef.current = false;
+            swipeStableFramesRef.current = 0;
+          }
+
+          if (pose === "openPalm") {
+            const palmX = Number(handState?.palmX);
+            const handSize = Number(handState?.handSize) || 0;
+            const swipeThreshold = Math.max(GESTURE_PALM_SWIPE_MIN_PX, handSize * 0.14);
+            if (Number.isFinite(palmX)) {
+              if (prevPalmXRef.current == null) {
+                prevPalmXRef.current = palmX;
+              } else {
+                const dx = palmX - prevPalmXRef.current;
+
+                if (Math.abs(dx) <= Math.max(5, swipeThreshold * 0.3)) {
+                  swipeStableFramesRef.current += 1;
+                } else {
+                  swipeStableFramesRef.current = 0;
+                }
+
+                if (swipeStableFramesRef.current >= GESTURE_SWIPE_STABLE_FRAMES) {
+                  palmMotionLockRef.current = false;
+                }
+
+                if (
+                  !poseConsumedRef.current &&
+                  !palmMotionLockRef.current &&
+                  !gestureScrollLockRef.current &&
+                  now - lastScrollAtRef.current > GESTURE_SCROLL_COOLDOWN_MS
+                ) {
+                  if (dx >= swipeThreshold) {
+                    lastScrollAtRef.current = now;
+                    poseConsumedRef.current = true;
+                    palmMotionLockRef.current = true;
+                    swipeStableFramesRef.current = 0;
+                    setGestureStatus("Open palm swipe right: next reel");
+                    scrollToIndex(currentIndexRef.current + 1);
+                  } else if (dx <= -swipeThreshold) {
+                    lastScrollAtRef.current = now;
+                    poseConsumedRef.current = true;
+                    palmMotionLockRef.current = true;
+                    swipeStableFramesRef.current = 0;
+                    setGestureStatus("Open palm swipe left: previous reel");
+                    scrollToIndex(currentIndexRef.current - 1);
+                  }
+                }
+
+                prevPalmXRef.current = palmX;
+              }
+            }
+          } else {
+            prevPalmXRef.current = null;
+            palmMotionLockRef.current = false;
+            swipeStableFramesRef.current = 0;
           }
 
           if (!poseConsumedRef.current) {
             if (
-              pose === "one" &&
+              pose === "thumbsUp" &&
               poseFramesRef.current >= GESTURE_POSE_HOLD_FRAMES &&
-              now - lastScrollAtRef.current > GESTURE_SCROLL_COOLDOWN_MS
-            ) {
-              lastScrollAtRef.current = now;
-              poseConsumedRef.current = true;
-              setGestureStatus("1 finger: scrolling up");
-              scrollToIndex(currentIndexRef.current - 1);
-            } else if (
-              pose === "two" &&
-              poseFramesRef.current >= GESTURE_POSE_HOLD_FRAMES &&
-              now - lastScrollAtRef.current > GESTURE_SCROLL_COOLDOWN_MS
-            ) {
-              lastScrollAtRef.current = now;
-              poseConsumedRef.current = true;
-              setGestureStatus("2 fingers: scrolling down");
-              scrollToIndex(currentIndexRef.current + 1);
-            } else if (
-              pose === "ok" &&
-              poseFramesRef.current >= GESTURE_OK_HOLD_FRAMES &&
               now - lastLikeAtRef.current > GESTURE_LIKE_COOLDOWN_MS
             ) {
               lastLikeAtRef.current = now;
               poseConsumedRef.current = true;
               const reel = reelsRef.current[currentIndexRef.current];
               if (reel) {
-                setGestureStatus("OK sign: liking reel");
+                setGestureStatus("Thumbs up: liking reel");
                 likeReel(reel.id);
+              }
+            } else if (
+              pose === "twoFingers" &&
+              poseFramesRef.current >= GESTURE_TWO_FINGER_HOLD_FRAMES &&
+              now - lastPlayToggleAtRef.current > GESTURE_PLAY_TOGGLE_COOLDOWN_MS
+            ) {
+              lastPlayToggleAtRef.current = now;
+              poseConsumedRef.current = true;
+              const reel = reelsRef.current[currentIndexRef.current];
+              if (reel) {
+                const state = togglePlayPause(reel.id);
+                setGestureStatus(state === "paused" ? "Two fingers: paused reel" : "Two fingers: playing reel");
               }
             }
           }
         } else {
           poseFramesRef.current = 0;
+          noPoseFramesRef.current += 1;
           activePoseRef.current = "none";
-          poseConsumedRef.current = false;
+          if (noPoseFramesRef.current >= GESTURE_RESET_HOLD_FRAMES) {
+            poseConsumedRef.current = false;
+          }
         }
       } catch {
         setGestureError("Unable to read hand gestures");

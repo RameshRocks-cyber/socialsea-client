@@ -5,6 +5,7 @@ import "./LongVideos.css";
 
 const LONG_VIDEO_SECONDS = 90;
 const QUALITY_OPTIONS = ["auto", "1080", "720", "480", "360"];
+const MIN_LONG_VIDEO_FALLBACK_SECONDS = 45;
 
 export default function LongVideos() {
   const { postId } = useParams();
@@ -15,12 +16,64 @@ export default function LongVideos() {
   const [isLoading, setIsLoading] = useState(true);
   const [selectedQuality, setSelectedQuality] = useState("auto");
   const [showQualityMenu, setShowQualityMenu] = useState(false);
+  const [likeCounts, setLikeCounts] = useState({});
+  const [likedPostIds, setLikedPostIds] = useState({});
+  const [dislikedPostIds, setDislikedPostIds] = useState({});
+  const [dislikeCounts, setDislikeCounts] = useState({});
+  const [commentsByPost, setCommentsByPost] = useState({});
+  const [commentTextByPost, setCommentTextByPost] = useState({});
+  const [savedPostIds, setSavedPostIds] = useState({});
+  const [watchLaterPostIds, setWatchLaterPostIds] = useState({});
+  const [showComments, setShowComments] = useState(true);
+
+  const toList = (payload) => {
+    if (Array.isArray(payload)) return payload;
+    if (Array.isArray(payload?.content)) return payload.content;
+    if (Array.isArray(payload?.items)) return payload.items;
+    if (Array.isArray(payload?.data)) return payload.data;
+    return [];
+  };
 
   const resolveUrl = (url) => {
     if (!url) return "";
     if (url.startsWith("http")) return url;
     const base = api.defaults.baseURL || "";
     return `${base}${url}`;
+  };
+  const readIdMap = (key) => {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return {};
+      const ids = JSON.parse(raw);
+      if (!Array.isArray(ids)) return {};
+      return ids.reduce((acc, id) => ({ ...acc, [Number(id)]: true }), {});
+    } catch {
+      return {};
+    }
+  };
+
+  const readNumberMap = (key) => {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+      const next = {};
+      Object.keys(parsed).forEach((k) => {
+        const n = Number(parsed[k]);
+        if (Number.isFinite(n) && n >= 0) next[k] = n;
+      });
+      return next;
+    } catch {
+      return {};
+    }
+  };
+
+  const persistIdMap = (key, map) => {
+    const ids = Object.keys(map)
+      .filter((id) => map[id])
+      .map((id) => Number(id));
+    localStorage.setItem(key, JSON.stringify(ids));
   };
 
   const mediaUrlFor = (post) => String(post?.contentUrl || post?.mediaUrl || "").trim();
@@ -106,11 +159,11 @@ export default function LongVideos() {
     const load = async () => {
       setIsLoading(true);
       try {
-        const endpoints = ["/api/feed", "/api/profile/me/posts", "/api/profile/posts"];
+        const endpoints = ["/api/feed", "/api/reels", "/api/profile/me/posts", "/api/profile/posts"];
         const responses = await Promise.allSettled(endpoints.map((url) => api.get(url)));
         const posts = responses
-          .filter((r) => r.status === "fulfilled" && Array.isArray(r.value?.data))
-          .flatMap((r) => r.value.data)
+          .filter((r) => r.status === "fulfilled")
+          .flatMap((r) => toList(r.value?.data))
           .filter(Boolean);
         if (cancelled) return;
         setAllPosts(uniqueByPostKey(posts));
@@ -159,6 +212,22 @@ export default function LongVideos() {
     };
   }, []);
 
+  useEffect(() => {
+    const liked = readIdMap("likedPostIds");
+    const disliked = readIdMap("dislikedPostIds");
+    const normalizedLiked = { ...liked };
+    Object.keys(disliked).forEach((id) => {
+      if (disliked[id]) normalizedLiked[id] = false;
+    });
+    setLikedPostIds(normalizedLiked);
+    setDislikedPostIds(disliked);
+    setSavedPostIds(readIdMap("savedPostIds"));
+    setWatchLaterPostIds(readIdMap("watchLaterPostIds"));
+    setDislikeCounts(readNumberMap("dislikeCountsByPost"));
+    persistIdMap("likedPostIds", normalizedLiked);
+    persistIdMap("dislikedPostIds", disliked);
+  }, []);
+
   const usernameFor = (post) => {
     const raw = post?.user?.name || post?.username || post?.user?.email || "User";
     const local = raw.includes("@") ? raw.split("@")[0] : raw;
@@ -189,9 +258,34 @@ export default function LongVideos() {
   }, [allPosts]);
 
   const longVideos = useMemo(() => {
-    const filtered = videoPosts.filter((post) => (videoDurationByPost[post.id] || 0) > LONG_VIDEO_SECONDS);
-    return uniqueByPostKey(filtered);
+    // Keep unknown-duration videos visible; many CDNs/API shapes do not expose duration reliably.
+    const filtered = videoPosts.filter((post) => {
+      const duration = Number(videoDurationByPost[post.id]) || 0;
+      return duration <= 0 || duration > LONG_VIDEO_SECONDS;
+    });
+    const strict = uniqueByPostKey(filtered);
+    if (strict.length >= 5) return strict;
+
+    // Fallback: relax threshold when strict long-video candidates are too few.
+    return uniqueByPostKey(
+      videoPosts.filter((post) => {
+        const duration = Number(videoDurationByPost[post.id]) || 0;
+        return duration <= 0 || duration > MIN_LONG_VIDEO_FALLBACK_SECONDS;
+      })
+    );
   }, [videoPosts, videoDurationByPost]);
+
+  useEffect(() => {
+    if (!longVideos.length) return;
+    longVideos.forEach((post) => {
+      api.get(`/api/likes/${post.id}/count`)
+        .then((res) => {
+          const count = Number(res?.data) || 0;
+          setLikeCounts((prev) => ({ ...prev, [post.id]: count }));
+        })
+        .catch(() => {});
+    });
+  }, [longVideos]);
 
   const activeVideo =
     longVideos.find((p) => String(p.id) === String(postId)) || longVideos[0] || null;
@@ -215,6 +309,147 @@ export default function LongVideos() {
     const url = resolveUrl(String(raw).trim());
     return withCloudinaryQuality(url, selectedQuality);
   }, [activeVideo, selectedQuality]);
+
+  useEffect(() => {
+    if (!activeVideo?.id) return;
+    api.get(`/api/comments/${activeVideo.id}`)
+      .then((res) => {
+        setCommentsByPost((prev) => ({
+          ...prev,
+          [activeVideo.id]: Array.isArray(res?.data) ? res.data : []
+        }));
+      })
+      .catch(() => {});
+  }, [activeVideo?.id]);
+
+  const toggleLike = async (postId) => {
+    if (!postId) return;
+    const wasLiked = Boolean(likedPostIds[postId]);
+    const wasDisliked = Boolean(dislikedPostIds[postId]);
+
+    setDislikedPostIds((prev) => {
+      if (!prev[postId]) return prev;
+      const next = { ...prev, [postId]: false };
+      persistIdMap("dislikedPostIds", next);
+      return next;
+    });
+    if (wasDisliked) {
+      setDislikeCounts((prev) => {
+        const next = { ...prev, [postId]: Math.max(0, (Number(prev[postId]) || 0) - 1) };
+        localStorage.setItem("dislikeCountsByPost", JSON.stringify(next));
+        return next;
+      });
+    }
+
+    if (wasLiked) {
+      setLikedPostIds((prev) => {
+        const next = { ...prev, [postId]: false };
+        persistIdMap("likedPostIds", next);
+        return next;
+      });
+      setLikeCounts((prev) => ({ ...prev, [postId]: Math.max(0, (prev[postId] || 0) - 1) }));
+      try {
+        await api.delete(`/api/likes/${postId}`);
+      } catch {
+        // noop
+      }
+      return;
+    }
+
+    setLikedPostIds((prev) => {
+      const next = { ...prev, [postId]: true };
+      persistIdMap("likedPostIds", next);
+      return next;
+    });
+    setLikeCounts((prev) => ({ ...prev, [postId]: (prev[postId] || 0) + 1 }));
+    try {
+      await api.post(`/api/likes/${postId}`);
+    } catch {
+      // noop
+    }
+  };
+
+  const toggleDislike = async (postId) => {
+    if (!postId) return;
+    const wasLiked = Boolean(likedPostIds[postId]);
+    const wasDisliked = Boolean(dislikedPostIds[postId]);
+
+    setLikedPostIds((prev) => {
+      if (!prev[postId]) return prev;
+      const next = { ...prev, [postId]: false };
+      persistIdMap("likedPostIds", next);
+      return next;
+    });
+    if (wasLiked) {
+      setLikeCounts((prev) => ({ ...prev, [postId]: Math.max(0, (prev[postId] || 0) - 1) }));
+      try {
+        await api.delete(`/api/likes/${postId}`);
+      } catch {
+        // noop
+      }
+    }
+
+    setDislikedPostIds((prev) => {
+      const nextValue = !wasDisliked;
+      const next = { ...prev, [postId]: nextValue };
+      persistIdMap("dislikedPostIds", next);
+      return next;
+    });
+    setDislikeCounts((prev) => {
+      const delta = wasDisliked ? -1 : 1;
+      const next = { ...prev, [postId]: Math.max(0, (Number(prev[postId]) || 0) + delta) };
+      localStorage.setItem("dislikeCountsByPost", JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const submitComment = async (postId) => {
+    const text = String(commentTextByPost[postId] || "").trim();
+    if (!text) return;
+    try {
+      await api.post(`/api/comments/${postId}`, text, {
+        headers: { "Content-Type": "text/plain" }
+      });
+      const res = await api.get(`/api/comments/${postId}`);
+      setCommentsByPost((prev) => ({
+        ...prev,
+        [postId]: Array.isArray(res?.data) ? res.data : []
+      }));
+      setCommentTextByPost((prev) => ({ ...prev, [postId]: "" }));
+    } catch {
+      // noop
+    }
+  };
+
+  const toggleSave = (postId) => {
+    setSavedPostIds((prev) => {
+      const next = { ...prev, [postId]: !prev[postId] };
+      persistIdMap("savedPostIds", next);
+      return next;
+    });
+  };
+
+  const toggleWatchLater = (postId) => {
+    setWatchLaterPostIds((prev) => {
+      const next = { ...prev, [postId]: !prev[postId] };
+      persistIdMap("watchLaterPostIds", next);
+      return next;
+    });
+  };
+
+  const normalizeDisplayName = (value) => {
+    const raw = String(value || "").trim();
+    if (!raw) return "User";
+    const local = raw.includes("@") ? raw.split("@")[0] : raw;
+    return local
+      .replace(/[._-]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .split(" ")
+      .filter(Boolean)
+      .map((x) => x.charAt(0).toUpperCase() + x.slice(1))
+      .join(" ");
+  };
 
   const selectVideo = (id) => {
     if (!id) return;
@@ -266,6 +501,78 @@ export default function LongVideos() {
 
             <h1 className="watch-title">{captionFor(activeVideo)}</h1>
             <p className="watch-owner">{usernameFor(activeVideo)}</p>
+
+            <div className="watch-actions-row">
+              {(() => {
+                const isDisliked = !!dislikedPostIds[activeVideo.id];
+                const isLiked = !!likedPostIds[activeVideo.id] && !isDisliked;
+                return (
+                  <>
+              <button
+                type="button"
+                className={`watch-action-btn ${isLiked ? "is-active" : ""}`}
+                onClick={() => toggleLike(activeVideo.id)}
+              >
+                {"\u{1F44D}"} Like {likeCounts[activeVideo.id] || 0}
+              </button>
+              <button
+                type="button"
+                className={`watch-action-btn ${isDisliked ? "is-active dislike" : ""}`}
+                onClick={() => toggleDislike(activeVideo.id)}
+              >
+                {"\u{1F44E}"} Dislike {dislikeCounts[activeVideo.id] || 0}
+              </button>
+              <button
+                type="button"
+                className="watch-action-btn"
+                onClick={() => setShowComments((v) => !v)}
+              >
+                {"\u{1F4AC}"} Comments {(commentsByPost[activeVideo.id] || []).length}
+              </button>
+              <button
+                type="button"
+                className={`watch-action-btn ${savedPostIds[activeVideo.id] ? "is-active" : ""}`}
+                onClick={() => toggleSave(activeVideo.id)}
+              >
+                {"\u{1F516}"} {savedPostIds[activeVideo.id] ? "Saved" : "Save"}
+              </button>
+              <button
+                type="button"
+                className={`watch-action-btn ${watchLaterPostIds[activeVideo.id] ? "is-active" : ""}`}
+                onClick={() => toggleWatchLater(activeVideo.id)}
+              >
+                {"\u23F2"} {watchLaterPostIds[activeVideo.id] ? "Added" : "Watch Later"}
+              </button>
+                  </>
+                );
+              })()}
+            </div>
+
+            {showComments && (
+              <section className="watch-comments">
+                <div className="watch-comment-input-row">
+                  <input
+                    type="text"
+                    placeholder="Add a comment..."
+                    value={commentTextByPost[activeVideo.id] || ""}
+                    onChange={(e) =>
+                      setCommentTextByPost((prev) => ({ ...prev, [activeVideo.id]: e.target.value }))
+                    }
+                  />
+                  <button type="button" onClick={() => submitComment(activeVideo.id)}>Post</button>
+                </div>
+
+                {(commentsByPost[activeVideo.id] || []).map((comment) => (
+                  <div className="watch-comment-item" key={comment.id}>
+                    <strong>{normalizeDisplayName(comment.user?.name || comment.user?.email || "User")}:</strong>{" "}
+                    {comment.text}
+                  </div>
+                ))}
+                {(commentsByPost[activeVideo.id] || []).length === 0 && (
+                  <p className="watch-empty">No comments yet.</p>
+                )}
+              </section>
+            )}
           </>
         )}
       </section>

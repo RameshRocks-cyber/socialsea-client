@@ -78,6 +78,83 @@
   color: #a8bcdf;
 }
 
+.watch-actions-row {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.watch-action-btn {
+  border: 1px solid rgba(112, 156, 237, 0.45);
+  background: rgba(12, 27, 56, 0.72);
+  color: #dbeaff;
+  border-radius: 999px;
+  padding: 7px 11px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.watch-action-btn:hover {
+  border-color: rgba(131, 179, 255, 0.72);
+}
+
+.watch-action-btn.is-active {
+  background: linear-gradient(140deg, rgba(33, 108, 236, 0.85), rgba(30, 164, 228, 0.85));
+  color: #fff;
+}
+
+.watch-action-btn.dislike.is-active {
+  background: linear-gradient(140deg, rgba(168, 58, 58, 0.95), rgba(214, 86, 86, 0.88));
+}
+
+.watch-comments {
+  margin-top: 12px;
+  border: 1px solid rgba(77, 113, 190, 0.32);
+  border-radius: 12px;
+  background: rgba(8, 16, 34, 0.72);
+  padding: 10px;
+}
+
+.watch-comment-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.watch-comment-input-row input {
+  border: 1px solid rgba(117, 169, 255, 0.4);
+  border-radius: 10px;
+  background: rgba(8, 22, 45, 0.82);
+  color: #edf4ff;
+  padding: 8px 10px;
+  outline: none;
+}
+
+.watch-comment-input-row button {
+  border: 1px solid rgba(117, 169, 255, 0.4);
+  border-radius: 10px;
+  background: linear-gradient(140deg, #1f5dcc, #2187de);
+  color: #fff;
+  padding: 8px 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.watch-comment-item {
+  color: #e5f0ff;
+  font-size: 13px;
+  line-height: 1.4;
+  padding: 6px 2px;
+  border-top: 1px solid rgba(86, 116, 175, 0.22);
+}
+
+.watch-comment-item strong {
+  color: #b6d0ff;
+}
+
 .watch-side {
   border: 1px solid rgba(72, 103, 172, 0.3);
   border-radius: 14px;
@@ -184,5 +261,14 @@
 
   .watch-side {
     max-height: none;
+  }
+
+  .watch-actions-row {
+    gap: 6px;
+  }
+
+  .watch-action-btn {
+    font-size: 11px;
+    padding: 6px 9px;
   }
 }

@@ -1,4 +1,8 @@
 export const SETTINGS_KEY = "socialsea_settings_v1";
+export const DEFAULT_CUSTOM_RINGTONE_URL = "";
+export const DEFAULT_CUSTOM_RINGTONE_NAME = "My Song";
+export const DEFAULT_CUSTOM_RINGTONE_START_SEC = 18;
+export const DEFAULT_CUSTOM_RINGTONE_DURATION_SEC = 20;
 
 export const NOTIFICATION_SOUND_OPTIONS = [
   { value: "classic", label: "Classic" },
@@ -26,7 +30,10 @@ export const DEFAULT_SOUND_PREFS = {
   notificationSound: "classic",
   ringtoneSound: "classic",
   customRingtoneDataUrl: "",
-  customRingtoneName: ""
+  customRingtoneName: DEFAULT_CUSTOM_RINGTONE_NAME,
+  customRingtoneUrl: DEFAULT_CUSTOM_RINGTONE_URL,
+  customRingtoneStartSec: DEFAULT_CUSTOM_RINGTONE_START_SEC,
+  customRingtoneDurationSec: DEFAULT_CUSTOM_RINGTONE_DURATION_SEC
 };
 
 const validNotificationSound = (value) =>
@@ -40,16 +47,31 @@ export const readSoundPrefs = () => {
     const raw = localStorage.getItem(SETTINGS_KEY);
     const parsed = raw ? JSON.parse(raw) : {};
     const notificationSound = String(parsed?.notificationSound || DEFAULT_SOUND_PREFS.notificationSound);
-    const ringtoneSound = String(parsed?.ringtoneSound || DEFAULT_SOUND_PREFS.ringtoneSound);
+    const hasAnyCustomSource = Boolean(
+      String(parsed?.customRingtoneDataUrl || "").trim() || String(parsed?.customRingtoneUrl || "").trim()
+    );
+    const rawRingtoneSound = String(parsed?.ringtoneSound || DEFAULT_SOUND_PREFS.ringtoneSound);
+    const ringtoneSound =
+      rawRingtoneSound === "custom" && !hasAnyCustomSource ? "classic" : rawRingtoneSound;
     const customRingtoneDataUrl = String(parsed?.customRingtoneDataUrl || "");
-    const customRingtoneName = String(parsed?.customRingtoneName || "");
+    const customRingtoneName = String(parsed?.customRingtoneName || DEFAULT_CUSTOM_RINGTONE_NAME);
+    const customRingtoneUrl = String(parsed?.customRingtoneUrl || DEFAULT_CUSTOM_RINGTONE_URL);
+    const customRingtoneStartSec = Number(parsed?.customRingtoneStartSec);
+    const customRingtoneDurationSec = Number(parsed?.customRingtoneDurationSec);
     return {
       notificationSound: validNotificationSound(notificationSound)
         ? notificationSound
         : DEFAULT_SOUND_PREFS.notificationSound,
       ringtoneSound: validRingtoneSound(ringtoneSound) ? ringtoneSound : DEFAULT_SOUND_PREFS.ringtoneSound,
       customRingtoneDataUrl,
-      customRingtoneName
+      customRingtoneName,
+      customRingtoneUrl,
+      customRingtoneStartSec: Number.isFinite(customRingtoneStartSec) && customRingtoneStartSec >= 0
+        ? customRingtoneStartSec
+        : DEFAULT_CUSTOM_RINGTONE_START_SEC,
+      customRingtoneDurationSec: Number.isFinite(customRingtoneDurationSec) && customRingtoneDurationSec > 1
+        ? customRingtoneDurationSec
+        : DEFAULT_CUSTOM_RINGTONE_DURATION_SEC
     };
   } catch {
     return { ...DEFAULT_SOUND_PREFS };
