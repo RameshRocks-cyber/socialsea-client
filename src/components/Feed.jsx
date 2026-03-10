@@ -31,6 +31,7 @@ export default function Feed() {
   const wheelDeltaRef = useRef(0);
   const touchStartYRef = useRef(null);
   const mediaClickTimerByPostRef = useRef({});
+  const viewerVideoRefs = useRef({});
 
   useEffect(() => {
     let mounted = true;
@@ -425,6 +426,16 @@ export default function Feed() {
     void likePost(post.id);
   };
 
+  const setViewerVideoRef = (postId, node) => {
+    const id = String(postId || "").trim();
+    if (!id) return;
+    if (!node) {
+      delete viewerVideoRefs.current[id];
+      return;
+    }
+    viewerVideoRefs.current[id] = node;
+  };
+
   const submitComment = async (postId) => {
     const text = (commentTextByPost[postId] || "").trim();
     if (!text) return;
@@ -634,6 +645,67 @@ export default function Feed() {
   }, [activePostId]);
 
   useEffect(() => {
+    if (!activePostId) return undefined;
+    const videos = Object.values(viewerVideoRefs.current).filter(Boolean);
+    if (!videos.length) return undefined;
+
+    const visibilityByVideo = new Map();
+    const pauseOthers = (keep) => {
+      videos.forEach((video) => {
+        if (video === keep) return;
+        try {
+          video.pause();
+        } catch {
+          // ignore pause failures
+        }
+      });
+    };
+
+    const playMostVisible = () => {
+      let bestVideo = null;
+      let bestRatio = 0;
+      videos.forEach((video) => {
+        const ratio = Number(visibilityByVideo.get(video) || 0);
+        if (ratio > bestRatio) {
+          bestRatio = ratio;
+          bestVideo = video;
+        }
+      });
+
+      pauseOthers(bestVideo);
+      if (!bestVideo || bestRatio < 0.55) return;
+      try {
+        const playAttempt = bestVideo.play();
+        if (playAttempt?.catch) playAttempt.catch(() => {});
+      } catch {
+        // ignore autoplay failures
+      }
+    };
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          visibilityByVideo.set(entry.target, entry.intersectionRatio);
+        });
+        playMostVisible();
+      },
+      { threshold: [0, 0.2, 0.4, 0.55, 0.75, 1] }
+    );
+
+    videos.forEach((video) => {
+      visibilityByVideo.set(video, 0);
+      observer.observe(video);
+    });
+
+    const rafId = requestAnimationFrame(playMostVisible);
+    return () => {
+      cancelAnimationFrame(rafId);
+      observer.disconnect();
+      pauseOthers(null);
+    };
+  }, [activePostId, viewerPosts]);
+
+  useEffect(() => {
     return () => {
       Object.values(mediaClickTimerByPostRef.current).forEach((timer) => {
         if (timer) clearTimeout(timer);
@@ -817,9 +889,13 @@ export default function Feed() {
                   {mediaUrl && (
                     type === "VIDEO" ? (
                       <video
+                        ref={(node) => setViewerVideoRef(post.id, node)}
                         src={mediaUrl}
-                        controls
-                        muted={!!mutedByPost[post.id]}
+                        autoPlay
+                        loop
+                        playsInline
+                        preload="metadata"
+                        muted={mutedByPost[post.id] ?? true}
                         className="feed-media-view"
                         onClick={() => handleViewerMediaClick(post)}
                         onDoubleClick={() => handleViewerMediaDoubleClick(post)}

@@ -3069,6 +3069,7 @@ export default function Chat() {
       if (contactKey) {
         autoSpeakBootstrappedByContactRef.current[contactKey] = false;
       }
+      spokenSignMessageIdsRef.current = new Set();
     }
     if (!next && "speechSynthesis" in window) {
       try {
@@ -3084,7 +3085,6 @@ export default function Chat() {
     const contactKey = String(activeContactId || "");
     const visibleIds = getVisibleThreadMessageIds();
     if (!autoSpeakBootstrappedByContactRef.current[contactKey]) {
-      const seen = new Set();
       const visibleQueue = [];
       activeMessages.forEach((msg) => {
         if (!msg || msg.mine) return;
@@ -3093,11 +3093,8 @@ export default function Chat() {
         if (!msgId || !payload?.text) return;
         if (visibleIds.has(msgId)) {
           visibleQueue.push({ msgId, payload });
-          return;
         }
-        seen.add(msgId);
       });
-      spokenSignMessageIdsRef.current = seen;
       autoSpeakBootstrappedByContactRef.current[contactKey] = true;
       visibleQueue.forEach(({ msgId, payload }) => {
         if (spokenSignMessageIdsRef.current.has(msgId)) return;
@@ -3125,8 +3122,25 @@ export default function Chat() {
     const contactKey = String(activeContactId || "");
     if (contactKey) {
       autoSpeakBootstrappedByContactRef.current[contactKey] = false;
+      spokenSignMessageIdsRef.current = new Set();
     }
   }, [activeContactId]);
+
+  const processVisibleAutoSpeak = () => {
+    if (!signAssistAutoSpeak || !activeContactId) return;
+    const visibleIds = getVisibleThreadMessageIds();
+    if (!visibleIds.size) return;
+    activeMessages.forEach((msg) => {
+      if (!msg || msg.mine) return;
+      const msgId = String(msg?.id || "");
+      if (!msgId || spokenSignMessageIdsRef.current.has(msgId)) return;
+      if (!visibleIds.has(msgId)) return;
+      const payload = getSpeakableIncomingPayload(msg);
+      if (!payload?.text) return;
+      spokenSignMessageIdsRef.current.add(msgId);
+      speakSignAssistText(payload.text, payload.voiceGender || "female");
+    });
+  };
 
   const goToProfile = (contact) => {
     if (!contact?.id) return;
@@ -4092,6 +4106,7 @@ export default function Chat() {
     scrollRafRef.current = requestAnimationFrame(() => {
       scrollRafRef.current = 0;
       refreshThreadScrollState();
+      processVisibleAutoSpeak();
     });
   };
 

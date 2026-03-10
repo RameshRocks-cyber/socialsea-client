@@ -59,7 +59,6 @@ const buildEmergencyUrls = (suffix) => {
     }
     if (base.startsWith("/")) {
       urls.push(`${base}/api/emergency/${path}`);
-      urls.push(`${base}/emergency/${path}`);
       continue;
     }
     if (/\/api$/i.test(base)) {
@@ -71,7 +70,6 @@ const buildEmergencyUrls = (suffix) => {
     urls.push(`${base}/emergency/${path}`);
   }
   urls.push(`/api/emergency/${path}`);
-  urls.push(`/emergency/${path}`);
   return uniqueNonEmpty(urls);
 };
 
