@@ -342,11 +342,15 @@ export default function Reels() {
   };
 
   const getMediaType = (item) => {
-    const type = (item?.type || "").toUpperCase();
-    if (type) return type;
-    const url = String(item?.contentUrl || item?.mediaUrl || "").toLowerCase();
-    if (url.match(/\.(mp4|mov|webm|mkv|m4v)(\?|$)/)) return "VIDEO";
-    if (url.match(/\.(png|jpe?g|gif|webp)(\?|$)/)) return "IMAGE";
+    const rawType = String(item?.type || item?.mediaType || item?.contentType || "")
+      .trim()
+      .toLowerCase();
+    if (rawType.includes("video")) return "VIDEO";
+    if (rawType.includes("image")) return "IMAGE";
+
+    const url = String(item?.contentUrl || item?.mediaUrl || "").trim().toLowerCase();
+    if (/\.(mp4|mov|webm|mkv|m4v|avi|mpg|mpeg|3gp|ogv)(\?|#|$)/.test(url)) return "VIDEO";
+    if (/\.(png|jpe?g|gif|webp|bmp|avif|svg)(\?|#|$)/.test(url)) return "IMAGE";
     return item?.reel ? "VIDEO" : "IMAGE";
   };
 

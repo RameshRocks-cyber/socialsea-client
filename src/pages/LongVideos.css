@@ -95,8 +95,9 @@
 .yt-home-thumb {
   width: 100%;
   aspect-ratio: 16 / 9;
-  object-fit: cover;
+  object-fit: contain;
   display: block;
+  background: #000;
 }
 
 .yt-duration-badge {
@@ -135,12 +136,18 @@
 
 .watch-page {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 410px;
-  gap: 16px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  max-width: 860px;
+  margin: 0 auto;
 }
 
 .watch-main {
   min-width: 0;
+  border: 1px solid rgba(67, 83, 112, 0.45);
+  border-radius: 14px;
+  background: #12151b;
+  padding: 10px;
 }
 
 .watch-player-wrap {
@@ -153,7 +160,8 @@
 
 .watch-player {
   width: 100%;
-  aspect-ratio: 16 / 9;
+  max-height: min(72vh, 680px);
+  object-fit: contain;
   display: block;
   background: #000;
 }
@@ -288,8 +296,8 @@
   border-radius: 14px;
   background: #12151b;
   padding: 10px;
-  max-height: calc(100vh - 150px);
-  overflow: auto;
+  max-height: none;
+  overflow: visible;
 }
 
 .watch-side h3 {
@@ -308,8 +316,8 @@
   border-radius: 11px;
   background: #1a1f27;
   display: grid;
-  grid-template-columns: 178px minmax(0, 1fr);
-  gap: 8px;
+  grid-template-columns: 1fr;
+  gap: 0;
   cursor: pointer;
   overflow: hidden;
 }
@@ -324,15 +332,14 @@
 
 .watch-item-thumb {
   width: 100%;
-  height: 100%;
   aspect-ratio: 16 / 9;
-  object-fit: cover;
+  object-fit: contain;
   display: block;
   background: #000;
 }
 
 .watch-item-text {
-  padding: 8px 8px 8px 0;
+  padding: 10px;
 }
 
 .watch-item-text p {
@@ -382,6 +389,6 @@
   }
 
   .watch-item {
-    grid-template-columns: 150px minmax(0, 1fr);
+    grid-template-columns: 1fr;
   }
 }

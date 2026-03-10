@@ -147,6 +147,28 @@
   background: rgba(11, 36, 73, 0.9);
 }
 
+.auth-password-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.auth-password-toggle {
+  border: 1px solid rgba(116, 174, 239, 0.46);
+  background: rgba(9, 30, 62, 0.86);
+  color: #d9ecff;
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.auth-password-toggle:hover {
+  border-color: #6bc7ff;
+}
+
 .auth-primary-btn,
 .auth-secondary-btn,
 .auth-link-btn {

@@ -17,6 +17,24 @@
   grid-template-columns: minmax(0, 1fr);
 }
 
+.chat-page.chat-list-only {
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.chat-page.chat-list-only .chat-sidebar {
+  border-right: none;
+  border-bottom: none;
+  min-height: 0;
+  height: 100%;
+}
+
+.chat-page.chat-list-only .chat-contact-list {
+  flex: 1;
+  min-height: 0;
+}
+
 :root {
   --wa-bg: #050f24;
   --wa-panel: #081930;

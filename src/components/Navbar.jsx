@@ -32,6 +32,9 @@ const SOS_SIGNAL_CHANNEL = "socialsea_sos_signal_channel_v1";
 const SOS_SESSION_KEY = "socialsea_sos_session_v1";
 const SOS_LAST_SIGNAL_ID_KEY = "socialsea_sos_last_signal_id_v1";
 const SOS_LAST_SESSION_SIG_KEY = "socialsea_sos_last_session_sig_v1";
+const SOS_NAV_CACHE_KEY = "socialsea_sos_nav_cache_v1";
+const SOS_SUPPRESSED_ALERTS_KEY = "socialsea_sos_suppressed_alerts_v1";
+const SOS_SEEN_ALERTS_KEY = "socialsea_sos_seen_alerts_v1";
 const uniqueNonEmpty = (arr) =>
   arr.filter((v, i) => {
     if (!v) return false;
@@ -114,6 +117,28 @@ const readSessionValue = (key) => {
   }
 };
 
+const readSuppressedAlertIds = () => {
+  try {
+    const raw = localStorage.getItem(SOS_SUPPRESSED_ALERTS_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(arr)) return new Set();
+    return new Set(arr.map((id) => String(id || "").trim()).filter(Boolean));
+  } catch {
+    return new Set();
+  }
+};
+
+const readSeenAlertIds = () => {
+  try {
+    const raw = localStorage.getItem(SOS_SEEN_ALERTS_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(arr)) return new Set();
+    return new Set(arr.map((id) => String(id || "").trim()).filter(Boolean));
+  } catch {
+    return new Set();
+  }
+};
+
 const SNAP_LENSES = [
   { id: "off", label: "Off", badge: "O", thumb: "linear-gradient(135deg, #131313, #282828)", filter: "none", mask: "" },
   { id: "natural", label: "Natural", badge: "N", thumb: "linear-gradient(135deg, #50755f, #9ed8a0)", filter: "none", mask: "" },
@@ -172,7 +197,7 @@ export default function Navbar() {
   const profileTarget = myUserId ? `/profile/${myUserId}` : "/profile/me";
   const [incomingCall, setIncomingCall] = useState(null);
   const [showSosInNavbar, setShowSosInNavbar] = useState(readShowSosInNavbar);
-  const [sosPopup, setSosPopup] = useState("");
+  const [sosPopup, setSosPopup] = useState(null);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraError, setCameraError] = useState("");
   const [cameraBusy, setCameraBusy] = useState(false);
@@ -182,6 +207,10 @@ export default function Navbar() {
   const seenEmergencyAlertsRef = useRef(new Set());
   const seenLocalSignalsRef = useRef(new Set());
   const seenSessionSignalsRef = useRef(new Set());
+  const seenAlertIdsRef = useRef(readSeenAlertIds());
+  const suppressedAlertIdsRef = useRef(readSuppressedAlertIds());
+  const popupStateRef = useRef(null);
+  const popupMetaRef = useRef({ fingerprint: "", shownAt: 0 });
   const sosSignalChannelRef = useRef(null);
   const lastHandledSignalIdRef = useRef(readSessionValue(SOS_LAST_SIGNAL_ID_KEY));
   const lastHandledSessionSigRef = useRef(readSessionValue(SOS_LAST_SESSION_SIG_KEY));
@@ -321,23 +350,29 @@ export default function Navbar() {
     sosTapRef.current = { count, lastAt: now };
 
     if (count === 1) {
-      setSosPopup("SOS ready. Tap 2 more times to send emergency alert.");
+      showSosPopup("SOS ready. Tap 2 more times to send emergency alert.");
       return;
     }
     if (count === 2) {
-      setSosPopup("One more tap. SOS will be sent now.");
+      showSosPopup("One more tap. SOS will be sent now.");
       return;
     }
 
     sosTapRef.current = { count: 0, lastAt: 0 };
-    setSosPopup("ok bee Brave Help is on the way");
+    showSosPopup("ok bee Brave Help is on the way");
     navigate("/sos?arm=1");
   };
 
   useEffect(() => {
     if (!sosPopup) return undefined;
-    const timer = setTimeout(() => setSosPopup(""), 9000);
+    const popupData = typeof sosPopup === "string" ? buildSosPopupPayload(sosPopup) : sosPopup;
+    if (popupData?.isEmergency) return undefined;
+    const timer = setTimeout(() => setSosPopup(null), 9000);
     return () => clearTimeout(timer);
+  }, [sosPopup]);
+
+  useEffect(() => {
+    popupStateRef.current = sosPopup;
   }, [sosPopup]);
 
   useEffect(() => {
@@ -373,10 +408,26 @@ export default function Navbar() {
 
       const kind = String(payload.type || "").toLowerCase();
       if (kind === "stopped") {
-        setSosPopup(`[EMERGENCY] ${payload.reporterEmail || "Nearby user"} stopped SOS`);
+        suppressAlert(payload.alertId);
+        setSosPopup(null);
         return;
       }
-      setSosPopup(`[EMERGENCY] ${payload.reporterEmail || "Nearby user"} triggered SOS`);
+      if (!payload.alertId) return;
+      if (isAlertSeen(payload.alertId)) return;
+      if (isAlertSuppressed(payload.alertId)) {
+        setSosPopup(null);
+        return;
+      }
+      showSosPopup("[EMERGENCY] SocialSea Emergengy SOS is asking for help", {
+        isEmergency: true,
+        alertId: payload.alertId,
+        reporterEmail: payload.reporterEmail,
+        liveUrl: payload.liveUrl,
+        navigateUrl: payload.navigateUrl,
+        mapsUrl: payload.mapsUrl,
+        latitude: payload.latitude,
+        longitude: payload.longitude
+      });
     };
 
     const onStorage = (event) => {
@@ -393,7 +444,21 @@ export default function Navbar() {
           const session = JSON.parse(event.newValue);
           if (location.pathname.startsWith("/sos")) return;
           const isActive = Boolean(session?.active);
-          if (!isActive) return;
+          if (!isActive) {
+            const stoppedId = normalizeAlertId(session?.alertId);
+            if (stoppedId) {
+              suppressAlert(stoppedId);
+              const currentId = normalizeAlertId(popupStateRef.current?.alertId);
+              if (!currentId || currentId === stoppedId) {
+                setSosPopup(null);
+              }
+            }
+            return;
+          }
+          if (isAlertSuppressed(session?.alertId)) {
+            setSosPopup(null);
+            return;
+          }
           const sig = `${session?.startedAt || ""}|${session?.updatedAt || ""}|${session?.alertId || ""}`;
           if (!sig.trim() || seenSessionSignalsRef.current.has(sig)) return;
           if (sig === lastHandledSessionSigRef.current) return;
@@ -405,7 +470,12 @@ export default function Navbar() {
           } catch {
             // ignore storage issues
           }
-          setSosPopup("[EMERGENCY] SOS is active");
+          showSosPopup("[EMERGENCY] SocialSea Emergengy SOS is asking for help", {
+            isEmergency: true,
+            alertId: session?.alertId,
+            latitude: session?.lastLocation?.latitude,
+            longitude: session?.lastLocation?.longitude
+          });
         } catch {
           // ignore malformed session events
         }
@@ -430,7 +500,21 @@ export default function Navbar() {
         const rawSession = localStorage.getItem(SOS_SESSION_KEY);
         if (!rawSession) return;
         const session = JSON.parse(rawSession);
-        if (!session?.active) return;
+        if (!session?.active) {
+          const stoppedId = normalizeAlertId(session?.alertId);
+          if (stoppedId) {
+            suppressAlert(stoppedId);
+            const currentId = normalizeAlertId(popupStateRef.current?.alertId);
+            if (!currentId || currentId === stoppedId) {
+              setSosPopup(null);
+            }
+          }
+          return;
+        }
+        if (isAlertSuppressed(session?.alertId)) {
+          setSosPopup(null);
+          return;
+        }
         const updatedAtMs = readEpoch(session?.updatedAt || session?.startedAt);
         if (!updatedAtMs || Date.now() - updatedAtMs > 15000) return;
         const sig = `${session?.startedAt || ""}|${session?.updatedAt || ""}|${session?.alertId || ""}`;
@@ -444,7 +528,12 @@ export default function Navbar() {
         } catch {
           // ignore storage issues
         }
-        setSosPopup("[EMERGENCY] SOS is active");
+        showSosPopup("[EMERGENCY] SocialSea Emergengy SOS is asking for help", {
+          isEmergency: true,
+          alertId: session?.alertId,
+          latitude: session?.lastLocation?.latitude,
+          longitude: session?.lastLocation?.longitude
+        });
       } catch {
         // ignore parse/storage issues
       }
@@ -517,10 +606,21 @@ export default function Navbar() {
         for (const a of alerts) {
           const id = String(a?.alertId || "");
           if (!id || seenEmergencyAlertsRef.current.has(id)) continue;
+          if (isAlertSeen(id)) continue;
+          if (isAlertSuppressed(id)) continue;
           seenEmergencyAlertsRef.current.add(id);
           const reporter = String(a?.reporterEmail || "").trim();
           if (myEmail && reporter.toLowerCase() === myEmail) continue;
-          setSosPopup(`[EMERGENCY] ${reporter || "Nearby user"} triggered SOS`);
+          showSosPopup("[EMERGENCY] SocialSea Emergengy SOS is asking for help", {
+            isEmergency: true,
+            alertId: id,
+            reporterEmail: reporter,
+            liveUrl: a?.liveUrl,
+            navigateUrl: a?.navigateUrl,
+            mapsUrl: a?.mapsUrl,
+            latitude: a?.latitude,
+            longitude: a?.longitude
+          });
           break;
         }
       } catch (err) {
@@ -598,6 +698,145 @@ export default function Navbar() {
   const activeLens = SNAP_LENSES.find((x) => x.id === activeLensId) || SNAP_LENSES[0];
   const cameraFilterCss = activeLens?.filter || "none";
 
+  const toFiniteNumber = (value) => {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  const normalizeAlertId = (value) => String(value || "").trim();
+
+  const isAlertSuppressed = (alertId) => {
+    const id = normalizeAlertId(alertId);
+    return Boolean(id) && suppressedAlertIdsRef.current.has(id);
+  };
+
+  const isAlertSeen = (alertId) => {
+    const id = normalizeAlertId(alertId);
+    return Boolean(id) && seenAlertIdsRef.current.has(id);
+  };
+
+  const markAlertSeen = (alertId) => {
+    const id = normalizeAlertId(alertId);
+    if (!id) return;
+    seenAlertIdsRef.current.add(id);
+    try {
+      localStorage.setItem(
+        SOS_SEEN_ALERTS_KEY,
+        JSON.stringify(Array.from(seenAlertIdsRef.current).slice(-1000))
+      );
+    } catch {
+      // ignore storage issues
+    }
+  };
+
+  const suppressAlert = (alertId) => {
+    const id = normalizeAlertId(alertId);
+    if (!id) return;
+    markAlertSeen(id);
+    suppressedAlertIdsRef.current.add(id);
+    try {
+      localStorage.setItem(
+        SOS_SUPPRESSED_ALERTS_KEY,
+        JSON.stringify(Array.from(suppressedAlertIdsRef.current).slice(-500))
+      );
+    } catch {
+      // ignore storage issues
+    }
+  };
+
+  const buildSosPopupPayload = (message, options = {}) => {
+    const text = String(message || "").trim();
+    const idText = String(options.alertId || "").trim();
+    const lat = toFiniteNumber(options.latitude);
+    const lon = toFiniteNumber(options.longitude);
+    const origin = typeof window !== "undefined" ? String(window.location.origin || "").replace(/\/+$/, "") : "";
+
+    const liveUrl = String(options.liveUrl || "").trim() || (idText ? `${origin}/sos/${encodeURIComponent(idText)}` : "");
+    const navParams = new URLSearchParams();
+    if (lat != null) navParams.set("lat", String(lat));
+    if (lon != null) navParams.set("lon", String(lon));
+    if (options.reporterEmail) navParams.set("reporter", String(options.reporterEmail));
+    if (liveUrl) navParams.set("live", liveUrl);
+    if (options.mapsUrl) navParams.set("maps", String(options.mapsUrl));
+    const localNavigateUrl =
+      idText || lat != null || lon != null
+        ? `${origin}/sos/navigate/${encodeURIComponent(idText || "active")}${navParams.toString() ? `?${navParams.toString()}` : ""}`
+        : "";
+    const locationUrl =
+      String(options.locationUrl || "").trim() ||
+      localNavigateUrl ||
+      String(options.navigateUrl || "").trim() ||
+      String(options.mapsUrl || "").trim() ||
+      (lat != null && lon != null ? `https://www.google.com/maps?q=${lat},${lon}` : "");
+
+    return {
+      text,
+      alertId: idText || "",
+      isEmergency:
+        Boolean(options.isEmergency) ||
+        /\bemergency\b/i.test(text) ||
+        /\btriggered\s+sos\b/i.test(text) ||
+        /\bsos\s+is\s+active\b/i.test(text),
+      showActions:
+        (Boolean(options.isEmergency) || /^\s*\[EMERGENCY\]/i.test(text)) &&
+        Boolean(idText || liveUrl || locationUrl),
+      liveUrl,
+      locationUrl
+    };
+  };
+
+  const showSosPopup = (message, options = {}) => {
+    const nextPopup = buildSosPopupPayload(message, options);
+    if (nextPopup?.isEmergency && (isAlertSuppressed(nextPopup?.alertId) || isAlertSeen(nextPopup?.alertId))) {
+      setSosPopup(null);
+      return;
+    }
+    try {
+      const alertId = String(options?.alertId || "").trim();
+      const lat = toFiniteNumber(options?.latitude);
+      const lon = toFiniteNumber(options?.longitude);
+      if (alertId || lat != null || lon != null) {
+        const raw = localStorage.getItem(SOS_NAV_CACHE_KEY);
+        const cache = raw ? JSON.parse(raw) : {};
+        const key = alertId || `loc_${Date.now()}`;
+        cache[key] = {
+          alertId: alertId || null,
+          latitude: lat,
+          longitude: lon,
+          reporterEmail: String(options?.reporterEmail || "").trim() || null,
+          liveUrl: String(options?.liveUrl || "").trim() || null,
+          navigateUrl: String(options?.navigateUrl || "").trim() || null,
+          mapsUrl: String(options?.mapsUrl || "").trim() || null,
+          updatedAt: new Date().toISOString()
+        };
+        localStorage.setItem(SOS_NAV_CACHE_KEY, JSON.stringify(cache));
+      }
+    } catch {
+      // ignore storage issues
+    }
+    const fingerprint = `${nextPopup?.alertId || ""}|${nextPopup?.text || ""}|${nextPopup?.locationUrl || ""}`;
+    const now = Date.now();
+    const last = popupMetaRef.current;
+    const current = popupStateRef.current;
+    const currentFingerprint = current
+      ? `${current?.alertId || ""}|${current?.text || ""}|${current?.locationUrl || ""}`
+      : "";
+    if (fingerprint && (fingerprint === currentFingerprint || (fingerprint === last.fingerprint && now - last.shownAt < 1500))) {
+      return;
+    }
+    popupMetaRef.current = { fingerprint, shownAt: now };
+    if (nextPopup?.isEmergency && nextPopup?.alertId) {
+      markAlertSeen(nextPopup.alertId);
+    }
+    setSosPopup(nextPopup);
+  };
+
+  const openPopupUrl = (url) => {
+    const href = String(url || "").trim();
+    if (!href) return;
+    window.open(href, "_blank", "noopener,noreferrer");
+  };
+
   return (
     <header className={`ss-nav-wrap ${onChatConversationRoute ? "is-chat-conversation" : ""}`}>
       <nav className="ss-nav" aria-label="Main navigation">
@@ -669,11 +908,44 @@ export default function Navbar() {
         </div>
       )}
 
-      {sosPopup && (
+      {sosPopup && (() => {
+        const popupData = typeof sosPopup === "string" ? buildSosPopupPayload(sosPopup) : sosPopup;
+        return (
         <div className="ss-sos-popup" role="status" aria-live="polite">
-          {sosPopup}
+          <div className="ss-sos-popup-text">{popupData?.text}</div>
+          {popupData?.showActions && (
+            <div className="ss-sos-popup-actions">
+              <button
+                type="button"
+                className="ss-sos-popup-btn"
+                onClick={() => openPopupUrl(popupData?.liveUrl)}
+                disabled={!popupData?.liveUrl}
+              >
+                Open Live Video
+              </button>
+              <button
+                type="button"
+                className="ss-sos-popup-btn"
+                onClick={() => openPopupUrl(popupData?.locationUrl)}
+                disabled={!popupData?.locationUrl}
+              >
+                Open Location
+              </button>
+              <button
+                type="button"
+                className="ss-sos-popup-btn ss-sos-popup-btn-cancel"
+                onClick={() => {
+                  if (popupData?.alertId) suppressAlert(popupData.alertId);
+                  setSosPopup(null);
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          )}
         </div>
-      )}
+        );
+      })()}
 
       {cameraOpen && (
         <div className="ss-camera-modal-backdrop" onClick={closeCameraStudio}>

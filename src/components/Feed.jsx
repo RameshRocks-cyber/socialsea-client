@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { FiBookmark } from "react-icons/fi";
 import { BsBookmarkFill } from "react-icons/bs";
 import api from "../api/axios";
@@ -10,6 +10,8 @@ const LONG_VIDEO_SECONDS = 90;
 
 export default function Feed() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const [feedMode, setFeedMode] = useState("long");
   const [posts, setPosts] = useState([]);
   const [likeCounts, setLikeCounts] = useState({});
   const [likedPostIds, setLikedPostIds] = useState({});
@@ -19,10 +21,16 @@ export default function Feed() {
   const [watchLaterPostIds, setWatchLaterPostIds] = useState({});
   const [shareMessageByPost, setShareMessageByPost] = useState({});
   const [error, setError] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [activePostId, setActivePostId] = useState(null);
   const [videoDurationByPost, setVideoDurationByPost] = useState({});
   const [profilePicByOwner, setProfilePicByOwner] = useState({});
+  const [mutedByPost, setMutedByPost] = useState({});
+  const wheelLockRef = useRef(0);
+  const wheelDeltaRef = useRef(0);
+  const touchStartYRef = useRef(null);
+  const mediaClickTimerByPostRef = useRef({});
 
   useEffect(() => {
     let mounted = true;
@@ -53,6 +61,7 @@ export default function Feed() {
               ? payload.content
               : [];
     const load = async () => {
+      setIsLoading(true);
       try {
         const baseCandidates = buildBaseCandidates();
         const endpoints = ["/api/feed", "/feed", "/api/posts", "/posts"];
@@ -119,6 +128,8 @@ export default function Feed() {
         const status = err?.response?.status;
         const message = err?.response?.data?.message || err?.response?.data || "";
         setError(status ? `Failed to load feed (${status}) ${message}` : "Failed to load feed");
+      } finally {
+        if (mounted) setIsLoading(false);
       }
     };
     void load();
@@ -293,8 +304,18 @@ export default function Feed() {
   }, [posts]);
 
   const mediaTypeFor = (post) => {
-    const t = (post?.type || "").toUpperCase();
-    if (t) return t;
+    const rawType = String(post?.type || post?.mediaType || post?.contentType || "")
+      .trim()
+      .toLowerCase();
+    if (rawType.includes("video")) return "VIDEO";
+    if (rawType.includes("image")) return "IMAGE";
+
+    const url = String(post?.contentUrl || post?.mediaUrl || "")
+      .trim()
+      .toLowerCase();
+    if (/\.(mp4|mov|webm|mkv|m4v|avi|mpg|mpeg|3gp|ogv)(\?|#|$)/.test(url)) return "VIDEO";
+    if (/\.(png|jpe?g|gif|webp|bmp|avif|svg)(\?|#|$)/.test(url)) return "IMAGE";
+
     return post?.reel ? "VIDEO" : "IMAGE";
   };
 
@@ -307,6 +328,27 @@ export default function Feed() {
     const ss = total % 60;
     if (hh > 0) return `${hh}:${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
     return `${mm}:${String(ss).padStart(2, "0")}`;
+  };
+
+  const formatCompactCount = (value) => {
+    const n = Number(value) || 0;
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
+    if (n >= 1_000) return `${(n / 1_000).toFixed(1).replace(/\.0$/, "")}K`;
+    return `${n}`;
+  };
+
+  const relativePostTime = (value) => {
+    const d = value ? new Date(value) : null;
+    if (!d || Number.isNaN(d.getTime())) return "recently";
+    const diffSec = Math.max(1, Math.floor((Date.now() - d.getTime()) / 1000));
+    if (diffSec < 60) return `${diffSec} seconds ago`;
+    const mins = Math.floor(diffSec / 60);
+    if (mins < 60) return `${mins} minutes ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs} hours ago`;
+    const days = Math.floor(hrs / 24);
+    if (days < 30) return `${days} days ago`;
+    return d.toLocaleDateString();
   };
 
   const loadComments = async (postId) => {
@@ -326,9 +368,18 @@ export default function Feed() {
       localStorage.setItem("likedPostIds", JSON.stringify(ids));
     };
 
-    if (likedPostIds[postId]) return;
-
     try {
+      if (likedPostIds[postId]) {
+        await api.delete(`/api/likes/${postId}`);
+        setLikedPostIds((prev) => {
+          const next = { ...prev, [postId]: false };
+          persistLikedMap(next);
+          return next;
+        });
+        setLikeCounts((prev) => ({ ...prev, [postId]: Math.max(0, (prev[postId] || 0) - 1) }));
+        return;
+      }
+
       const res = await api.post(`/api/likes/${postId}`);
       const message = String(res?.data || "").toLowerCase();
       if (message.includes("already")) {
@@ -348,6 +399,30 @@ export default function Feed() {
     } catch {
       // noop
     }
+  };
+
+  const togglePostMute = (postId) => {
+    setMutedByPost((prev) => ({ ...prev, [postId]: !prev[postId] }));
+  };
+
+  const handleViewerMediaClick = (post) => {
+    if (!post || mediaTypeFor(post) !== "VIDEO") return;
+    const existing = mediaClickTimerByPostRef.current[post.id];
+    if (existing) clearTimeout(existing);
+    mediaClickTimerByPostRef.current[post.id] = setTimeout(() => {
+      togglePostMute(post.id);
+      mediaClickTimerByPostRef.current[post.id] = null;
+    }, 240);
+  };
+
+  const handleViewerMediaDoubleClick = (post) => {
+    if (!post) return;
+    const existing = mediaClickTimerByPostRef.current[post.id];
+    if (existing) {
+      clearTimeout(existing);
+      mediaClickTimerByPostRef.current[post.id] = null;
+    }
+    void likePost(post.id);
   };
 
   const submitComment = async (postId) => {
@@ -413,7 +488,9 @@ export default function Feed() {
   const longVideoPosts = useMemo(() => {
     return filteredPosts.filter((post) => {
       const isVideo = mediaTypeFor(post) === "VIDEO";
-      return isVideo && (videoDurationByPost[post.id] || 0) > LONG_VIDEO_SECONDS;
+      const duration = Number(videoDurationByPost[post.id] || 0);
+      // Keep videos visible until metadata is known, then keep only true long videos.
+      return isVideo && (duration <= 0 || duration > LONG_VIDEO_SECONDS);
     });
   }, [filteredPosts, videoDurationByPost]);
 
@@ -421,23 +498,149 @@ export default function Feed() {
     return filteredPosts.filter((post) => !longVideoPosts.some((lv) => lv.id === post.id));
   }, [filteredPosts, longVideoPosts]);
 
-  const openPost = async (postId) => {
+  const shortVideoPosts = useMemo(() => {
+    return filteredPosts.filter((post) => {
+      if (mediaTypeFor(post) !== "VIDEO") return false;
+      const duration = Number(videoDurationByPost[post.id] || 0);
+      return duration <= 0 || duration <= LONG_VIDEO_SECONDS;
+    });
+  }, [filteredPosts, videoDurationByPost]);
+
+  const activeShortVideoIndex = useMemo(
+    () => shortVideoPosts.findIndex((p) => p.id === activePostId),
+    [shortVideoPosts, activePostId]
+  );
+  const isShortViewerOpen = feedMode === "all" && activeShortVideoIndex >= 0;
+
+  const openPost = async (postId, syncUrl = false, replace = false) => {
     setActivePostId(postId);
     await loadComments(postId);
+    if (syncUrl) {
+      navigate(`/feed?post=${postId}`, { replace });
+    }
   };
+
+  useEffect(() => {
+    const postParam = String(searchParams.get("post") || "").trim();
+    if (!postParam) return;
+    const target = posts.find((p) => String(p?.id) === postParam);
+    if (!target) return;
+    if (String(activePostId || "") === postParam) return;
+    void openPost(target.id, false);
+  }, [searchParams, posts, activePostId, videoDurationByPost, navigate]);
 
   const openPostFromGrid = async (post) => {
     const type = mediaTypeFor(post);
+    if (feedMode === "all" && type === "VIDEO") {
+      navigate(`/reels?post=${post.id}`);
+      return;
+    }
     const duration = videoDurationByPost[post.id] || 0;
     const isShortVideo = type === "VIDEO" && duration > 0 && duration <= LONG_VIDEO_SECONDS;
     if (isShortVideo) {
       navigate(`/reels?post=${post.id}`);
       return;
     }
-    await openPost(post.id);
+    await openPost(post.id, false);
+  };
+
+  const moveShortVideo = async (direction) => {
+    if (activeShortVideoIndex < 0 || !shortVideoPosts.length) return;
+    const nextIndex = (activeShortVideoIndex + direction + shortVideoPosts.length) % shortVideoPosts.length;
+    const nextPost = shortVideoPosts[nextIndex];
+    if (!nextPost) return;
+    await openPost(nextPost.id, true, true);
+  };
+
+  useEffect(() => {
+    if (!isShortViewerOpen) return;
+    const onKeyDown = (e) => {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        void moveShortVideo(1);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        void moveShortVideo(-1);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isShortViewerOpen, shortVideoPosts, activeShortVideoIndex]);
+
+  useEffect(() => {
+    if (!isShortViewerOpen) return;
+    const onWheel = (e) => {
+      e.preventDefault();
+      wheelDeltaRef.current += e.deltaY;
+      if (Math.abs(wheelDeltaRef.current) < 50) return;
+      const direction = wheelDeltaRef.current > 0 ? 1 : -1;
+      wheelDeltaRef.current = 0;
+      const now = Date.now();
+      if (now - wheelLockRef.current < 360) return;
+      wheelLockRef.current = now;
+      void moveShortVideo(direction);
+    };
+    window.addEventListener("wheel", onWheel, { passive: false });
+    return () => window.removeEventListener("wheel", onWheel);
+  }, [isShortViewerOpen, shortVideoPosts, activeShortVideoIndex]);
+
+  useEffect(() => {
+    if (!isShortViewerOpen) return;
+    const onTouchStart = (e) => {
+      touchStartYRef.current = e.touches?.[0]?.clientY ?? null;
+    };
+    const onTouchEnd = (e) => {
+      const startY = touchStartYRef.current;
+      const endY = e.changedTouches?.[0]?.clientY ?? null;
+      touchStartYRef.current = null;
+      if (startY == null || endY == null) return;
+      const delta = startY - endY;
+      if (Math.abs(delta) < 40) return;
+      const now = Date.now();
+      if (now - wheelLockRef.current < 360) return;
+      wheelLockRef.current = now;
+      void moveShortVideo(delta > 0 ? 1 : -1);
+    };
+    window.addEventListener("touchstart", onTouchStart, { passive: true });
+    window.addEventListener("touchend", onTouchEnd, { passive: true });
+    return () => {
+      window.removeEventListener("touchstart", onTouchStart);
+      window.removeEventListener("touchend", onTouchEnd);
+    };
+  }, [isShortViewerOpen, shortVideoPosts, activeShortVideoIndex]);
+
+  const closePostView = () => {
+    setActivePostId(null);
+    if (searchParams.get("post")) navigate("/feed", { replace: true });
   };
 
   const activePost = posts.find((p) => p.id === activePostId) || null;
+  const viewerPosts = useMemo(() => {
+    if (!activePost) return [];
+    const pool = feedMode === "all" ? shortVideoPosts : filteredPosts;
+    const idx = pool.findIndex((p) => Number(p?.id) === Number(activePost.id));
+    if (idx < 0) return [activePost];
+    const ordered = [...pool.slice(idx), ...pool.slice(0, idx)];
+    return ordered.length ? ordered : [activePost];
+  }, [activePost, feedMode, shortVideoPosts, filteredPosts]);
+
+  useEffect(() => {
+    if (!activePostId) return undefined;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [activePostId]);
+
+  useEffect(() => {
+    return () => {
+      Object.values(mediaClickTimerByPostRef.current).forEach((timer) => {
+        if (timer) clearTimeout(timer);
+      });
+      mediaClickTimerByPostRef.current = {};
+    };
+  }, []);
 
   return (
     <div className="feed-page">
@@ -452,10 +655,38 @@ export default function Feed() {
         />
       </div>
 
-      {error && <p>{error}</p>}
-      {!error && filteredPosts.length === 0 && <p className="feed-empty">No posts found</p>}
+      <div className="feed-mode-switch" role="tablist" aria-label="Feed mode">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={feedMode === "long"}
+          className={`feed-mode-btn ${feedMode === "long" ? "is-active" : ""}`}
+          onClick={() => setFeedMode("long")}
+        >
+          Long Videos
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={feedMode === "all"}
+          className={`feed-mode-btn ${feedMode === "all" ? "is-active" : ""}`}
+          onClick={() => setFeedMode("all")}
+        >
+          Short Videos
+        </button>
+      </div>
 
-      {!!longVideoPosts.length && (
+      {error && <p>{error}</p>}
+      {!error && isLoading && <p className="feed-empty">Loading videos...</p>}
+      {!error && !isLoading && filteredPosts.length === 0 && <p className="feed-empty">No posts found</p>}
+      {!error && !isLoading && feedMode === "long" && !longVideoPosts.length && (
+        <p className="feed-empty">No long videos found</p>
+      )}
+      {!error && !isLoading && feedMode === "all" && !shortVideoPosts.length && (
+        <p className="feed-empty">No short videos found</p>
+      )}
+
+      {!!longVideoPosts.length && feedMode === "long" && (
         <section className="long-video-feed">
           {longVideoPosts.map((post) => {
             const rawUrl = post.contentUrl || post.mediaUrl || "";
@@ -503,31 +734,30 @@ export default function Feed() {
         </section>
       )}
 
-      <section className="explore-grid">
-        {gridPosts.map((post, idx) => {
+      {feedMode === "all" && (
+        <section className="explore-grid instagram-grid">
+        {shortVideoPosts.map((post) => {
           const rawUrl = post.contentUrl || post.mediaUrl || "";
           const mediaUrl = rawUrl.trim() ? resolveUrl(rawUrl.trim()) : "";
           const type = mediaTypeFor(post);
-          const isLongVideo =
-            type === "VIDEO" && (videoDurationByPost[post.id] || 0) > LONG_VIDEO_SECONDS;
           if (!mediaUrl) return null;
 
           return (
             <button
               key={post.id}
               type="button"
-              className={`explore-tile ${idx % 7 === 0 && !isLongVideo ? "tall" : ""} ${
-                isLongVideo ? "long-video-tile" : ""
-              }`}
-              onClick={() => openPostFromGrid(post)}
+              className="explore-tile instagram-tile"
+              onClick={() => openPost(post.id, true)}
               title={usernameFor(post)}
             >
               {type === "VIDEO" ? (
                 <video
                   src={mediaUrl}
+                  autoPlay
+                  loop
                   muted
                   playsInline
-                  preload="metadata"
+                  preload="auto"
                   className="explore-media"
                   onLoadedMetadata={(e) => {
                     const duration = Number(e.currentTarget.duration) || 0;
@@ -541,113 +771,139 @@ export default function Feed() {
                 <img src={mediaUrl} alt="post" className="explore-media" />
               )}
               <div className="explore-overlay">
-                {isLongVideo && <span className="long-video-badge">Long Video</span>}
                 <span>{"\u25B7"} {(likeCounts[post.id] || 0).toLocaleString()}</span>
               </div>
             </button>
           );
         })}
-      </section>
+        </section>
+      )}
 
       {activePost && (
-        <div className="post-view-backdrop" onClick={() => setActivePostId(null)}>
-          <article className="post-view-card" onClick={(e) => e.stopPropagation()}>
-            <header className="feed-post-head">
-              {profilePicFor(activePost) ? (
-                <img
-                  src={profilePicFor(activePost)}
-                  alt={usernameFor(activePost)}
-                  className="feed-avatar feed-avatar-img"
-                />
-              ) : (
-                <div className="feed-avatar">{usernameFor(activePost).charAt(0).toUpperCase()}</div>
-              )}
-              <p className="feed-username">{usernameFor(activePost)}</p>
-            </header>
-
-            {(() => {
-              const raw = activePost.contentUrl || activePost.mediaUrl || "";
+        <div className="post-view-backdrop" onClick={closePostView}>
+          <div className="post-view-stack" onClick={(e) => e.stopPropagation()}>
+            {viewerPosts.map((post, idx) => {
+              const isPrimary = idx === 0;
+              const raw = post.contentUrl || post.mediaUrl || "";
               const mediaUrl = raw.trim() ? resolveUrl(raw.trim()) : "";
-              const type = activePost.type || (activePost.reel ? "VIDEO" : "IMAGE");
-              if (!mediaUrl) return null;
-              if (type === "VIDEO") return <video src={mediaUrl} controls className="feed-media-view" />;
-              return <img src={mediaUrl} alt="post" className="feed-media-view" />;
-            })()}
+              const type = mediaTypeFor(post);
+              return (
+                <article className="post-view-card instagram-post-card" key={`viewer-${post.id}-${idx}`}>
+                  <div className="ig-post-context">
+                    <p className="ig-post-tags">{post.description || post.content || "Post"}</p>
+                    <p className="ig-post-time">{relativePostTime(post.createdAt || post.createdDate)}</p>
+                  </div>
 
-            <div className="feed-actions">
-              <div className="feed-actions-left">
-                <button
-                  type="button"
-                  className={likedPostIds[activePost.id] ? "is-active" : ""}
-                  onClick={() => likePost(activePost.id)}
-                  title="Like"
-                >
-                  <span className="action-icon">{"\u2665"}</span>
-                  <span className="action-count">{likeCounts[activePost.id] || 0}</span>
-                </button>
-                <button type="button" title="Comments">
-                  <span className="action-icon">{"\u{1F4AC}"}</span>
-                  <span className="action-count">{(commentsByPost[activePost.id] || []).length}</span>
-                </button>
-                <button type="button" onClick={() => sharePost(activePost)} title="Share">
-                  <span className="action-icon">{"\u2934"}</span>
-                </button>
-                <button
-                  type="button"
-                  className={watchLaterPostIds[activePost.id] ? "is-saved is-active" : ""}
-                  onClick={() => toggleWatchLater(activePost.id)}
-                  title="Watch Later"
-                >
-                  <span className="action-icon">{"\u23F2"}</span>
-                </button>
-              </div>
+                  <header className="feed-post-head ig-post-head">
+                    {profilePicFor(post) ? (
+                      <img
+                        src={profilePicFor(post)}
+                        alt={usernameFor(post)}
+                        className="feed-avatar feed-avatar-img"
+                      />
+                    ) : (
+                      <div className="feed-avatar">{usernameFor(post).charAt(0).toUpperCase()}</div>
+                    )}
+                    <div className="ig-user-meta">
+                      <p className="feed-username">{usernameFor(post)}</p>
+                      <small>{usernameFor(post)} • Original audio</small>
+                    </div>
+                    <div className="ig-user-actions">
+                      <button type="button" className="ig-follow-btn">Follow</button>
+                      <button type="button" className="ig-more-btn" aria-label="More options">⋮</button>
+                    </div>
+                  </header>
 
-              <button
-                type="button"
-                className={`feed-save-btn ${savedPostIds[activePost.id] ? "is-saved is-active" : ""}`}
-                onClick={() => toggleSave(activePost.id)}
-                title="Save"
-              >
-                <span className="action-icon action-icon-svg">
-                  {savedPostIds[activePost.id] ? <BsBookmarkFill /> : <FiBookmark />}
-                </span>
-              </button>
-            </div>
+                  {mediaUrl && (
+                    type === "VIDEO" ? (
+                      <video
+                        src={mediaUrl}
+                        controls
+                        muted={!!mutedByPost[post.id]}
+                        className="feed-media-view"
+                        onClick={() => handleViewerMediaClick(post)}
+                        onDoubleClick={() => handleViewerMediaDoubleClick(post)}
+                      />
+                    ) : (
+                      <img src={mediaUrl} alt="post" className="feed-media-view" />
+                    )
+                  )}
 
-            {shareMessageByPost[activePost.id] && (
-              <p className="feed-share-status">{shareMessageByPost[activePost.id]}</p>
-            )}
-            {likeCounts[activePost.id] > 0 && (
-              <p className="feed-likes-line">{likeCounts[activePost.id]} likes</p>
-            )}
-            {(activePost.description || activePost.content) && (
-              <p className="feed-caption">
-                <strong>{usernameFor(activePost)}</strong>{" "}
-                {activePost.description || activePost.content}
-              </p>
-            )}
+                  <div className="feed-actions ig-feed-actions">
+                    <div className="feed-actions-left">
+                      <button
+                        type="button"
+                        className={likedPostIds[post.id] ? "is-active" : ""}
+                        onClick={() => likePost(post.id)}
+                        title="Like"
+                      >
+                        <span className="action-icon">{"\u2665"}</span>
+                        <span className="action-count">{formatCompactCount(likeCounts[post.id] || 0)}</span>
+                      </button>
+                      <button type="button" title="Comments">
+                        <span className="action-icon">{"\u{1F4AC}"}</span>
+                        <span className="action-count">{formatCompactCount((commentsByPost[post.id] || []).length)}</span>
+                      </button>
+                      <button type="button" onClick={() => sharePost(post)} title="Share">
+                        <span className="action-icon">{"\u2934"}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className={watchLaterPostIds[post.id] ? "is-saved is-active" : ""}
+                        onClick={() => toggleWatchLater(post.id)}
+                        title="Watch Later"
+                      >
+                        <span className="action-icon">{"\u23F2"}</span>
+                      </button>
+                    </div>
 
-            <div className="feed-comments">
-              <div className="feed-comment-input-row">
-                <input
-                  type="text"
-                  placeholder="Add a comment..."
-                  value={commentTextByPost[activePost.id] || ""}
-                  onChange={(e) =>
-                    setCommentTextByPost((prev) => ({ ...prev, [activePost.id]: e.target.value }))
-                  }
-                />
-                <button type="button" onClick={() => submitComment(activePost.id)}>Post</button>
-              </div>
+                    <button
+                      type="button"
+                      className={`feed-save-btn ${savedPostIds[post.id] ? "is-saved is-active" : ""}`}
+                      onClick={() => toggleSave(post.id)}
+                      title="Save"
+                    >
+                      <span className="action-icon action-icon-svg">
+                        {savedPostIds[post.id] ? <BsBookmarkFill /> : <FiBookmark />}
+                      </span>
+                    </button>
+                  </div>
 
-              {(commentsByPost[activePost.id] || []).map((comment) => (
-                <div className="feed-comment-item" key={comment.id}>
-                  <strong>{normalizeDisplayName(comment.user?.name || comment.user?.email || "User")}:</strong>{" "}
-                  {comment.text}
-                </div>
-              ))}
-            </div>
-          </article>
+                  {shareMessageByPost[post.id] && <p className="feed-share-status">{shareMessageByPost[post.id]}</p>}
+                  {likeCounts[post.id] > 0 && <p className="feed-likes-line">{likeCounts[post.id]} likes</p>}
+                  {(post.description || post.content) && (
+                    <p className="feed-caption">
+                      <strong>{usernameFor(post)}</strong>{" "}
+                      {post.description || post.content}
+                    </p>
+                  )}
+
+                  {isPrimary && (
+                    <div className="feed-comments">
+                      <div className="feed-comment-input-row">
+                        <input
+                          type="text"
+                          placeholder="Add a comment..."
+                          value={commentTextByPost[post.id] || ""}
+                          onChange={(e) =>
+                            setCommentTextByPost((prev) => ({ ...prev, [post.id]: e.target.value }))
+                          }
+                        />
+                        <button type="button" onClick={() => submitComment(post.id)}>Post</button>
+                      </div>
+
+                      {(commentsByPost[post.id] || []).map((comment) => (
+                        <div className="feed-comment-item" key={comment.id}>
+                          <strong>{normalizeDisplayName(comment.user?.name || comment.user?.email || "User")}:</strong>{" "}
+                          {comment.text}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </article>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>

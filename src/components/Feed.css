@@ -20,6 +20,39 @@
   gap: 8px;
 }
 
+.feed-mode-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 10px;
+  padding: 3px;
+  border-radius: 999px;
+  border: 1px solid rgba(74, 119, 198, 0.45);
+  background: linear-gradient(180deg, rgba(20, 38, 70, 0.96), rgba(11, 24, 46, 0.96));
+}
+
+.feed-mode-btn {
+  border: 0;
+  border-radius: 999px;
+  padding: 7px 12px;
+  background: transparent;
+  color: #b8cae9;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.feed-mode-btn.is-active {
+  background: linear-gradient(180deg, #2b5db3, #244d94);
+  color: #f6f9ff;
+  box-shadow: 0 6px 14px rgba(13, 41, 88, 0.45);
+}
+
+.feed-mode-btn:hover {
+  color: #e7f0ff;
+}
+
 .explore-search-icon {
   position: absolute;
   left: 14px;
@@ -50,6 +83,10 @@
   gap: 6px;
 }
 
+.instagram-grid {
+  gap: 4px;
+}
+
 .explore-tile {
   position: relative;
   border: none;
@@ -71,6 +108,11 @@
 .explore-tile.tall {
   grid-row: span 2;
   aspect-ratio: 3 / 8;
+}
+
+.instagram-tile {
+  aspect-ratio: 1 / 1;
+  border-radius: 8px;
 }
 
 .explore-media {
@@ -126,11 +168,12 @@
   border: 1px solid rgba(63, 93, 161, 0.36);
   background: linear-gradient(160deg, rgba(14, 22, 43, 0.9), rgba(9, 13, 25, 0.95));
   border-radius: 14px;
-  padding: 10px;
+  padding: 0;
   color: inherit;
   text-align: left;
   cursor: pointer;
   transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+  overflow: hidden;
 }
 
 .long-feed-card:hover {
@@ -143,10 +186,10 @@
   position: relative;
   width: 100%;
   aspect-ratio: 16 / 9;
-  border-radius: 12px;
+  border-radius: 0;
   overflow: hidden;
   background: #000;
-  border: 1px solid rgba(80, 113, 178, 0.32);
+  border: 0;
 }
 
 .long-feed-thumb {
@@ -169,7 +212,8 @@
 }
 
 .long-feed-meta {
-  margin-top: 10px;
+  margin-top: 0;
+  padding: 10px;
   display: flex;
   align-items: flex-start;
   gap: 10px;
@@ -224,28 +268,48 @@
   position: fixed;
   inset: 0;
   z-index: 1200;
-  background: rgba(0, 0, 0, 0.76);
+  background: rgba(0, 0, 0, 0.78);
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
-  padding: 10px;
+  padding: 12px 8px 90px;
+  overflow-y: auto;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.post-view-backdrop::-webkit-scrollbar {
+  display: none;
+}
+
+.post-view-stack {
+  width: min(720px, 100%);
+  display: grid;
+  gap: 10px;
 }
 
 .post-view-card {
-  width: min(560px, 95vw);
-  max-height: 94vh;
+  width: min(720px, 100%);
+  max-height: none;
   overflow: auto;
-  background: linear-gradient(160deg, #070b17, #090e1e);
-  border: 1px solid rgba(62, 88, 146, 0.45);
+  background: #000;
+  border: 1px solid rgba(45, 58, 86, 0.55);
   border-radius: 16px;
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.42);
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.post-view-card::-webkit-scrollbar {
+  display: none;
 }
 
 .feed-post-head {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(53, 67, 95, 0.5);
 }
 
 .feed-avatar {
@@ -269,38 +333,40 @@
 
 .feed-username {
   margin: 0;
-  color: #f2f2f2;
-  font-weight: 600;
-  font-size: 14px;
+  color: #f4f8ff;
+  font-weight: 700;
+  font-size: 1.1rem;
 }
 
 .feed-media-view {
   width: 100%;
-  max-height: 66vh;
-  object-fit: cover;
+  height: min(72vh, 760px);
+  max-height: min(72vh, 760px);
+  object-fit: contain;
   display: block;
+  background: #000;
 }
 
 .feed-actions {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 10px 2px;
+  padding: 10px 12px 4px;
 }
 
 .feed-actions-left {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
 }
 
 .feed-actions button,
 .feed-comment-input-row button {
   border: none;
   background: transparent;
-  color: #f3f3f3;
+  color: #edf4ff;
   border-radius: 8px;
-  padding: 4px 6px;
+  padding: 4px 5px;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -312,7 +378,7 @@
 }
 
 .action-icon {
-  font-size: 20px;
+  font-size: 24px;
   line-height: 1;
 }
 
@@ -324,7 +390,8 @@
 
 .action-count {
   font-size: 12px;
-  color: #d6d6d6;
+  color: #e8edf8;
+  font-weight: 600;
 }
 
 .feed-actions button.is-active {
@@ -336,15 +403,15 @@
 }
 
 .feed-likes-line {
-  margin: 2px 12px 0;
-  color: #f1f1f1;
+  margin: 0 14px 0;
+  color: #f2f8ff;
   font-size: 13px;
   font-weight: 600;
 }
 
 .feed-caption {
-  margin: 8px 12px 10px;
-  color: #f3f3f3;
+  margin: 6px 14px 10px;
+  color: #eaf3ff;
   font-size: 13px;
   line-height: 1.45;
 }
@@ -356,38 +423,117 @@
 }
 
 .feed-comments {
-  margin: 0 10px 10px;
-  background: #0a0a0a;
-  border: 1px solid #1f1f1f;
-  border-radius: 10px;
-  padding: 8px;
+  margin: 0;
+  background: #000;
+  border-top: 1px solid rgba(40, 49, 69, 0.68);
+  border-radius: 0 0 16px 16px;
+  padding: 8px 10px 10px;
 }
 
 .feed-comment-input-row {
   display: flex;
   gap: 8px;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .feed-comment-input-row input {
   flex: 1;
-  border-radius: 8px;
-  border: 1px solid #2f2f2f;
-  background: #121212;
-  color: #f3f3f3;
-  padding: 7px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(64, 75, 98, 0.7);
+  background: rgba(9, 10, 14, 0.95);
+  color: #f3f8ff;
+  padding: 8px 11px;
 }
 
 .feed-comment-input-row button {
-  border: 1px solid #2f2f2f;
-  background: #181818;
-  padding: 7px 10px;
+  border: 1px solid rgba(74, 119, 198, 0.56);
+  background: linear-gradient(180deg, rgba(29, 66, 125, 0.96), rgba(21, 50, 98, 0.96));
+  padding: 7px 12px;
+  color: #f3f9ff;
+  font-weight: 700;
 }
 
 .feed-comment-item {
-  padding: 6px 0;
-  border-bottom: 1px solid #1b1b1b;
+  padding: 7px 2px;
+  border-bottom: 1px solid rgba(45, 57, 78, 0.44);
   font-size: 13px;
+  color: #dceaff;
+}
+
+.ig-post-context {
+  padding: 12px 14px 6px;
+  border-bottom: 1px solid rgba(39, 47, 63, 0.62);
+}
+
+.ig-post-tags {
+  margin: 0;
+  color: #f0f3fb;
+  font-size: 1.15rem;
+  font-weight: 600;
+  line-height: 1.28;
+}
+
+.ig-post-time {
+  margin: 6px 0 0;
+  color: #9da8ba;
+  font-size: 12px;
+}
+
+.ig-post-head {
+  border-bottom: none;
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+.ig-user-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ig-user-meta small {
+  color: #cad1de;
+  font-size: 12px;
+}
+
+.ig-user-actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ig-follow-btn {
+  border: 1px solid rgba(76, 92, 124, 0.8);
+  background: #1f2735;
+  color: #f4f8ff;
+  border-radius: 11px;
+  height: 42px;
+  min-width: 112px;
+  padding: 0 18px;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.ig-more-btn {
+  border: none;
+  background: transparent;
+  color: #e7edf9;
+  font-size: 1.55rem;
+  line-height: 1;
+  padding: 0 6px;
+  cursor: pointer;
+}
+
+.ig-feed-actions .feed-actions-left button {
+  padding: 0 2px;
+  border-radius: 0;
+}
+
+.instagram-post-card + .instagram-post-card {
+  border-top-left-radius: 10px;
+  border-top-right-radius: 10px;
 }
 
 .feed-comment-item:last-child {
@@ -404,6 +550,17 @@
     margin-bottom: 10px;
     padding: 0;
     border-radius: 0;
+  }
+
+  .feed-mode-switch {
+    width: 100%;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+
+  .feed-mode-btn {
+    flex: 1;
+    text-align: center;
   }
 
   .explore-grid {

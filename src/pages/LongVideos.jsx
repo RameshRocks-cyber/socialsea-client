@@ -157,6 +157,15 @@ export default function LongVideos() {
   };
 
   const mediaUrlFor = (post) => String(post?.contentUrl || post?.mediaUrl || "").trim();
+  const isVideoPost = (post) => {
+    const rawType = String(post?.type || post?.mediaType || post?.contentType || "")
+      .trim()
+      .toLowerCase();
+    if (rawType.includes("video")) return true;
+    if (rawType.includes("image")) return false;
+    const url = mediaUrlFor(post).toLowerCase();
+    return /\.(mp4|mov|webm|mkv|m4v|avi|mpg|mpeg|3gp|ogv)(\?|#|$)/.test(url);
+  };
 
   const parseDurationLikeValue = (raw) => {
     if (raw == null) return 0;
@@ -334,7 +343,7 @@ export default function LongVideos() {
   };
 
   const videoPosts = useMemo(() => {
-    return uniqueByPostKey(allPosts.filter((post) => !!mediaUrlFor(post)));
+    return uniqueByPostKey(allPosts.filter((post) => !!mediaUrlFor(post) && isVideoPost(post)));
   }, [allPosts]);
 
   const longVideos = useMemo(() => {

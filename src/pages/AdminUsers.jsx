@@ -136,19 +136,23 @@ export default function AdminUsers() {
     setNoticeTextByUserId((prev) => ({ ...prev, [user.id]: "" }));
   };
 
-  const banUser = async (user) => {
+  const setUserBlockedState = async (user, blocked) => {
     setBusyByUserId((prev) => ({ ...prev, [user.id]: true }));
     try {
-      await api.post(`/api/admin/users/${user.id}/ban`);
-      issueNotice(user, "red");
+      await api.post(`/api/admin/users/${user.id}/${blocked ? "block" : "unblock"}`);
+      if (blocked) issueNotice(user, "red");
       await loadUsers();
     } catch (err) {
       console.error(err);
-      setError("Failed to remove user access");
+      setError(blocked ? "Failed to block user account" : "Failed to unblock user account");
     } finally {
       setBusyByUserId((prev) => ({ ...prev, [user.id]: false }));
     }
   };
+
+  const blockUser = async (user) => setUserBlockedState(user, true);
+
+  const unblockUser = async (user) => setUserBlockedState(user, false);
 
   const activeUsers = users.filter((user) => !user?.banned).length;
   const redNotices = notices.filter((notice) => notice.targetType === "user" && notice.severity === "red").length;
@@ -228,6 +232,14 @@ export default function AdminUsers() {
                       <span className={`admin-badge ${user.banned ? "danger" : "success"}`}>
                         {user.banned ? "Removed access" : "Active"}
                       </span>
+                      <div className="admin-row-actions" style={{ marginTop: 8 }}>
+                        <button type="button" className="admin-btn ghost" onClick={() => blockUser(user)} disabled={busy || user?.banned}>
+                          {busy && !user?.banned ? "Blocking..." : user?.banned ? "Blocked" : "Block"}
+                        </button>
+                        <button type="button" className="admin-btn success" onClick={() => unblockUser(user)} disabled={busy || !user?.banned}>
+                          {busy && user?.banned ? "Unblocking..." : user?.banned ? "Unblock" : "Unblocked"}
+                        </button>
+                      </div>
                     </td>
                     <td>{formatDateTime(getCreatedAt(user))}</td>
                     <td>
@@ -250,9 +262,6 @@ export default function AdminUsers() {
                           </button>
                           <button type="button" className="admin-btn danger" onClick={() => issueNotice(user, "red")}>
                             Red Notice
-                          </button>
-                          <button type="button" className="admin-btn ghost" onClick={() => banUser(user)} disabled={busy || user?.banned}>
-                            {busy ? "Removing..." : user?.banned ? "Access removed" : "Remove user"}
                           </button>
                         </div>
                       </div>

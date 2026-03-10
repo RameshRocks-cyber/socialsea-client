@@ -1,27 +1,116 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import "./SOSNavigate.css";
 
+const SOS_NAV_CACHE_KEY = "socialsea_sos_nav_cache_v1";
+
+const toFiniteNumber = (value) => {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+};
+
+const haversineMeters = (lat1, lon1, lat2, lon2) => {
+  const R = 6371000;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+};
+
 export default function SOSNavigate() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { alertId } = useParams();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [payload, setPayload] = useState(null);
+  const [myLocation, setMyLocation] = useState(null);
 
   useEffect(() => {
     let active = true;
+
+    const fallbackFromSearchAndCache = () => {
+      const queryLat = toFiniteNumber(searchParams.get("lat"));
+      const queryLon = toFiniteNumber(searchParams.get("lon"));
+      const queryReporter = String(searchParams.get("reporter") || "").trim();
+      const queryLive = String(searchParams.get("live") || "").trim();
+      const queryMaps = String(searchParams.get("maps") || "").trim();
+
+      if (queryLat != null && queryLon != null) {
+        return {
+          alertId: alertId || "active",
+          active: true,
+          latitude: queryLat,
+          longitude: queryLon,
+          reporterEmail: queryReporter || null,
+          liveUrl: queryLive || null,
+          mapsUrl: queryMaps || null,
+          source: "query"
+        };
+      }
+
+      try {
+        const raw = localStorage.getItem(SOS_NAV_CACHE_KEY);
+        const cache = raw ? JSON.parse(raw) : {};
+        const cached = cache?.[String(alertId || "").trim()];
+        const cachedLat = toFiniteNumber(cached?.latitude);
+        const cachedLon = toFiniteNumber(cached?.longitude);
+        if (cachedLat != null && cachedLon != null) {
+          return {
+            alertId: cached?.alertId || alertId || "active",
+            active: true,
+            latitude: cachedLat,
+            longitude: cachedLon,
+            reporterEmail: cached?.reporterEmail || null,
+            liveUrl: cached?.liveUrl || null,
+            mapsUrl: cached?.mapsUrl || null,
+            source: "cache"
+          };
+        }
+      } catch {
+        // ignore storage issues
+      }
+      return null;
+    };
+
     const load = async () => {
       setLoading(true);
       setError("");
+      const isNumericAlertId = /^\d+$/.test(String(alertId || "").trim());
       try {
+        if (!isNumericAlertId) {
+          const fallback = fallbackFromSearchAndCache();
+          if (!active) return;
+          if (fallback) {
+            setPayload(fallback);
+          } else {
+            setError("SOS location is unavailable.");
+          }
+          return;
+        }
+
         const res = await api.get(`/api/emergency/${alertId}/assist`);
         if (!active) return;
-        setPayload(res?.data || null);
+        const data = res?.data || null;
+        if (!data) {
+          setError("SOS location is unavailable.");
+          return;
+        }
+        setPayload(data);
       } catch (err) {
         if (!active) return;
-        const status = err?.response?.status;
+        const fallback = fallbackFromSearchAndCache();
+        if (fallback) {
+          setPayload(fallback);
+          setError("");
+          return;
+        }
+
+        const status = Number(err?.response?.status || 0);
         if (status === 404) setError("SOS alert not found.");
         else if (status === 401 || status === 403) setError("Please login to view SOS navigation.");
         else setError("Unable to load SOS navigation details.");
@@ -33,13 +122,45 @@ export default function SOSNavigate() {
     return () => {
       active = false;
     };
-  }, [alertId]);
+  }, [alertId, searchParams]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!navigator.geolocation) return undefined;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        if (cancelled) return;
+        setMyLocation({
+          latitude: pos.coords.latitude,
+          longitude: pos.coords.longitude
+        });
+      },
+      () => {},
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 15000 }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const mapsLink = useMemo(() => {
     if (payload?.mapsUrl) return payload.mapsUrl;
     if (payload?.latitude == null || payload?.longitude == null) return "";
-    return `https://www.google.com/maps/dir/?api=1&destination=${payload.latitude},${payload.longitude}`;
-  }, [payload]);
+    const destination = `${payload.latitude},${payload.longitude}`;
+    const origin =
+      myLocation?.latitude != null && myLocation?.longitude != null
+        ? `&origin=${myLocation.latitude},${myLocation.longitude}`
+        : "";
+    return `https://www.google.com/maps/dir/?api=1&destination=${destination}${origin}&travelmode=driving`;
+  }, [payload, myLocation]);
+
+  const distanceText = useMemo(() => {
+    if (!payload || payload?.latitude == null || payload?.longitude == null || !myLocation) return "";
+    const meters = haversineMeters(myLocation.latitude, myLocation.longitude, payload.latitude, payload.longitude);
+    if (!Number.isFinite(meters)) return "";
+    if (meters < 1000) return `${Math.round(meters)} m away`;
+    return `${(meters / 1000).toFixed(2)} km away`;
+  }, [payload, myLocation]);
 
   return (
     <section className="sos-nav-page">
@@ -57,8 +178,10 @@ export default function SOSNavigate() {
             <div className="sos-nav-grid">
               <p><strong>Alert ID:</strong> {payload.alertId}</p>
               <p><strong>Status:</strong> {payload.active ? "ACTIVE" : "ENDED"}</p>
+              <p><strong>Reporter:</strong> {payload.reporterEmail || "-"}</p>
               <p><strong>Latitude:</strong> {payload.latitude}</p>
               <p><strong>Longitude:</strong> {payload.longitude}</p>
+              <p><strong>Your distance:</strong> {distanceText || "Locating..."}</p>
             </div>
 
             <div className="sos-nav-actions">
@@ -69,7 +192,7 @@ export default function SOSNavigate() {
               )}
               {mapsLink && (
                 <a className="sos-nav-btn map" href={mapsLink} target="_blank" rel="noreferrer">
-                  Open Navigation
+                  Start Navigation
                 </a>
               )}
             </div>
@@ -79,7 +202,7 @@ export default function SOSNavigate() {
               title="SOS location map"
               loading="lazy"
               referrerPolicy="no-referrer-when-downgrade"
-              src={`https://maps.google.com/maps?q=${payload.latitude},${payload.longitude}&z=15&output=embed`}
+              src={`https://maps.google.com/maps?q=${payload.latitude},${payload.longitude}&z=16&output=embed`}
             />
           </>
         )}

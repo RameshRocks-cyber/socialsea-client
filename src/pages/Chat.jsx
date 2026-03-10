@@ -30,9 +30,12 @@ const CALL_HISTORY_KEY = "socialsea_call_history_v1";
 const CALL_SIGNAL_LOCAL_KEY = "socialsea_call_signal_local_v1";
 const CHAT_READ_RECEIPT_KEY = "socialsea_chat_read_receipt_v1";
 const CHAT_READ_RECEIPT_CHANNEL = "socialsea-chat-read-receipt";
+const CHAT_MESSAGE_LOCAL_KEY = "socialsea_chat_message_local_v1";
+const CHAT_MESSAGE_CHANNEL = "socialsea-chat-message";
 const CALL_ACCEPT_TARGET_KEY = "socialsea_call_accept_target_v1";
 const CALL_RING_MS = 30000;
 const CALL_POLL_MS = 1200;
+const CALL_SIGNAL_MAX_AGE_MS = 45000;
 const CHAT_ONLINE_WINDOW_MS = 600000;
 const RTC_CONFIG = {
   iceServers: [
@@ -502,6 +505,7 @@ export default function Chat() {
   const tabIdRef = useRef(`${Date.now()}_${Math.random().toString(36).slice(2, 7)}`);
   const callChannelRef = useRef(null);
   const readReceiptChannelRef = useRef(null);
+  const messageChannelRef = useRef(null);
   const seenReadReceiptsRef = useRef(new Set());
   const lastReadReceiptSentByContactRef = useRef({});
   const composerInputRef = useRef(null);
@@ -1649,6 +1653,11 @@ export default function Chat() {
   const onSignal = async (signal) => {
     const type = String(signal?.type || "").toLowerCase();
     const fromId = String(signal?.fromUserId || "");
+    const rawTs = signal?.timestamp ?? signal?.at ?? signal?.createdAt ?? 0;
+    const parsedTs = Number(rawTs);
+    const signalMs = Number.isFinite(parsedTs)
+      ? (parsedTs > 1000000000000 ? parsedTs : parsedTs * 1000)
+      : new Date(String(rawTs || "")).getTime();
     const signature = `${type}|${fromId}|${signal?.timestamp || ""}|${signal?.sdp || ""}|${signal?.candidate || ""}`;
     if (seenSignalsRef.current.has(signature)) return;
     seenSignalsRef.current.add(signature);
@@ -1659,8 +1668,18 @@ export default function Chat() {
 
     ensureSignalContact(signal);
     const current = callStateRef.current;
+    const terminalTypes = new Set(["hangup", "reject", "busy", "answer", "accepted", "ended"]);
+
+    if (incomingCall?.fromUserId && fromId === String(incomingCall.fromUserId) && terminalTypes.has(type)) {
+      stopRingtone();
+      setIncomingCall(null);
+      setRingtoneMuted(false);
+    }
 
     if (type === "offer") {
+      if (Number.isFinite(signalMs) && signalMs > 0 && Date.now() - signalMs > CALL_SIGNAL_MAX_AGE_MS) {
+        return;
+      }
       if (current.phase !== "idle") {
         // Handle call-collision (both users pressed call at the same time):
         // if the offer is from the same peer we are dialing, switch to incoming
@@ -1742,7 +1761,7 @@ export default function Chat() {
       return;
     }
 
-    if (type === "hangup") {
+    if (type === "hangup" || type === "ended") {
       finishCall(false, "Call ended");
     }
   };
@@ -2291,6 +2310,69 @@ export default function Chat() {
   }, [myUserId]);
 
   useEffect(() => {
+    if (!myUserId) return undefined;
+
+    const toId = (payload, keys) => {
+      for (const key of keys) {
+        const value = payload?.[key];
+        if (value !== null && value !== undefined && String(value).trim()) {
+          return String(value);
+        }
+      }
+      return "";
+    };
+
+    const isPacketForCurrentUser = (payload) => {
+      const me = String(myUserId || "");
+      if (!me) return false;
+      const senderId = toId(payload, ["senderId", "fromUserId", "fromId"]);
+      const receiverId = toId(payload, ["receiverId", "toUserId", "toId"]);
+      if (!senderId && !receiverId) return false;
+      return senderId === me || receiverId === me;
+    };
+
+    const applyPacket = (packet) => {
+      if (!packet || packet.kind !== "chat-message") return;
+      if (packet?.fromTab && packet.fromTab === tabIdRef.current) return;
+      const payload = packet?.payload;
+      if (!payload || !isPacketForCurrentUser(payload)) return;
+      onIncomingChatMessage(payload);
+    };
+
+    const onStorage = (event) => {
+      if (event?.key !== CHAT_MESSAGE_LOCAL_KEY || !event.newValue) return;
+      try {
+        applyPacket(JSON.parse(event.newValue));
+      } catch {
+        // ignore malformed packet
+      }
+    };
+
+    const onChannelMessage = (event) => {
+      applyPacket(event?.data);
+    };
+
+    window.addEventListener("storage", onStorage);
+    try {
+      if (typeof BroadcastChannel !== "undefined") {
+        messageChannelRef.current = new BroadcastChannel(CHAT_MESSAGE_CHANNEL);
+        messageChannelRef.current.addEventListener("message", onChannelMessage);
+      }
+    } catch {
+      messageChannelRef.current = null;
+    }
+
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      if (messageChannelRef.current) {
+        messageChannelRef.current.removeEventListener("message", onChannelMessage);
+        messageChannelRef.current.close();
+        messageChannelRef.current = null;
+      }
+    };
+  }, [myUserId]);
+
+  useEffect(() => {
     let active = true;
 
     const boot = async () => {
@@ -2649,6 +2731,26 @@ export default function Chat() {
       onSent = null
     } = options;
 
+    const emitLocalPacket = (payload) => {
+      if (!payload || !myUserId || !activeContactId) return;
+      const packet = {
+        kind: "chat-message",
+        fromTab: tabIdRef.current,
+        at: new Date().toISOString(),
+        payload
+      };
+      try {
+        localStorage.setItem(CHAT_MESSAGE_LOCAL_KEY, JSON.stringify(packet));
+      } catch {
+        // ignore storage write failures
+      }
+      try {
+        messageChannelRef.current?.postMessage(packet);
+      } catch {
+        // ignore cross-tab channel failures
+      }
+    };
+
     if (clearComposer) {
       if (isSpeechTyping) stopSpeechTyping();
       setInputText("");
@@ -2675,6 +2777,14 @@ export default function Chat() {
         setMessagesByContact((prev) => ({ ...prev, [activeContactId]: nextList }));
         setContacts((prev) => prev.map((c) => (c.id === activeContactId ? { ...c, lastMessage: previewText } : c)));
         setError("Server chat unavailable on this backend. Using local chat mode.");
+        emitLocalPacket({
+          id: mine.id,
+          senderId: mine.senderId || Number(myUserId) || myUserId,
+          receiverId: mine.receiverId || Number(activeContactId) || activeContactId,
+          text: cleanText,
+          createdAt: mine.createdAt || new Date().toISOString(),
+          senderEmail: myEmail || ""
+        });
         shouldStickToBottomRef.current = true;
         setTimeout(() => scrollThreadToBottom("smooth"), 50);
         if (typeof onSent === "function") onSent();
@@ -2699,6 +2809,14 @@ export default function Chat() {
         [activeContactId]: [...(prev[activeContactId] || []), sent]
       }));
       setContacts((prev) => prev.map((c) => (c.id === activeContactId ? { ...c, lastMessage: previewText } : c)));
+      emitLocalPacket({
+        id: sent.id,
+        senderId: sent.senderId || Number(myUserId) || myUserId,
+        receiverId: sent.receiverId || Number(activeContactId) || activeContactId,
+        text: cleanText,
+        createdAt: sent.createdAt || new Date().toISOString(),
+        senderEmail: myEmail || ""
+      });
       shouldStickToBottomRef.current = true;
       setTimeout(() => scrollThreadToBottom("smooth"), 50);
       if (typeof onSent === "function") onSent();

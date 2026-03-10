@@ -94,8 +94,8 @@
   margin-top: 12px;
   border: 1px solid #1f2f5e;
   border-radius: 12px;
-  padding: 12px;
-  background: #0b1224;
+  padding: 10px;
+  background: linear-gradient(180deg, #0b1330 0%, #081126 100%);
 }
 
 .tool-row {
@@ -174,23 +174,88 @@
 }
 
 .video-tools h3 {
-  margin: 0 0 10px;
-  font-size: 15px;
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.video-action-bar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.video-action-bar button {
+  border: 1px solid #2b436f;
+  background: #101a34;
+  color: #d4e2ff;
+  border-radius: 12px;
+  padding: 8px 6px;
+  font-size: 14px;
+  font-weight: 700;
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.video-action-bar button.active {
+  border-color: #4e86eb;
+  background: #173a77;
+  color: #fff;
+}
+
+.video-action-symbol {
+  line-height: 1;
+  letter-spacing: 0.2px;
+}
+
+.video-tool-panel {
+  margin-bottom: 10px;
+  border: 1px solid #1f2f5e;
+  border-radius: 12px;
+  padding: 8px;
+  background: #0d152c;
+}
+
+.video-tool-panel input[type="text"] {
+  border-radius: 10px;
+  border: 1px solid #2b436f;
+  background: #0f1830;
+  color: #f4f8ff;
+  padding: 8px 10px;
+}
+
+.toggle-btn {
+  border: 1px solid #2b436f;
+  background: #0f1830;
+  color: #d4e2ff;
+  border-radius: 10px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.toggle-btn.active {
+  border-color: #4e86eb;
+  background: #173a77;
+  color: #fff;
 }
 
 .creator-settings-grid {
-  margin-top: 8px;
+  margin-top: 6px;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px 12px;
+  gap: 8px 10px;
 }
 
 .creator-settings-grid label {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
   color: #d4e2ff;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .creator-settings-grid select,
@@ -199,7 +264,18 @@
   border: 1px solid #2b436f;
   background: #0f1830;
   color: #f4f8ff;
-  padding: 8px 10px;
+  padding: 6px 9px;
+  font-size: 13px;
+}
+
+.video-tools .pill-group {
+  gap: 6px;
+}
+
+.video-tools .pill-group button {
+  padding: 5px 9px;
+  font-size: 11px;
+  border-radius: 999px;
 }
 
 .upload-submit {
@@ -208,7 +284,8 @@
   background: #2477ff;
   color: #fff;
   border-radius: 10px;
-  padding: 10px 14px;
+  padding: 8px 12px;
+  font-size: 13px;
   cursor: pointer;
   font-weight: 700;
 }

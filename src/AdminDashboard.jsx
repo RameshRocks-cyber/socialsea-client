@@ -109,11 +109,12 @@ export default function AdminDashboard() {
   );
 
   const growthSeries = useMemo(() => {
+    const pointValue = (x) => toNumber(x?.value ?? x?.count ?? x?.total ?? 0);
     const usersByDate = Object.fromEntries(
-      chartData.users.map((x) => [String(x.label || x.name || x.date || ""), toNumber(x.value)])
+      chartData.users.map((x) => [String(x?.label || x?.name || x?.date || ""), pointValue(x)])
     );
     const postsByDate = Object.fromEntries(
-      chartData.posts.map((x) => [String(x.label || x.name || x.date || ""), toNumber(x.value)])
+      chartData.posts.map((x) => [String(x?.label || x?.name || x?.date || ""), pointValue(x)])
     );
     const labels = Array.from(new Set([...Object.keys(usersByDate), ...Object.keys(postsByDate)])).sort();
     return labels.map((label) => ({

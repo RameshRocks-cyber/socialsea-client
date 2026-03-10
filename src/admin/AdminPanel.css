@@ -395,6 +395,11 @@
   border: 1px solid rgba(102, 152, 241, 0.34);
 }
 
+.admin-btn.success {
+  background: linear-gradient(135deg, #34d399, #10b981);
+  color: #05261c;
+}
+
 .admin-btn:disabled,
 .admin-link-btn:disabled {
   opacity: 0.6;

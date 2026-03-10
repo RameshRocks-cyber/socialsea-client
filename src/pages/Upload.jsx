@@ -34,6 +34,19 @@ const PRESETS = {
   soft: { label: "Soft", brightness: 106, contrast: 94, saturation: 92, warmth: 10, blur: 1, grayscale: 0 }
 };
 
+const VIDEO_TOOL_OPTIONS = [
+  { key: "edit", label: "Edit", symbol: "✂" },
+  { key: "add-clips", label: "Add clips", symbol: "+" },
+  { key: "audio", label: "Audio", symbol: "♪" },
+  { key: "text", label: "Text", symbol: "Aa" },
+  { key: "overlay", label: "Overlay", symbol: "◫" },
+  { key: "stickers", label: "Stickers", symbol: "★" },
+  { key: "captions", label: "Captions", symbol: "CC" },
+  { key: "voiceover", label: "Voiceover", symbol: "◉" },
+  { key: "filters", label: "Filters", symbol: "◎" },
+  { key: "import-audio", label: "Import audio", symbol: "♫" }
+];
+
 function parseUploadError(err) {
   const data = err?.response?.data;
   if (typeof data === "string" && data.trim()) return data;
@@ -69,9 +82,20 @@ export default function Upload() {
     brightness: 100,
     contrast: 100,
     saturation: 100,
+    filterPreset: "normal",
+    overlayText: "",
+    overlayOpacity: 70,
+    overlayMode: "screen",
+    sticker: "none",
+    captionsStyle: "classic",
+    voiceoverGain: 100,
+    importedAudioName: "",
+    extraClipCount: 0,
     qualityTarget: "1080p",
     coverMode: "auto"
   });
+  const [activeVideoTool, setActiveVideoTool] = useState("edit");
+  const [extraClips, setExtraClips] = useState([]);
   const [creatorSettings, setCreatorSettings] = useState({
     audience: "public",
     allowComments: true,
@@ -124,7 +148,15 @@ export default function Upload() {
   const setCreatorSetting = (key, value) => setCreatorSettings((prev) => ({ ...prev, [key]: value }));
 
   const videoFilterStyle = useMemo(() => {
-    return `brightness(${videoEdits.brightness}%) contrast(${videoEdits.contrast}%) saturate(${videoEdits.saturation}%)`;
+    const presetTuning = {
+      normal: { b: 1, c: 1, s: 1 },
+      cinematic: { b: 0.96, c: 1.18, s: 0.9 },
+      vivid: { b: 1.05, c: 1.08, s: 1.24 },
+      mono: { b: 1, c: 1.1, s: 0.01 },
+      vintage: { b: 1.04, c: 0.94, s: 0.84 }
+    };
+    const tuning = presetTuning[videoEdits.filterPreset] || presetTuning.normal;
+    return `brightness(${Math.round(videoEdits.brightness * tuning.b)}%) contrast(${Math.round(videoEdits.contrast * tuning.c)}%) saturate(${Math.round(videoEdits.saturation * tuning.s)}%)`;
   }, [videoEdits]);
 
   const videoTrimSummary = useMemo(() => {
@@ -248,6 +280,8 @@ export default function Upload() {
       setCaption("");
       setEdits(defaultEdits);
       setVideoMeta({ duration: 0, width: 0, height: 0 });
+      setActiveVideoTool("edit");
+      setExtraClips([]);
       setVideoEdits({
         trimStart: 0,
         trimEnd: 0,
@@ -257,6 +291,15 @@ export default function Upload() {
         brightness: 100,
         contrast: 100,
         saturation: 100,
+        filterPreset: "normal",
+        overlayText: "",
+        overlayOpacity: 70,
+        overlayMode: "screen",
+        sticker: "none",
+        captionsStyle: "classic",
+        voiceoverGain: 100,
+        importedAudioName: "",
+        extraClipCount: 0,
         qualityTarget: "1080p",
         coverMode: "auto"
       });
@@ -293,6 +336,8 @@ export default function Upload() {
               setFile(e.target.files?.[0] || null);
               setMsg("");
               setEdits(defaultEdits);
+              setActiveVideoTool("edit");
+              setExtraClips([]);
               setVideoMeta({ duration: 0, width: 0, height: 0 });
             }}
           />
@@ -444,117 +489,310 @@ export default function Upload() {
           <div className="upload-tools video-tools">
             <h3>Creator Video Studio</h3>
 
-            <div className="tool-row">
-              <span>Trim</span>
-              <div className="slider-grid">
+            <div className="video-action-bar">
+              {VIDEO_TOOL_OPTIONS.map((tool) => (
+                <button
+                  key={tool.key}
+                  type="button"
+                  className={activeVideoTool === tool.key ? "active" : ""}
+                  onClick={() => setActiveVideoTool(tool.key)}
+                  aria-label={tool.label}
+                  title={tool.label}
+                >
+                  <span className="video-action-symbol">{tool.symbol}</span>
+                </button>
+              ))}
+            </div>
+
+            {activeVideoTool === "edit" && (
+              <>
+                <div className="tool-row">
+                  <span>Trim</span>
+                  <div className="slider-grid">
+                    <label>
+                      Start: {videoTrimSummary.start}s
+                      <input
+                        type="range"
+                        min="0"
+                        max={trimStartMax || 0}
+                        step="0.1"
+                        value={videoEdits.trimStart}
+                        onChange={(e) => setVideoEdit("trimStart", Number(e.target.value))}
+                      />
+                    </label>
+                    <label>
+                      End: {videoTrimSummary.end}s
+                      <input
+                        type="range"
+                        min={Math.min(videoEdits.trimStart + 0.2, trimEndMax || 0)}
+                        max={trimEndMax || 0}
+                        step="0.1"
+                        value={videoEdits.trimEnd}
+                        onChange={(e) => setVideoEdit("trimEnd", Number(e.target.value))}
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                <p className="video-note">Clip length: {videoTrimSummary.clipLen}s</p>
+
+                <div className="tool-row">
+                  <span>Playback</span>
+                  <div className="pill-group">
+                    {[0.5, 0.75, 1, 1.25, 1.5, 2].map((speed) => (
+                      <button
+                        key={speed}
+                        type="button"
+                        className={Number(videoEdits.playbackSpeed) === speed ? "active" : ""}
+                        onClick={() => setVideoEdit("playbackSpeed", speed)}
+                      >
+                        {speed}x
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="slider-grid">
+                  <label>
+                    Brightness
+                    <input
+                      type="range"
+                      min="60"
+                      max="150"
+                      value={videoEdits.brightness}
+                      onChange={(e) => setVideoEdit("brightness", Number(e.target.value))}
+                    />
+                  </label>
+                  <label>
+                    Contrast
+                    <input
+                      type="range"
+                      min="70"
+                      max="150"
+                      value={videoEdits.contrast}
+                      onChange={(e) => setVideoEdit("contrast", Number(e.target.value))}
+                    />
+                  </label>
+                  <label>
+                    Saturation
+                    <input
+                      type="range"
+                      min="0"
+                      max="180"
+                      value={videoEdits.saturation}
+                      onChange={(e) => setVideoEdit("saturation", Number(e.target.value))}
+                    />
+                  </label>
+                </div>
+
+                <div className="tool-row">
+                  <span>Output</span>
+                  <div className="pill-group">
+                    {["144p", "240p", "360p", "480p", "720p", "1080p", "1440p", "2160p"].map((q) => (
+                      <button
+                        key={q}
+                        type="button"
+                        className={videoEdits.qualityTarget === q ? "active" : ""}
+                        onClick={() => setVideoEdit("qualityTarget", q)}
+                      >
+                        {q}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+
+            {activeVideoTool === "add-clips" && (
+              <div className="video-tool-panel">
+                <label className="upload-file-pick">
+                  Add clips
+                  <input
+                    type="file"
+                    accept="video/*"
+                    multiple
+                    onChange={(e) => {
+                      const clips = Array.from(e.target.files || []);
+                      setExtraClips(clips);
+                      setVideoEdit("extraClipCount", clips.length);
+                    }}
+                  />
+                </label>
+                <p className="video-note">{extraClips.length} extra clip(s) selected.</p>
+              </div>
+            )}
+
+            {activeVideoTool === "audio" && (
+              <div className="video-tool-panel slider-grid">
                 <label>
-                  Start: {videoTrimSummary.start}s
+                  Volume: {videoEdits.volume}%
                   <input
                     type="range"
                     min="0"
-                    max={trimStartMax || 0}
-                    step="0.1"
-                    value={videoEdits.trimStart}
-                    onChange={(e) => setVideoEdit("trimStart", Number(e.target.value))}
+                    max="100"
+                    value={videoEdits.volume}
+                    onChange={(e) => setVideoEdit("volume", Number(e.target.value))}
                   />
                 </label>
                 <label>
-                  End: {videoTrimSummary.end}s
+                  <span>Audio Mode</span>
+                  <button
+                    type="button"
+                    className={videoEdits.muted ? "toggle-btn active" : "toggle-btn"}
+                    onClick={() => setVideoEdit("muted", !videoEdits.muted)}
+                  >
+                    {videoEdits.muted ? "Muted" : "Audio On"}
+                  </button>
+                </label>
+              </div>
+            )}
+
+            {activeVideoTool === "text" && (
+              <div className="video-tool-panel slider-grid">
+                <label>
+                  Overlay text
+                  <input
+                    type="text"
+                    value={videoEdits.overlayText}
+                    placeholder="Add text"
+                    onChange={(e) => setVideoEdit("overlayText", e.target.value)}
+                  />
+                </label>
+                <label>
+                  Text opacity: {videoEdits.overlayOpacity}%
                   <input
                     type="range"
-                    min={Math.min(videoEdits.trimStart + 0.2, trimEndMax || 0)}
-                    max={trimEndMax || 0}
-                    step="0.1"
-                    value={videoEdits.trimEnd}
-                    onChange={(e) => setVideoEdit("trimEnd", Number(e.target.value))}
+                    min="0"
+                    max="100"
+                    value={videoEdits.overlayOpacity}
+                    onChange={(e) => setVideoEdit("overlayOpacity", Number(e.target.value))}
                   />
                 </label>
               </div>
-            </div>
+            )}
 
-            <p className="video-note">Clip length: {videoTrimSummary.clipLen}s</p>
-
-            <div className="tool-row">
-              <span>Playback</span>
-              <div className="pill-group">
-                {[0.5, 0.75, 1, 1.25, 1.5, 2].map((speed) => (
-                  <button
-                    key={speed}
-                    type="button"
-                    className={Number(videoEdits.playbackSpeed) === speed ? "active" : ""}
-                    onClick={() => setVideoEdit("playbackSpeed", speed)}
+            {activeVideoTool === "overlay" && (
+              <div className="video-tool-panel creator-settings-grid">
+                <label>
+                  Overlay blend
+                  <select
+                    value={videoEdits.overlayMode}
+                    onChange={(e) => setVideoEdit("overlayMode", e.target.value)}
                   >
-                    {speed}x
-                  </button>
-                ))}
+                    <option value="screen">Screen</option>
+                    <option value="overlay">Overlay</option>
+                    <option value="multiply">Multiply</option>
+                    <option value="soft-light">Soft Light</option>
+                  </select>
+                </label>
+                <label>
+                  Overlay opacity: {videoEdits.overlayOpacity}%
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    value={videoEdits.overlayOpacity}
+                    onChange={(e) => setVideoEdit("overlayOpacity", Number(e.target.value))}
+                  />
+                </label>
               </div>
-            </div>
+            )}
 
-            <div className="slider-grid">
-              <label>
-                Volume: {videoEdits.volume}%
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={videoEdits.volume}
-                  onChange={(e) => setVideoEdit("volume", Number(e.target.value))}
-                />
-              </label>
-              <label>
-                Brightness
-                <input
-                  type="range"
-                  min="60"
-                  max="150"
-                  value={videoEdits.brightness}
-                  onChange={(e) => setVideoEdit("brightness", Number(e.target.value))}
-                />
-              </label>
-              <label>
-                Contrast
-                <input
-                  type="range"
-                  min="70"
-                  max="150"
-                  value={videoEdits.contrast}
-                  onChange={(e) => setVideoEdit("contrast", Number(e.target.value))}
-                />
-              </label>
-              <label>
-                Saturation
-                <input
-                  type="range"
-                  min="0"
-                  max="180"
-                  value={videoEdits.saturation}
-                  onChange={(e) => setVideoEdit("saturation", Number(e.target.value))}
-                />
-              </label>
-            </div>
+            {activeVideoTool === "stickers" && (
+              <div className="video-tool-panel">
+                <div className="pill-group">
+                  {["none", "fire", "heart", "star", "wow", "party"].map((sticker) => (
+                    <button
+                      key={sticker}
+                      type="button"
+                      className={videoEdits.sticker === sticker ? "active" : ""}
+                      onClick={() => setVideoEdit("sticker", sticker)}
+                    >
+                      {sticker}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
-            <div className="tool-row">
-              <span>Output</span>
-              <div className="pill-group">
-                {["1080p", "720p", "480p", "Auto"].map((q) => (
-                  <button
-                    key={q}
-                    type="button"
-                    className={videoEdits.qualityTarget === q ? "active" : ""}
-                    onClick={() => setVideoEdit("qualityTarget", q)}
+            {activeVideoTool === "captions" && (
+              <div className="video-tool-panel creator-settings-grid">
+                <label>
+                  Captions style
+                  <select
+                    value={videoEdits.captionsStyle}
+                    onChange={(e) => setVideoEdit("captionsStyle", e.target.value)}
                   >
-                    {q}
+                    <option value="classic">Classic</option>
+                    <option value="karaoke">Karaoke</option>
+                    <option value="minimal">Minimal</option>
+                  </select>
+                </label>
+                <label>
+                  Auto captions
+                  <button
+                    type="button"
+                    className={creatorSettings.autoCaptions ? "toggle-btn active" : "toggle-btn"}
+                    onClick={() => setCreatorSetting("autoCaptions", !creatorSettings.autoCaptions)}
+                  >
+                    {creatorSettings.autoCaptions ? "Enabled" : "Disabled"}
                   </button>
-                ))}
-                <button
-                  type="button"
-                  className={videoEdits.muted ? "active" : ""}
-                  onClick={() => setVideoEdit("muted", !videoEdits.muted)}
-                >
-                  {videoEdits.muted ? "Muted" : "Audio On"}
-                </button>
+                </label>
               </div>
-            </div>
+            )}
+
+            {activeVideoTool === "voiceover" && (
+              <div className="video-tool-panel slider-grid">
+                <label>
+                  Voiceover gain: {videoEdits.voiceoverGain}%
+                  <input
+                    type="range"
+                    min="0"
+                    max="200"
+                    value={videoEdits.voiceoverGain}
+                    onChange={(e) => setVideoEdit("voiceoverGain", Number(e.target.value))}
+                  />
+                </label>
+              </div>
+            )}
+
+            {activeVideoTool === "filters" && (
+              <div className="video-tool-panel">
+                <div className="pill-group">
+                  {["normal", "cinematic", "vivid", "mono", "vintage"].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      className={videoEdits.filterPreset === preset ? "active" : ""}
+                      onClick={() => setVideoEdit("filterPreset", preset)}
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {activeVideoTool === "import-audio" && (
+              <div className="video-tool-panel">
+                <label className="upload-file-pick">
+                  Import audio
+                  <input
+                    type="file"
+                    accept="audio/*"
+                    onChange={(e) => {
+                      const audioFile = e.target.files?.[0];
+                      setVideoEdit("importedAudioName", audioFile?.name || "");
+                    }}
+                  />
+                </label>
+                <p className="video-note">
+                  {videoEdits.importedAudioName
+                    ? `Imported: ${videoEdits.importedAudioName}`
+                    : "No audio selected yet."}
+                </p>
+              </div>
+            )}
 
             <h3>Creator Publish Settings</h3>
             <div className="creator-settings-grid">

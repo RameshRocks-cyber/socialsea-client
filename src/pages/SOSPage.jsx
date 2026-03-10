@@ -115,6 +115,7 @@ export default function SOSPage() {
   const [status, setStatus] = useState("idle");
   const [message, setMessage] = useState("");
   const [alertId, setAlertId] = useState(routeAlertId ? Number(routeAlertId) : null);
+  const [alertDisplayId, setAlertDisplayId] = useState(routeAlertId ? String(routeAlertId) : null);
   const [startedAt, setStartedAt] = useState(null);
   const [elapsedSec, setElapsedSec] = useState(0);
   const [lastLocation, setLastLocation] = useState(null);
@@ -197,6 +198,26 @@ export default function SOSPage() {
     }, 1000);
   };
 
+  const callEmergency = async (method, suffix, data = undefined, extraConfig = {}) => {
+    const urls = buildEmergencyUrls(suffix);
+    let lastErr = null;
+    for (const url of urls) {
+      try {
+        return await api.request({
+          method,
+          url,
+          data,
+          ...extraConfig
+        });
+      } catch (err) {
+        lastErr = err;
+        const status = Number(err?.response?.status || 0);
+        if (status === 401 || status === 403) throw err;
+      }
+    }
+    throw lastErr || new Error("Emergency request failed");
+  };
+
   const sendHeartbeat = async (forcedLocation) => {
     if (!alertId) return;
     try {
@@ -206,18 +227,7 @@ export default function SOSPage() {
         audioActive: recordingInfo.audio,
         videoActive: recordingInfo.video
       };
-      let hbErr = null;
-      const hbEndpoints = [`/api/emergency/${alertId}/heartbeat`, `/emergency/${alertId}/heartbeat`];
-      for (const hbUrl of hbEndpoints) {
-        try {
-          await api.post(hbUrl, payload);
-          hbErr = null;
-          break;
-        } catch (err) {
-          hbErr = err;
-        }
-      }
-      if (hbErr) throw hbErr;
+      await callEmergency("post", `${alertId}/heartbeat`, payload);
       setBackendStatus("Live connection active");
       persistSession({ backendStatus: "Live connection active", updatedAt: nowIso() });
     } catch (err) {
@@ -356,6 +366,7 @@ export default function SOSPage() {
         lastLocation: initialLocation,
         locationCount: 1,
         alertId: null,
+        alertDisplayId: null,
         backendStatus: "Sending trigger...",
         updatedAt: startIso
       });
@@ -385,44 +396,18 @@ export default function SOSPage() {
           videoActive: media.video
         };
 
-        const triggerUrls = buildEmergencyUrls("trigger");
-        let res;
-        let lastErr = null;
-        const token =
-          sessionStorage.getItem("accessToken") ||
-          sessionStorage.getItem("token") ||
-          localStorage.getItem("accessToken") ||
-          localStorage.getItem("token") ||
-          "";
-        for (const url of triggerUrls) {
-          try {
-            const response = await fetch(url, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                ...(token ? { Authorization: `Bearer ${String(token).trim()}` } : {}),
-              },
-              body: JSON.stringify(payload),
-            });
-            if (!response.ok) {
-              const err = new Error(`HTTP ${response.status}`);
-              err.response = { status: response.status };
-              throw err;
-            }
-            const data = await response.json().catch(() => ({}));
-            res = { data };
-            lastErr = null;
-            break;
-          } catch (err) {
-            lastErr = err;
-          }
-        }
-        if (!res) throw lastErr || new Error("SOS trigger failed");
+        const res = await callEmergency("post", "trigger", payload);
 
         const id = res?.data?.alertId || null;
         setAlertId(id);
+        setAlertDisplayId(id ? String(id) : null);
         setBackendStatus("SOS sent to backend (5km)");
-        persistSession({ alertId: id, backendStatus: "SOS sent to backend (5km)", updatedAt: nowIso() });
+        persistSession({
+          alertId: id,
+          alertDisplayId: id ? String(id) : null,
+          backendStatus: "SOS sent to backend (5km)",
+          updatedAt: nowIso()
+        });
         broadcastSosSignal("triggered", {
           alertId: id,
           reporterUserId,
@@ -433,11 +418,18 @@ export default function SOSPage() {
         });
       } catch (err) {
         const status = Number(err?.response?.status || 0);
+        const localId = `LOCAL-${Date.now()}`;
+        setAlertDisplayId(localId);
         const backendMessage = status === 404
           ? "Backend emergency endpoint not found (404). Local SOS is still active."
           : `Backend error: ${status || ""} ${err?.message || ""}`.trim();
         setBackendStatus(backendMessage);
-        persistSession({ backendStatus: backendMessage, updatedAt: nowIso() });
+        persistSession({
+          alertId: null,
+          alertDisplayId: localId,
+          backendStatus: backendMessage,
+          updatedAt: nowIso()
+        });
         broadcastSosSignal("triggered-local", {
           reporterUserId,
           reporterEmail,
@@ -479,21 +471,9 @@ export default function SOSPage() {
           const form = new FormData();
           if (blob) form.append("media", blob, `sos-${alertId}.webm`);
           form.append("durationMs", String(durationMs));
-          let res = null;
-          let stopErr = null;
-          const stopEndpoints = [`/api/emergency/${alertId}/stop`, `/emergency/${alertId}/stop`];
-          for (const stopUrl of stopEndpoints) {
-            try {
-              res = await api.post(stopUrl, form, {
-                headers: { "Content-Type": "multipart/form-data" }
-              });
-              stopErr = null;
-              break;
-            } catch (err) {
-              stopErr = err;
-            }
-          }
-          if (stopErr) throw stopErr;
+          const res = await callEmergency("post", `${alertId}/stop`, form, {
+            headers: { "Content-Type": "multipart/form-data" }
+          });
           mediaUrl = res?.data?.mediaUrl || null;
           setBackendStatus("SOS stopped and synced");
         } catch (err) {
@@ -548,6 +528,7 @@ export default function SOSPage() {
         stoppedAt,
         elapsedSec,
         alertId,
+        alertDisplayId: alertDisplayId || (alertId ? String(alertId) : null),
         lastLocation,
         locationCount,
         recordingInfo: stoppedRecordingInfo,
@@ -642,37 +623,47 @@ export default function SOSPage() {
   useEffect(() => {
     if (!routeAlertId) return;
     let cancelled = false;
+    let lastCoordKey = "";
     const poll = async () => {
       try {
         let res = null;
-        let statusErr = null;
-        const statusEndpoints = [`/api/emergency/${routeAlertId}`, `/emergency/${routeAlertId}`];
-        for (const statusUrl of statusEndpoints) {
-          try {
-            res = await api.get(statusUrl);
-            statusErr = null;
-            break;
-          } catch (err) {
-            statusErr = err;
-          }
+        let usedAssist = false;
+        try {
+          res = await callEmergency("get", `${routeAlertId}/assist`);
+          usedAssist = true;
+        } catch {
+          res = await callEmergency("get", `${routeAlertId}`);
         }
-        if (statusErr) throw statusErr;
         if (cancelled) return;
         const data = res?.data || {};
+        const lat = data.latitude != null ? data.latitude : null;
+        const lon = data.longitude != null ? data.longitude : null;
+        const coordKey = lat != null && lon != null ? `${lat},${lon}` : "";
         setAlertId(data.alertId || Number(routeAlertId));
+        setAlertDisplayId(String(data.alertId || routeAlertId || ""));
         setStatus(data.active ? "active" : "stopped");
         setStartedAt(data.startedAt || null);
         setLastLocation(
-          data.latitude != null && data.longitude != null
-            ? { latitude: data.latitude, longitude: data.longitude, accuracy: null, at: data.lastHeartbeatAt || nowIso() }
+          lat != null && lon != null
+            ? { latitude: lat, longitude: lon, accuracy: null, at: data.lastHeartbeatAt || nowIso() }
             : null
         );
+        if (coordKey && coordKey !== lastCoordKey) {
+          lastCoordKey = coordKey;
+          setLocationCount((prev) => prev + 1);
+        }
         setRecordingInfo((prev) => ({
           ...prev,
-          audio: Boolean(data.audioActive),
-          video: Boolean(data.videoActive)
+          audio: usedAssist ? prev.audio : Boolean(data.audioActive),
+          video: usedAssist ? prev.video : Boolean(data.videoActive)
         }));
-        setBackendStatus(data.active ? "Live connection active" : "Session stopped");
+        setBackendStatus(
+          data.active
+            ? usedAssist
+              ? "Live location active"
+              : "Live connection active"
+            : "Session stopped"
+        );
       } catch (err) {
         if (!cancelled) setBackendStatus(`Live status failed: ${err?.response?.status || ""}`);
       }
@@ -690,6 +681,7 @@ export default function SOSPage() {
       setStatus("active");
       setStartedAt(session.startedAt || null);
       setAlertId(session.alertId || null);
+      setAlertDisplayId(session.alertDisplayId || (session.alertId ? String(session.alertId) : null));
       setLastLocation(session.lastLocation || null);
       setLocationCount(session.locationCount || 0);
       setRecordingInfo(session.recordingInfo || { audio: false, video: false, chunks: 0, bytes: 0 });
@@ -763,7 +755,7 @@ export default function SOSPage() {
         <div className="sos-meta">
           <p>Started At: {startedAt || "-"}</p>
           <p>Elapsed: {elapsedSec}s</p>
-          <p>Alert Id: {alertId || "-"}</p>
+          <p>Alert Id: {alertDisplayId || alertId || "-"}</p>
           <p>Radius: {RADIUS_METERS / 1000} km</p>
           <p>Backend: {backendStatus}</p>
         </div>

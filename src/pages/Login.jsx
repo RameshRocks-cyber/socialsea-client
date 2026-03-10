@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import api from "../api/axios";
-import { loginWithPassword, registerWithPassword, sendOtp, verifyOtp } from "../api/auth";
+import { loginWithPassword, registerWithPassword } from "../api/auth";
 import { clearAuthStorage } from "../auth";
 import "./AuthScreen.css";
 
@@ -44,17 +44,11 @@ export default function Login() {
   const isLocalHost =
     typeof window !== "undefined" &&
     ["localhost", "127.0.0.1"].includes(String(window.location.hostname || "").toLowerCase());
-  const envWantsDebugOtp = String(import.meta.env.VITE_SHOW_DEV_OTP || "").toLowerCase() === "true";
-  const canShowDebugOtp = isLocalHost || envWantsDebugOtp;
 
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
-  const [otp, setOtp] = useState("");
-  const [loginMode, setLoginMode] = useState("password");
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [sendingOtp, setSendingOtp] = useState(false);
-  const [otpSent, setOtpSent] = useState(false);
-  const [debugOtp, setDebugOtp] = useState("");
   const [showQuickCreate, setShowQuickCreate] = useState(false);
   const [creatingAccount, setCreatingAccount] = useState(false);
   const [msg, setMsg] = useState("");
@@ -139,62 +133,6 @@ export default function Login() {
     }
   };
 
-  const onSendOtp = async () => {
-    setMsg("");
-    setDebugOtp("");
-    if (!identifier.trim()) {
-      setMsg("Username/email is required.");
-      return;
-    }
-    setSendingOtp(true);
-    try {
-      const res = await sendOtp(identifier.trim());
-      const payload = res?.data || {};
-      const serverDebugOtp = String(payload?.debugOtp || "").trim();
-      const deliveryFailed = payload?.deliveryFailed === true;
-      setOtpSent(true);
-      if (canShowDebugOtp && serverDebugOtp) {
-        setDebugOtp(serverDebugOtp);
-        setOtp(serverDebugOtp);
-      }
-      if (deliveryFailed) {
-        setMsg(
-          serverDebugOtp
-            ? "Email delivery failed. Debug OTP has been auto-filled for local testing."
-            : "Email delivery failed on server."
-        );
-      } else {
-        setMsg(serverDebugOtp ? "OTP sent. Debug OTP was auto-filled." : "OTP sent. Check Inbox/Spam.");
-      }
-    } catch (err) {
-      setMsg(parseErrorMessage(err, "Failed to send OTP."));
-    } finally {
-      setSendingOtp(false);
-    }
-  };
-
-  const onOtpLogin = async (e) => {
-    e.preventDefault();
-    setMsg("");
-    if (!identifier.trim()) {
-      setMsg("Username/email is required.");
-      return;
-    }
-    if (!otp.trim()) {
-      setMsg("OTP is required.");
-      return;
-    }
-    setLoading(true);
-    try {
-      const res = await verifyOtp(identifier.trim(), otp.trim());
-      await completeLogin(res?.data);
-    } catch (err) {
-      setMsg(parseErrorMessage(err, "OTP login failed."));
-    } finally {
-      setLoading(false);
-    }
-  };
-
   return (
     <div className="auth-screen auth-login">
       <div className="auth-orb auth-orb-a" />
@@ -207,75 +145,35 @@ export default function Login() {
           <p>Sign in with username or email</p>
         </div>
 
-        <div className="auth-login-mode-row">
-          <button
-            type="button"
-            className={`auth-login-mode-btn ${loginMode === "password" ? "is-active" : ""}`}
-            onClick={() => {
-              setLoginMode("password");
-              setMsg("");
-            }}
-          >
-            Password
-          </button>
-          <button
-            type="button"
-            className={`auth-login-mode-btn ${loginMode === "otp" ? "is-active" : ""}`}
-            onClick={() => {
-              setLoginMode("otp");
-              setMsg("");
-            }}
-          >
-            OTP
-          </button>
-        </div>
-
-        <form className="auth-form-new" onSubmit={loginMode === "otp" ? onOtpLogin : onPasswordLogin}>
+        <form className="auth-form-new" onSubmit={onPasswordLogin}>
           <label htmlFor="identifier">Username or email</label>
           <input
             id="identifier"
             type="text"
             value={identifier}
-            onChange={(e) => {
-              setIdentifier(e.target.value);
-              if (loginMode === "otp") {
-                setOtpSent(false);
-                setOtp("");
-                setDebugOtp("");
-              }
-            }}
+            onChange={(e) => setIdentifier(e.target.value)}
             placeholder="username or name@email.com"
             autoComplete="username"
           />
 
-          {loginMode === "password" ? (
-            <>
-              <label htmlFor="password">Password</label>
-              <input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter your password"
-                autoComplete="current-password"
-              />
-            </>
-          ) : (
-            <>
-              <label htmlFor="otp">OTP</label>
-              <input
-                id="otp"
-                type="text"
-                value={otp}
-                onChange={(e) => setOtp(e.target.value)}
-                placeholder="Enter OTP"
-                autoComplete="one-time-code"
-              />
-              <button type="button" className="auth-secondary-btn" disabled={sendingOtp} onClick={onSendOtp}>
-                {sendingOtp ? "Sending..." : otpSent ? "Resend OTP" : "Send OTP"}
-              </button>
-            </>
-          )}
+          <label htmlFor="password">Password</label>
+          <div className="auth-password-row">
+            <input
+              id="password"
+              type={showPassword ? "text" : "password"}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Enter your password"
+              autoComplete="current-password"
+            />
+            <button
+              type="button"
+              className="auth-password-toggle"
+              onClick={() => setShowPassword((prev) => !prev)}
+            >
+              {showPassword ? "Hide" : "Show"}
+            </button>
+          </div>
 
           <div className="auth-forgot-row">
             <Link to="/forgot-password" className="auth-forgot-link">
@@ -284,18 +182,15 @@ export default function Login() {
           </div>
 
           <button type="submit" className="auth-primary-btn" disabled={loading}>
-            {loading ? "Signing in..." : loginMode === "otp" ? "Verify OTP & Log in" : "Log in"}
+            {loading ? "Signing in..." : "Log in"}
           </button>
         </form>
 
         {msg && <p className="auth-error">{msg}</p>}
-        {showQuickCreate && loginMode === "password" && (
+        {showQuickCreate && (
           <button type="button" className="auth-secondary-btn auth-quick-create-btn" onClick={onQuickCreateAccount} disabled={creatingAccount}>
             {creatingAccount ? "Creating account..." : "Create account & Log in (Local)"}
           </button>
-        )}
-        {loginMode === "otp" && canShowDebugOtp && !!debugOtp && (
-          <p className="auth-debug-otp">Debug OTP: {debugOtp}</p>
         )}
 
         <p className="auth-foot">
