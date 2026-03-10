@@ -338,6 +338,12 @@ export default function Settings() {
             onClick={() => setToggle("storyLocationEnabled")}
           />
           <Row
+            icon={"L"}
+            title="My exact location"
+            value="Open"
+            onClick={() => navigate("/settings/location")}
+          />
+          <Row
             icon={"F"}
             title="Activity in Friends tab"
             value={prefs.activityInFriendsTab ? "On" : "Off"}

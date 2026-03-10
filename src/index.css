@@ -6,48 +6,57 @@
 }
 
 :root {
-  --ss-theme-accent: #4da2ff;
-  --ss-theme-accent-2: #36e2d1;
-  --ss-theme-bg: #05152b;
-  --ss-theme-bg-soft: #0d274a;
-  --ss-theme-border: rgba(120, 194, 255, 0.48);
-  --ss-theme-text: #edf7ff;
+  --ss-theme-accent: #9f6f4a;
+  --ss-theme-accent-2: #c4955b;
+  --ss-theme-bg: #16110d;
+  --ss-theme-bg-soft: #231a14;
+  --ss-theme-border: rgba(141, 106, 74, 0.5);
+  --ss-theme-text: #f2e7da;
+}
+
+body.ss-theme-mankind {
+  --ss-theme-accent: #9f6f4a;
+  --ss-theme-accent-2: #c4955b;
+  --ss-theme-bg: #16110d;
+  --ss-theme-bg-soft: #231a14;
+  --ss-theme-border: rgba(141, 106, 74, 0.5);
+  --ss-theme-text: #f2e7da;
 }
 
 body.ss-theme-pink {
-  --ss-theme-accent: #ff5fae;
-  --ss-theme-accent-2: #ff9ad6;
-  --ss-theme-bg: #250a1b;
-  --ss-theme-bg-soft: #4f1a3c;
-  --ss-theme-border: rgba(255, 164, 215, 0.55);
-  --ss-theme-text: #fff4fb;
+  --ss-theme-accent: #d84d90;
+  --ss-theme-accent-2: #c96ea8;
+  --ss-theme-bg: #190714;
+  --ss-theme-bg-soft: #32132a;
+  --ss-theme-border: rgba(201, 121, 170, 0.48);
+  --ss-theme-text: #f8eaf2;
 }
 
 body.ss-theme-yellow {
-  --ss-theme-accent: #ffc83d;
-  --ss-theme-accent-2: #ffe98b;
-  --ss-theme-bg: #241b06;
-  --ss-theme-bg-soft: #4b3810;
-  --ss-theme-border: rgba(255, 223, 135, 0.55);
-  --ss-theme-text: #fff9e8;
+  --ss-theme-accent: #c59a30;
+  --ss-theme-accent-2: #cbb96d;
+  --ss-theme-bg: #191303;
+  --ss-theme-bg-soft: #312409;
+  --ss-theme-border: rgba(188, 164, 94, 0.48);
+  --ss-theme-text: #f5edd6;
 }
 
 body.ss-theme-black {
-  --ss-theme-accent: #4b4b4b;
-  --ss-theme-accent-2: #8a8a8a;
-  --ss-theme-bg: #07090d;
-  --ss-theme-bg-soft: #1a1f29;
-  --ss-theme-border: rgba(171, 184, 208, 0.4);
-  --ss-theme-text: #f6f8fc;
+  --ss-theme-accent: #3f3f3f;
+  --ss-theme-accent-2: #727272;
+  --ss-theme-bg: #040507;
+  --ss-theme-bg-soft: #11141b;
+  --ss-theme-border: rgba(140, 151, 173, 0.36);
+  --ss-theme-text: #f0f3f8;
 }
 
 body.ss-theme-white {
-  --ss-theme-accent: #58b3ff;
-  --ss-theme-accent-2: #7dffda;
-  --ss-theme-bg: #0b1c35;
-  --ss-theme-bg-soft: #143157;
-  --ss-theme-border: rgba(158, 222, 255, 0.58);
-  --ss-theme-text: #f5fbff;
+  --ss-theme-accent: #4188bf;
+  --ss-theme-accent-2: #58c2a8;
+  --ss-theme-bg: #071427;
+  --ss-theme-bg-soft: #102540;
+  --ss-theme-border: rgba(124, 176, 205, 0.5);
+  --ss-theme-text: #eaf5ff;
 }
 
 html,
@@ -88,7 +97,11 @@ body.ss-themed .settings-select-grid button,
 body.ss-themed .watch-later-shortcut,
 body.ss-themed .chat-send-btn,
 body.ss-themed .mic-fab {
-  background: linear-gradient(135deg, var(--ss-theme-accent), var(--ss-theme-accent-2)) !important;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--ss-theme-accent) 82%, black),
+    color-mix(in srgb, var(--ss-theme-accent-2) 78%, black)
+  ) !important;
   border-color: var(--ss-theme-border) !important;
   color: var(--ss-theme-text) !important;
 }
@@ -105,6 +118,50 @@ body.ss-themed .settings-row-icon,
 body.ss-themed .chat-avatar,
 body.ss-themed .settings-user-avatar {
   background: linear-gradient(145deg, color-mix(in srgb, var(--ss-theme-accent) 78%, #ffffff 22%), var(--ss-theme-accent-2)) !important;
+}
+
+body.ss-themed .ss-nav {
+  border-color: color-mix(in srgb, var(--ss-theme-border) 90%, #000 10%) !important;
+  background:
+    radial-gradient(130% 140% at 5% -20%, color-mix(in srgb, var(--ss-theme-accent) 28%, transparent), transparent 50%),
+    radial-gradient(120% 140% at 100% 0%, color-mix(in srgb, var(--ss-theme-accent-2) 22%, transparent), transparent 55%),
+    color-mix(in srgb, var(--ss-theme-bg-soft) 72%, black) !important;
+}
+
+body.ss-themed .ss-brand-text {
+  color: color-mix(in srgb, var(--ss-theme-text) 92%, #fff 8%) !important;
+  text-shadow: 0 0 10px color-mix(in srgb, var(--ss-theme-accent-2) 30%, transparent);
+}
+
+body.ss-themed .feed-page,
+body.ss-themed .reels-page,
+body.ss-themed .watch-page,
+body.ss-themed .yt-watch-page,
+body.ss-themed .chat-page,
+body.ss-themed .settings-page,
+body.ss-themed .profile-page {
+  color: var(--ss-theme-text);
+}
+
+body.ss-themed .feed-page .explore-tile,
+body.ss-themed .reels-page .reel-frame,
+body.ss-themed .watch-main,
+body.ss-themed .watch-side,
+body.ss-themed .yt-home-card,
+body.ss-themed .chat-bubble,
+body.ss-themed .settings-section,
+body.ss-themed .profile-shortcut-card {
+  border-color: color-mix(in srgb, var(--ss-theme-border) 85%, #000 15%) !important;
+  background: color-mix(in srgb, var(--ss-theme-bg-soft) 84%, black) !important;
+}
+
+body.ss-themed .yt-chip:not(.is-active),
+body.ss-themed .watch-action-btn,
+body.ss-themed .chat-quality-btn,
+body.ss-themed .settings-select-grid button {
+  background: color-mix(in srgb, var(--ss-theme-bg-soft) 76%, black) !important;
+  border-color: color-mix(in srgb, var(--ss-theme-border) 82%, black) !important;
+  color: var(--ss-theme-text) !important;
 }
 
 a {

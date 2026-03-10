@@ -2,10 +2,12 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { FiAlertTriangle, FiBell, FiHeart, FiMapPin, FiMessageCircle, FiUserPlus, FiVideo } from "react-icons/fi";
 import api from "../api/axios";
+import { toApiUrl } from "../api/baseUrl";
 import "./Notifications.css";
 
 const EMAIL_REGEX = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
 const FOLLOWING_CACHE_KEY = "socialsea_following_cache_v1";
+const READ_NOTIFICATIONS_KEY = "socialsea_read_notifications_v1";
 
 const readFollowingCache = () => {
   try {
@@ -41,6 +43,24 @@ const getCachedFollowing = (identifiers) => {
     .some((key) => cache[key] === true);
 };
 
+const readSeenNotificationIds = () => {
+  try {
+    const raw = localStorage.getItem(READ_NOTIFICATIONS_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(parsed) ? parsed.map((x) => String(x)) : []);
+  } catch {
+    return new Set();
+  }
+};
+
+const persistSeenNotificationIds = (setValue) => {
+  try {
+    localStorage.setItem(READ_NOTIFICATIONS_KEY, JSON.stringify(Array.from(setValue || [])));
+  } catch {
+    // ignore storage errors
+  }
+};
+
 const extractFollowingFlag = (item) => {
   const booleanCandidates = [
     item?.isFollowing,
@@ -74,6 +94,7 @@ export default function Notifications() {
   const [loading, setLoading] = useState(true);
   const [followBusyById, setFollowBusyById] = useState({});
   const [followedById, setFollowedById] = useState({});
+  const [seenNotificationIds, setSeenNotificationIds] = useState(() => readSeenNotificationIds());
 
   const emailToName = (email) => {
     const raw = (email || "").split("@")[0] || "";
@@ -145,6 +166,13 @@ export default function Notifications() {
     });
   };
 
+  const resolveAvatarUrl = (raw) => {
+    const value = String(raw || "").trim();
+    if (!value) return "";
+    if (/^https?:\/\//i.test(value) || value.startsWith("data:")) return value;
+    return toApiUrl(value);
+  };
+
   useEffect(() => {
     let active = true;
     const load = (showLoader = false) => {
@@ -205,7 +233,80 @@ export default function Notifications() {
     };
   }, []);
 
-  const unreadCount = useMemo(() => items.filter((n) => !n?.read).length, [items]);
+  const markReadLocal = (notificationId) => {
+    const idText = String(notificationId || "").trim();
+    if (!idText) return;
+    setSeenNotificationIds((prev) => {
+      if (prev.has(idText)) return prev;
+      const next = new Set(prev);
+      next.add(idText);
+      persistSeenNotificationIds(next);
+      return next;
+    });
+    setItems((prev) =>
+      prev.map((item) =>
+        String(item?.id || "") === idText ? { ...item, read: true } : item
+      )
+    );
+  };
+
+  const markReadOnServer = async (notificationId) => {
+    const idText = String(notificationId || "").trim();
+    if (!idText) return;
+    const candidates = [
+      { method: "post", url: `/api/notifications/${encodeURIComponent(idText)}/read` },
+      { method: "post", url: `/api/notifications/read/${encodeURIComponent(idText)}` },
+      { method: "patch", url: `/api/notifications/${encodeURIComponent(idText)}`, data: { read: true } }
+    ];
+    for (const req of candidates) {
+      try {
+        await api.request({ ...req, suppressAuthRedirect: true });
+        return;
+      } catch {
+        // try next endpoint shape
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (!items.length) return;
+    const unreadIds = items
+      .filter((n) => !n?.read)
+      .map((n) => String(n?.id || "").trim())
+      .filter(Boolean);
+    if (!unreadIds.length) return;
+
+    unreadIds.forEach((id) => markReadLocal(id));
+
+    const markAllRead = async () => {
+      const bulkCandidates = [
+        { method: "post", url: "/api/notifications/read-all" },
+        { method: "post", url: "/api/notifications/mark-all-read" },
+        { method: "patch", url: "/api/notifications", data: { read: true } }
+      ];
+      for (const req of bulkCandidates) {
+        try {
+          await api.request({ ...req, suppressAuthRedirect: true });
+          return;
+        } catch {
+          // try next
+        }
+      }
+      await Promise.allSettled(unreadIds.map((id) => markReadOnServer(id)));
+    };
+
+    void markAllRead();
+  }, [items]);
+
+  const unreadCount = useMemo(
+    () =>
+      items.filter((n) => {
+        const idText = String(n?.id || "").trim();
+        if (n?.read) return false;
+        return idText ? !seenNotificationIds.has(idText) : false;
+      }).length,
+    [items, seenNotificationIds]
+  );
 
   const openActorProfile = (identifier) => {
     const safe = String(identifier || "").trim();
@@ -258,23 +359,42 @@ export default function Notifications() {
           const content = normalizeMessage(n?.message);
           const { Icon, label, tone } = kindMeta(kind);
           const avatarLetter = (actor[0] || "U").toUpperCase();
+          const actorAvatar =
+            resolveAvatarUrl(
+              n?.actorProfilePic ||
+              n?.actor?.profilePicUrl ||
+              n?.actor?.profilePic ||
+              n?.actor?.avatarUrl ||
+              n?.actor?.avatar ||
+              n?.user?.profilePicUrl ||
+              n?.user?.profilePic ||
+              n?.user?.avatarUrl ||
+              n?.user?.avatar ||
+              ""
+            );
           const actorIdentifier = n?.actorIdentifier || n?.actorEmail || actor;
           const following = !!followedById[n?.id];
           const followBusy = !!followBusyById[n?.id];
           const canFollow = kind === "follow" && !!actorIdentifier;
           const emergency = extractEmergencyLinks(n, content);
           const emergencyNav = emergency.navigateUrl || emergency.mapsUrl;
+          const idText = String(n?.id || "").trim();
+          const isRead = Boolean(n?.read) || !idText || seenNotificationIds.has(idText);
 
           return (
-            <article key={n.id} className={`notify-card ${n.read ? "is-read" : "is-unread"}`}>
+            <article
+              key={n.id}
+              className={`notify-card ${isRead ? "is-read" : "is-unread"}`}
+              onMouseEnter={() => markReadLocal(n?.id)}
+            >
               <button
                 type="button"
                 className={`notify-avatar ${tone} notify-avatar-btn`}
                 onClick={() => openActorProfile(actorIdentifier)}
                 aria-label={`Open ${actor} profile`}
               >
-                {n?.actorProfilePic ? (
-                  <img src={n.actorProfilePic} alt={actor} className="notify-avatar-img" />
+                {actorAvatar ? (
+                  <img src={actorAvatar} alt={actor} className="notify-avatar-img" />
                 ) : (
                   avatarLetter
                 )}

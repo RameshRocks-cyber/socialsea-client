@@ -2,46 +2,47 @@ export const COLOR_THEME_KEY = "socialsea_color_theme_v1";
 export const CUSTOM_THEME_KEY = "socialsea_custom_theme_v1";
 
 export const COLOR_THEME_OPTIONS = [
-  { id: "blue", label: "Default" },
+  { id: "black", label: "Default" },
+  { id: "mankind", label: "Mankind" },
   { id: "ocean", label: "Ocean" },
   { id: "pink", label: "Pink" },
   { id: "yellow", label: "Yellow" },
-  { id: "black", label: "Black" },
+  { id: "blue", label: "Blue" },
   { id: "white", label: "White" },
   { id: "custom", label: "Custom" },
 ];
 
 const DEFAULT_CUSTOM_THEME = {
-  accent: "#4da2ff",
-  accent2: "#36e2d1",
-  bg: "#05152b",
-  bgSoft: "#0d274a",
-  border: "#78c2ff",
-  text: "#edf7ff",
+  accent: "#9f6f4a",
+  accent2: "#c4955b",
+  bg: "#16110d",
+  bgSoft: "#231a14",
+  border: "#8d6a4a",
+  text: "#f2e7da",
 };
 
 const OCEAN_THEME = {
-  accent: "#2f8dff",
-  accent2: "#20d4c9",
-  bg: "#041933",
-  bgSoft: "#0a2f5d",
-  border: "#73c5ff",
-  text: "#e9f7ff",
+  accent: "#2a72c4",
+  accent2: "#1ca89f",
+  bg: "#031022",
+  bgSoft: "#082344",
+  border: "#5a97c7",
+  text: "#e2f2ff",
 };
 
 const VALID_THEME_IDS = new Set(COLOR_THEME_OPTIONS.map((x) => x.id));
 
 export const normalizeTheme = (value) => {
   const id = String(value || "").trim().toLowerCase();
-  return VALID_THEME_IDS.has(id) ? id : "blue";
+  return VALID_THEME_IDS.has(id) ? id : "black";
 };
 
 export const readTheme = () => {
   try {
     const raw = localStorage.getItem(COLOR_THEME_KEY);
-    return normalizeTheme(raw || "blue");
+    return normalizeTheme(raw || "black");
   } catch {
-    return "blue";
+    return "black";
   }
 };
 
@@ -88,7 +89,7 @@ const clearCustomThemeVars = () => {
 };
 
 export const applyTheme = (value) => {
-  if (typeof document === "undefined") return "blue";
+  if (typeof document === "undefined") return "black";
   const id = normalizeTheme(value);
   const body = document.body;
 
@@ -97,6 +98,7 @@ export const applyTheme = (value) => {
     "ss-theme-pink",
     "ss-theme-yellow",
     "ss-theme-black",
+    "ss-theme-mankind",
     "ss-theme-white",
     "ss-theme-blue"
   );
@@ -107,7 +109,7 @@ export const applyTheme = (value) => {
     body.classList.add("ss-themed");
   }
 
-  if (["pink", "yellow", "black", "white"].includes(id)) {
+  if (["mankind", "pink", "yellow", "black", "white"].includes(id)) {
     body.classList.add(`ss-theme-${id}`);
   }
 

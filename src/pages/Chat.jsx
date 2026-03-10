@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import {
   FiArrowLeft,
   FiCamera,
+  FiChevronDown,
   FiMic,
   FiMicOff,
   FiMoreVertical,
@@ -11,6 +12,7 @@ import {
   FiPhoneOff,
   FiSmile,
   FiVolume2,
+  FiVolumeX,
   FiVideo,
   FiVideoOff
 } from "react-icons/fi";
@@ -23,11 +25,15 @@ import "./Chat.css";
 
 const POLL_MS = 1200;
 const LOCAL_CHAT_KEY = "socialsea_chat_fallback_v1";
+const HIDDEN_CHAT_MSG_IDS_KEY = "socialsea_hidden_msg_ids_v1";
 const CALL_HISTORY_KEY = "socialsea_call_history_v1";
 const CALL_SIGNAL_LOCAL_KEY = "socialsea_call_signal_local_v1";
+const CHAT_READ_RECEIPT_KEY = "socialsea_chat_read_receipt_v1";
+const CHAT_READ_RECEIPT_CHANNEL = "socialsea-chat-read-receipt";
 const CALL_ACCEPT_TARGET_KEY = "socialsea_call_accept_target_v1";
 const CALL_RING_MS = 30000;
 const CALL_POLL_MS = 1200;
+const CHAT_ONLINE_WINDOW_MS = 600000;
 const RTC_CONFIG = {
   iceServers: [
     { urls: "stun:stun.l.google.com:19302" },
@@ -39,20 +45,91 @@ const RTC_CONFIG = {
 const CHAT_FAVORITES_KEY = "socialsea_chat_favorites_v1";
 const CHAT_CUSTOM_STICKERS_KEY = "socialsea_chat_custom_stickers_v1";
 const CHAT_TRANSLATOR_KEY = "socialsea_chat_translator_v1";
+const CHAT_WALLPAPER_KEY = "socialsea_chat_wallpaper_v1";
 const BLOCKED_USERS_KEY = "socialsea_blocked_users_v1";
 const DELETE_FOR_EVERYONE_TOKEN = "__SS_DELETE_EVERYONE__:";
 const SIGN_ASSIST_TOKEN = "__SS_SIGN_ASSIST__:";
-const SIGN_VOICE_GENDERS = ["neutral", "female", "male"];
+const SIGN_VOICE_GENDERS = ["female", "male"];
 const SIGN_LOCAL_TF_SCRIPT = "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js";
 const SIGN_LOCAL_HANDPOSE_SCRIPT =
   "https://cdn.jsdelivr.net/npm/@tensorflow-models/handpose@0.0.7/dist/handpose.min.js";
+const BASE_SPEECH_LANG_OPTIONS = [
+  "en-IN", "en-US", "en-GB", "en-AU",
+  "te-IN", "hi-IN", "ta-IN", "kn-IN", "ml-IN", "mr-IN", "bn-IN", "gu-IN", "pa-IN", "ur-IN", "or-IN",
+  "as-IN", "kok-IN", "sa-IN", "ne-NP", "si-LK",
+  "ar-SA", "fa-IR", "he-IL", "tr-TR",
+  "es-ES", "es-MX", "fr-FR", "de-DE", "it-IT", "pt-PT", "pt-BR", "nl-NL", "pl-PL", "sv-SE", "no-NO",
+  "da-DK", "fi-FI", "cs-CZ", "sk-SK", "hu-HU", "ro-RO", "uk-UA", "ru-RU", "el-GR",
+  "zh-CN", "zh-TW", "ja-JP", "ko-KR", "th-TH", "vi-VN", "id-ID", "ms-MY", "fil-PH"
+];
 
-const encodeSignAssistText = (text, voiceGender = "neutral", source = "manual") => {
+const normalizeLangCode = (value) => String(value || "").trim().replace("_", "-");
+
+const getLangDisplayLabel = (langCode) => {
+  const normalized = normalizeLangCode(langCode);
+  if (!normalized) return "";
+  try {
+    if (typeof Intl !== "undefined" && typeof Intl.DisplayNames !== "undefined") {
+      const names = new Intl.DisplayNames(["en"], { type: "language" });
+      const parts = normalized.split("-");
+      const languageName = names.of(parts[0]) || parts[0];
+      return parts[1] ? `${languageName} (${parts[1].toUpperCase()})` : languageName;
+    }
+  } catch {
+    // ignore display-name errors
+  }
+  return normalized;
+};
+
+const buildSpeechLangOptions = (extraLangs = []) => {
+  const all = [...BASE_SPEECH_LANG_OPTIONS, ...extraLangs]
+    .map(normalizeLangCode)
+    .filter(Boolean)
+    .filter((value, index, arr) => arr.indexOf(value) === index);
+  return all
+    .map((value) => ({ value, label: getLangDisplayLabel(value) }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+};
+
+const createWallpaperSvgData = (baseA, baseB, line, dot) =>
+  `data:image/svg+xml;utf8,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1800" preserveAspectRatio="xMidYMid slice">
+      <defs>
+        <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="${baseA}"/>
+          <stop offset="100%" stop-color="${baseB}"/>
+        </linearGradient>
+        <pattern id="p" width="120" height="120" patternUnits="userSpaceOnUse">
+          <path d="M0 60 L120 60 M60 0 L60 120" stroke="${line}" stroke-width="1" opacity="0.45"/>
+          <circle cx="60" cy="60" r="2.2" fill="${dot}" opacity="0.55"/>
+        </pattern>
+      </defs>
+      <rect width="1200" height="1800" fill="url(#g)"/>
+      <rect width="1200" height="1800" fill="url(#p)"/>
+    </svg>`
+  )}`;
+
+const CHAT_WALLPAPER_PRESETS = [
+  { id: "none", label: "Dark", image: "" },
+  { id: "night-grid", label: "Night Grid", image: createWallpaperSvgData("#070b14", "#121a2a", "#6f85ae", "#d4e4ff") },
+  { id: "dark-cyan", label: "Dark Cyan", image: createWallpaperSvgData("#061018", "#122434", "#3f7999", "#b8ecff") },
+  { id: "graphite", label: "Graphite", image: createWallpaperSvgData("#090909", "#1a1d23", "#8a8d95", "#f4f4f4") }
+];
+
+const DEFAULT_WALLPAPER_PRESET_ID = "graphite";
+const DEFAULT_WALLPAPER_OPTIONS = {
+  fit: "cover",
+  zoom: 100,
+  x: 50,
+  y: 50
+};
+
+const encodeSignAssistText = (text, voiceGender = "female", source = "manual") => {
   const cleanText = String(text || "").trim();
   if (!cleanText) return "";
   const gender = SIGN_VOICE_GENDERS.includes(String(voiceGender || "").toLowerCase())
     ? String(voiceGender || "").toLowerCase()
-    : "neutral";
+    : "female";
   const payload = {
     text: cleanText,
     voiceGender: gender,
@@ -71,7 +148,7 @@ const decodeSignAssistText = (rawText) => {
     if (!text) return null;
     const gender = SIGN_VOICE_GENDERS.includes(String(parsed?.voiceGender || "").toLowerCase())
       ? String(parsed.voiceGender).toLowerCase()
-      : "neutral";
+      : "female";
     return {
       text,
       voiceGender: gender,
@@ -302,6 +379,7 @@ export default function Chat() {
   const [isRecordingAudio, setIsRecordingAudio] = useState(false);
   const [isSpeechTyping, setIsSpeechTyping] = useState(false);
   const [speechLang, setSpeechLang] = useState("en-IN");
+  const [speechLangOptions, setSpeechLangOptions] = useState(() => buildSpeechLangOptions());
   const [showHeaderMenu, setShowHeaderMenu] = useState(false);
   const [translatorEnabled, setTranslatorEnabled] = useState(() => {
     try {
@@ -321,8 +399,19 @@ export default function Chat() {
       return "en";
     }
   });
+  const [speechVoiceGender, setSpeechVoiceGender] = useState(() => {
+    try {
+      const raw = localStorage.getItem(CHAT_TRANSLATOR_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      const next = String(parsed?.voiceGender || "female").toLowerCase();
+      return SIGN_VOICE_GENDERS.includes(next) ? next : "female";
+    } catch {
+      return "female";
+    }
+  });
   const [translatedIncomingById, setTranslatedIncomingById] = useState({});
   const [translatorError, setTranslatorError] = useState("");
+  const [showScrollDown, setShowScrollDown] = useState(false);
   const [nowTick, setNowTick] = useState(Date.now());
   const [soundPrefs, setSoundPrefs] = useState(readSoundPrefs);
   const [hasRemoteVideo, setHasRemoteVideo] = useState(false);
@@ -330,7 +419,7 @@ export default function Chat() {
   const [signAssistEnabled, setSignAssistEnabled] = useState(false);
   const [signAssistText, setSignAssistText] = useState("");
   const [signAssistVoiceGender, setSignAssistVoiceGender] = useState("female");
-  const [signAssistAutoSpeak, setSignAssistAutoSpeak] = useState(true);
+  const [signAssistAutoSpeak, setSignAssistAutoSpeak] = useState(false);
   const [signAssistBusy, setSignAssistBusy] = useState(false);
   const [signAssistStatus, setSignAssistStatus] = useState("");
   const [blockedUsers, setBlockedUsers] = useState(() => {
@@ -342,6 +431,53 @@ export default function Chat() {
       return [];
     }
   });
+  const [chatWallpaper, setChatWallpaper] = useState(() => {
+    try {
+      const raw = localStorage.getItem(CHAT_WALLPAPER_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      const presetId = String(parsed?.presetId || DEFAULT_WALLPAPER_PRESET_ID);
+      const image = String(parsed?.image || "");
+      const fitRaw = String(parsed?.fit || parsed?.mode || DEFAULT_WALLPAPER_OPTIONS.fit).toLowerCase();
+      const fit = ["cover", "contain", "stretch"].includes(fitRaw) ? fitRaw : DEFAULT_WALLPAPER_OPTIONS.fit;
+      const zoom = Number.isFinite(Number(parsed?.zoom)) ? Math.max(60, Math.min(220, Number(parsed.zoom))) : DEFAULT_WALLPAPER_OPTIONS.zoom;
+      const x = Number.isFinite(Number(parsed?.x)) ? Math.max(0, Math.min(100, Number(parsed.x))) : DEFAULT_WALLPAPER_OPTIONS.x;
+      const y = Number.isFinite(Number(parsed?.y)) ? Math.max(0, Math.min(100, Number(parsed.y))) : DEFAULT_WALLPAPER_OPTIONS.y;
+      if (presetId === "custom" && image) return { presetId: "custom", image, fit, zoom, x, y };
+      const preset = CHAT_WALLPAPER_PRESETS.find((item) => item.id === presetId);
+      const fallbackPreset = CHAT_WALLPAPER_PRESETS.find((item) => item.id === DEFAULT_WALLPAPER_PRESET_ID);
+      if (preset) return { presetId: preset.id, image: preset.image, fit, zoom, x, y };
+      if (fallbackPreset) {
+        return {
+          presetId: fallbackPreset.id,
+          image: fallbackPreset.image,
+          fit: DEFAULT_WALLPAPER_OPTIONS.fit,
+          zoom: DEFAULT_WALLPAPER_OPTIONS.zoom,
+          x: DEFAULT_WALLPAPER_OPTIONS.x,
+          y: DEFAULT_WALLPAPER_OPTIONS.y
+        };
+      }
+      return {
+        presetId: "none",
+        image: "",
+        fit: DEFAULT_WALLPAPER_OPTIONS.fit,
+        zoom: DEFAULT_WALLPAPER_OPTIONS.zoom,
+        x: DEFAULT_WALLPAPER_OPTIONS.x,
+        y: DEFAULT_WALLPAPER_OPTIONS.y
+      };
+    } catch {
+      const fallbackPreset = CHAT_WALLPAPER_PRESETS.find((item) => item.id === DEFAULT_WALLPAPER_PRESET_ID);
+      return {
+        presetId: fallbackPreset?.id || "none",
+        image: fallbackPreset?.image || "",
+        fit: DEFAULT_WALLPAPER_OPTIONS.fit,
+        zoom: DEFAULT_WALLPAPER_OPTIONS.zoom,
+        x: DEFAULT_WALLPAPER_OPTIONS.x,
+        y: DEFAULT_WALLPAPER_OPTIONS.y
+      };
+    }
+  });
+  const [showWallpaperEditor, setShowWallpaperEditor] = useState(false);
+  const [wallpaperDraft, setWallpaperDraft] = useState(null);
 
   const stompRef = useRef(null);
   const peerRef = useRef(null);
@@ -365,10 +501,14 @@ export default function Chat() {
   const touchStartPointRef = useRef({ x: 0, y: 0 });
   const tabIdRef = useRef(`${Date.now()}_${Math.random().toString(36).slice(2, 7)}`);
   const callChannelRef = useRef(null);
+  const readReceiptChannelRef = useRef(null);
+  const seenReadReceiptsRef = useRef(new Set());
+  const lastReadReceiptSentByContactRef = useRef({});
   const composerInputRef = useRef(null);
   const attachInputRef = useRef(null);
   const cameraInputRef = useRef(null);
   const stickerInputRef = useRef(null);
+  const wallpaperInputRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const recordingStreamRef = useRef(null);
   const recordingChunksRef = useRef([]);
@@ -382,19 +522,15 @@ export default function Chat() {
   const threadRef = useRef(null);
   const shouldStickToBottomRef = useRef(true);
   const lastThreadItemCountRef = useRef(0);
+  const scrollRafRef = useRef(0);
+  const openScrollPlanRef = useRef({ contactId: "", untilMs: 0, timers: [] });
+  const showScrollDownRef = useRef(false);
   const spokenSignMessageIdsRef = useRef(new Set());
+  const autoSpeakBootstrappedByContactRef = useRef({});
   const signApiUnavailableRef = useRef(false);
   const signLocalModelRef = useRef(null);
   const signLocalModelLoadingRef = useRef(null);
 
-  const SPEECH_LANG_OPTIONS = [
-    { value: "en-IN", label: "English" },
-    { value: "te-IN", label: "Telugu" },
-    { value: "hi-IN", label: "Hindi" },
-    { value: "ta-IN", label: "Tamil" },
-    { value: "kn-IN", label: "Kannada" },
-    { value: "ml-IN", label: "Malayalam" }
-  ];
   const TRANSLATE_LANG_OPTIONS = [
     { value: "en", label: "English" },
     { value: "te", label: "Telugu" },
@@ -423,6 +559,56 @@ export default function Chat() {
     { value: "zh", label: "Chinese (Simplified)" }
   ];
 
+  const threadWallpaperStyle = useMemo(() => {
+    const image = String(chatWallpaper?.image || "").trim();
+    if (!image) return undefined;
+    const fit = String(chatWallpaper?.fit || DEFAULT_WALLPAPER_OPTIONS.fit).toLowerCase();
+    const zoom = Number.isFinite(Number(chatWallpaper?.zoom))
+      ? Math.max(60, Math.min(220, Number(chatWallpaper.zoom)))
+      : DEFAULT_WALLPAPER_OPTIONS.zoom;
+    const x = Number.isFinite(Number(chatWallpaper?.x))
+      ? Math.max(0, Math.min(100, Number(chatWallpaper.x)))
+      : DEFAULT_WALLPAPER_OPTIONS.x;
+    const y = Number.isFinite(Number(chatWallpaper?.y))
+      ? Math.max(0, Math.min(100, Number(chatWallpaper.y)))
+      : DEFAULT_WALLPAPER_OPTIONS.y;
+    const backgroundSize =
+      fit === "contain" ? `${zoom}% auto` : fit === "stretch" ? "100% 100%" : `${zoom}% ${zoom}%`;
+    return {
+      backgroundImage: `linear-gradient(rgba(2, 8, 16, 0.82), rgba(2, 8, 16, 0.88)), url("${image}")`,
+      backgroundSize,
+      backgroundPosition: `${x}% ${y}%`,
+      backgroundRepeat: "no-repeat"
+    };
+  }, [chatWallpaper]);
+
+  useEffect(() => {
+    const updateSpeechLangs = () => {
+      const voices = "speechSynthesis" in window && window.speechSynthesis?.getVoices
+        ? window.speechSynthesis.getVoices()
+        : [];
+      const voiceLangs = Array.isArray(voices) ? voices.map((v) => v?.lang) : [];
+      const browserLangs = Array.isArray(navigator?.languages) ? navigator.languages : [navigator?.language];
+      const nextOptions = buildSpeechLangOptions([...voiceLangs, ...browserLangs]);
+      setSpeechLangOptions(nextOptions);
+      const current = normalizeLangCode(speechLang);
+      if (!nextOptions.some((opt) => opt.value === current)) {
+        const fallback = nextOptions.find((opt) => opt.value.startsWith("en"))?.value || nextOptions[0]?.value || "en-IN";
+        setSpeechLang(fallback);
+      }
+    };
+
+    updateSpeechLangs();
+    if ("speechSynthesis" in window) {
+      window.speechSynthesis.onvoiceschanged = updateSpeechLangs;
+    }
+    return () => {
+      if ("speechSynthesis" in window) {
+        window.speechSynthesis.onvoiceschanged = null;
+      }
+    };
+  }, [speechLang]);
+
   useEffect(() => {
     safeSetItem(CHAT_FAVORITES_KEY, JSON.stringify(favoritePicks));
   }, [favoritePicks]);
@@ -435,12 +621,12 @@ export default function Chat() {
     try {
       localStorage.setItem(
         CHAT_TRANSLATOR_KEY,
-        JSON.stringify({ enabled: translatorEnabled, lang: translatorLang })
+        JSON.stringify({ enabled: translatorEnabled, lang: translatorLang, voiceGender: speechVoiceGender })
       );
     } catch {
       // ignore
     }
-  }, [translatorEnabled, translatorLang]);
+  }, [translatorEnabled, translatorLang, speechVoiceGender]);
 
   useEffect(() => {
     try {
@@ -449,6 +635,101 @@ export default function Chat() {
       // ignore
     }
   }, [blockedUsers]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        CHAT_WALLPAPER_KEY,
+        JSON.stringify({
+          presetId: chatWallpaper?.presetId || DEFAULT_WALLPAPER_PRESET_ID,
+          image: String(chatWallpaper?.image || ""),
+          fit: String(chatWallpaper?.fit || DEFAULT_WALLPAPER_OPTIONS.fit),
+          zoom: Number(chatWallpaper?.zoom || DEFAULT_WALLPAPER_OPTIONS.zoom),
+          x: Number(chatWallpaper?.x || DEFAULT_WALLPAPER_OPTIONS.x),
+          y: Number(chatWallpaper?.y || DEFAULT_WALLPAPER_OPTIONS.y)
+        })
+      );
+    } catch {
+      // ignore
+    }
+  }, [chatWallpaper]);
+
+  const selectChatWallpaperPreset = (presetId) => {
+    const picked = CHAT_WALLPAPER_PRESETS.find((item) => item.id === presetId);
+    if (!picked) return;
+    setChatWallpaper((prev) => ({
+      presetId: picked.id,
+      image: picked.image,
+      fit: prev?.fit || DEFAULT_WALLPAPER_OPTIONS.fit,
+      zoom: Number.isFinite(Number(prev?.zoom)) ? Number(prev.zoom) : DEFAULT_WALLPAPER_OPTIONS.zoom,
+      x: Number.isFinite(Number(prev?.x)) ? Number(prev.x) : DEFAULT_WALLPAPER_OPTIONS.x,
+      y: Number.isFinite(Number(prev?.y)) ? Number(prev.y) : DEFAULT_WALLPAPER_OPTIONS.y
+    }));
+  };
+
+  const openWallpaperPicker = () => {
+    if (!wallpaperInputRef.current) return;
+    wallpaperInputRef.current.value = "";
+    wallpaperInputRef.current.click();
+  };
+
+  const buildWallpaperDraft = (source) => {
+    const base = source || {};
+    return {
+      presetId: String(base?.presetId || "custom"),
+      image: String(base?.image || ""),
+      fit: String(base?.fit || DEFAULT_WALLPAPER_OPTIONS.fit),
+      zoom: Number.isFinite(Number(base?.zoom)) ? Math.max(60, Math.min(220, Number(base.zoom))) : DEFAULT_WALLPAPER_OPTIONS.zoom,
+      x: Number.isFinite(Number(base?.x)) ? Math.max(0, Math.min(100, Number(base.x))) : DEFAULT_WALLPAPER_OPTIONS.x,
+      y: Number.isFinite(Number(base?.y)) ? Math.max(0, Math.min(100, Number(base.y))) : DEFAULT_WALLPAPER_OPTIONS.y
+    };
+  };
+
+  const openWallpaperEditor = (source = null) => {
+    const draft = buildWallpaperDraft(source || chatWallpaper);
+    if (!draft.image) return;
+    setWallpaperDraft(draft);
+    setShowWallpaperEditor(true);
+  };
+
+  const closeWallpaperEditor = () => {
+    setShowWallpaperEditor(false);
+    setWallpaperDraft(null);
+  };
+
+  const applyWallpaperEditor = () => {
+    if (!wallpaperDraft?.image) return closeWallpaperEditor();
+    setChatWallpaper(buildWallpaperDraft(wallpaperDraft));
+    closeWallpaperEditor();
+  };
+
+  const onWallpaperPicked = (event) => {
+    const file = event?.target?.files?.[0];
+    if (!file || !String(file.type || "").startsWith("image/")) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || "");
+      if (!result) return;
+      const draft = {
+        presetId: "custom",
+        image: result,
+        fit: chatWallpaper?.fit || DEFAULT_WALLPAPER_OPTIONS.fit,
+        zoom: Number.isFinite(Number(chatWallpaper?.zoom)) ? Number(chatWallpaper.zoom) : DEFAULT_WALLPAPER_OPTIONS.zoom,
+        x: Number.isFinite(Number(chatWallpaper?.x)) ? Number(chatWallpaper.x) : DEFAULT_WALLPAPER_OPTIONS.x,
+        y: Number.isFinite(Number(chatWallpaper?.y)) ? Number(chatWallpaper.y) : DEFAULT_WALLPAPER_OPTIONS.y
+      };
+      setWallpaperDraft(buildWallpaperDraft(draft));
+      setShowWallpaperEditor(true);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const updateWallpaperOptions = (patch) => {
+    setWallpaperDraft((prev) => ({
+      ...prev,
+      ...(patch || {})
+    }));
+  };
 
   const ensureAudioContext = () => {
     if (audioCtxRef.current) return audioCtxRef.current;
@@ -792,6 +1073,42 @@ export default function Chat() {
     safeSetItem(LOCAL_CHAT_KEY, JSON.stringify(data));
   };
 
+  const hiddenMessageStorageKey = () => `${HIDDEN_CHAT_MSG_IDS_KEY}_${myUserId || "guest"}`;
+
+  const readHiddenMessageMap = () => {
+    try {
+      const raw = safeGetItem(hiddenMessageStorageKey());
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  };
+
+  const writeHiddenMessageMap = (value) => {
+    safeSetItem(hiddenMessageStorageKey(), JSON.stringify(value || {}));
+  };
+
+  const getHiddenMessageSetForContact = (otherId) => {
+    const key = localThreadKey(myUserId, otherId);
+    const map = readHiddenMessageMap();
+    const list = Array.isArray(map[key]) ? map[key] : [];
+    return new Set(list.map((x) => String(x || "").trim()).filter(Boolean));
+  };
+
+  const markMessageHiddenForMe = (otherId, messageId) => {
+    const msgId = String(messageId || "").trim();
+    if (!msgId) return;
+    const key = localThreadKey(myUserId, otherId);
+    const map = readHiddenMessageMap();
+    const existing = Array.isArray(map[key]) ? map[key] : [];
+    if (existing.includes(msgId)) return;
+    const next = [...existing, msgId].slice(-600);
+    map[key] = next;
+    writeHiddenMessageMap(map);
+  };
+
   const callHistoryStorageKey = () => `${CALL_HISTORY_KEY}_${myUserId || "guest"}`;
 
   const readCallHistory = () => {
@@ -905,20 +1222,82 @@ export default function Chat() {
     const el = threadRef.current;
     if (!el) return;
     el.scrollTo({ top: el.scrollHeight, behavior });
+    shouldStickToBottomRef.current = true;
+    showScrollDownRef.current = false;
+    setShowScrollDown(false);
+  };
+
+  const refreshThreadScrollState = () => {
+    const el = threadRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const nearBottom = distanceFromBottom < 100;
+    shouldStickToBottomRef.current = nearBottom;
+    const nextShow = distanceFromBottom > 160;
+    if (showScrollDownRef.current !== nextShow) {
+      showScrollDownRef.current = nextShow;
+      setShowScrollDown(nextShow);
+    }
+  };
+
+  const getVisibleThreadMessageIds = () => {
+    const threadEl = threadRef.current;
+    if (!threadEl) return new Set();
+    const threadRect = threadEl.getBoundingClientRect();
+    const visible = new Set();
+    const nodes = threadEl.querySelectorAll("[data-chat-msg-id]");
+    nodes.forEach((node) => {
+      const idText = String(node.getAttribute("data-chat-msg-id") || "").trim();
+      if (!idText) return;
+      const rect = node.getBoundingClientRect();
+      const intersects =
+        rect.bottom > threadRect.top + 24 &&
+        rect.top < threadRect.bottom - 24;
+      if (intersects) visible.add(idText);
+    });
+    return visible;
   };
 
   const mapUserToContact = (u) => {
+    const toBool = (value) => {
+      if (typeof value === "boolean") return value;
+      const raw = String(value || "").trim().toLowerCase();
+      return raw === "true" || raw === "1" || raw === "online" || raw === "active" || raw === "yes";
+    };
     const id = String(u?.userId || u?.id || "");
     const rawName = u?.name || u?.email || `User ${id}`;
     const name = normalizeDisplayName(rawName);
     const profilePicRaw = u?.profilePicUrl || u?.profilePic || u?.avatar || u?.user?.profilePicUrl || u?.user?.profilePic || "";
+    const lastActiveAt =
+      u?.lastActiveAt ||
+      u?.lastSeenAt ||
+      u?.lastSeen ||
+      u?.locationUpdatedAt ||
+      u?.lastAt ||
+      u?.updatedAt ||
+      u?.timestamp ||
+      u?.user?.locationUpdatedAt ||
+      u?.user?.lastSeenAt ||
+      u?.user?.lastSeen ||
+      "";
+    const online =
+      toBool(u?.online) ||
+      toBool(u?.isOnline) ||
+      toBool(u?.active) ||
+      toBool(u?.presence) ||
+      toBool(u?.status) ||
+      toBool(u?.user?.online) ||
+      toBool(u?.user?.isOnline) ||
+      toBool(u?.user?.active);
     return {
       id,
       name,
       email: u?.email || "",
       avatar: (name[0] || "U").toUpperCase(),
       profilePic: profilePicRaw ? toApiUrl(profilePicRaw) : "",
-      lastMessage: u?.lastMessage || ""
+      lastMessage: u?.lastMessage || "",
+      lastActiveAt,
+      online
     };
   };
 
@@ -1369,24 +1748,38 @@ export default function Chat() {
   };
 
   const onIncomingChatMessage = (payload) => {
-    const senderId = String(payload?.senderId || "");
-    if (!senderId || senderId === myUserId) return;
+    const senderId = String(
+      payload?.senderId ?? payload?.fromUserId ?? payload?.fromId ?? payload?.sender?.id ?? payload?.userId ?? ""
+    );
+    const receiverId = String(
+      payload?.receiverId ?? payload?.toUserId ?? payload?.toId ?? payload?.receiver?.id ?? ""
+    );
+    const contactIdForThread =
+      senderId && senderId !== String(myUserId)
+        ? senderId
+        : receiverId && receiverId !== String(myUserId)
+          ? receiverId
+          : "";
+    if (!contactIdForThread) return;
+
     const text = String(payload?.text || "");
     const deleteTargetId = parseDeleteTargetId(text);
     if (deleteTargetId) {
       setMessagesByContact((prev) => {
-        const existing = Array.isArray(prev[senderId]) ? prev[senderId] : [];
+        const existing = Array.isArray(prev[contactIdForThread]) ? prev[contactIdForThread] : [];
         const next = applyDeleteTargetsToList(existing, new Set([String(deleteTargetId)]));
-        return { ...prev, [senderId]: next };
+        return { ...prev, [contactIdForThread]: next };
       });
-      setContacts((prev) => prev.map((c) => (c.id === senderId ? { ...c, lastMessage: "This message was deleted" } : c)));
+      setContacts((prev) =>
+        prev.map((c) => (c.id === contactIdForThread ? { ...c, lastMessage: "This message was deleted" } : c))
+      );
       shouldStickToBottomRef.current = true;
       setTimeout(() => scrollThreadToBottom("smooth"), 50);
       return;
     }
     const nextMessage = normalizeMessage({
       id: payload?.id || `${payload?.createdAt || Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-      senderId: Number(senderId),
+      senderId: Number(senderId || contactIdForThread),
       receiverId: Number(myUserId) || null,
       text,
       audioUrl: payload?.audioUrl || "",
@@ -1395,7 +1788,9 @@ export default function Chat() {
       fileName: payload?.fileName || "",
       createdAt: payload?.createdAt || new Date().toISOString(),
       mine: false
-    }, senderId);
+    }, contactIdForThread);
+    const hiddenIds = getHiddenMessageSetForContact(contactIdForThread);
+    if (hiddenIds.has(String(nextMessage.id || ""))) return;
     const preview =
       nextMessage.audioUrl
         ? "?? Voice message"
@@ -1410,22 +1805,22 @@ export default function Chat() {
                 : text;
 
     setMessagesByContact((prev) => {
-      const existing = Array.isArray(prev[senderId]) ? prev[senderId] : [];
+      const existing = Array.isArray(prev[contactIdForThread]) ? prev[contactIdForThread] : [];
       const exists = existing.some((m) => String(m?.id || "") === String(nextMessage.id));
       if (exists) return prev;
-      return { ...prev, [senderId]: [...existing, nextMessage] };
+      return { ...prev, [contactIdForThread]: [...existing, nextMessage] };
     });
 
     setContacts((prev) => {
-      const found = prev.find((c) => c.id === senderId);
+      const found = prev.find((c) => c.id === contactIdForThread);
       let next = prev;
       if (!found) {
         const name = normalizeDisplayName(
-          payload?.senderName || payload?.senderEmail || payload?.fromName || payload?.fromEmail || `User ${senderId}`
+          payload?.senderName || payload?.senderEmail || payload?.fromName || payload?.fromEmail || `User ${contactIdForThread}`
         );
         next = mergeContacts(prev, [
           {
-            id: senderId,
+            id: contactIdForThread,
             name,
             email: payload?.senderEmail || payload?.fromEmail || "",
             avatar: (name[0] || "U").toUpperCase(),
@@ -1433,7 +1828,16 @@ export default function Chat() {
           }
         ]);
       }
-      return next.map((c) => (c.id === senderId ? { ...c, lastMessage: preview || c.lastMessage } : c));
+      return next.map((c) =>
+        c.id === contactIdForThread
+          ? {
+              ...c,
+              lastMessage: preview || c.lastMessage,
+              lastActiveAt: new Date().toISOString(),
+              online: true
+            }
+          : c
+      );
     });
 
     playMessageAlert();
@@ -1441,6 +1845,11 @@ export default function Chat() {
     maybeShowBrowserNotification(senderName, preview || "You have a new message");
     shouldStickToBottomRef.current = true;
     setTimeout(() => scrollThreadToBottom("smooth"), 50);
+    if (contactIdForThread === String(activeContactId)) {
+      setTimeout(() => {
+        loadThread(contactIdForThread).catch(() => {});
+      }, 120);
+    }
   };
 
   const startOutgoingCall = async (mode) => {
@@ -1627,7 +2036,9 @@ export default function Chat() {
   const loadConversations = async () => {
     let list = [];
     try {
-      const res = await api.get("/api/chat/conversations");
+      const res = await api.get("/api/chat/conversations", {
+        params: { _: Date.now() }
+      });
       list = Array.isArray(res.data) ? res.data.map(mapUserToContact) : [];
       setContacts((prev) => mergeContacts(list, prev));
       setChatFallbackMode(false);
@@ -1669,21 +2080,24 @@ export default function Chat() {
 
   const loadThread = async (otherId) => {
     if (!otherId) return;
+    const hiddenIds = getHiddenMessageSetForContact(otherId);
     if (chatFallbackMode) {
       const all = readLocalChat();
       const key = localThreadKey(myUserId, otherId);
       const normalized = (Array.isArray(all[key]) ? all[key] : []).map((m) => normalizeMessage(m, otherId));
       const deleteTargets = new Set(normalized.map((m) => parseDeleteTargetId(m?.text)).filter(Boolean).map(String));
       const visible = normalized.filter((m) => !parseDeleteTargetId(m?.text));
-      const list = applyDeleteTargetsToList(visible, deleteTargets);
+      const list = applyDeleteTargetsToList(visible, deleteTargets).filter((m) => !hiddenIds.has(String(m?.id || "")));
       setMessagesByContact((prev) => ({ ...prev, [String(otherId)]: list }));
       return;
     }
-    const res = await api.get(`/api/chat/${otherId}/messages`);
+    const res = await api.get(`/api/chat/${otherId}/messages`, {
+      params: { _: Date.now() }
+    });
     const normalized = (Array.isArray(res.data) ? res.data : []).map((m) => normalizeMessage(m, otherId));
     const deleteTargets = new Set(normalized.map((m) => parseDeleteTargetId(m?.text)).filter(Boolean).map(String));
     const visible = normalized.filter((m) => !parseDeleteTargetId(m?.text));
-    const list = applyDeleteTargetsToList(visible, deleteTargets);
+    const list = applyDeleteTargetsToList(visible, deleteTargets).filter((m) => !hiddenIds.has(String(m?.id || "")));
     setMessagesByContact((prev) => {
       const key = String(otherId);
       const oldList = Array.isArray(prev[key]) ? prev[key] : [];
@@ -1789,6 +2203,92 @@ export default function Chat() {
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
   }, [myUserId, myEmail]);
+
+  useEffect(() => {
+    if (!myUserId) return undefined;
+
+    const applyReadReceipt = (packet) => {
+      if (!packet || typeof packet !== "object") return;
+      const readerId = String(packet.readerId || "");
+      const peerId = String(packet.peerId || "");
+      if (!readerId || !peerId) return;
+      if (peerId !== String(myUserId)) return;
+      if (readerId === String(myUserId)) return;
+
+      const readUptoMs = Number(packet.readUptoMs || 0);
+      if (!Number.isFinite(readUptoMs) || readUptoMs <= 0) return;
+
+      const receiptId = String(packet.receiptId || `${readerId}|${peerId}|${readUptoMs}`);
+      if (seenReadReceiptsRef.current.has(receiptId)) return;
+      seenReadReceiptsRef.current.add(receiptId);
+      if (seenReadReceiptsRef.current.size > 1200) {
+        seenReadReceiptsRef.current.clear();
+      }
+
+      const readAt = String(packet.at || new Date().toISOString());
+      setMessagesByContact((prev) => {
+        const key = readerId;
+        const list = Array.isArray(prev[key]) ? prev[key] : [];
+        if (!list.length) return prev;
+        let changed = false;
+        const nextList = list.map((msg) => {
+          if (!msg?.mine) return msg;
+          const msgMs = new Date(normalizeTimestamp(msg?.createdAt || 0)).getTime();
+          if (!Number.isFinite(msgMs) || msgMs > readUptoMs) return msg;
+          if (msg.read === true || msg.seen === true || msg.readAt || msg.seenAt || String(msg.status || "").toLowerCase() === "read") {
+            return msg;
+          }
+          changed = true;
+          return {
+            ...msg,
+            read: true,
+            seen: true,
+            readAt,
+            seenAt: readAt,
+            status: "read",
+            deliveryStatus: "read"
+          };
+        });
+        return changed ? { ...prev, [key]: nextList } : prev;
+      });
+    };
+
+    const onStorage = (event) => {
+      if (event?.key !== CHAT_READ_RECEIPT_KEY || !event.newValue) return;
+      try {
+        const packet = JSON.parse(event.newValue);
+        if (packet?.fromTab && packet.fromTab === tabIdRef.current) return;
+        applyReadReceipt(packet);
+      } catch {
+        // ignore malformed receipt packet
+      }
+    };
+
+    const onChannelMessage = (event) => {
+      const packet = event?.data;
+      if (packet?.fromTab && packet.fromTab === tabIdRef.current) return;
+      applyReadReceipt(packet);
+    };
+
+    window.addEventListener("storage", onStorage);
+    try {
+      if (typeof BroadcastChannel !== "undefined") {
+        readReceiptChannelRef.current = new BroadcastChannel(CHAT_READ_RECEIPT_CHANNEL);
+        readReceiptChannelRef.current.addEventListener("message", onChannelMessage);
+      }
+    } catch {
+      readReceiptChannelRef.current = null;
+    }
+
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      if (readReceiptChannelRef.current) {
+        readReceiptChannelRef.current.removeEventListener("message", onChannelMessage);
+        readReceiptChannelRef.current.close();
+        readReceiptChannelRef.current = null;
+      }
+    };
+  }, [myUserId]);
 
   useEffect(() => {
     let active = true;
@@ -2092,13 +2592,8 @@ export default function Chat() {
 
   const formatLastSeen = (value) => {
     const d = new Date(value);
-    if (!Number.isFinite(d.getTime())) return "lastseen recently";
+    if (!Number.isFinite(d.getTime())) return "lastseen at --";
     const now = new Date(nowTick);
-    const deltaMs = now.getTime() - d.getTime();
-    if (deltaMs < 3600000) {
-      const mins = Math.max(1, Math.floor(deltaMs / 60000));
-      return `lastseen ${mins} min ago`;
-    }
     const sameDay = d.toDateString() === now.toDateString();
     if (sameDay) {
       return `lastseen today at ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }).toLowerCase()}`;
@@ -2121,13 +2616,24 @@ export default function Chat() {
     const t = new Date(c?.at || 0).getTime();
     return Number.isFinite(t) && t > max ? t : max;
   }, 0);
-  const peerLatestActivityTs = Math.max(peerLatestMessageTs, peerLatestCallTs);
-  const isPeerOnline = peerLatestActivityTs > 0 && nowTick - peerLatestActivityTs <= 120000;
+  const threadLatestTs = activeMessages.reduce((max, m) => {
+    const t = new Date(m?.createdAt || 0).getTime();
+    return Number.isFinite(t) && t > max ? t : max;
+  }, 0);
+  const peerLatestProfileTs = new Date(activeContact?.lastActiveAt || 0).getTime();
+  const peerLatestActivityTs = Math.max(
+    peerLatestMessageTs,
+    peerLatestCallTs,
+    Number.isFinite(peerLatestProfileTs) ? peerLatestProfileTs : 0,
+    threadLatestTs
+  );
+  const hasExplicitOnline = Boolean(activeContact?.online);
+  const isPeerOnline = hasExplicitOnline || (peerLatestActivityTs > 0 && nowTick - peerLatestActivityTs <= CHAT_ONLINE_WINDOW_MS);
   const headerPresenceText = isPeerOnline
     ? "online"
     : peerLatestActivityTs > 0
       ? formatLastSeen(peerLatestActivityTs)
-      : "lastseen recently";
+      : "lastseen at --";
 
   const sendTextPayload = async (text, options = {}) => {
     const cleanText = String(text || "").trim();
@@ -2402,26 +2908,31 @@ export default function Chat() {
     }
   };
 
-  const speakSignAssistText = (text, voiceGender = "neutral") => {
+  const speakSignAssistText = (text, voiceGender = "female") => {
     const cleanText = String(text || "").trim();
     if (!cleanText || !("speechSynthesis" in window)) return;
 
     const synth = window.speechSynthesis;
     const utter = new SpeechSynthesisUtterance(cleanText);
-    utter.lang = speechLang || "en-IN";
+    const targetLang = normalizeLangCode(speechLang || navigator.language || "en-IN");
+    const targetBase = targetLang.split("-")[0];
+    utter.lang = targetLang;
 
     const voices = synth.getVoices ? synth.getVoices() : [];
     const gender = String(voiceGender || "neutral").toLowerCase();
     const femaleHints = ["female", "woman", "zira", "susan", "samantha", "heera", "kalpana"];
     const maleHints = ["male", "man", "david", "mark", "alex", "ravi", "hemant"];
     const hints = gender === "female" ? femaleHints : gender === "male" ? maleHints : [];
+    const exactLangVoices = voices.filter((v) => normalizeLangCode(v?.lang).toLowerCase() === targetLang.toLowerCase());
+    const baseLangVoices = voices.filter((v) => normalizeLangCode(v?.lang).toLowerCase().startsWith(`${targetBase.toLowerCase()}-`));
+    const langVoices = exactLangVoices.length ? exactLangVoices : (baseLangVoices.length ? baseLangVoices : voices);
 
     let picked = null;
     if (hints.length) {
-      picked = voices.find((v) => hints.some((h) => String(v?.name || "").toLowerCase().includes(h)));
+      picked = langVoices.find((v) => hints.some((h) => String(v?.name || "").toLowerCase().includes(h)));
     }
     if (!picked) {
-      picked = voices.find((v) => String(v?.lang || "").toLowerCase().startsWith("en")) || voices[0] || null;
+      picked = langVoices[0] || voices[0] || null;
     }
     if (picked) utter.voice = picked;
 
@@ -2432,20 +2943,72 @@ export default function Chat() {
     }
   };
 
+  const setAutoSpeakEnabled = (nextValue) => {
+    const next = Boolean(nextValue);
+    setSignAssistAutoSpeak(next);
+    if (next) {
+      const contactKey = String(activeContactId || "");
+      if (contactKey) {
+        autoSpeakBootstrappedByContactRef.current[contactKey] = false;
+      }
+    }
+    if (!next && "speechSynthesis" in window) {
+      try {
+        window.speechSynthesis.cancel();
+      } catch {
+        // ignore speech cancel failures
+      }
+    }
+  };
+
   useEffect(() => {
     if (!signAssistAutoSpeak || !activeContactId) return;
+    const contactKey = String(activeContactId || "");
+    const visibleIds = getVisibleThreadMessageIds();
+    if (!autoSpeakBootstrappedByContactRef.current[contactKey]) {
+      const seen = new Set();
+      const visibleQueue = [];
+      activeMessages.forEach((msg) => {
+        if (!msg || msg.mine) return;
+        const msgId = String(msg?.id || "");
+        const payload = getSpeakableIncomingPayload(msg);
+        if (!msgId || !payload?.text) return;
+        if (visibleIds.has(msgId)) {
+          visibleQueue.push({ msgId, payload });
+          return;
+        }
+        seen.add(msgId);
+      });
+      spokenSignMessageIdsRef.current = seen;
+      autoSpeakBootstrappedByContactRef.current[contactKey] = true;
+      visibleQueue.forEach(({ msgId, payload }) => {
+        if (spokenSignMessageIdsRef.current.has(msgId)) return;
+        spokenSignMessageIdsRef.current.add(msgId);
+        speakSignAssistText(payload.text, payload.voiceGender || "female");
+      });
+      return;
+    }
 
     activeMessages.forEach((msg) => {
       if (!msg || msg.mine) return;
       const msgId = String(msg?.id || "");
       if (!msgId || spokenSignMessageIdsRef.current.has(msgId)) return;
-      const payload = decodeSignAssistText(msg?.text || "");
+      const payload = getSpeakableIncomingPayload(msg);
       if (!payload?.text) return;
 
       spokenSignMessageIdsRef.current.add(msgId);
-      speakSignAssistText(payload.text, payload.voiceGender || "neutral");
+      if (visibleIds.has(msgId)) {
+        speakSignAssistText(payload.text, payload.voiceGender || "female");
+      }
     });
-  }, [activeMessages, activeContactId, signAssistAutoSpeak, speechLang]);
+  }, [activeMessages, activeContactId, signAssistAutoSpeak, speechLang, translatorEnabled, translatedIncomingById, speechVoiceGender]);
+
+  useEffect(() => {
+    const contactKey = String(activeContactId || "");
+    if (contactKey) {
+      autoSpeakBootstrappedByContactRef.current[contactKey] = false;
+    }
+  }, [activeContactId]);
 
   const goToProfile = (contact) => {
     if (!contact?.id) return;
@@ -2973,6 +3536,43 @@ export default function Chat() {
     return true;
   };
 
+  const getSpeakableIncomingPayload = (msg) => {
+    if (!msg || msg.mine) return null;
+    const signPayload = decodeSignAssistText(msg?.text || "");
+    if (signPayload?.text) {
+      return {
+        text: String(signPayload.text || "").trim(),
+        voiceGender: signPayload.voiceGender || "female"
+      };
+    }
+    if (msg.audioUrl || msg.mediaUrl) return null;
+    const plainText = String(msg.text || "").trim();
+    if (!plainText) return null;
+    if (/^\[Attachment:\s*.+\]$/i.test(plainText)) return null;
+    if (/^This message was deleted$/i.test(plainText)) return null;
+
+    if (translatorEnabled && canTranslateMessage(msg)) {
+      const msgKey = String(msg?.id || `${msg?.createdAt}_${msg?.text}`);
+      const translated = String(translatedIncomingById[msgKey] || "").trim();
+      if (!translated) {
+        return {
+          text: "",
+          voiceGender: speechVoiceGender,
+          waitForTranslation: true
+        };
+      }
+      return {
+        text: translated,
+        voiceGender: speechVoiceGender
+      };
+    }
+
+    return {
+      text: plainText,
+      voiceGender: speechVoiceGender
+    };
+  };
+
   const translateText = async (text, targetLang) => {
     const raw = String(text || "").trim();
     const lang = String(targetLang || "").trim().toLowerCase();
@@ -3083,18 +3683,16 @@ export default function Chat() {
   const getMessageTickState = (message) => {
     if (!message || !message.mine) return null;
     const rawStatus = String(message.status || message.deliveryStatus || "").toLowerCase();
-    const messageTs = new Date(normalizeTimestamp(message.createdAt || 0)).getTime();
-    const peerHasNewerMessage =
-      Number.isFinite(messageTs) && peerLatestMessageTs > 0 && peerLatestMessageTs >= messageTs;
     const isRead =
       Boolean(message.readAt || message.seenAt) ||
       message.read === true ||
       message.seen === true ||
       rawStatus === "read" ||
-      rawStatus === "seen" ||
-      peerHasNewerMessage;
+      rawStatus === "seen";
     if (isRead) return "read";
+    if (isPeerOnline && activeContactId) return "read";
 
+    const messageTs = new Date(normalizeTimestamp(message.createdAt || 0)).getTime();
     const idText = String(message.id || "");
     const isLocalPendingId =
       idText.startsWith("local_") ||
@@ -3110,6 +3708,12 @@ export default function Chat() {
     if (isDelivered) return "delivered";
 
     return "sent";
+  };
+
+  const getTickSymbol = (tickState) => {
+    if (tickState === "sent") return "\u2713";
+    if (tickState === "delivered" || tickState === "read") return "\u2713\u2713";
+    return "";
   };
 
   const formatDayLabel = (value) => {
@@ -3195,8 +3799,9 @@ export default function Chat() {
   useEffect(() => {
     const onDocClick = (event) => {
       const wrap = headerMenuWrapRef.current;
-      if (!wrap) return;
-      if (wrap.contains(event.target)) return;
+      const panel = headerMenuRef.current;
+      if (wrap?.contains(event.target)) return;
+      if (panel?.contains(event.target)) return;
       setShowHeaderMenu(false);
     };
     document.addEventListener("mousedown", onDocClick);
@@ -3248,6 +3853,45 @@ export default function Chat() {
 
   useEffect(() => {
     if (!isConversationRoute) return;
+    if (!myUserId || !activeContactId) return;
+    const incoming = (Array.isArray(activeMessages) ? activeMessages : []).filter((m) => !m?.mine);
+    if (!incoming.length) return;
+
+    const readUptoMs = incoming.reduce((max, msg) => {
+      const t = new Date(normalizeTimestamp(msg?.createdAt || 0)).getTime();
+      return Number.isFinite(t) && t > max ? t : max;
+    }, 0);
+    if (!readUptoMs) return;
+
+    const key = String(activeContactId);
+    const lastSent = Number(lastReadReceiptSentByContactRef.current[key] || 0);
+    if (lastSent >= readUptoMs) return;
+    lastReadReceiptSentByContactRef.current[key] = readUptoMs;
+
+    const packet = {
+      kind: "chat-read",
+      receiptId: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      fromTab: tabIdRef.current,
+      readerId: String(myUserId),
+      peerId: key,
+      readUptoMs,
+      at: new Date().toISOString()
+    };
+
+    try {
+      localStorage.setItem(CHAT_READ_RECEIPT_KEY, JSON.stringify(packet));
+    } catch {
+      // ignore storage write failures
+    }
+    try {
+      readReceiptChannelRef.current?.postMessage(packet);
+    } catch {
+      // ignore broadcast failures
+    }
+  }, [isConversationRoute, myUserId, activeContactId, activeMessages]);
+
+  useEffect(() => {
+    if (!isConversationRoute) return;
     if (!chatItems.length) return;
     const hasNewItems = chatItems.length > lastThreadItemCountRef.current;
     lastThreadItemCountRef.current = chatItems.length;
@@ -3257,18 +3901,88 @@ export default function Chat() {
   }, [chatItems, isConversationRoute]);
 
   useEffect(() => {
+    if (!isConversationRoute) return;
+    requestAnimationFrame(() => refreshThreadScrollState());
+  }, [chatItems, isConversationRoute]);
+
+  useEffect(() => {
     lastThreadItemCountRef.current = 0;
     shouldStickToBottomRef.current = true;
+    showScrollDownRef.current = false;
+    setShowScrollDown(false);
     if (!activeContactId) return;
-    requestAnimationFrame(() => scrollThreadToBottom("auto"));
+    let raf1 = 0;
+    let raf2 = 0;
+    raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => scrollThreadToBottom("auto"));
+    });
+    return () => {
+      if (raf1) cancelAnimationFrame(raf1);
+      if (raf2) cancelAnimationFrame(raf2);
+    };
   }, [activeContactId]);
 
+  useEffect(() => {
+    const plan = openScrollPlanRef.current;
+    if (!isConversationRoute || !activeContactId) {
+      if (Array.isArray(plan.timers) && plan.timers.length) {
+        plan.timers.forEach((timer) => clearTimeout(timer));
+      }
+      openScrollPlanRef.current = { contactId: "", untilMs: 0, timers: [] };
+      return;
+    }
+
+    if (Array.isArray(plan.timers) && plan.timers.length) {
+      plan.timers.forEach((timer) => clearTimeout(timer));
+    }
+
+    const nextPlan = {
+      contactId: String(activeContactId),
+      untilMs: Date.now() + 2600,
+      timers: []
+    };
+    openScrollPlanRef.current = nextPlan;
+
+    // Force-open at latest message even if content height settles late.
+    [0, 120, 320, 700, 1200].forEach((delay) => {
+      const timer = setTimeout(() => {
+        if (openScrollPlanRef.current.contactId !== String(activeContactId)) return;
+        shouldStickToBottomRef.current = true;
+        scrollThreadToBottom("auto");
+      }, delay);
+      nextPlan.timers.push(timer);
+    });
+
+    return () => {
+      if (Array.isArray(nextPlan.timers) && nextPlan.timers.length) {
+        nextPlan.timers.forEach((timer) => clearTimeout(timer));
+      }
+    };
+  }, [isConversationRoute, activeContactId]);
+
+  useEffect(() => {
+    if (!isConversationRoute || !activeContactId) return;
+    const plan = openScrollPlanRef.current;
+    if (plan.contactId !== String(activeContactId)) return;
+    if (Date.now() > Number(plan.untilMs || 0)) return;
+    shouldStickToBottomRef.current = true;
+    requestAnimationFrame(() => scrollThreadToBottom("auto"));
+  }, [chatItems.length, isConversationRoute, activeContactId]);
+
   const onThreadScroll = () => {
-    const el = threadRef.current;
-    if (!el) return;
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    shouldStickToBottomRef.current = distanceFromBottom < 100;
+    if (scrollRafRef.current) return;
+    scrollRafRef.current = requestAnimationFrame(() => {
+      scrollRafRef.current = 0;
+      refreshThreadScrollState();
+    });
   };
+
+  useEffect(() => () => {
+    if (scrollRafRef.current) {
+      cancelAnimationFrame(scrollRafRef.current);
+      scrollRafRef.current = 0;
+    }
+  }, []);
 
   const openBubbleMenu = (event, item) => {
     event.preventDefault();
@@ -3327,6 +4041,27 @@ export default function Chat() {
     if (!item || !activeContactId) return closeBubbleMenu();
     if (item.kind === "message") {
       const rawId = item.raw?.id;
+      if (rawId) {
+        markMessageHiddenForMe(activeContactId, rawId);
+        if (!chatFallbackMode && !String(rawId).startsWith("local_")) {
+          const endpoints = [
+            { method: "delete", url: `/api/chat/messages/${rawId}` },
+            { method: "delete", url: `/api/chat/${activeContactId}/messages/${rawId}` },
+            { method: "post", url: `/api/chat/messages/${rawId}/delete` },
+            { method: "post", url: `/api/chat/${activeContactId}/messages/${rawId}/delete` }
+          ];
+          void (async () => {
+            for (const ep of endpoints) {
+              try {
+                await api({ method: ep.method, url: ep.url });
+                return;
+              } catch {
+                // try next endpoint
+              }
+            }
+          })();
+        }
+      }
       setMessagesByContact((prev) => ({
         ...prev,
         [activeContactId]: (prev[activeContactId] || []).filter((m) => String(m?.id) !== String(rawId))
@@ -3480,7 +4215,7 @@ export default function Chat() {
       )}
 
       {isConversationRoute && (
-      <section className="chat-main">
+      <section className={`chat-main ${showHeaderMenu ? "settings-open" : ""}`}>
         <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: "none" }} aria-hidden="true" />
         {incomingCall && (
           <div className="incoming-call-popup" role="dialog" aria-live="polite" aria-label="Incoming call controls">
@@ -3569,7 +4304,7 @@ export default function Chat() {
                     <input
                       type="checkbox"
                       checked={signAssistAutoSpeak}
-                      onChange={(e) => setSignAssistAutoSpeak(e.target.checked)}
+                      onChange={(e) => setAutoSpeakEnabled(e.target.checked)}
                     />
                     Auto-speak incoming
                   </label>
@@ -3591,7 +4326,6 @@ export default function Chat() {
                   >
                     <option value="female">Female voice</option>
                     <option value="male">Male voice</option>
-                    <option value="neutral">Neutral voice</option>
                   </select>
                 </div>
                 <textarea
@@ -3713,63 +4447,151 @@ export default function Chat() {
                 <button
                   type="button"
                   className="call-action"
+                  title={signAssistAutoSpeak ? "Auto-speak on" : "Auto-speak off"}
+                  onClick={() => setAutoSpeakEnabled(!signAssistAutoSpeak)}
+                >
+                  {signAssistAutoSpeak ? <FiVolume2 /> : <FiVolumeX />}
+                </button>
+                <button
+                  type="button"
+                  className="call-action"
                   title="More options"
                   onClick={() => setShowHeaderMenu((prev) => !prev)}
                 >
                   <FiMoreVertical />
                 </button>
-                {showHeaderMenu && (
-                  <div className="chat-header-menu" ref={headerMenuRef}>
-                    <div className="chat-translate-card">
-                      <label className="chat-header-menu-row chat-switch-row">
-                        <span className="chat-menu-label-group">
-                          <strong>Translator</strong>
-                          <small>Auto-translate incoming messages</small>
-                        </span>
-                        <span className="chat-switch">
-                          <input
-                            type="checkbox"
-                            checked={translatorEnabled}
-                            onChange={(e) => setTranslatorEnabled(e.target.checked)}
-                          />
-                          <span className="chat-switch-track" />
-                        </span>
-                      </label>
-                    </div>
-                    {translatorEnabled && (
-                      <>
-                        <label className="chat-header-menu-row chat-language-row">
-                          <span className="chat-menu-label-group">
-                            <strong>Language</strong>
-                            <small>Select target language</small>
-                          </span>
-                          <select
-                            className="chat-translate-select"
-                            value={translatorLang}
-                            onChange={(e) => setTranslatorLang(e.target.value)}
-                          >
-                            {TRANSLATE_LANG_OPTIONS.map((opt) => (
-                              <option key={opt.value} value={opt.value}>
-                                {opt.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        {translatorError && <p className="chat-translate-error">{translatorError}</p>}
-                      </>
+              </div>
+            </header>
+
+            {showHeaderMenu && (
+              <aside className="chat-header-menu" ref={headerMenuRef}>
+                <div className="chat-translate-card">
+                  <label className="chat-header-menu-row chat-switch-row">
+                    <span className="chat-menu-label-group">
+                      <strong>Translator</strong>
+                      <small>Auto-translate incoming messages</small>
+                    </span>
+                    <span className="chat-switch">
+                      <input
+                        type="checkbox"
+                        checked={translatorEnabled}
+                        onChange={(e) => setTranslatorEnabled(e.target.checked)}
+                      />
+                      <span className="chat-switch-track" />
+                    </span>
+                  </label>
+                </div>
+                {translatorEnabled && (
+                  <label className="chat-header-menu-row chat-language-row">
+                    <span className="chat-menu-label-group">
+                      <strong>Language</strong>
+                      <small>Select target language</small>
+                    </span>
+                    <select
+                      className="chat-translate-select"
+                      value={translatorLang}
+                      onChange={(e) => setTranslatorLang(e.target.value)}
+                    >
+                      {TRANSLATE_LANG_OPTIONS.map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                <label className="chat-header-menu-row chat-language-row">
+                  <span className="chat-menu-label-group">
+                    <strong>Speak language</strong>
+                    <small>Choose text-to-speech language</small>
+                  </span>
+                  <select
+                    className="chat-translate-select"
+                    value={speechLang}
+                    onChange={(e) => setSpeechLang(e.target.value)}
+                  >
+                    {speechLangOptions.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="chat-header-menu-row chat-language-row">
+                  <span className="chat-menu-label-group">
+                    <strong>Voice</strong>
+                    <small>Select male or female voice</small>
+                  </span>
+                  <select
+                    className="chat-translate-select"
+                    value={speechVoiceGender}
+                    onChange={(e) => setSpeechVoiceGender(e.target.value)}
+                  >
+                    <option value="female">Female voice</option>
+                    <option value="male">Male voice</option>
+                  </select>
+                </label>
+                <div className="chat-translate-card chat-wallpaper-card">
+                  <div className="chat-menu-label-group">
+                    <strong>Chat wallpaper</strong>
+                    <small>Choose background picture for this chat page</small>
+                  </div>
+                  <div className="chat-wallpaper-grid">
+                    {CHAT_WALLPAPER_PRESETS.map((preset) => (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        className={`chat-wallpaper-chip ${chatWallpaper?.presetId === preset.id ? "is-active" : ""}`}
+                        onClick={() => selectChatWallpaperPreset(preset.id)}
+                      >
+                        <span
+                          className="chat-wallpaper-chip-preview"
+                          style={preset.image ? { backgroundImage: `url("${preset.image}")` } : undefined}
+                        />
+                        <small>{preset.label}</small>
+                      </button>
+                    ))}
+                  </div>
+                  <div className="chat-wallpaper-actions">
+                    <button type="button" className="chat-wallpaper-upload" onClick={openWallpaperPicker}>
+                      Upload Picture
+                    </button>
+                    {!!chatWallpaper?.image && (
+                      <button
+                        type="button"
+                        className="chat-wallpaper-upload"
+                        onClick={() => openWallpaperEditor(chatWallpaper)}
+                      >
+                        Preview / Adjust
+                      </button>
                     )}
                     <button
                       type="button"
-                      className="chat-header-menu-row chat-header-danger-btn"
-                      onClick={blockActiveContact}
-                      disabled={activeContactBlocked}
+                      className="chat-wallpaper-upload secondary"
+                      onClick={() => selectChatWallpaperPreset("none")}
                     >
-                      {activeContactBlocked ? "User blocked" : "Block user"}
+                      Remove
                     </button>
+                    <input
+                      ref={wallpaperInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="chat-hidden-file-input"
+                      onChange={onWallpaperPicked}
+                    />
                   </div>
-                )}
-              </div>
-            </header>
+                </div>
+                {translatorError && <p className="chat-translate-error">{translatorError}</p>}
+                <button
+                  type="button"
+                  className="chat-header-menu-row chat-header-danger-btn"
+                  onClick={blockActiveContact}
+                  disabled={activeContactBlocked}
+                >
+                  {activeContactBlocked ? "User blocked" : "Block user"}
+                </button>
+              </aside>
+            )}
 
             {(incomingCall || (callActive && callState.mode === "audio") || callError) && (
               <div className="call-panel">
@@ -3808,7 +4630,7 @@ export default function Chat() {
               </div>
             )}
 
-            <div ref={threadRef} onScroll={onThreadScroll} className="chat-thread wa-thread">
+            <div ref={threadRef} onScroll={onThreadScroll} className="chat-thread wa-thread" style={threadWallpaperStyle}>
 
               {chatItems.map((item) => {
                 if (item.kind === "day") {
@@ -3826,6 +4648,7 @@ export default function Chat() {
                     className={`chat-bubble ${
                       item.kind === "call" ? `call-log ${item.mine ? "mine" : "their"}` : item.mine ? "mine" : "their"
                     }`}
+                    data-chat-msg-id={item.kind === "message" ? String(item.raw?.id || "") : undefined}
                     onContextMenu={enableBubbleMenu ? (e) => openBubbleMenu(e, item) : undefined}
                     onTouchStart={enableBubbleMenu ? (e) => onBubbleTouchStart(item, e) : undefined}
                     onTouchMove={enableBubbleMenu ? onBubbleTouchMove : undefined}
@@ -3911,7 +4734,7 @@ export default function Chat() {
                         if (!tickState) return null;
                         return (
                           <span className={`chat-read-ticks ${tickState}`} aria-label={tickState}>
-                            {tickState === "sent" ? "?" : "??"}
+                            {getTickSymbol(tickState)}
                           </span>
                         );
                       })()}
@@ -3921,6 +4744,17 @@ export default function Chat() {
               })}
               {threadItems.length === 0 && <p className="chat-empty-thread">No messages yet. Say hi.</p>}
             </div>
+            {showScrollDown && (
+              <button
+                type="button"
+                className="chat-scroll-bottom-btn"
+                onClick={() => scrollThreadToBottom("smooth")}
+                aria-label="Scroll to latest message"
+                title="Scroll down"
+              >
+                <FiChevronDown />
+              </button>
+            )}
 
             {showEmojiTray && (
               <div className="emoji-tray" aria-label="Emoji and sticker picker">
@@ -4109,7 +4943,7 @@ export default function Chat() {
                 onChange={(e) => setSpeechLang(e.target.value)}
                 title="Speech language"
               >
-                {SPEECH_LANG_OPTIONS.map((opt) => (
+                {speechLangOptions.map((opt) => (
                   <option key={opt.value} value={opt.value}>
                     {opt.label}
                   </option>
@@ -4162,6 +4996,84 @@ export default function Chat() {
                 onChange={onStickerImagePicked}
               />
             </div>
+            {showWallpaperEditor && wallpaperDraft?.image && (
+              <div className="chat-wallpaper-editor-backdrop" onClick={closeWallpaperEditor}>
+                <div className="chat-wallpaper-editor" onClick={(e) => e.stopPropagation()}>
+                  <div className="chat-wallpaper-preview-head">
+                    <strong>Live preview</strong>
+                    <small>Adjust wallpaper as needed</small>
+                  </div>
+                  <div
+                    className="chat-wallpaper-live-preview editor"
+                    style={{
+                      backgroundImage: `linear-gradient(rgba(2, 8, 16, 0.72), rgba(2, 8, 16, 0.78)), url("${wallpaperDraft.image}")`,
+                      backgroundSize:
+                        wallpaperDraft.fit === "contain"
+                          ? `${Number(wallpaperDraft.zoom || 100)}% auto`
+                          : wallpaperDraft.fit === "stretch"
+                            ? "100% 100%"
+                            : `${Number(wallpaperDraft.zoom || 100)}% ${Number(wallpaperDraft.zoom || 100)}%`,
+                      backgroundPosition: `${Number(wallpaperDraft.x || 50)}% ${Number(wallpaperDraft.y || 50)}%`,
+                      backgroundRepeat: "no-repeat"
+                    }}
+                  />
+                  <div className="chat-wallpaper-control-grid">
+                    <label className="chat-wallpaper-control">
+                      <span>Fit</span>
+                      <select
+                        value={String(wallpaperDraft?.fit || "cover")}
+                        onChange={(e) => updateWallpaperOptions({ fit: String(e.target.value || "cover") })}
+                      >
+                        <option value="cover">Cover</option>
+                        <option value="contain">Contain</option>
+                        <option value="stretch">Stretch</option>
+                      </select>
+                    </label>
+                    <label className="chat-wallpaper-control">
+                      <span>Zoom</span>
+                      <input
+                        type="range"
+                        min="60"
+                        max="220"
+                        step="1"
+                        value={Number(wallpaperDraft?.zoom || 100)}
+                        onChange={(e) => updateWallpaperOptions({ zoom: Number(e.target.value) || 100 })}
+                      />
+                    </label>
+                    <label className="chat-wallpaper-control">
+                      <span>Horizontal</span>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        step="1"
+                        value={Number(wallpaperDraft?.x || 50)}
+                        onChange={(e) => updateWallpaperOptions({ x: Number(e.target.value) || 50 })}
+                      />
+                    </label>
+                    <label className="chat-wallpaper-control">
+                      <span>Vertical</span>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        step="1"
+                        value={Number(wallpaperDraft?.y || 50)}
+                        onChange={(e) => updateWallpaperOptions({ y: Number(e.target.value) || 50 })}
+                      />
+                    </label>
+                  </div>
+                  <div className="chat-wallpaper-editor-actions">
+                    <button type="button" className="chat-wallpaper-upload secondary" onClick={closeWallpaperEditor}>
+                      Cancel
+                    </button>
+                    <button type="button" className="chat-wallpaper-upload" onClick={applyWallpaperEditor}>
+                      Apply
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
             {bubbleMenu && (
               <div className="bubble-menu-backdrop" onClick={closeBubbleMenu}>
                 <div

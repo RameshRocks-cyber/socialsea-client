@@ -47,6 +47,34 @@ const emergencyBaseCandidates = () => {
   );
 };
 
+const buildEmergencyUrls = (suffix) => {
+  const path = String(suffix || "").replace(/^\/+/, "");
+  const urls = [];
+  for (const rawBase of emergencyBaseCandidates()) {
+    const base = String(rawBase || "").trim().replace(/\/+$/, "");
+    if (!base) continue;
+    if (base === "/api") {
+      urls.push(`/api/emergency/${path}`);
+      continue;
+    }
+    if (base.startsWith("/")) {
+      urls.push(`${base}/api/emergency/${path}`);
+      urls.push(`${base}/emergency/${path}`);
+      continue;
+    }
+    if (/\/api$/i.test(base)) {
+      urls.push(`${base}/emergency/${path}`);
+      urls.push(`${base.replace(/\/api$/i, "")}/api/emergency/${path}`);
+      continue;
+    }
+    urls.push(`${base}/api/emergency/${path}`);
+    urls.push(`${base}/emergency/${path}`);
+  }
+  urls.push(`/api/emergency/${path}`);
+  urls.push(`/emergency/${path}`);
+  return uniqueNonEmpty(urls);
+};
+
 const readJson = (key, fallback) => {
   try {
     const raw = localStorage.getItem(key);
@@ -357,31 +385,37 @@ export default function SOSPage() {
           videoActive: media.video
         };
 
-        const endpointCandidates = ["/api/emergency/trigger", "/emergency/trigger"];
-        const baseCandidates = emergencyBaseCandidates();
+        const triggerUrls = buildEmergencyUrls("trigger");
         let res;
         let lastErr = null;
-        for (const baseURL of baseCandidates) {
-          for (const endpoint of endpointCandidates) {
-            try {
-              res = await api.post(endpoint, payload, { baseURL });
-              lastErr = null;
-              break;
-            } catch (err) {
-              if (err?.response?.status === 401 || err?.response?.status === 403) {
-                try {
-                  res = await api.post(endpoint, payload, { baseURL, skipAuth: true, suppressAuthRedirect: true });
-                  lastErr = null;
-                  break;
-                } catch (err2) {
-                  lastErr = err2;
-                }
-              } else {
-                lastErr = err;
-              }
+        const token =
+          sessionStorage.getItem("accessToken") ||
+          sessionStorage.getItem("token") ||
+          localStorage.getItem("accessToken") ||
+          localStorage.getItem("token") ||
+          "";
+        for (const url of triggerUrls) {
+          try {
+            const response = await fetch(url, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                ...(token ? { Authorization: `Bearer ${String(token).trim()}` } : {}),
+              },
+              body: JSON.stringify(payload),
+            });
+            if (!response.ok) {
+              const err = new Error(`HTTP ${response.status}`);
+              err.response = { status: response.status };
+              throw err;
             }
+            const data = await response.json().catch(() => ({}));
+            res = { data };
+            lastErr = null;
+            break;
+          } catch (err) {
+            lastErr = err;
           }
-          if (res) break;
         }
         if (!res) throw lastErr || new Error("SOS trigger failed");
 

@@ -5,6 +5,8 @@ import { getApiBaseUrl, toApiUrl } from "../api/baseUrl";
 import "./LiveRecordings.css";
 
 const SOS_HISTORY_KEY = "socialsea_sos_history_v1";
+const LIVE_RECORDINGS_PIN_KEY = "socialsea_live_recordings_pin_v1";
+const LIVE_RECORDINGS_HIDDEN_KEY = "socialsea_live_recordings_hidden_v1";
 
 const formatDuration = (ms) => {
   const totalSec = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
@@ -27,6 +29,41 @@ const readLocalHistory = () => {
     return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
+  }
+};
+
+const readRecordingsPin = () => {
+  try {
+    const raw = String(localStorage.getItem(LIVE_RECORDINGS_PIN_KEY) || "").trim();
+    return /^\d{6}$/.test(raw) ? raw : "";
+  } catch {
+    return "";
+  }
+};
+
+const writeRecordingsPin = (pin) => {
+  localStorage.setItem(LIVE_RECORDINGS_PIN_KEY, String(pin || "").trim());
+};
+
+const readHiddenRecordingIds = () => {
+  try {
+    const raw = localStorage.getItem(LIVE_RECORDINGS_HIDDEN_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return new Set((Array.isArray(parsed) ? parsed : []).map((v) => String(v || "").trim()).filter(Boolean));
+  } catch {
+    return new Set();
+  }
+};
+
+const addHiddenRecordingId = (id) => {
+  const idText = String(id || "").trim();
+  if (!idText) return;
+  try {
+    const set = readHiddenRecordingIds();
+    set.add(idText);
+    localStorage.setItem(LIVE_RECORDINGS_HIDDEN_KEY, JSON.stringify(Array.from(set)));
+  } catch {
+    // ignore storage errors
   }
 };
 
@@ -54,10 +91,47 @@ const normalizeRecordingList = (rawList) =>
 export default function LiveRecordings() {
   const navigate = useNavigate();
   const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [note, setNote] = useState("");
   const [activeId, setActiveId] = useState(null);
   const [mediaBaseUrl, setMediaBaseUrl] = useState(api.defaults.baseURL || "");
+  const [deletingId, setDeletingId] = useState(null);
+  const [sharingId, setSharingId] = useState(null);
+  const [pinMode, setPinMode] = useState(() => (readRecordingsPin() ? "unlock" : "setup"));
+  const [pinInput, setPinInput] = useState("");
+  const [pinConfirmInput, setPinConfirmInput] = useState("");
+  const [pinError, setPinError] = useState("");
+  const [unlocked, setUnlocked] = useState(false);
+
+  const buildBaseCandidates = () => {
+    const isLocalDev =
+      typeof window !== "undefined" &&
+      ["localhost", "127.0.0.1"].includes(String(window.location.hostname || "").toLowerCase());
+    const storedBase =
+      typeof window !== "undefined"
+        ? localStorage.getItem("socialsea_auth_base_url") || sessionStorage.getItem("socialsea_auth_base_url")
+        : "";
+    return [
+      api.defaults.baseURL,
+      storedBase,
+      getApiBaseUrl(),
+      import.meta.env.VITE_API_URL,
+      ...(isLocalDev ? ["/api", "http://localhost:8080", "http://127.0.0.1:8080"] : ["https://socialsea.co.in"]),
+    ]
+      .filter((v, i, arr) => v && arr.indexOf(v) === i);
+  };
+
+  const removeFromLocalHistory = (id) => {
+    const idText = String(id || "").trim();
+    if (!idText) return;
+    try {
+      const next = readLocalHistory().filter((entry) => String(entry?.alertId ?? entry?.id ?? entry?.recordingId ?? "").trim() !== idText);
+      localStorage.setItem(SOS_HISTORY_KEY, JSON.stringify(next));
+    } catch {
+      // ignore local storage errors
+    }
+  };
 
   const resolveUrl = (url) => {
     if (!url) return "";
@@ -72,26 +146,14 @@ export default function LiveRecordings() {
   };
 
   useEffect(() => {
+    if (!unlocked) return undefined;
     let cancelled = false;
-    const isLocalDev =
-      typeof window !== "undefined" &&
-      ["localhost", "127.0.0.1"].includes(String(window.location.hostname || "").toLowerCase());
     const load = async () => {
       setLoading(true);
       setError("");
+      setNote("");
       try {
-        const storedBase =
-          typeof window !== "undefined"
-            ? localStorage.getItem("socialsea_auth_base_url") || sessionStorage.getItem("socialsea_auth_base_url")
-            : "";
-        const baseCandidates = [
-          api.defaults.baseURL,
-          storedBase,
-          getApiBaseUrl(),
-          import.meta.env.VITE_API_URL,
-          ...(isLocalDev ? ["/api", "http://localhost:8080", "http://127.0.0.1:8080"] : ["https://socialsea.co.in"]),
-        ]
-          .filter((v, i, arr) => v && arr.indexOf(v) === i);
+        const baseCandidates = buildBaseCandidates();
 
         const endpoints = [
           "/api/profile/live-recordings",
@@ -149,11 +211,13 @@ export default function LiveRecordings() {
                 : Array.isArray(payload?.content)
                   ? payload.content
                   : [];
-        const list = normalizeRecordingList(rawList);
+        const hiddenIds = readHiddenRecordingIds();
+        const list = normalizeRecordingList(rawList).filter((item) => !hiddenIds.has(String(item.id)));
         const localList = normalizeRecordingList(readLocalHistory());
         const merged = [...list];
         const seen = new Set(merged.map((x) => String(x.id)));
         for (const item of localList) {
+          if (hiddenIds.has(String(item.id))) continue;
           const key = String(item.id);
           if (!seen.has(key)) {
             seen.add(key);
@@ -190,11 +254,235 @@ export default function LiveRecordings() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [unlocked]);
+
+  const handlePinSubmit = (event) => {
+    event.preventDefault();
+    const pin = String(pinInput || "").trim();
+    if (!/^\d{6}$/.test(pin)) {
+      setPinError("Enter exactly 6 digits.");
+      return;
+    }
+
+    if (pinMode === "setup") {
+      const confirm = String(pinConfirmInput || "").trim();
+      if (pin !== confirm) {
+        setPinError("PIN and confirm PIN do not match.");
+        return;
+      }
+      writeRecordingsPin(pin);
+      setPinError("");
+      setUnlocked(true);
+      return;
+    }
+
+    const stored = readRecordingsPin();
+    if (!stored || stored !== pin) {
+      setPinError("Incorrect 6-digit password.");
+      return;
+    }
+    setPinError("");
+    setUnlocked(true);
+  };
+
+  const handleDelete = async (item) => {
+    const idText = String(item?.id || "").trim();
+    if (!idText || deletingId) return;
+    const previousItems = items;
+    setDeletingId(idText);
+    setError("");
+    setNote("");
+    setItems((prev) => prev.filter((x) => String(x.id) !== idText));
+    setActiveId((prev) => (String(prev) === idText ? null : prev));
+    removeFromLocalHistory(idText);
+
+    const endpoints = [
+      { method: "delete", url: `/api/profile/live-recordings/${encodeURIComponent(idText)}` },
+      { method: "delete", url: `/api/profile/me/live-recordings/${encodeURIComponent(idText)}` },
+      { method: "delete", url: `/api/emergency/my-recordings/${encodeURIComponent(idText)}` },
+      { method: "delete", url: `/emergency/my-recordings/${encodeURIComponent(idText)}` },
+      { method: "post", url: `/api/profile/live-recordings/${encodeURIComponent(idText)}/delete` },
+    ];
+
+    let deletedOnServer = false;
+    try {
+      if (item?.localOnly) {
+        deletedOnServer = true;
+      } else {
+        const baseCandidates = buildBaseCandidates();
+        for (const baseURL of baseCandidates) {
+          for (const req of endpoints) {
+            try {
+              await api.request({
+                ...req,
+                baseURL,
+                timeout: 10000,
+                suppressAuthRedirect: true,
+              });
+              deletedOnServer = true;
+              break;
+            } catch (err) {
+              const status = err?.response?.status;
+              if (!(status === 400 || status === 401 || status === 403 || status === 404 || status === 405 || status >= 500 || !status)) {
+                throw err;
+              }
+            }
+          }
+          if (deletedOnServer) break;
+        }
+      }
+
+      if (!deletedOnServer) {
+        // Backend delete API may not be deployed; keep it hidden locally.
+        addHiddenRecordingId(idText);
+        setError("");
+      }
+    } catch {
+      setItems(previousItems);
+      setActiveId(previousItems[0]?.id || null);
+      setError("Failed to delete recording.");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const extFromMimeOrUrl = (mime, url) => {
+    const m = String(mime || "").toLowerCase();
+    if (m.includes("mp4")) return "mp4";
+    if (m.includes("webm")) return "webm";
+    if (m.includes("quicktime")) return "mov";
+    if (m.includes("ogg")) return "ogv";
+    const u = String(url || "").toLowerCase();
+    if (u.endsWith(".mp4")) return "mp4";
+    if (u.endsWith(".webm")) return "webm";
+    if (u.endsWith(".mov")) return "mov";
+    if (u.endsWith(".ogv")) return "ogv";
+    return "mp4";
+  };
+
+  const handleShareAsPost = async (item) => {
+    const idText = String(item?.id || "").trim();
+    if (!idText || sharingId) return;
+    const sourceUrl = resolveUrl(item?.mediaUrl || "");
+    if (!sourceUrl) {
+      setError("No video available to share.");
+      return;
+    }
+
+    setSharingId(idText);
+    setError("");
+    setNote("");
+
+    try {
+      const mediaRes = await fetch(sourceUrl);
+      if (!mediaRes.ok) {
+        throw new Error(`Media fetch failed (${mediaRes.status})`);
+      }
+      const blob = await mediaRes.blob();
+      if (!blob || !blob.size) {
+        throw new Error("Empty recording data");
+      }
+
+      const mimeType = String(blob.type || "video/mp4");
+      const ext = extFromMimeOrUrl(mimeType, sourceUrl);
+      const file = new File([blob], `sos-recording-${idText}.${ext}`, { type: mimeType });
+      const caption = `SOS recording (${formatDateTime(item?.startedAt)})`;
+
+      const endpoints = ["/api/posts/upload", "/posts/upload"];
+      const baseCandidates = buildBaseCandidates();
+      let shared = false;
+      let lastErr = null;
+
+      for (const baseURL of baseCandidates) {
+        for (const url of endpoints) {
+          try {
+            const form = new FormData();
+            form.append("file", file);
+            form.append("caption", caption);
+            form.append("sharedFrom", "sos-recording");
+            await api.post(url, form, {
+              baseURL,
+              headers: { "Content-Type": "multipart/form-data" },
+              timeout: 25000,
+              suppressAuthRedirect: true,
+            });
+            shared = true;
+            lastErr = null;
+            break;
+          } catch (err) {
+            lastErr = err;
+            const status = err?.response?.status;
+            if (!(status === 400 || status === 401 || status === 403 || status === 404 || status === 405 || status >= 500 || !status)) {
+              throw err;
+            }
+          }
+        }
+        if (shared) break;
+      }
+
+      if (!shared) {
+        throw lastErr || new Error("Share upload failed");
+      }
+      setNote("Shared as post successfully.");
+    } catch {
+      setError("Failed to share recording as post.");
+    } finally {
+      setSharingId(null);
+    }
+  };
 
   const active = useMemo(() => {
     return items.find((x) => String(x.id) === String(activeId)) || items[0] || null;
   }, [items, activeId]);
+
+  if (!unlocked) {
+    return (
+      <div className="live-recordings-page">
+        <header className="live-recordings-head">
+          <div>
+            <h1>Recorded Live</h1>
+            <p>Protected page. Enter a 6-digit password.</p>
+          </div>
+          <button type="button" onClick={() => navigate("/profile/me")}>Back to Profile</button>
+        </header>
+
+        <section className="live-recordings-lock-card">
+          <h2>{pinMode === "setup" ? "Set 6-digit Password" : "Enter 6-digit Password"}</h2>
+          <form className="live-recordings-lock-form" onSubmit={handlePinSubmit}>
+            <input
+              type="password"
+              inputMode="numeric"
+              pattern="\d{6}"
+              maxLength={6}
+              value={pinInput}
+              onChange={(e) => {
+                setPinInput(String(e.target.value || "").replace(/\D/g, "").slice(0, 6));
+                if (pinError) setPinError("");
+              }}
+              placeholder="Enter 6 digits"
+              autoFocus
+            />
+            {pinMode === "setup" && (
+              <input
+                type="password"
+                inputMode="numeric"
+                pattern="\d{6}"
+                maxLength={6}
+                value={pinConfirmInput}
+                onChange={(e) => {
+                  setPinConfirmInput(String(e.target.value || "").replace(/\D/g, "").slice(0, 6));
+                  if (pinError) setPinError("");
+                }}
+                placeholder="Confirm 6 digits"
+              />
+            )}
+            {pinError && <p className="live-recordings-error">{pinError}</p>}
+            <button type="submit">{pinMode === "setup" ? "Save & Open" : "Unlock"}</button>
+          </form>
+        </section>
+      </div>
+    );
+  }
 
   return (
     <div className="live-recordings-page">
@@ -208,6 +496,7 @@ export default function LiveRecordings() {
 
       {loading && <p className="live-recordings-empty">Loading recordings...</p>}
       {!loading && error && <p className="live-recordings-error">{error}</p>}
+      {!loading && !error && note && <p className="live-recordings-note">{note}</p>}
       {!loading && !error && !items.length && (
         <p className="live-recordings-empty">No SOS recordings found yet.</p>
       )}
@@ -235,6 +524,24 @@ export default function LiveRecordings() {
                   <p><strong>Ended:</strong> {formatDateTime(active.endedAt)}</p>
                   <p><strong>Duration:</strong> {formatDuration(active.durationMs)}</p>
                   {active.localOnly && <p><strong>Mode:</strong> Local fallback</p>}
+                  <div className="live-recordings-actions">
+                    <button
+                      type="button"
+                      className="live-recordings-share"
+                      disabled={String(sharingId || "") === String(active.id)}
+                      onClick={() => handleShareAsPost(active)}
+                    >
+                      {String(sharingId || "") === String(active.id) ? "Sharing..." : "Share as Post"}
+                    </button>
+                    <button
+                      type="button"
+                      className="live-recordings-delete"
+                      disabled={String(deletingId || "") === String(active.id)}
+                      onClick={() => handleDelete(active)}
+                    >
+                      {String(deletingId || "") === String(active.id) ? "Deleting..." : "Delete Recording"}
+                    </button>
+                  </div>
                 </div>
               </>
             )}
@@ -244,22 +551,41 @@ export default function LiveRecordings() {
             {items.map((item) => {
               const isActive = String(item.id) === String(active?.id);
               return (
-                <button
-                  key={item.id}
-                  type="button"
-                  className={`live-recording-item ${isActive ? "is-active" : ""}`}
-                  onClick={() => setActiveId(item.id)}
-                >
-                  {String(item.mediaUrl || "").trim() ? (
-                    <video src={resolveUrl(item.mediaUrl)} muted playsInline preload="metadata" />
-                  ) : (
-                    <div className="live-recording-item-empty">No video</div>
-                  )}
-                  <div>
-                    <p>Alert #{item.id}</p>
-                    <small>{formatDateTime(item.startedAt)}</small>
+                <article key={item.id} className={`live-recording-item-wrap ${isActive ? "is-active" : ""}`}>
+                  <button
+                    type="button"
+                    className={`live-recording-item ${isActive ? "is-active" : ""}`}
+                    onClick={() => setActiveId(item.id)}
+                  >
+                    {String(item.mediaUrl || "").trim() ? (
+                      <video src={resolveUrl(item.mediaUrl)} muted playsInline preload="metadata" />
+                    ) : (
+                      <div className="live-recording-item-empty">No video</div>
+                    )}
+                    <div>
+                      <p>Alert #{item.id}</p>
+                      <small>{formatDateTime(item.startedAt)}</small>
+                    </div>
+                  </button>
+                  <div className="live-recordings-item-actions">
+                    <button
+                      type="button"
+                      className="live-recordings-share live-recordings-share-small"
+                      disabled={String(sharingId || "") === String(item.id)}
+                      onClick={() => handleShareAsPost(item)}
+                    >
+                      {String(sharingId || "") === String(item.id) ? "..." : "Share"}
+                    </button>
+                    <button
+                      type="button"
+                      className="live-recordings-delete live-recordings-delete-small"
+                      disabled={String(deletingId || "") === String(item.id)}
+                      onClick={() => handleDelete(item)}
+                    >
+                      {String(deletingId || "") === String(item.id) ? "..." : "Delete"}
+                    </button>
                   </div>
-                </button>
+                </article>
               );
             })}
           </aside>

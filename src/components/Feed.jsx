@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { FiBookmark } from "react-icons/fi";
 import { BsBookmarkFill } from "react-icons/bs";
 import api from "../api/axios";
+import { getApiBaseUrl, toApiUrl } from "../api/baseUrl";
 import "./Feed.css";
 
 const LONG_VIDEO_SECONDS = 90;
@@ -21,12 +22,78 @@ export default function Feed() {
   const [query, setQuery] = useState("");
   const [activePostId, setActivePostId] = useState(null);
   const [videoDurationByPost, setVideoDurationByPost] = useState({});
+  const [profilePicByOwner, setProfilePicByOwner] = useState({});
 
   useEffect(() => {
     let mounted = true;
+    const buildBaseCandidates = () => {
+      const isLocalDev =
+        typeof window !== "undefined" &&
+        ["localhost", "127.0.0.1"].includes(String(window.location.hostname || "").toLowerCase());
+      const storedBase =
+        typeof window !== "undefined"
+          ? localStorage.getItem("socialsea_auth_base_url") || sessionStorage.getItem("socialsea_auth_base_url")
+          : "";
+      return [
+        api.defaults.baseURL,
+        storedBase,
+        getApiBaseUrl(),
+        import.meta.env.VITE_API_URL,
+        ...(isLocalDev ? ["http://localhost:8080", "http://127.0.0.1:8080", "/api"] : ["https://socialsea.co.in"]),
+      ].filter((v, i, arr) => v && arr.indexOf(v) === i);
+    };
+    const extractList = (payload) =>
+      Array.isArray(payload)
+        ? payload
+        : Array.isArray(payload?.items)
+          ? payload.items
+          : Array.isArray(payload?.data)
+            ? payload.data
+            : Array.isArray(payload?.content)
+              ? payload.content
+              : [];
     const load = async () => {
       try {
-        const res = await api.get("/api/feed");
+        const baseCandidates = buildBaseCandidates();
+        const endpoints = ["/api/feed", "/feed", "/api/posts", "/posts"];
+        let res = null;
+        let lastErr = null;
+        let fallbackRes = null;
+        for (const baseURL of baseCandidates) {
+          for (const url of endpoints) {
+            try {
+              const r = await api.request({
+                method: "GET",
+                url,
+                baseURL,
+                timeout: 10000,
+                suppressAuthRedirect: true,
+              });
+              const body = r?.data;
+              const looksLikeHtml =
+                typeof body === "string" && (/^\s*<!doctype html/i.test(body) || /<html[\s>]/i.test(body));
+              if (looksLikeHtml) {
+                const htmlErr = new Error("Received HTML instead of API JSON");
+                htmlErr.response = { status: 404, data: body };
+                throw htmlErr;
+              }
+              const listTry = extractList(body);
+              if (Array.isArray(listTry)) {
+                if (!fallbackRes) fallbackRes = { ...r, data: listTry };
+                if (listTry.length > 0) {
+                  res = { ...r, data: listTry };
+                  lastErr = null;
+                  break;
+                }
+              }
+            } catch (err) {
+              lastErr = err;
+            }
+          }
+          if (res) break;
+        }
+        if (!res && fallbackRes) res = fallbackRes;
+        if (!res) throw lastErr || new Error("Failed to load feed");
         const list = Array.isArray(res.data) ? res.data : [];
         if (!mounted) return;
         setPosts(list);
@@ -114,8 +181,7 @@ export default function Feed() {
   const resolveUrl = (url) => {
     if (!url) return "";
     if (url.startsWith("http")) return url;
-    const base = api.defaults.baseURL || "";
-    return `${base}${url}`;
+    return toApiUrl(url);
   };
 
   const normalizeDisplayName = (value) => {
@@ -136,6 +202,95 @@ export default function Feed() {
     const raw = post?.user?.name || post?.username || post?.user?.email || "User";
     return normalizeDisplayName(raw);
   };
+
+  const ownerCandidatesFor = (post) => {
+    const values = [
+      post?.user?.id,
+      post?.userId,
+      post?.user?.username,
+      post?.username,
+      post?.user?.email,
+      post?.email,
+      post?.user?.name,
+      post?.name
+    ]
+      .map((v) => String(v || "").trim())
+      .filter(Boolean);
+    return values.filter((v, i, arr) => arr.indexOf(v) === i);
+  };
+
+  const ownerKeyFor = (post) => ownerCandidatesFor(post)[0] || "";
+
+  const profilePicFor = (post) => {
+    const ownerKey = ownerKeyFor(post);
+    if (ownerKey && profilePicByOwner[ownerKey]) return profilePicByOwner[ownerKey];
+    const raw =
+      post?.user?.profilePicUrl ||
+      post?.user?.profilePic ||
+      post?.user?.avatarUrl ||
+      post?.user?.avatar ||
+      post?.profilePicUrl ||
+      post?.profilePic ||
+      post?.avatarUrl ||
+      post?.avatar ||
+      "";
+    return raw ? resolveUrl(String(raw).trim()) : "";
+  };
+
+  useEffect(() => {
+    if (!posts.length) return;
+    const uniquePostsByOwner = [];
+    const seen = new Set();
+    posts.forEach((post) => {
+      const ownerKey = ownerKeyFor(post);
+      if (!ownerKey || seen.has(ownerKey)) return;
+      seen.add(ownerKey);
+      uniquePostsByOwner.push(post);
+    });
+    if (!uniquePostsByOwner.length) return;
+
+    let cancelled = false;
+    const run = async () => {
+      const nextMap = {};
+      for (const post of uniquePostsByOwner.slice(0, 40)) {
+        const ownerKey = ownerKeyFor(post);
+        if (!ownerKey || profilePicByOwner[ownerKey]) continue;
+        if (profilePicFor(post)) continue;
+
+        const candidates = ownerCandidatesFor(post);
+        let found = "";
+        for (const candidate of candidates) {
+          const endpoints = [`/api/profile/${encodeURIComponent(candidate)}`];
+          for (const url of endpoints) {
+            try {
+              const res = await api.get(url, { suppressAuthRedirect: true, timeout: 4000 });
+              const user = res?.data?.user || res?.data || {};
+              const rawPic =
+                user?.profilePicUrl ||
+                user?.profilePic ||
+                user?.avatarUrl ||
+                user?.avatar ||
+                "";
+              if (rawPic) {
+                found = resolveUrl(String(rawPic).trim());
+                break;
+              }
+            } catch {
+              // try next candidate/endpoint
+            }
+          }
+          if (found) break;
+        }
+        if (found) nextMap[ownerKey] = found;
+      }
+      if (cancelled || !Object.keys(nextMap).length) return;
+      setProfilePicByOwner((prev) => ({ ...prev, ...nextMap }));
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [posts]);
 
   const mediaTypeFor = (post) => {
     const t = (post?.type || "").toUpperCase();
@@ -307,6 +462,7 @@ export default function Feed() {
             const mediaUrl = rawUrl.trim() ? resolveUrl(rawUrl.trim()) : "";
             if (!mediaUrl) return null;
             const user = usernameFor(post);
+            const profilePic = profilePicFor(post);
             const duration = videoDurationByPost[post.id] || 0;
             return (
               <button
@@ -331,7 +487,11 @@ export default function Feed() {
                   <span className="long-feed-duration">{formatDuration(duration)}</span>
                 </div>
                 <div className="long-feed-meta">
-                  <span className="long-feed-avatar">{user.charAt(0).toUpperCase()}</span>
+                  {profilePic ? (
+                    <img src={profilePic} alt={user} className="long-feed-avatar long-feed-avatar-img" />
+                  ) : (
+                    <span className="long-feed-avatar">{user.charAt(0).toUpperCase()}</span>
+                  )}
                   <div className="long-feed-text">
                     <p className="long-feed-title">{captionFor(post)}</p>
                     <p className="long-feed-sub">{user} • {(likeCounts[post.id] || 0).toLocaleString()} likes</p>
@@ -393,7 +553,15 @@ export default function Feed() {
         <div className="post-view-backdrop" onClick={() => setActivePostId(null)}>
           <article className="post-view-card" onClick={(e) => e.stopPropagation()}>
             <header className="feed-post-head">
-              <div className="feed-avatar">{usernameFor(activePost).charAt(0).toUpperCase()}</div>
+              {profilePicFor(activePost) ? (
+                <img
+                  src={profilePicFor(activePost)}
+                  alt={usernameFor(activePost)}
+                  className="feed-avatar feed-avatar-img"
+                />
+              ) : (
+                <div className="feed-avatar">{usernameFor(activePost).charAt(0).toUpperCase()}</div>
+              )}
               <p className="feed-username">{usernameFor(activePost)}</p>
             </header>
 

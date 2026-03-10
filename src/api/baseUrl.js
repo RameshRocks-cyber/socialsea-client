@@ -37,7 +37,7 @@ function isFrontendLikeHost(host) {
 
 export function getApiBaseUrl() {
   const forcedUrl = normalizeApiUrl(import.meta.env.VITE_API_BASE_URL);
-  if (forcedUrl && !forcedUrl.startsWith("/")) return forcedUrl;
+  if (forcedUrl) return forcedUrl;
 
   if (typeof window !== "undefined") {
     const host = String(window.location.hostname || "").toLowerCase();
@@ -48,7 +48,7 @@ export function getApiBaseUrl() {
     if (host === "localhost" || host === "127.0.0.1") {
       const envUrl = normalizeApiUrl(import.meta.env.VITE_API_URL);
       const envHost = hostFromUrl(envUrl);
-      // In local dev, prefer local backend by default unless forced override is used.
+      // In local dev, prefer local backend by default.
       if (!envUrl || envUrl.startsWith("/") || isFrontendLikeHost(envHost)) {
         return "http://localhost:8080";
       }

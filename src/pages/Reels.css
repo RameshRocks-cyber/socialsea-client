@@ -4,6 +4,7 @@
   background: radial-gradient(130% 130% at 50% -5%, #12234b 0%, #070d1f 45%, #02040d 100%);
   border-radius: 18px;
   overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .reels-gesture-toggle {
@@ -43,6 +44,7 @@
     0 10px 24px rgba(0, 0, 0, 0.45),
     0 0 0 1px rgba(138, 176, 255, 0.22) inset;
   transition: transform 0.18s ease, box-shadow 0.2s ease, filter 0.2s ease;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .reels-gesture-btn:hover {
@@ -63,6 +65,9 @@
   height: 100%;
   overflow-y: auto;
   scroll-snap-type: y mandatory;
+  overscroll-behavior-y: contain;
+  background: #02040d;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .reels-container::-webkit-scrollbar {
@@ -77,6 +82,8 @@
   display: grid;
   place-items: center;
   padding: 10px;
+  background: #02040d;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .reel-frame {
@@ -90,6 +97,8 @@
   box-shadow:
     0 28px 48px rgba(4, 9, 22, 0.66),
     0 6px 16px rgba(28, 74, 185, 0.2);
+  background: #000;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .reel-video {
@@ -99,6 +108,8 @@
   display: block;
   cursor: pointer;
   background: #000;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
 }
 
 .reel-gradient-top,
@@ -174,11 +185,17 @@
   gap: 2px;
   cursor: pointer;
   transition: transform 0.2s ease, opacity 0.2s ease;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .reel-action-btn:hover {
   transform: translateY(-2px);
   opacity: 0.92;
+}
+
+.reel-action-btn:active {
+  transform: none;
+  opacity: 1;
 }
 
 .reel-action-btn span {
@@ -224,6 +241,12 @@
   align-items: center;
   justify-content: center;
   box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.22);
+  overflow: hidden;
+}
+
+.reel-owner-avatar-img {
+  object-fit: cover;
+  display: block;
 }
 
 .reel-owner {
@@ -243,6 +266,7 @@
   font-size: 0.74rem;
   font-weight: 700;
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .reel-follow-btn:disabled {
@@ -348,6 +372,17 @@
   color: #d9e7ff;
   padding: 22px;
   text-align: center;
+}
+
+.reels-page * {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.reel-video,
+.reel-action-btn,
+.reel-follow-btn,
+.reels-gesture-btn {
+  touch-action: manipulation;
 }
 
 @media (max-width: 560px) {

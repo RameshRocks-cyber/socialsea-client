@@ -6,6 +6,17 @@ import "./LongVideos.css";
 const LONG_VIDEO_SECONDS = 90;
 const QUALITY_OPTIONS = ["auto", "1080", "720", "480", "360"];
 const MIN_LONG_VIDEO_FALLBACK_SECONDS = 45;
+const WATCH_CATEGORIES = [
+  "All",
+  "Music",
+  "Mixes",
+  "News",
+  "Live",
+  "Comedy",
+  "Movies",
+  "Gaming",
+  "Trending"
+];
 
 export default function LongVideos() {
   const { postId } = useParams();
@@ -25,6 +36,8 @@ export default function LongVideos() {
   const [savedPostIds, setSavedPostIds] = useState({});
   const [watchLaterPostIds, setWatchLaterPostIds] = useState({});
   const [showComments, setShowComments] = useState(true);
+  const [searchText, setSearchText] = useState("");
+  const [activeCategory, setActiveCategory] = useState("All");
 
   const toList = (payload) => {
     if (Array.isArray(payload)) return payload;
@@ -32,6 +45,73 @@ export default function LongVideos() {
     if (Array.isArray(payload?.items)) return payload.items;
     if (Array.isArray(payload?.data)) return payload.data;
     return [];
+  };
+
+  const getTotalPages = (payload) => {
+    const candidates = [
+      payload?.totalPages,
+      payload?.page?.totalPages,
+      payload?.pagination?.totalPages
+    ];
+    for (const raw of candidates) {
+      const n = Number(raw);
+      if (Number.isFinite(n) && n > 0) return Math.floor(n);
+    }
+    return 0;
+  };
+
+  const hasNextPage = (payload) => {
+    const candidates = [payload?.hasNext, payload?.page?.hasNext, payload?.pagination?.hasNext];
+    return candidates.some((v) => v === true);
+  };
+
+  const fetchEndpointItems = async (url) => {
+    const first = await api.get(url, {
+      suppressAuthRedirect: true,
+      params: { page: 0, size: 500 }
+    });
+    const firstPayload = first?.data;
+    let merged = toList(firstPayload);
+
+    const totalPages = getTotalPages(firstPayload);
+    if (totalPages > 1) {
+      const pageRequests = [];
+      for (let page = 1; page < totalPages; page += 1) {
+        pageRequests.push(
+          api.get(url, {
+            suppressAuthRedirect: true,
+            params: { page, size: 100 }
+          })
+        );
+      }
+      const rest = await Promise.allSettled(pageRequests);
+      rest.forEach((result) => {
+        if (result.status === "fulfilled") {
+          merged = merged.concat(toList(result.value?.data));
+        }
+      });
+      return merged;
+    }
+
+    // Some APIs expose hasNext without totalPages.
+    if (hasNextPage(firstPayload)) {
+      let page = 1;
+      let safety = 0;
+      while (safety < 20) {
+        const next = await api.get(url, {
+          suppressAuthRedirect: true,
+          params: { page, size: 100 }
+        });
+        const nextItems = toList(next?.data);
+        if (!nextItems.length) break;
+        merged = merged.concat(nextItems);
+        if (!hasNextPage(next?.data)) break;
+        page += 1;
+        safety += 1;
+      }
+    }
+
+    return merged;
   };
 
   const resolveUrl = (url) => {
@@ -160,10 +240,10 @@ export default function LongVideos() {
       setIsLoading(true);
       try {
         const endpoints = ["/api/feed", "/api/reels", "/api/profile/me/posts", "/api/profile/posts"];
-        const responses = await Promise.allSettled(endpoints.map((url) => api.get(url)));
+        const responses = await Promise.allSettled(endpoints.map((url) => fetchEndpointItems(url)));
         const posts = responses
           .filter((r) => r.status === "fulfilled")
-          .flatMap((r) => toList(r.value?.data))
+          .flatMap((r) => (Array.isArray(r.value) ? r.value : []))
           .filter(Boolean);
         if (cancelled) return;
         setAllPosts(uniqueByPostKey(posts));
@@ -259,18 +339,11 @@ export default function LongVideos() {
 
   const longVideos = useMemo(() => {
     // Keep unknown-duration videos visible; many CDNs/API shapes do not expose duration reliably.
-    const filtered = videoPosts.filter((post) => {
-      const duration = Number(videoDurationByPost[post.id]) || 0;
-      return duration <= 0 || duration > LONG_VIDEO_SECONDS;
-    });
-    const strict = uniqueByPostKey(filtered);
-    if (strict.length >= 5) return strict;
-
-    // Fallback: relax threshold when strict long-video candidates are too few.
+    // Use relaxed threshold consistently so 45s+ videos are included.
     return uniqueByPostKey(
       videoPosts.filter((post) => {
         const duration = Number(videoDurationByPost[post.id]) || 0;
-        return duration <= 0 || duration > MIN_LONG_VIDEO_FALLBACK_SECONDS;
+        return duration <= 0 || duration > Math.min(LONG_VIDEO_SECONDS, MIN_LONG_VIDEO_FALLBACK_SECONDS);
       })
     );
   }, [videoPosts, videoDurationByPost]);
@@ -287,8 +360,23 @@ export default function LongVideos() {
     });
   }, [longVideos]);
 
+  const filteredLongVideos = useMemo(() => {
+    const q = String(searchText || "").trim().toLowerCase();
+    return longVideos.filter((post) => {
+      const owner = usernameFor(post).toLowerCase();
+      const title = captionFor(post).toLowerCase();
+      const categoryMatch =
+        activeCategory === "All" ||
+        title.includes(activeCategory.toLowerCase()) ||
+        owner.includes(activeCategory.toLowerCase());
+      if (!categoryMatch) return false;
+      if (!q) return true;
+      return owner.includes(q) || title.includes(q);
+    });
+  }, [longVideos, searchText, activeCategory]);
+
   const activeVideo =
-    longVideos.find((p) => String(p.id) === String(postId)) || longVideos[0] || null;
+    longVideos.find((p) => String(p.id) === String(postId)) || filteredLongVideos[0] || longVideos[0] || null;
 
   const withCloudinaryQuality = (url, quality) => {
     if (!url || quality === "auto") return url;
@@ -451,178 +539,291 @@ export default function LongVideos() {
       .join(" ");
   };
 
+  const formatDuration = (seconds) => {
+    const total = Math.max(0, Math.floor(Number(seconds) || 0));
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+    return `${m}:${String(s).padStart(2, "0")}`;
+  };
+
+  const formatCompact = (value) => {
+    const n = Number(value) || 0;
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
+    if (n >= 1_000) return `${(n / 1_000).toFixed(1).replace(/\.0$/, "")}K`;
+    return `${n}`;
+  };
+
+  const relativeFrom = (value) => {
+    if (!value) return "recently";
+    const d = new Date(value);
+    if (!Number.isFinite(d.getTime())) return "recently";
+    const diffMs = Date.now() - d.getTime();
+    const minutes = Math.max(1, Math.floor(diffMs / 60000));
+    if (minutes < 60) return `${minutes} min ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours} hr ago`;
+    const days = Math.floor(hours / 24);
+    if (days < 30) return `${days} day ago`;
+    const months = Math.floor(days / 30);
+    if (months < 12) return `${months} month ago`;
+    return `${Math.floor(months / 12)} year ago`;
+  };
+
   const selectVideo = (id) => {
     if (!id) return;
     navigate(`/watch/${id}`);
   };
 
+  const isWatchMode = Boolean(postId);
+  const relatedVideos = longVideos.filter((item) => String(item.id) !== String(activeVideo?.id));
+
   return (
-    <div className="watch-page">
-      <section className="watch-main">
-        {isLoading && <p className="watch-empty">Loading long videos...</p>}
-        {!isLoading && !activeVideo && <p className="watch-empty">No long videos found.</p>}
+    <div className="yt-watch-page">
+      <header className="yt-topbar">
+        <h2>SocialSea Watch</h2>
+        <div className="yt-search-wrap">
+          <input
+            type="text"
+            className="yt-search-input"
+            placeholder="Search long videos"
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+          />
+        </div>
+      </header>
 
-        {activeVideo && (
-          <>
-            <div className="watch-player-wrap">
-              <video
-                key={`${activeVideo.id}-${selectedQuality}`}
-                ref={playerRef}
-                src={activeVideoUrl}
-                controls
-                autoPlay
-                className="watch-player"
-              />
-              <button
-                type="button"
-                className="watch-quality-btn"
-                onClick={() => setShowQualityMenu((s) => !s)}
-              >
-                Quality: {selectedQuality === "auto" ? "Auto" : `${selectedQuality}p`}
-              </button>
-              {showQualityMenu && (
-                <div className="watch-quality-menu">
-                  {QUALITY_OPTIONS.map((q) => (
-                    <button
-                      key={q}
-                      type="button"
-                      className={selectedQuality === q ? "is-active" : ""}
-                      onClick={() => {
-                        setSelectedQuality(q);
-                        setShowQualityMenu(false);
-                      }}
-                    >
-                      {q === "auto" ? "Auto" : `${q}p`}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+      <div className="yt-chip-row">
+        {WATCH_CATEGORIES.map((chip) => (
+          <button
+            key={chip}
+            type="button"
+            className={`yt-chip ${activeCategory === chip ? "is-active" : ""}`}
+            onClick={() => setActiveCategory(chip)}
+          >
+            {chip}
+          </button>
+        ))}
+      </div>
 
-            <h1 className="watch-title">{captionFor(activeVideo)}</h1>
-            <p className="watch-owner">{usernameFor(activeVideo)}</p>
-
-            <div className="watch-actions-row">
-              {(() => {
-                const isDisliked = !!dislikedPostIds[activeVideo.id];
-                const isLiked = !!likedPostIds[activeVideo.id] && !isDisliked;
-                return (
-                  <>
-              <button
-                type="button"
-                className={`watch-action-btn ${isLiked ? "is-active" : ""}`}
-                onClick={() => toggleLike(activeVideo.id)}
-              >
-                {"\u{1F44D}"} Like {likeCounts[activeVideo.id] || 0}
-              </button>
-              <button
-                type="button"
-                className={`watch-action-btn ${isDisliked ? "is-active dislike" : ""}`}
-                onClick={() => toggleDislike(activeVideo.id)}
-              >
-                {"\u{1F44E}"} Dislike {dislikeCounts[activeVideo.id] || 0}
-              </button>
-              <button
-                type="button"
-                className="watch-action-btn"
-                onClick={() => setShowComments((v) => !v)}
-              >
-                {"\u{1F4AC}"} Comments {(commentsByPost[activeVideo.id] || []).length}
-              </button>
-              <button
-                type="button"
-                className={`watch-action-btn ${savedPostIds[activeVideo.id] ? "is-active" : ""}`}
-                onClick={() => toggleSave(activeVideo.id)}
-              >
-                {"\u{1F516}"} {savedPostIds[activeVideo.id] ? "Saved" : "Save"}
-              </button>
-              <button
-                type="button"
-                className={`watch-action-btn ${watchLaterPostIds[activeVideo.id] ? "is-active" : ""}`}
-                onClick={() => toggleWatchLater(activeVideo.id)}
-              >
-                {"\u23F2"} {watchLaterPostIds[activeVideo.id] ? "Added" : "Watch Later"}
-              </button>
-                  </>
-                );
-              })()}
-            </div>
-
-            {showComments && (
-              <section className="watch-comments">
-                <div className="watch-comment-input-row">
-                  <input
-                    type="text"
-                    placeholder="Add a comment..."
-                    value={commentTextByPost[activeVideo.id] || ""}
-                    onChange={(e) =>
-                      setCommentTextByPost((prev) => ({ ...prev, [activeVideo.id]: e.target.value }))
-                    }
-                  />
-                  <button type="button" onClick={() => submitComment(activeVideo.id)}>Post</button>
-                </div>
-
-                {(commentsByPost[activeVideo.id] || []).map((comment) => (
-                  <div className="watch-comment-item" key={comment.id}>
-                    <strong>{normalizeDisplayName(comment.user?.name || comment.user?.email || "User")}:</strong>{" "}
-                    {comment.text}
-                  </div>
-                ))}
-                {(commentsByPost[activeVideo.id] || []).length === 0 && (
-                  <p className="watch-empty">No comments yet.</p>
-                )}
-              </section>
-            )}
-          </>
-        )}
-      </section>
-
-      <aside className="watch-side">
-        <h3>Long Videos</h3>
-        <div className="watch-list">
-          {longVideos.map((v) => {
-            const raw = v.contentUrl || v.mediaUrl || "";
-            const url = resolveUrl(String(raw).trim());
-            const isActive = String(v.id) === String(activeVideo?.id);
+      {!isWatchMode ? (
+        <section className="yt-home-grid">
+          {isLoading && <p className="watch-empty">Loading long videos...</p>}
+          {!isLoading && !filteredLongVideos.length && <p className="watch-empty">No long videos found.</p>}
+          {filteredLongVideos.map((video) => {
+            const raw = mediaUrlFor(video);
+            const url = resolveUrl(raw);
+            const duration = videoDurationByPost[video.id] || 0;
             return (
               <article
-                key={v.id}
-                className={`watch-item ${isActive ? "is-active" : ""}`}
+                key={video.id}
+                className="yt-home-card"
                 role="button"
                 tabIndex={0}
-                onClick={() => selectVideo(v.id)}
+                onClick={() => selectVideo(video.id)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
-                    selectVideo(v.id);
+                    selectVideo(video.id);
                   }
                 }}
-                aria-label={`Select video ${captionFor(v)}`}
               >
-                <video
-                  src={url}
-                  muted
-                  playsInline
-                  preload="metadata"
-                  className="watch-item-thumb"
-                  onPlay={(event) => {
-                    event.currentTarget.pause();
-                    event.currentTarget.currentTime = 0;
-                  }}
-                />
-                <div className="watch-item-text">
-                  <p>{captionFor(v)}</p>
-                  <small>{usernameFor(v)}</small>
-                  <span className={`watch-item-cta ${isActive ? "is-active" : ""}`}>
-                    {isActive ? "Now Playing" : "Select"}
-                  </span>
+                <div className="yt-home-thumb-wrap">
+                  <video
+                    src={url}
+                    muted
+                    playsInline
+                    preload="metadata"
+                    className="yt-home-thumb"
+                    onPlay={(event) => {
+                      event.currentTarget.pause();
+                      event.currentTarget.currentTime = 0;
+                    }}
+                  />
+                  <span className="yt-duration-badge">{duration > 0 ? formatDuration(duration) : "--:--"}</span>
+                </div>
+                <div className="yt-home-meta">
+                  <h4>{captionFor(video)}</h4>
+                  <p>{usernameFor(video)}</p>
+                  <small>{formatCompact(likeCounts[video.id] || 0)} likes • {relativeFrom(video?.createdAt)}</small>
                 </div>
               </article>
             );
           })}
-          {!longVideos.length && <p className="watch-empty">No long videos found.</p>}
+        </section>
+      ) : (
+        <div className="watch-page">
+          <section className="watch-main">
+            {isLoading && <p className="watch-empty">Loading long videos...</p>}
+            {!isLoading && !activeVideo && <p className="watch-empty">No long videos found.</p>}
+
+            {activeVideo && (
+              <>
+                <div className="watch-player-wrap">
+                  <video
+                    key={`${activeVideo.id}-${selectedQuality}`}
+                    ref={playerRef}
+                    src={activeVideoUrl}
+                    controls
+                    autoPlay
+                    className="watch-player"
+                  />
+                  <button
+                    type="button"
+                    className="watch-quality-btn"
+                    onClick={() => setShowQualityMenu((s) => !s)}
+                  >
+                    {selectedQuality === "auto" ? "Auto" : `${selectedQuality}p`}
+                  </button>
+                  {showQualityMenu && (
+                    <div className="watch-quality-menu">
+                      {QUALITY_OPTIONS.map((q) => (
+                        <button
+                          key={q}
+                          type="button"
+                          className={selectedQuality === q ? "is-active" : ""}
+                          onClick={() => {
+                            setSelectedQuality(q);
+                            setShowQualityMenu(false);
+                          }}
+                        >
+                          {q === "auto" ? "Auto" : `${q}p`}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <h1 className="watch-title">{captionFor(activeVideo)}</h1>
+                <p className="watch-owner">
+                  {usernameFor(activeVideo)} • {formatCompact(likeCounts[activeVideo.id] || 0)} likes • {relativeFrom(activeVideo?.createdAt)}
+                </p>
+
+                <div className="watch-actions-row">
+                  {(() => {
+                    const isDisliked = !!dislikedPostIds[activeVideo.id];
+                    const isLiked = !!likedPostIds[activeVideo.id] && !isDisliked;
+                    return (
+                      <>
+                        <button
+                          type="button"
+                          className={`watch-action-btn ${isLiked ? "is-active" : ""}`}
+                          onClick={() => toggleLike(activeVideo.id)}
+                        >
+                          {"\u{1F44D}"} {likeCounts[activeVideo.id] || 0}
+                        </button>
+                        <button
+                          type="button"
+                          className={`watch-action-btn ${isDisliked ? "is-active dislike" : ""}`}
+                          onClick={() => toggleDislike(activeVideo.id)}
+                        >
+                          {"\u{1F44E}"} {dislikeCounts[activeVideo.id] || 0}
+                        </button>
+                        <button
+                          type="button"
+                          className="watch-action-btn"
+                          onClick={() => setShowComments((v) => !v)}
+                        >
+                          {"\u{1F4AC}"} {(commentsByPost[activeVideo.id] || []).length}
+                        </button>
+                        <button
+                          type="button"
+                          className={`watch-action-btn ${savedPostIds[activeVideo.id] ? "is-active" : ""}`}
+                          onClick={() => toggleSave(activeVideo.id)}
+                        >
+                          {"\u{1F516}"} {savedPostIds[activeVideo.id] ? "Saved" : "Save"}
+                        </button>
+                        <button
+                          type="button"
+                          className={`watch-action-btn ${watchLaterPostIds[activeVideo.id] ? "is-active" : ""}`}
+                          onClick={() => toggleWatchLater(activeVideo.id)}
+                        >
+                          {"\u23F2"} {watchLaterPostIds[activeVideo.id] ? "Added" : "Watch Later"}
+                        </button>
+                      </>
+                    );
+                  })()}
+                </div>
+
+                {showComments && (
+                  <section className="watch-comments">
+                    <div className="watch-comment-input-row">
+                      <input
+                        type="text"
+                        placeholder="Add a comment..."
+                        value={commentTextByPost[activeVideo.id] || ""}
+                        onChange={(e) =>
+                          setCommentTextByPost((prev) => ({ ...prev, [activeVideo.id]: e.target.value }))
+                        }
+                      />
+                      <button type="button" onClick={() => submitComment(activeVideo.id)}>Post</button>
+                    </div>
+
+                    {(commentsByPost[activeVideo.id] || []).map((comment) => (
+                      <div className="watch-comment-item" key={comment.id}>
+                        <strong>{normalizeDisplayName(comment.user?.name || comment.user?.email || "User")}:</strong>{" "}
+                        {comment.text}
+                      </div>
+                    ))}
+                    {(commentsByPost[activeVideo.id] || []).length === 0 && (
+                      <p className="watch-empty">No comments yet.</p>
+                    )}
+                  </section>
+                )}
+              </>
+            )}
+          </section>
+
+          <aside className="watch-side">
+            <h3>Up next</h3>
+            <div className="watch-list">
+              {relatedVideos.map((v) => {
+                const raw = v.contentUrl || v.mediaUrl || "";
+                const url = resolveUrl(String(raw).trim());
+                const duration = videoDurationByPost[v.id] || 0;
+                return (
+                  <article
+                    key={v.id}
+                    className="watch-item"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => selectVideo(v.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        selectVideo(v.id);
+                      }
+                    }}
+                    aria-label={`Select video ${captionFor(v)}`}
+                  >
+                    <div className="watch-item-thumb-wrap">
+                      <video
+                        src={url}
+                        muted
+                        playsInline
+                        preload="metadata"
+                        className="watch-item-thumb"
+                        onPlay={(event) => {
+                          event.currentTarget.pause();
+                          event.currentTarget.currentTime = 0;
+                        }}
+                      />
+                      <span className="yt-duration-badge">{duration > 0 ? formatDuration(duration) : "--:--"}</span>
+                    </div>
+                    <div className="watch-item-text">
+                      <p>{captionFor(v)}</p>
+                      <small>{usernameFor(v)}</small>
+                      <small>{formatCompact(likeCounts[v.id] || 0)} likes • {relativeFrom(v?.createdAt)}</small>
+                    </div>
+                  </article>
+                );
+              })}
+              {!relatedVideos.length && <p className="watch-empty">No long videos found.</p>}
+            </div>
+          </aside>
         </div>
-      </aside>
+      )}
     </div>
   );
 }

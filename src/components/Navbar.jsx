@@ -1,6 +1,19 @@
 ﻿import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { FiBell, FiHome, FiMessageSquare, FiSettings, FiUser, FiVideo } from "react-icons/fi";
+import {
+  FiBell,
+  FiCamera,
+  FiChevronDown,
+  FiHome,
+  FiImage,
+  FiMessageSquare,
+  FiRotateCcw,
+  FiSettings,
+  FiSlash,
+  FiUser,
+  FiVideo,
+  FiX
+} from "react-icons/fi";
 import api from "../api/axios";
 import { getApiBaseUrl } from "../api/baseUrl";
 import "./Navbar.css";
@@ -10,15 +23,15 @@ const ITEMS = [
   { to: "/reels", icon: FiVideo, label: "Reels", match: (p) => p === "/reels" },
   { to: "/chat", icon: FiMessageSquare, label: "Chat", match: (p) => p === "/chat" },
   { to: "/notifications", icon: FiBell, label: "Alerts", match: (p) => p === "/notifications" },
-  { to: "/settings", icon: FiSettings, label: "Settings", match: (p) => p.startsWith("/settings") },
   { to: "/profile/me", icon: FiUser, label: "Profile", match: (p) => p.startsWith("/profile") },
 ];
 const CALL_ACCEPT_TARGET_KEY = "socialsea_call_accept_target_v1";
 const SETTINGS_KEY = "socialsea_settings_v1";
 const SOS_SIGNAL_KEY = "socialsea_sos_signal_v1";
 const SOS_SIGNAL_CHANNEL = "socialsea_sos_signal_channel_v1";
-const SOS_LAST_SEEN_TS_KEY = "socialsea_sos_last_seen_ts_v1";
-const SOS_SIGNAL_TTL_MS = 12000;
+const SOS_SESSION_KEY = "socialsea_sos_session_v1";
+const SOS_LAST_SIGNAL_ID_KEY = "socialsea_sos_last_signal_id_v1";
+const SOS_LAST_SESSION_SIG_KEY = "socialsea_sos_last_session_sig_v1";
 const uniqueNonEmpty = (arr) =>
   arr.filter((v, i) => {
     if (!v) return false;
@@ -54,6 +67,34 @@ const emergencyBaseCandidates = () => {
   );
 };
 
+const buildEmergencyUrls = (suffix) => {
+  const path = String(suffix || "").replace(/^\/+/, "");
+  const urls = [];
+  for (const rawBase of emergencyBaseCandidates()) {
+    const base = String(rawBase || "").trim().replace(/\/+$/, "");
+    if (!base) continue;
+    if (base === "/api") {
+      urls.push(`/api/emergency/${path}`);
+      continue;
+    }
+    if (base.startsWith("/")) {
+      urls.push(`${base}/api/emergency/${path}`);
+      urls.push(`${base}/emergency/${path}`);
+      continue;
+    }
+    if (/\/api$/i.test(base)) {
+      urls.push(`${base}/emergency/${path}`);
+      urls.push(`${base.replace(/\/api$/i, "")}/api/emergency/${path}`);
+      continue;
+    }
+    urls.push(`${base}/api/emergency/${path}`);
+    urls.push(`${base}/emergency/${path}`);
+  }
+  urls.push(`/api/emergency/${path}`);
+  urls.push(`/emergency/${path}`);
+  return uniqueNonEmpty(urls);
+};
+
 const readShowSosInNavbar = () => {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
@@ -65,6 +106,63 @@ const readShowSosInNavbar = () => {
   }
 };
 
+const readSessionValue = (key) => {
+  try {
+    return String(sessionStorage.getItem(key) || "");
+  } catch {
+    return "";
+  }
+};
+
+const SNAP_LENSES = [
+  { id: "off", label: "Off", badge: "O", thumb: "linear-gradient(135deg, #131313, #282828)", filter: "none", mask: "" },
+  { id: "natural", label: "Natural", badge: "N", thumb: "linear-gradient(135deg, #50755f, #9ed8a0)", filter: "none", mask: "" },
+  {
+    id: "colorful",
+    label: "Colorful",
+    badge: "C",
+    thumb: "linear-gradient(135deg, #19a6ff, #7ce2ff 55%, #5adb88)",
+    filter: "saturate(1.62) contrast(1.18) brightness(1.06)",
+    mask: ""
+  },
+  {
+    id: "cartoon",
+    label: "Cartoon",
+    badge: "T",
+    thumb: "linear-gradient(135deg, #6f5eff, #f08dff)",
+    filter: "contrast(1.34) saturate(1.34) brightness(1.08)",
+    mask: ""
+  },
+  {
+    id: "girl",
+    label: "Girl",
+    badge: "G",
+    thumb: "linear-gradient(135deg, #ff94ca, #ffa3a3)",
+    filter: "brightness(1.1) saturate(1.16) sepia(0.08) hue-rotate(-10deg)",
+    mask: ""
+  },
+  {
+    id: "boy",
+    label: "Boy",
+    badge: "B",
+    thumb: "linear-gradient(135deg, #59a4ff, #7ed0ff)",
+    filter: "contrast(1.12) saturate(0.92) hue-rotate(8deg)",
+    mask: ""
+  },
+  {
+    id: "aging",
+    label: "Aging",
+    badge: "A",
+    thumb: "linear-gradient(135deg, #ae8f75, #d0bda3)",
+    filter: "sepia(0.28) contrast(1.16) grayscale(0.18)",
+    mask: ""
+  },
+  { id: "cat", label: "Cat", badge: "CAT", thumb: "linear-gradient(135deg, #f7ab56, #f9d179)", filter: "none", mask: "🐱" },
+  { id: "dog", label: "Dog", badge: "DOG", thumb: "linear-gradient(135deg, #c48f63, #e5cb9f)", filter: "none", mask: "🐶" }
+];
+
+const SNAP_TOOLS = ["Aa", "∞", "✧", "⌄"];
+
 export default function Navbar() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -75,12 +173,20 @@ export default function Navbar() {
   const [incomingCall, setIncomingCall] = useState(null);
   const [showSosInNavbar, setShowSosInNavbar] = useState(readShowSosInNavbar);
   const [sosPopup, setSosPopup] = useState("");
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [cameraError, setCameraError] = useState("");
+  const [cameraBusy, setCameraBusy] = useState(false);
+  const [activeLensId, setActiveLensId] = useState("colorful");
   const seenSignalRef = useRef(new Set());
   const sosTapRef = useRef({ count: 0, lastAt: 0 });
   const seenEmergencyAlertsRef = useRef(new Set());
   const seenLocalSignalsRef = useRef(new Set());
+  const seenSessionSignalsRef = useRef(new Set());
   const sosSignalChannelRef = useRef(null);
-  const lastSeenSignalTsRef = useRef(0);
+  const lastHandledSignalIdRef = useRef(readSessionValue(SOS_LAST_SIGNAL_ID_KEY));
+  const lastHandledSessionSigRef = useRef(readSessionValue(SOS_LAST_SESSION_SIG_KEY));
+  const cameraVideoRef = useRef(null);
+  const cameraStreamRef = useRef(null);
 
   const items = ITEMS.map((item) =>
     item.label === "Profile" ? { ...item, to: profileTarget } : item
@@ -235,39 +341,34 @@ export default function Navbar() {
   }, [sosPopup]);
 
   useEffect(() => {
-    try {
-      const raw = sessionStorage.getItem(SOS_LAST_SEEN_TS_KEY) || localStorage.getItem(SOS_LAST_SEEN_TS_KEY) || "0";
-      const parsed = Number(raw);
-      lastSeenSignalTsRef.current = Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
-    } catch {
-      lastSeenSignalTsRef.current = 0;
-    }
+    const readEpoch = (value) => {
+      const t = new Date(value || "").getTime();
+      return Number.isFinite(t) ? t : 0;
+    };
 
-    const processSignal = (payload) => {
+    const processSignal = (payload, options = {}) => {
       if (!payload || typeof payload !== "object") return;
-      const signalId = String(payload.id || "");
+      if (options.requireFresh) {
+        const atMs = readEpoch(payload.at);
+        if (!atMs || Date.now() - atMs > 15000) return;
+      }
+      const signalId = String(payload.id || payload.alertId || `${payload.type || "sos"}_${payload.at || ""}`);
       if (!signalId || seenLocalSignalsRef.current.has(signalId)) return;
+      if (signalId === lastHandledSignalIdRef.current) return;
 
-      const signalTs = new Date(payload.at || 0).getTime();
-      const now = Date.now();
-      if (!Number.isFinite(signalTs) || signalTs <= 0) return;
-      if (now - signalTs > SOS_SIGNAL_TTL_MS) return;
-      if (signalTs <= lastSeenSignalTsRef.current) return;
+      // Keep SOS page itself clean; do not consume the signal here,
+      // so other app pages/windows can still show the popup.
+      if (location.pathname.startsWith("/sos")) {
+        return;
+      }
 
       seenLocalSignalsRef.current.add(signalId);
       if (seenLocalSignalsRef.current.size > 1000) seenLocalSignalsRef.current.clear();
-      lastSeenSignalTsRef.current = signalTs;
+      lastHandledSignalIdRef.current = signalId;
       try {
-        const safe = String(signalTs);
-        sessionStorage.setItem(SOS_LAST_SEEN_TS_KEY, safe);
-        localStorage.setItem(SOS_LAST_SEEN_TS_KEY, safe);
+        sessionStorage.setItem(SOS_LAST_SIGNAL_ID_KEY, signalId);
       } catch {
         // ignore storage issues
-      }
-
-      // Keep SOS page itself clean; show popup in other pages/windows for fast visibility.
-      if (location.pathname.startsWith("/sos")) {
-        return;
       }
 
       const kind = String(payload.type || "").toLowerCase();
@@ -279,11 +380,35 @@ export default function Navbar() {
     };
 
     const onStorage = (event) => {
-      if (event?.key !== SOS_SIGNAL_KEY || !event.newValue) return;
-      try {
-        processSignal(JSON.parse(event.newValue));
-      } catch {
-        // ignore malformed events
+      if (event?.key === SOS_SIGNAL_KEY && event.newValue) {
+        try {
+          processSignal(JSON.parse(event.newValue));
+        } catch {
+          // ignore malformed events
+        }
+      }
+
+      if (event?.key === SOS_SESSION_KEY && event.newValue) {
+        try {
+          const session = JSON.parse(event.newValue);
+          if (location.pathname.startsWith("/sos")) return;
+          const isActive = Boolean(session?.active);
+          if (!isActive) return;
+          const sig = `${session?.startedAt || ""}|${session?.updatedAt || ""}|${session?.alertId || ""}`;
+          if (!sig.trim() || seenSessionSignalsRef.current.has(sig)) return;
+          if (sig === lastHandledSessionSigRef.current) return;
+          seenSessionSignalsRef.current.add(sig);
+          if (seenSessionSignalsRef.current.size > 300) seenSessionSignalsRef.current.clear();
+          lastHandledSessionSigRef.current = sig;
+          try {
+            sessionStorage.setItem(SOS_LAST_SESSION_SIG_KEY, sig);
+          } catch {
+            // ignore storage issues
+          }
+          setSosPopup("[EMERGENCY] SOS is active");
+        } catch {
+          // ignore malformed session events
+        }
       }
     };
 
@@ -295,7 +420,31 @@ export default function Navbar() {
       try {
         const raw = localStorage.getItem(SOS_SIGNAL_KEY);
         if (!raw) return;
-        processSignal(JSON.parse(raw));
+        processSignal(JSON.parse(raw), { requireFresh: true });
+      } catch {
+        // ignore parse/storage issues
+      }
+
+      try {
+        if (location.pathname.startsWith("/sos")) return;
+        const rawSession = localStorage.getItem(SOS_SESSION_KEY);
+        if (!rawSession) return;
+        const session = JSON.parse(rawSession);
+        if (!session?.active) return;
+        const updatedAtMs = readEpoch(session?.updatedAt || session?.startedAt);
+        if (!updatedAtMs || Date.now() - updatedAtMs > 15000) return;
+        const sig = `${session?.startedAt || ""}|${session?.updatedAt || ""}|${session?.alertId || ""}`;
+        if (!sig.trim() || seenSessionSignalsRef.current.has(sig)) return;
+        if (sig === lastHandledSessionSigRef.current) return;
+        seenSessionSignalsRef.current.add(sig);
+        if (seenSessionSignalsRef.current.size > 300) seenSessionSignalsRef.current.clear();
+        lastHandledSessionSigRef.current = sig;
+        try {
+          sessionStorage.setItem(SOS_LAST_SESSION_SIG_KEY, sig);
+        } catch {
+          // ignore storage issues
+        }
+        setSosPopup("[EMERGENCY] SOS is active");
       } catch {
         // ignore parse/storage issues
       }
@@ -326,28 +475,35 @@ export default function Navbar() {
   }, [location.pathname]);
 
   useEffect(() => {
-    if (!myUserId) return undefined;
     let disposed = false;
+    let pollingDisabled = false;
 
     const pollEmergency = async () => {
+      if (pollingDisabled) return;
       try {
         let res = null;
-        let lastErr = null;
-        const emergencyEndpoints = ["/api/emergency/active", "/emergency/active"];
-        const baseCandidates = emergencyBaseCandidates();
-        for (const baseURL of baseCandidates) {
-          for (const endpoint of emergencyEndpoints) {
-            try {
-              res = await api.get(endpoint, { baseURL, skipAuth: true, suppressAuthRedirect: true });
-              lastErr = null;
-              break;
-            } catch (err) {
-              lastErr = err;
+        let lastError = null;
+        const urls = buildEmergencyUrls("active");
+        for (const url of urls) {
+          const baseURL = /^https?:\/\//i.test(url) ? undefined : api.defaults.baseURL;
+          const path = /^https?:\/\//i.test(url) ? url : url;
+          try {
+            res = await api.get(path, {
+              baseURL,
+              suppressAuthRedirect: true,
+              skipAuth: true
+            });
+            break;
+          } catch (err) {
+            lastError = err;
+            const status = Number(err?.response?.status || 0);
+            if (!(status === 400 || status === 401 || status === 403 || status === 404 || status === 405 || status >= 500 || !status)) {
+              throw err;
             }
           }
-          if (res) break;
         }
-        if (lastErr) throw lastErr;
+        if (!res) throw lastError || new Error("Emergency endpoint unavailable");
+
         if (disposed) return;
         const data = res?.data;
         const alerts = Array.isArray(data)
@@ -367,8 +523,11 @@ export default function Navbar() {
           setSosPopup(`[EMERGENCY] ${reporter || "Nearby user"} triggered SOS`);
           break;
         }
-      } catch {
-        // ignore transient poll failures
+      } catch (err) {
+        const status = Number(err?.response?.status || 0);
+        if (status === 401 || status === 403) {
+          pollingDisabled = true;
+        }
       }
     };
 
@@ -378,7 +537,66 @@ export default function Navbar() {
       disposed = true;
       clearInterval(timer);
     };
-  }, [myUserId]);
+  }, [myUserId, location.pathname]);
+
+  const closeCameraStudio = () => {
+    setCameraOpen(false);
+    const stream = cameraStreamRef.current;
+    if (stream) {
+      try {
+        stream.getTracks().forEach((track) => track.stop());
+      } catch {
+        // ignore
+      }
+    }
+    cameraStreamRef.current = null;
+    if (cameraVideoRef.current) {
+      cameraVideoRef.current.srcObject = null;
+    }
+  };
+
+  const openCameraStudio = async () => {
+    if (cameraOpen) {
+      closeCameraStudio();
+      return;
+    }
+    setCameraError("");
+    setCameraBusy(true);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user", width: { ideal: 960 }, height: { ideal: 720 } },
+        audio: false
+      });
+      cameraStreamRef.current = stream;
+      setCameraOpen(true);
+      requestAnimationFrame(() => {
+        if (cameraVideoRef.current) {
+          cameraVideoRef.current.srcObject = stream;
+          cameraVideoRef.current.play?.().catch(() => {});
+        }
+      });
+    } catch {
+      setCameraError("Camera access denied or unavailable.");
+      setCameraOpen(false);
+    } finally {
+      setCameraBusy(false);
+    }
+  };
+
+  useEffect(() => () => {
+    const stream = cameraStreamRef.current;
+    if (stream) {
+      try {
+        stream.getTracks().forEach((track) => track.stop());
+      } catch {
+        // ignore
+      }
+    }
+    cameraStreamRef.current = null;
+  }, []);
+
+  const activeLens = SNAP_LENSES.find((x) => x.id === activeLensId) || SNAP_LENSES[0];
+  const cameraFilterCss = activeLens?.filter || "none";
 
   return (
     <header className={`ss-nav-wrap ${onChatConversationRoute ? "is-chat-conversation" : ""}`}>
@@ -386,6 +604,19 @@ export default function Navbar() {
         <Link to="/feed" className="ss-brand" aria-label="Go to feed">
           <img src="/logo.png?v=3" alt="SocialSea" className="ss-brand-logo" />
           <span className="ss-brand-text">SocialSea</span>
+          <button
+            type="button"
+            className="ss-camera-btn"
+            title="Open Camera Studio"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              void openCameraStudio();
+            }}
+            disabled={cameraBusy}
+          >
+            <FiCamera />
+          </button>
           {showSosInNavbar && (
             <button type="button" className="ss-sos-chip" title="Emergency SOS" onClick={onSosTap}>
               SOS
@@ -441,6 +672,87 @@ export default function Navbar() {
       {sosPopup && (
         <div className="ss-sos-popup" role="status" aria-live="polite">
           {sosPopup}
+        </div>
+      )}
+
+      {cameraOpen && (
+        <div className="ss-camera-modal-backdrop" onClick={closeCameraStudio}>
+          <section className="ss-snap-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="ss-snap-preview">
+              <header className="ss-snap-topbar">
+                <button type="button" className="ss-snap-icon-btn" onClick={closeCameraStudio} title="Close">
+                  <FiX />
+                </button>
+                <button type="button" className="ss-snap-icon-btn" title="Flash">
+                  <FiSlash />
+                </button>
+                <button type="button" className="ss-snap-icon-btn" title="Settings">
+                  <FiSettings />
+                </button>
+              </header>
+
+              <div className="ss-snap-tools">
+                {SNAP_TOOLS.map((tool) => (
+                  <button key={tool} type="button" className="ss-snap-tool-btn">
+                    {tool}
+                  </button>
+                ))}
+              </div>
+
+              <div className="ss-camera-preview">
+                <video
+                  ref={cameraVideoRef}
+                  className="ss-camera-video"
+                  style={{ filter: cameraFilterCss }}
+                  autoPlay
+                  playsInline
+                  muted
+                />
+                {!!activeLens.mask && (
+                  <div className="ss-camera-animal-mask" aria-hidden="true">
+                    {activeLens.mask}
+                  </div>
+                )}
+              </div>
+
+              <div className="ss-snap-bottom">
+                <div className="ss-snap-lenses">
+                  {SNAP_LENSES.map((lens) => (
+                    <button
+                      key={lens.id}
+                      type="button"
+                      className={`ss-snap-lens ${activeLensId === lens.id ? "is-active" : ""}`}
+                      style={{ "--lens-bg": lens.thumb }}
+                      onClick={() => setActiveLensId(lens.id)}
+                      title={lens.label}
+                    >
+                      <span>{lens.badge}</span>
+                    </button>
+                  ))}
+                </div>
+
+                <div className="ss-snap-control-row">
+                  <button type="button" className="ss-snap-side-btn" title="Gallery">
+                    <FiImage />
+                  </button>
+                  <button type="button" className="ss-snap-shutter" title="Capture" />
+                  <button type="button" className="ss-snap-side-btn" title="Rotate">
+                    <FiRotateCcw />
+                  </button>
+                </div>
+
+                <div className="ss-snap-pill">
+                  <span className="ss-snap-pill-mark">🔖</span>
+                  <span className="ss-snap-pill-label">{activeLens.label}</span>
+                  <button type="button" className="ss-snap-pill-close" title="Hide">
+                    <FiChevronDown />
+                  </button>
+                </div>
+              </div>
+
+              {cameraError && <p className="ss-camera-error">{cameraError}</p>}
+            </div>
+          </section>
         </div>
       )}
     </header>

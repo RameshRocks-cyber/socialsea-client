@@ -6,6 +6,7 @@ import { clearAuthStorage } from "../auth";
 import "./Profile.css";
 
 const FOLLOWING_CACHE_KEY = "socialsea_following_cache_v1";
+const HIDDEN_PROFILE_POSTS_KEY = "socialsea_hidden_profile_posts_v1";
 
 const readFollowingCache = () => {
   try {
@@ -70,6 +71,29 @@ const normalizeUserId = (entry) => {
   return String(user?.id ?? user?.userId ?? "").trim();
 };
 
+const readHiddenProfilePostIds = () => {
+  try {
+    const raw = localStorage.getItem(HIDDEN_PROFILE_POSTS_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.map((id) => String(id || "").trim()).filter(Boolean));
+  } catch {
+    return new Set();
+  }
+};
+
+const persistHiddenProfilePostId = (postId) => {
+  const idText = String(postId || "").trim();
+  if (!idText) return;
+  const next = readHiddenProfilePostIds();
+  next.add(idText);
+  try {
+    localStorage.setItem(HIDDEN_PROFILE_POSTS_KEY, JSON.stringify(Array.from(next).slice(-500)));
+  } catch {
+    // ignore storage issues
+  }
+};
+
 const getConnectionIdentityKeys = (entry) => {
   const user = entry?.user || entry?.sender || entry?.target || entry;
   const id = String(user?.id ?? user?.userId ?? entry?.id ?? entry?.userId ?? "").trim();
@@ -119,8 +143,8 @@ const extractFollowingFlag = (response, profileData) => {
 
 export default function Profile() {
   const { username } = useParams();
-  const myUserId = localStorage.getItem("userId");
-  const myEmail = localStorage.getItem("email");
+  const myUserId = sessionStorage.getItem("userId") || localStorage.getItem("userId");
+  const myEmail = sessionStorage.getItem("email") || localStorage.getItem("email");
   const navigate = useNavigate();
   const [profile, setProfile] = useState(null);
   const [posts, setPosts] = useState([]);
@@ -150,18 +174,14 @@ export default function Profile() {
     }
 
     const defaultBase = String(api?.defaults?.baseURL || "").replace(/\/+$/, "");
-    const baseCandidates = [
-      defaultBase,
-      "http://localhost:8080",
-      "http://127.0.0.1:8080",
-      "https://socialsea.co.in"
-    ].filter((value, index, arr) => value && arr.indexOf(value) === index);
+    const baseCandidates = [defaultBase || undefined];
 
-    const normalizePosts = (items) => {
-      const list = Array.isArray(items) ? items : [];
-      return list
-        .map((post) => {
-          const contentUrl =
+      const normalizePosts = (items) => {
+        const list = Array.isArray(items) ? items : [];
+        const hiddenPostIds = readHiddenProfilePostIds();
+        return list
+          .map((post) => {
+            const contentUrl =
             post?.contentUrl ||
             post?.mediaUrl ||
             post?.imageUrl ||
@@ -169,14 +189,18 @@ export default function Profile() {
             post?.media?.url ||
             "";
           const typeRaw = String(post?.type || post?.mediaType || post?.mimeType || "").toLowerCase();
-          const isVideo =
-            post?.reel === true ||
-            typeRaw.includes("video") ||
-            /\.(mp4|webm|ogg|mov|m4v)(\?|$)/i.test(contentUrl);
-          return { ...post, contentUrl, isVideo };
-        })
-        .filter((post) => String(post?.contentUrl || "").trim());
-    };
+            const isVideo =
+              post?.reel === true ||
+              typeRaw.includes("video") ||
+              /\.(mp4|webm|ogg|mov|m4v)(\?|$)/i.test(contentUrl);
+            return { ...post, contentUrl, isVideo };
+          })
+          .filter((post) => {
+            const idText = String(post?.id || "").trim();
+            if (idText && hiddenPostIds.has(idText)) return false;
+            return String(post?.contentUrl || "").trim();
+          });
+      };
 
     const loadProfile = async () => {
       let lastError = null;
@@ -184,7 +208,12 @@ export default function Profile() {
         try {
           const res = await api.get(`/api/profile/${username}`, {
             baseURL: base,
-            suppressAuthRedirect: true
+            suppressAuthRedirect: true,
+            params: { _: Date.now() },
+            headers: {
+              "Cache-Control": "no-cache",
+              Pragma: "no-cache"
+            }
           });
           const data = res.data?.user || res.data || {};
           if (!data || typeof data !== "object" || Object.keys(data).length === 0) {
@@ -257,47 +286,6 @@ export default function Profile() {
       return null;
     };
 
-    const fetchConnectionCount = async (kind, profileData) => {
-      const ids = [
-        username,
-        profileData?.id,
-        profileData?.email,
-        profileData?.username,
-        username === "me" ? "me" : null,
-        username === "me" ? myUserId : null,
-        username === "me" ? myEmail : null
-      ]
-        .map((v) => String(v || "").trim())
-        .filter(Boolean)
-        .filter((v, i, arr) => arr.indexOf(v) === i);
-
-      const endpoints = ids.flatMap((id) => getPathCandidates(id, kind))
-        .filter((path, i, arr) => arr.indexOf(path) === i);
-
-      let bestCount = 0;
-      let hasPayload = false;
-      for (const base of baseCandidates) {
-        for (const endpoint of endpoints) {
-          try {
-            const res = await api.get(endpoint, {
-              baseURL: base,
-              suppressAuthRedirect: true,
-              skipAuth: true,
-              skipRefresh: true
-            });
-            const list = pickList(res?.data, kind);
-            if (!Array.isArray(list)) continue;
-            hasPayload = true;
-            const unique = new Set(list.flatMap((entry) => getConnectionIdentityKeys(entry)).filter(Boolean));
-            if (unique.size > bestCount) bestCount = unique.size;
-          } catch {
-            // continue
-          }
-        }
-      }
-      return hasPayload ? bestCount : null;
-    };
-
     const loadPosts = async (preferredBase, profileId) => {
       const orderedBases = [preferredBase, ...baseCandidates.filter((b) => b !== preferredBase)].filter(Boolean);
       const endpointCandidates = [
@@ -314,7 +302,12 @@ export default function Profile() {
               baseURL: base,
               suppressAuthRedirect: true,
               skipAuth: true,
-              skipRefresh: true
+              skipRefresh: true,
+              params: { _: Date.now() },
+              headers: {
+                "Cache-Control": "no-cache",
+                Pragma: "no-cache"
+              }
             });
             const normalized = normalizePosts(res?.data);
             if (normalized.length > bestPosts.length) {
@@ -333,39 +326,18 @@ export default function Profile() {
       const profileResult = await loadProfile();
       if (profileResult?.profileId && !cancelled) {
         const profileData = profileResult?.profileData || { id: profileResult.profileId };
-        const isOwn =
-          username === "me" ||
-          Number(username) === Number(myUserId) ||
-          Number(profileData?.id) === Number(myUserId);
-        const [followersResolved, followingResolved] = await Promise.all([
-          fetchConnectionCount("followers", profileData),
-          fetchConnectionCount("following", profileData)
-        ]);
-        const cache = readFollowingCache();
-        const myId = String(myUserId || "").trim().toLowerCase();
-        const myEmailLower = String(myEmail || "").trim().toLowerCase();
-        const myUsernameLower = String(profileData?.username || "").trim().toLowerCase();
-        const cachedFollowingCount = Object.entries(cache || {})
-          .filter(([k, v]) => {
-            const key = String(k || "").trim().toLowerCase();
-            if (!v || !key) return false;
-            if (key === "me") return false;
-            if (myId && key === myId) return false;
-            if (myEmailLower && key === myEmailLower) return false;
-            if (myUsernameLower && key === myUsernameLower) return false;
-            return true;
-          })
-          .length;
-        if (!cancelled) {
-          if (followersResolved !== null) setFollowers(followersResolved);
-          const resolvedFollowingCount = followingResolved === null ? 0 : followingResolved;
-          const nextFollowingCount = isOwn
-            ? Math.max(resolvedFollowingCount, cachedFollowingCount)
-            : resolvedFollowingCount;
-          if (followingResolved !== null || (isOwn && cachedFollowingCount > 0)) {
-            setFollowingCount(nextFollowingCount);
-          }
-        }
+        const safeFollowers = Number(
+          profileData?.followers ??
+          profileData?.followersCount ??
+          0
+        ) || 0;
+        const safeFollowing = Number(
+          profileData?.following ??
+          profileData?.followingCount ??
+          0
+        ) || 0;
+        setFollowers(Math.max(0, safeFollowers));
+        setFollowingCount(Math.max(0, safeFollowing));
       }
       await loadPosts(profileResult?.base, profileResult?.profileId);
     };
@@ -421,17 +393,27 @@ export default function Profile() {
     ].filter((value, index, arr) => value && arr.indexOf(value) === index);
 
     const endpointCandidates = [
-      `/api/posts/${postId}`,
-      `/api/admin/posts/${postId}`,
-      `/api/profile/posts/${postId}`
-    ];
+      { method: "delete", url: `/api/posts/${postId}` },
+      { method: "delete", url: `/api/admin/posts/${postId}` },
+      { method: "delete", url: `/api/profile/posts/${postId}` },
+      { method: "delete", url: `/api/profile/${encodeURIComponent(String(username || "me"))}/posts/${postId}` },
+      { method: "delete", url: "/api/profile/me/posts/" + postId },
+      profile?.id ? { method: "delete", url: `/api/profile/${profile.id}/posts/${postId}` } : null,
+      { method: "delete", url: `/api/feed/${postId}` },
+      { method: "post", url: `/api/posts/${postId}/delete` },
+      { method: "post", url: `/api/profile/posts/${postId}/delete` },
+      { method: "post", url: `/api/profile/${encodeURIComponent(String(username || "me"))}/posts/${postId}/delete` },
+      { method: "post", url: `/api/feed/${postId}/delete` }
+    ].filter(Boolean);
 
     let lastError = null;
 
     for (const base of baseCandidates) {
       for (const endpoint of endpointCandidates) {
         try {
-          await api.delete(endpoint, {
+          await api({
+            method: endpoint.method,
+            url: endpoint.url,
             baseURL: base,
             suppressAuthRedirect: true
           });
@@ -446,7 +428,15 @@ export default function Profile() {
 
     const status = lastError?.response?.status;
     const msg = lastError?.response?.data?.message || lastError?.message || "Unable to delete post";
-    setPostActionError(status ? `Delete failed (${status}): ${msg}` : `Delete failed: ${msg}`);
+    persistHiddenProfilePostId(postId);
+    setPosts((prev) => prev.filter((p) => String(p?.id) !== String(postId)));
+    setPostActionError(
+      status === 404
+        ? "Delete endpoint is not available on backend yet. Post hidden locally."
+        : status
+          ? `Delete failed (${status}): ${msg}. Post hidden locally.`
+          : `Delete failed: ${msg}. Post hidden locally.`
+    );
     setDeletingPostIds((prev) => ({ ...prev, [postId]: false }));
   };
   const resolveMediaUrl = (url) => {

@@ -16,6 +16,7 @@ import AdminDashboard from "./AdminDashboard";
 import AdminUsers from "./pages/AdminUsers";
 import AdminPosts from "./pages/AdminPosts";
 import AdminReports from "./pages/AdminReports";
+import AdminLiveRecordings from "./pages/AdminLiveRecordings";
 import AdminAnonymousPending from "./pages/AdminAnonymousPending";
 import NotificationsPage from "./NotificationsPage";
 import Dashboard from "./Dashboard";
@@ -24,6 +25,7 @@ import Unauthorized from "./pages/Unauthorized";
 import ProfileSetup from "./pages/ProfileSetup";
 import Settings from "./pages/Settings";
 import SettingsSounds from "./pages/SettingsSounds";
+import SettingsLocation from "./pages/SettingsLocation";
 import SOSPage from "./pages/SOSPage";
 import SOSNavigate from "./pages/SOSNavigate";
 import AdminLayout from "./AdminLayout";
@@ -131,6 +133,7 @@ function AppRoutes() {
               <Route path="/forgot-password" element={<PublicOnlyRoute><ForgotPassword /></PublicOnlyRoute>} />
               <Route path="/upload" element={<ProtectedRoute><Upload /></ProtectedRoute>} />
               <Route path="/reels" element={<ProtectedRoute><Reels /></ProtectedRoute>} />
+              <Route path="/watch" element={<ProtectedRoute><LongVideos /></ProtectedRoute>} />
               <Route path="/watch/:postId" element={<ProtectedRoute><LongVideos /></ProtectedRoute>} />
               <Route path="/notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
               <Route
@@ -160,6 +163,7 @@ function AppRoutes() {
               <Route path="/live-recordings" element={<ProtectedRoute><LiveRecordings /></ProtectedRoute>} />
               <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
               <Route path="/settings/sounds" element={<ProtectedRoute><SettingsSounds /></ProtectedRoute>} />
+              <Route path="/settings/location" element={<ProtectedRoute><SettingsLocation /></ProtectedRoute>} />
               <Route path="/sos" element={<ProtectedRoute><SOSPage /></ProtectedRoute>} />
               <Route path="/sos/live/:alertId" element={<ProtectedRoute><SOSPage /></ProtectedRoute>} />
               <Route path="/sos/navigate/:alertId" element={<ProtectedRoute><SOSNavigate /></ProtectedRoute>} />
@@ -174,6 +178,7 @@ function AppRoutes() {
                 <Route path="dashboard" element={<AdminDashboard />} />
                 <Route path="users" element={<AdminUsers />} />
                 <Route path="posts" element={<AdminPosts />} />
+                <Route path="live-recordings" element={<AdminLiveRecordings />} />
                 <Route path="reports" element={<AdminReports />} />
                 <Route path="anonymous/pending" element={<AdminAnonymousPending />} />
                 <Route path="notifications" element={<NotificationsPage />} />

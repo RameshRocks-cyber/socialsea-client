@@ -3,6 +3,7 @@ import { Link, useLocation } from "react-router-dom";
 import { FiBookmark } from "react-icons/fi";
 import { BsBookmarkFill } from "react-icons/bs";
 import api from "../api/axios";
+import { getApiBaseUrl, toApiUrl } from "../api/baseUrl";
 import "./Reels.css";
 
 const MAX_REEL_SECONDS = 90;
@@ -49,11 +50,18 @@ export default function Reels() {
   const [tapLikeBurstByPost, setTapLikeBurstByPost] = useState({});
   const [followingByKey, setFollowingByKey] = useState({});
   const [likeBusyByPost, setLikeBusyByPost] = useState({});
-  const [mutedByPost, setMutedByPost] = useState({});
+  const [profilePicByOwner, setProfilePicByOwner] = useState({});
+  const [allMuted, setAllMuted] = useState(() => {
+    try {
+      return localStorage.getItem("reelsMutedAll") === "1";
+    } catch {
+      return false;
+    }
+  });
 
   const containerRef = useRef(null);
   const videoRefs = useRef({});
-  const tapTrackerRef = useRef({ lastTapTs: 0, singleTapTimer: null });
+  const tapTrackerRef = useRef({ singleTapTimer: null });
   const cameraVideoRef = useRef(null);
   const cameraStreamRef = useRef(null);
   const detectFrameRef = useRef(0);
@@ -83,12 +91,75 @@ export default function Reels() {
 
   useEffect(() => {
     let cancelled = false;
+    const buildBaseCandidates = () => {
+      const isLocalDev =
+        typeof window !== "undefined" &&
+        ["localhost", "127.0.0.1"].includes(String(window.location.hostname || "").toLowerCase());
+      const storedBase =
+        typeof window !== "undefined"
+          ? localStorage.getItem("socialsea_auth_base_url") || sessionStorage.getItem("socialsea_auth_base_url")
+          : "";
+      return [
+        api.defaults.baseURL,
+        storedBase,
+        getApiBaseUrl(),
+        import.meta.env.VITE_API_URL,
+        ...(isLocalDev ? ["http://localhost:8080", "http://127.0.0.1:8080", "/api"] : ["https://socialsea.co.in"]),
+      ].filter((v, i, arr) => v && arr.indexOf(v) === i);
+    };
+    const extractList = (payload) =>
+      Array.isArray(payload)
+        ? payload
+        : Array.isArray(payload?.items)
+          ? payload.items
+          : Array.isArray(payload?.data)
+            ? payload.data
+            : Array.isArray(payload?.content)
+              ? payload.content
+              : [];
+    const fetchAny = async (endpoints) => {
+      const bases = buildBaseCandidates();
+      let lastErr = null;
+      let fallbackList = null;
+      for (const baseURL of bases) {
+        for (const url of endpoints) {
+          try {
+            const res = await api.request({
+              method: "GET",
+              url,
+              baseURL,
+              timeout: 10000,
+              suppressAuthRedirect: true,
+            });
+            const body = res?.data;
+            const looksLikeHtml =
+              typeof body === "string" && (/^\s*<!doctype html/i.test(body) || /<html[\s>]/i.test(body));
+            if (looksLikeHtml) {
+              const htmlErr = new Error("Received HTML instead of API JSON");
+              htmlErr.response = { status: 404, data: body };
+              throw htmlErr;
+            }
+            const list = extractList(body);
+            if (fallbackList == null) fallbackList = list;
+            if (Array.isArray(list) && list.length > 0) {
+              return list;
+            }
+          } catch (err) {
+            lastErr = err;
+          }
+        }
+      }
+      if (Array.isArray(fallbackList)) return fallbackList;
+      if (lastErr) throw lastErr;
+      return [];
+    };
 
     const loadShortVideos = async () => {
       try {
-        const [feedRes, reelsRes] = await Promise.allSettled([api.get("/api/feed"), api.get("/api/reels")]);
-        const fromFeed = feedRes.status === "fulfilled" && Array.isArray(feedRes.value?.data) ? feedRes.value.data : [];
-        const fromReels = reelsRes.status === "fulfilled" && Array.isArray(reelsRes.value?.data) ? reelsRes.value.data : [];
+        const [fromFeed, fromReels] = await Promise.all([
+          fetchAny(["/api/feed", "/feed", "/api/posts", "/posts"]),
+          fetchAny(["/api/reels", "/reels"]),
+        ]);
 
         const byKey = new Map();
         const pushItem = (item, source) => {
@@ -195,17 +266,26 @@ export default function Reels() {
     reels.forEach((reel, idx) => {
       const video = videoRefs.current[reel.id];
       if (!video) return;
+      video.muted = allMuted;
       if (idx === currentIndex) {
         video.play().catch(() => {
           video.muted = true;
-          setMutedByPost((prev) => ({ ...prev, [reel.id]: true }));
+          setAllMuted(true);
           video.play().catch(() => {});
         });
       } else {
         video.pause();
       }
     });
-  }, [currentIndex, reels]);
+  }, [currentIndex, reels, allMuted]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("reelsMutedAll", allMuted ? "1" : "0");
+    } catch {
+      // ignore storage issues
+    }
+  }, [allMuted]);
 
   useEffect(() => {
     if (!targetPostId || !reels.length) return;
@@ -258,8 +338,7 @@ export default function Reels() {
   const resolveUrl = (url) => {
     if (!url) return "";
     if (url.startsWith("http")) return url;
-    const base = api.defaults.baseURL || "";
-    return `${base}${url}`;
+    return toApiUrl(url);
   };
 
   const getMediaType = (item) => {
@@ -306,7 +385,85 @@ export default function Reels() {
   };
 
   const reelOwnerKey = (reel) => String(reel?.user?.id || reel?.user?.email || reel?.username || reel?.id);
+  const reelOwnerCandidates = (reel) =>
+    [
+      reel?.user?.id,
+      reel?.user?.username,
+      reel?.username,
+      reel?.user?.email,
+      reel?.email,
+      reel?.userId
+    ]
+      .map((v) => String(v || "").trim())
+      .filter(Boolean)
+      .filter((v, i, arr) => arr.indexOf(v) === i);
+  const reelOwnerProfilePic = (reel) => {
+    const ownerKey = reelOwnerKey(reel);
+    if (ownerKey && profilePicByOwner[ownerKey]) return profilePicByOwner[ownerKey];
+    const raw =
+      reel?.user?.profilePicUrl ||
+      reel?.user?.profilePic ||
+      reel?.user?.avatarUrl ||
+      reel?.user?.avatar ||
+      reel?.profilePicUrl ||
+      reel?.profilePic ||
+      reel?.avatarUrl ||
+      reel?.avatar ||
+      "";
+    return raw ? resolveUrl(String(raw).trim()) : "";
+  };
   const myUserId = Number(localStorage.getItem("userId"));
+
+  useEffect(() => {
+    if (!reels.length) return;
+    const targets = [];
+    const seen = new Set();
+    reels.forEach((reel) => {
+      const ownerKey = reelOwnerKey(reel);
+      if (!ownerKey || seen.has(ownerKey)) return;
+      seen.add(ownerKey);
+      if (!reelOwnerProfilePic(reel)) targets.push(reel);
+    });
+    if (!targets.length) return;
+    let cancelled = false;
+    const run = async () => {
+      const foundByOwner = {};
+      for (const reel of targets.slice(0, 40)) {
+        const ownerKey = reelOwnerKey(reel);
+        const candidates = reelOwnerCandidates(reel);
+        if (!ownerKey || !candidates.length) continue;
+        let found = "";
+        for (const candidate of candidates) {
+          try {
+            const res = await api.get(`/api/profile/${encodeURIComponent(candidate)}`, {
+              suppressAuthRedirect: true,
+              timeout: 4000
+            });
+            const user = res?.data?.user || res?.data || {};
+            const rawPic =
+              user?.profilePicUrl ||
+              user?.profilePic ||
+              user?.avatarUrl ||
+              user?.avatar ||
+              "";
+            if (rawPic) {
+              found = resolveUrl(String(rawPic).trim());
+              break;
+            }
+          } catch {
+            // try next identifier
+          }
+        }
+        if (found) foundByOwner[ownerKey] = found;
+      }
+      if (cancelled || !Object.keys(foundByOwner).length) return;
+      setProfilePicByOwner((prev) => ({ ...prev, ...foundByOwner }));
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [reels]);
 
   const onScroll = () => {
     const el = containerRef.current;
@@ -465,13 +622,18 @@ export default function Reels() {
     }
   };
 
-  const toggleMute = (postId) => {
-    const video = videoRefs.current[postId];
-    if (!video) return;
-    const nextMuted = !video.muted;
-    video.muted = nextMuted;
-    setMutedByPost((prev) => ({ ...prev, [postId]: nextMuted }));
-    if (!nextMuted && video.paused) video.play().catch(() => {});
+  const toggleMute = () => {
+    const nextMuted = !allMuted;
+    setAllMuted(nextMuted);
+    Object.values(videoRefs.current).forEach((video) => {
+      if (!video) return;
+      video.muted = nextMuted;
+    });
+    const currentReel = reels[currentIndexRef.current];
+    if (!nextMuted && currentReel) {
+      const currentVideo = videoRefs.current[currentReel.id];
+      if (currentVideo?.paused) currentVideo.play().catch(() => {});
+    }
   };
 
   const togglePlayPause = (postId) => {
@@ -506,75 +668,37 @@ export default function Reels() {
     }, 550);
   };
 
-  const handleReelTap = (reel) => {
-    const now = Date.now();
-    const delta = now - tapTrackerRef.current.lastTapTs;
+  const handleReelTap = (reel, event) => {
+    const tapCount = Number(event?.detail || 1);
     if (tapTrackerRef.current.singleTapTimer) {
       clearTimeout(tapTrackerRef.current.singleTapTimer);
       tapTrackerRef.current.singleTapTimer = null;
     }
-    if (delta > 0 && delta < 280) {
+    if (tapCount >= 2) {
       likeReel(reel.id);
-      tapTrackerRef.current.lastTapTs = 0;
       return;
     }
-    tapTrackerRef.current.lastTapTs = now;
     tapTrackerRef.current.singleTapTimer = setTimeout(() => {
-      toggleMute(reel.id);
+      toggleMute();
       tapTrackerRef.current.singleTapTimer = null;
-    }, 280);
+    }, 260);
   };
 
   const readHandState = (landmarks) => {
     if (!landmarks || landmarks.length < 21) return null;
     const wrist = landmarks[0];
-    const indexTip = landmarks[8];
-    const indexPip = landmarks[6];
     const indexMcp = landmarks[5];
     const middleMcp = landmarks[9];
-    const middleTip = landmarks[12];
-    const middlePip = landmarks[10];
-    const ringMcp = landmarks[13];
-    const ringTip = landmarks[16];
-    const ringPip = landmarks[14];
-    const pinkyMcp = landmarks[17];
-    const pinkyTip = landmarks[20];
-    const pinkyPip = landmarks[18];
     const thumbTip = landmarks[4];
-    const thumbIp = landmarks[3];
 
     const handSize = Math.hypot(middleMcp[0] - wrist[0], middleMcp[1] - wrist[1]) || 1;
-    const extMargin = handSize * 0.1;
-    const foldMargin = handSize * 0.03;
-    const isUp = (tip, pip) => tip[1] < pip[1] - extMargin;
-    const isFolded = (tip, pip, mcp) => tip[1] >= pip[1] - foldMargin || tip[1] > mcp[1] + foldMargin;
+    const thumbToIndex = Math.hypot(thumbTip[0] - indexMcp[0], thumbTip[1] - indexMcp[1]);
+    const thumbToWrist = Math.hypot(thumbTip[0] - wrist[0], thumbTip[1] - wrist[1]);
+    const thumbExtended = thumbToIndex > handSize * 0.42 && thumbToWrist > handSize * 0.45;
+    const thumbBent = thumbToIndex < handSize * 0.28 || thumbToWrist < handSize * 0.32;
 
-    const indexUp = isUp(indexTip, indexPip);
-    const middleUp = isUp(middleTip, middlePip);
-    const ringUp = isUp(ringTip, ringPip);
-    const pinkyUp = isUp(pinkyTip, pinkyPip);
-    const thumbUp = thumbTip[1] < thumbIp[1] - handSize * 0.02;
-
-    const openPalm = indexUp && middleUp && ringUp && pinkyUp;
-    const twoFingers = indexUp && middleUp && !ringUp && !pinkyUp;
-    const thumbsUpLike =
-      thumbUp &&
-      isFolded(indexTip, indexPip, indexMcp) &&
-      isFolded(middleTip, middlePip, middleMcp) &&
-      isFolded(ringTip, ringPip, ringMcp) &&
-      isFolded(pinkyTip, pinkyPip, pinkyMcp);
-    const fistClosed =
-      isFolded(indexTip, indexPip, indexMcp) &&
-      isFolded(middleTip, middlePip, middleMcp) &&
-      isFolded(ringTip, ringPip, ringMcp) &&
-      isFolded(pinkyTip, pinkyPip, pinkyMcp);
-
-    const palmX = (wrist[0] + indexMcp[0] + middleMcp[0] + ringMcp[0] + pinkyMcp[0]) / 5;
-
-    if (openPalm) return { pose: "openPalm", palmX, handSize };
-    if (thumbsUpLike) return { pose: "thumbsUp", palmX, handSize };
-    if (twoFingers) return { pose: "twoFingers", palmX, handSize };
-    if (fistClosed) return { pose: "none", palmX, handSize };
+    if (thumbBent) return { pose: "thumbBent", handSize };
+    if (thumbExtended) return { pose: "thumbMove", thumbX: Number(thumbTip[0]) || 0, handSize };
     return { pose: "none" };
   };
 
@@ -674,15 +798,15 @@ export default function Reels() {
             swipeStableFramesRef.current = 0;
           }
 
-          if (pose === "openPalm") {
-            const palmX = Number(handState?.palmX);
+          if (pose === "thumbMove") {
+            const thumbX = Number(handState?.thumbX);
             const handSize = Number(handState?.handSize) || 0;
             const swipeThreshold = Math.max(GESTURE_PALM_SWIPE_MIN_PX, handSize * 0.14);
-            if (Number.isFinite(palmX)) {
+            if (Number.isFinite(thumbX)) {
               if (prevPalmXRef.current == null) {
-                prevPalmXRef.current = palmX;
+                prevPalmXRef.current = thumbX;
               } else {
-                const dx = palmX - prevPalmXRef.current;
+                const dx = thumbX - prevPalmXRef.current;
 
                 if (Math.abs(dx) <= Math.max(5, swipeThreshold * 0.3)) {
                   swipeStableFramesRef.current += 1;
@@ -705,19 +829,19 @@ export default function Reels() {
                     poseConsumedRef.current = true;
                     palmMotionLockRef.current = true;
                     swipeStableFramesRef.current = 0;
-                    setGestureStatus("Open palm swipe right: next reel");
-                    scrollToIndex(currentIndexRef.current + 1);
+                    setGestureStatus("Thumb right: previous reel");
+                    scrollToIndex(currentIndexRef.current - 1);
                   } else if (dx <= -swipeThreshold) {
                     lastScrollAtRef.current = now;
                     poseConsumedRef.current = true;
                     palmMotionLockRef.current = true;
                     swipeStableFramesRef.current = 0;
-                    setGestureStatus("Open palm swipe left: previous reel");
-                    scrollToIndex(currentIndexRef.current - 1);
+                    setGestureStatus("Thumb left: next reel");
+                    scrollToIndex(currentIndexRef.current + 1);
                   }
                 }
 
-                prevPalmXRef.current = palmX;
+                prevPalmXRef.current = thumbX;
               }
             }
           } else {
@@ -728,7 +852,7 @@ export default function Reels() {
 
           if (!poseConsumedRef.current) {
             if (
-              pose === "thumbsUp" &&
+              pose === "thumbBent" &&
               poseFramesRef.current >= GESTURE_POSE_HOLD_FRAMES &&
               now - lastLikeAtRef.current > GESTURE_LIKE_COOLDOWN_MS
             ) {
@@ -736,20 +860,8 @@ export default function Reels() {
               poseConsumedRef.current = true;
               const reel = reelsRef.current[currentIndexRef.current];
               if (reel) {
-                setGestureStatus("Thumbs up: liking reel");
+                setGestureStatus("Thumb bent: liking reel");
                 likeReel(reel.id);
-              }
-            } else if (
-              pose === "twoFingers" &&
-              poseFramesRef.current >= GESTURE_TWO_FINGER_HOLD_FRAMES &&
-              now - lastPlayToggleAtRef.current > GESTURE_PLAY_TOGGLE_COOLDOWN_MS
-            ) {
-              lastPlayToggleAtRef.current = now;
-              poseConsumedRef.current = true;
-              const reel = reelsRef.current[currentIndexRef.current];
-              if (reel) {
-                const state = togglePlayPause(reel.id);
-                setGestureStatus(state === "paused" ? "Two fingers: paused reel" : "Two fingers: playing reel");
               }
             }
           }
@@ -798,6 +910,7 @@ export default function Reels() {
           const ownerNameRaw = reel?.user?.name || reel?.user?.email || reel?.username || "User";
           const ownerName = ownerNameRaw.includes("@") ? emailToName(ownerNameRaw) : ownerNameRaw;
           const ownerKey = reelOwnerKey(reel);
+          const ownerPic = reelOwnerProfilePic(reel);
           const isOwnReel = Number(reel?.user?.id) === myUserId;
           const isFollowing = !!followingByKey[ownerKey];
           const caption = reel?.description || reel?.content || "Watch this reel";
@@ -811,11 +924,11 @@ export default function Reels() {
                   }}
                   src={videoUrl}
                   loop
-                  muted={mutedByPost[reel.id] ?? false}
+                  muted={allMuted}
                   playsInline
                   controls={false}
                   className="reel-video"
-                  onClick={() => handleReelTap(reel)}
+                  onClick={(event) => handleReelTap(reel, event)}
                 />
                 <div className="reel-gradient-top" />
                 <div className="reel-gradient-bottom" />
@@ -831,10 +944,10 @@ export default function Reels() {
                 <button
                   type="button"
                   className="reel-action-btn"
-                  onClick={() => toggleMute(reel.id)}
-                  title={mutedByPost[reel.id] ? "Unmute" : "Mute"}
+                  onClick={toggleMute}
+                  title={allMuted ? "Unmute all reels" : "Mute all reels"}
                 >
-                  <span>{mutedByPost[reel.id] ? "\u{1F507}" : "\u{1F50A}"}</span>
+                  <span>{allMuted ? "\u{1F507}" : "\u{1F50A}"}</span>
                 </button>
                 <button
                   type="button"
@@ -877,7 +990,11 @@ export default function Reels() {
 
               <div className="reel-bottom-meta">
                 <div className="reel-owner-row">
-                  <span className="reel-owner-avatar">{ownerName.charAt(0).toUpperCase()}</span>
+                  {ownerPic ? (
+                    <img src={ownerPic} alt={ownerName} className="reel-owner-avatar reel-owner-avatar-img" />
+                  ) : (
+                    <span className="reel-owner-avatar">{ownerName.charAt(0).toUpperCase()}</span>
+                  )}
                   <Link 
                     to={`/profile/${reel.user?.email || reel.user?.username || reel.username || "me"}`}
                     className="reel-owner hover:underline"
