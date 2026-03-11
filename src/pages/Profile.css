@@ -407,9 +407,14 @@
 }
 
 @media (hover: none) {
-  .profile-post-actions {
+  .profile-post-card .profile-post-actions {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+
+  .profile-post-card.is-delete-visible .profile-post-actions {
     opacity: 1;
-    transform: none;
+    transform: translateY(0);
   }
 }
 

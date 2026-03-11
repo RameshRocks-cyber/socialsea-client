@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import api from "../api/axios";
 import { getApiBaseUrl, toApiUrl } from "../api/baseUrl";
@@ -185,6 +185,9 @@ export default function Profile() {
   const [followError, setFollowError] = useState("");
   const [postActionError, setPostActionError] = useState("");
   const [deletingPostIds, setDeletingPostIds] = useState({});
+  const [deleteRevealPostId, setDeleteRevealPostId] = useState(null);
+  const holdTimerRef = useRef(null);
+  const deleteRevealHideTimerRef = useRef(null);
 
   const isOwnProfile =
     username === "me" || Number(username) === Number(myUserId) || profile?.id === Number(myUserId);
@@ -587,6 +590,7 @@ export default function Profile() {
             suppressAuthRedirect: true
           });
           setPosts((prev) => prev.filter((p) => String(p?.id) !== String(postId)));
+          setDeleteRevealPostId((prev) => (String(prev || "") === String(postId) ? null : prev));
           setDeletingPostIds((prev) => ({ ...prev, [postId]: false }));
           return;
         } catch (err) {
@@ -599,6 +603,7 @@ export default function Profile() {
     const msg = lastError?.response?.data?.message || lastError?.message || "Unable to delete post";
     persistHiddenProfilePostId(postId);
     setPosts((prev) => prev.filter((p) => String(p?.id) !== String(postId)));
+    setDeleteRevealPostId((prev) => (String(prev || "") === String(postId) ? null : prev));
     setPostActionError(
       status === 404
         ? "Delete endpoint is not available on backend yet. Post hidden locally."
@@ -612,6 +617,43 @@ export default function Profile() {
     if (!url) return "";
     return toApiUrl(url);
   };
+
+  const clearHoldTimer = () => {
+    if (holdTimerRef.current) {
+      clearTimeout(holdTimerRef.current);
+      holdTimerRef.current = null;
+    }
+  };
+
+  const clearDeleteRevealHideTimer = () => {
+    if (deleteRevealHideTimerRef.current) {
+      clearTimeout(deleteRevealHideTimerRef.current);
+      deleteRevealHideTimerRef.current = null;
+    }
+  };
+
+  const handleCardPointerDown = (event, postId) => {
+    if (!isOwnProfile || postId == null) return;
+    const pointerType = String(event?.pointerType || event?.nativeEvent?.pointerType || "").toLowerCase();
+    if (pointerType === "mouse") return;
+    clearHoldTimer();
+    holdTimerRef.current = setTimeout(() => {
+      setDeleteRevealPostId(String(postId));
+      clearDeleteRevealHideTimer();
+      deleteRevealHideTimerRef.current = setTimeout(() => {
+        setDeleteRevealPostId((current) => (String(current || "") === String(postId) ? null : current));
+      }, 3500);
+    }, 450);
+  };
+
+  const handleCardPointerEnd = () => {
+    clearHoldTimer();
+  };
+
+  useEffect(() => () => {
+    clearHoldTimer();
+    clearDeleteRevealHideTimer();
+  }, []);
 
   const logout = () => {
     clearAuthStorage();
@@ -707,7 +749,14 @@ export default function Profile() {
           <div className="profile-posts-grid">
             {posts.length === 0 && <p>No posts yet</p>}
             {posts.map((post, index) => (
-              <div key={`${String(post?.id ?? "post")}-${index}`} className="profile-post-card">
+              <div
+                key={`${String(post?.id ?? "post")}-${index}`}
+                className={`profile-post-card ${String(deleteRevealPostId || "") === String(post?.id || "") ? "is-delete-visible" : ""}`}
+                onPointerDown={(event) => handleCardPointerDown(event, post?.id)}
+                onPointerUp={handleCardPointerEnd}
+                onPointerCancel={handleCardPointerEnd}
+                onPointerLeave={handleCardPointerEnd}
+              >
                 {!post.isVideo && post.contentUrl?.trim() && (
                   <img src={resolveMediaUrl(post.contentUrl)} alt="" />
                 )}
@@ -719,7 +768,10 @@ export default function Profile() {
                     <button
                       type="button"
                       className="profile-post-delete-inline"
-                      onClick={() => deletePost(post?.id)}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        deletePost(post?.id);
+                      }}
                       disabled={Boolean(deletingPostIds[post?.id])}
                       title="Delete post"
                     >
