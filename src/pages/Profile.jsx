@@ -761,7 +761,14 @@ export default function Profile() {
                   <img src={resolveMediaUrl(post.contentUrl)} alt="" />
                 )}
                 {post.isVideo && post.contentUrl?.trim() && (
-                  <video src={resolveMediaUrl(post.contentUrl)} controls controlsList="nodownload noplaybackrate noremoteplayback" disablePictureInPicture onContextMenu={(e) => e.preventDefault()} />
+                  <video
+                    src={resolveMediaUrl(post.contentUrl)}
+                    autoPlay
+                    muted
+                    loop
+                    playsInline
+                    onContextMenu={(e) => e.preventDefault()}
+                  />
                 )}
                 {isOwnProfile && (
                   <div className="profile-post-actions">

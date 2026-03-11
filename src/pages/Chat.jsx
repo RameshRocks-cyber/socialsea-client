@@ -52,6 +52,7 @@ const CHAT_WALLPAPER_KEY = "socialsea_chat_wallpaper_v1";
 const BLOCKED_USERS_KEY = "socialsea_blocked_users_v1";
 const CHAT_SHARE_DRAFT_KEY = "socialsea_chat_share_draft_v1";
 const DELETE_FOR_EVERYONE_TOKEN = "__SS_DELETE_EVERYONE__:";
+const MESSAGE_REPLY_TOKEN = "__SS_REPLY__:";
 const SIGN_ASSIST_TOKEN = "__SS_SIGN_ASSIST__:";
 const SIGN_VOICE_GENDERS = ["female", "male"];
 const SIGN_LOCAL_TF_SCRIPT = "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js";
@@ -285,6 +286,39 @@ const parseDeleteTargetId = (text) => {
   return raw.slice(DELETE_FOR_EVERYONE_TOKEN.length).trim();
 };
 
+const trimReplyPreview = (value, maxLen = 72) => {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (!text) return "";
+  if (text.length <= maxLen) return text;
+  return `${text.slice(0, Math.max(1, maxLen - 1)).trimEnd()}...`;
+};
+
+const parseReplyEnvelope = (rawText) => {
+  const raw = String(rawText || "");
+  if (!raw.startsWith(MESSAGE_REPLY_TOKEN)) {
+    return { text: raw, replyTo: null };
+  }
+  const payloadBlock = raw.slice(MESSAGE_REPLY_TOKEN.length);
+  const separatorIndex = payloadBlock.indexOf("\n");
+  const replyMetaText = separatorIndex >= 0 ? payloadBlock.slice(0, separatorIndex) : payloadBlock;
+  const bodyText = separatorIndex >= 0 ? payloadBlock.slice(separatorIndex + 1) : "";
+  try {
+    const parsed = JSON.parse(replyMetaText);
+    const id = String(parsed?.id || "").trim();
+    const preview = trimReplyPreview(parsed?.preview);
+    const senderName = String(parsed?.senderName || "").trim();
+    const senderId = String(parsed?.senderId || "").trim();
+    return {
+      text: String(bodyText || "").trim(),
+      replyTo: id || preview || senderName || senderId
+        ? { id, preview, senderName, senderId }
+        : null
+    };
+  } catch {
+    return { text: raw, replyTo: null };
+  }
+};
+
 const applyDeleteTargetsToList = (list, targets) => {
   if (!Array.isArray(list) || !targets?.size) return list || [];
   return list.map((m) => {
@@ -485,6 +519,7 @@ export default function Chat() {
   });
   const [showWallpaperEditor, setShowWallpaperEditor] = useState(false);
   const [wallpaperDraft, setWallpaperDraft] = useState(null);
+  const [replyDraft, setReplyDraft] = useState(null);
 
   const stompRef = useRef(null);
   const peerRef = useRef(null);
@@ -506,6 +541,7 @@ export default function Chat() {
   const seenSignalsRef = useRef(new Set());
   const longPressTimerRef = useRef(null);
   const touchStartPointRef = useRef({ x: 0, y: 0 });
+  const touchSwipeReplyRef = useRef({ triggered: false });
   const tabIdRef = useRef(`${Date.now()}_${Math.random().toString(36).slice(2, 7)}`);
   const callChannelRef = useRef(null);
   const readReceiptChannelRef = useRef(null);
@@ -1188,6 +1224,8 @@ export default function Chat() {
   };
 
   const normalizeMessage = (message, otherId = "") => {
+    const rawText = String(message?.text ?? message?.message ?? message?.content ?? "");
+    const { text: normalizedText, replyTo } = parseReplyEnvelope(rawText);
     const senderId = String(
       message?.senderId ?? message?.fromUserId ?? message?.fromId ?? message?.userId ?? message?.sender?.id ?? ""
     );
@@ -1211,11 +1249,12 @@ export default function Chat() {
           senderId || "unknown",
           receiverId || otherId || "unknown",
           normalizeTimestamp(message?.createdAt || message?.sentAt || message?.timestamp || message?.time),
-          String(message?.text ?? message?.message ?? message?.content ?? "")
+          rawText
         ].join("|"),
       senderId: senderId || undefined,
       receiverId: receiverId || undefined,
-      text: String(message?.text ?? message?.message ?? message?.content ?? ""),
+      text: normalizedText,
+      replyTo: replyTo || undefined,
       audioUrl: String(message?.audioUrl || ""),
       speechTyped: Boolean(message?.speechTyped),
       mediaUrl: String(message?.mediaUrl || ""),
@@ -1825,7 +1864,7 @@ export default function Chat() {
               ? "?? Voice message"
               : nextMessage.mediaUrl
                 ? `?? ${nextMessage.fileName || "File"}`
-                : text;
+                : nextMessage.text;
 
     setMessagesByContact((prev) => {
       const existing = Array.isArray(prev[contactIdForThread]) ? prev[contactIdForThread] : [];
@@ -1847,7 +1886,7 @@ export default function Chat() {
             name,
             email: payload?.senderEmail || payload?.fromEmail || "",
             avatar: (name[0] || "U").toUpperCase(),
-            lastMessage: text
+            lastMessage: preview || nextMessage.text
           }
         ]);
       }
@@ -2879,7 +2918,19 @@ export default function Chat() {
   const sendMessage = async () => {
     const text = inputText.trim();
     if (!text) return;
-    await sendTextPayload(text, { clearComposer: true });
+    const withReply = replyDraft?.id
+      ? `${MESSAGE_REPLY_TOKEN}${JSON.stringify({
+        id: replyDraft.id,
+        senderName: replyDraft.senderName || "",
+        senderId: replyDraft.senderId || "",
+        preview: trimReplyPreview(replyDraft.preview || "")
+      })}\n${text}`
+      : text;
+    await sendTextPayload(withReply, {
+      clearComposer: true,
+      previewText: text,
+      onSent: () => setReplyDraft(null)
+    });
   };
 
   const sendSignAssistMessage = async () => {
@@ -3979,6 +4030,7 @@ export default function Chat() {
 
   useEffect(() => {
     setShowHeaderMenu(false);
+    setReplyDraft(null);
   }, [activeContactId]);
 
   useEffect(() => {
@@ -4183,25 +4235,57 @@ export default function Chat() {
     const t = touchEvent.touches?.[0];
     if (!t) return;
     touchStartPointRef.current = { x: t.clientX, y: t.clientY };
+    touchSwipeReplyRef.current = { triggered: false };
     longPressTimerRef.current = setTimeout(() => {
       setBubbleMenu({ x: t.clientX, y: t.clientY, item });
     }, 600);
   };
 
-  const onBubbleTouchMove = (touchEvent) => {
+  const onBubbleTouchMove = (item, touchEvent) => {
     const t = touchEvent.touches?.[0];
     if (!t) return;
-    const dx = Math.abs(t.clientX - touchStartPointRef.current.x);
-    const dy = Math.abs(t.clientY - touchStartPointRef.current.y);
+    const deltaX = t.clientX - touchStartPointRef.current.x;
+    const deltaY = t.clientY - touchStartPointRef.current.y;
+    const dx = Math.abs(deltaX);
+    const dy = Math.abs(deltaY);
     if (dx > 16 || dy > 16) {
       if (longPressTimerRef.current) {
         clearTimeout(longPressTimerRef.current);
         longPressTimerRef.current = null;
       }
     }
+    if (!item || item.kind !== "message" || touchSwipeReplyRef.current.triggered) return;
+    if (dy > 24 || dx < 56 || dx < dy * 1.25) return;
+    const source = item.raw || {};
+    const replyPreview = trimReplyPreview(
+      source?.audioUrl || source?.mediaType === "audio"
+        ? "Voice message"
+        : source?.mediaType === "image"
+          ? "Photo"
+          : source?.mediaType === "video"
+            ? "Video"
+            : source?.mediaUrl
+              ? source?.fileName || "File"
+              : decodeSignAssistText(source?.text || item.text)?.text || source?.text || item.text || "Message"
+    );
+    touchSwipeReplyRef.current = { triggered: true };
+    setReplyDraft({
+      id: String(source?.id || item.id || ""),
+      senderName: item.mine ? "You" : (activeContact?.name || "User"),
+      senderId: String(source?.senderId || ""),
+      preview: replyPreview || "Message"
+    });
+    setShowEmojiTray(false);
+    try {
+      window.navigator?.vibrate?.(8);
+    } catch {
+      // vibration not available
+    }
+    setTimeout(() => composerInputRef.current?.focus(), 0);
   };
 
   const onBubbleTouchEnd = () => {
+    touchSwipeReplyRef.current = { triggered: false };
     if (longPressTimerRef.current) {
       clearTimeout(longPressTimerRef.current);
       longPressTimerRef.current = null;
@@ -4838,11 +4922,21 @@ export default function Chat() {
                     data-chat-msg-id={item.kind === "message" ? String(item.raw?.id || "") : undefined}
                     onContextMenu={enableBubbleMenu ? (e) => openBubbleMenu(e, item) : undefined}
                     onTouchStart={enableBubbleMenu ? (e) => onBubbleTouchStart(item, e) : undefined}
-                    onTouchMove={enableBubbleMenu ? onBubbleTouchMove : undefined}
+                    onTouchMove={enableBubbleMenu ? (e) => onBubbleTouchMove(item, e) : undefined}
                     onTouchEnd={enableBubbleMenu ? onBubbleTouchEnd : undefined}
                     onTouchCancel={enableBubbleMenu ? onBubbleTouchEnd : undefined}
                   >
                     <div className={`chat-bubble-line ${item.kind === "call" ? "call-line" : ""}`}>
+                      {item.kind === "message" && item.raw?.replyTo && (
+                        <div className={`chat-reply-chip ${item.mine ? "mine" : "their"}`}>
+                          <small>
+                            {String(item.raw.replyTo.senderId || "") === String(myUserId)
+                              ? "You"
+                              : item.raw.replyTo.senderName || "Message"}
+                          </small>
+                          <span>{trimReplyPreview(item.raw.replyTo.preview || "Message")}</span>
+                        </div>
+                      )}
                       {item.kind === "message" && item.raw?.audioUrl ? (
                         <div className={`chat-voice-note ${item.mine ? "mine" : "their"}`}>
                           {item.mine && (
@@ -5100,6 +5194,20 @@ export default function Chat() {
                     ))}
                   </div>
                 )}
+              </div>
+            )}
+
+            {replyDraft && (
+              <div className="chat-reply-draft">
+                <div className="chat-reply-draft-text">
+                  <strong>
+                    Replying to {String(replyDraft.senderId || "") === String(myUserId) ? "You" : (replyDraft.senderName || "User")}
+                  </strong>
+                  <span>{trimReplyPreview(replyDraft.preview || "Message")}</span>
+                </div>
+                <button type="button" className="chat-reply-draft-cancel" onClick={() => setReplyDraft(null)}>
+                  Cancel
+                </button>
               </div>
             )}
 

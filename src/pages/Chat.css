@@ -837,8 +837,39 @@
 
 .chat-bubble-line {
   display: inline-flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-start;
   gap: 7px;
+}
+
+.chat-reply-chip {
+  width: 100%;
+  max-width: min(320px, 66vw);
+  border-left: 3px solid rgba(178, 230, 255, 0.85);
+  border-radius: 8px;
+  padding: 6px 8px;
+  background: rgba(8, 29, 54, 0.52);
+  margin-bottom: 2px;
+}
+
+.chat-reply-chip small {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #d9edff;
+  margin-bottom: 2px;
+}
+
+.chat-reply-chip span {
+  display: block;
+  font-size: 0.76rem;
+  color: #c1dbf7;
+  line-height: 1.25;
+}
+
+.chat-bubble.mine .chat-reply-chip {
+  background: rgba(6, 76, 112, 0.48);
+  border-left-color: rgba(208, 251, 255, 0.92);
 }
 
 .chat-audio {
@@ -1014,6 +1045,51 @@
   display: flex;
   gap: 8px;
   flex-shrink: 0;
+}
+
+.chat-reply-draft {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  border-top: 1px solid rgba(111, 172, 248, 0.26);
+  background: linear-gradient(180deg, rgba(11, 34, 64, 0.94), rgba(8, 25, 47, 0.95));
+}
+
+.chat-reply-draft-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.chat-reply-draft-text strong {
+  font-size: 0.74rem;
+  color: #e3f2ff;
+}
+
+.chat-reply-draft-text span {
+  font-size: 0.78rem;
+  color: #b8d3ef;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-reply-draft-cancel {
+  border: 1px solid rgba(133, 188, 253, 0.45);
+  border-radius: 999px;
+  background: rgba(16, 46, 84, 0.9);
+  color: #e5f3ff;
+  font-size: 0.74rem;
+  font-weight: 700;
+  padding: 6px 11px;
+  cursor: pointer;
+}
+
+.chat-reply-draft-cancel:hover {
+  filter: brightness(1.08);
 }
 
 .wa-input-row {
