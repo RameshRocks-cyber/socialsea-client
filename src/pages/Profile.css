@@ -1,6 +1,6 @@
-﻿.profile-page {
+.profile-page {
   min-height: 100vh;
-  padding: 18px clamp(10px, 3vw, 24px) 30px;
+  padding: 14px clamp(8px, 2.4vw, 20px) 24px;
   color: #eef4ff;
   background:
     radial-gradient(1100px 380px at 15% -10%, rgba(42, 120, 255, 0.2), transparent 70%),
@@ -15,7 +15,7 @@
   align-items: center;
   background: linear-gradient(145deg, rgba(12, 20, 42, 0.8), rgba(8, 12, 24, 0.9));
   border: 1px solid rgba(82, 126, 224, 0.28);
-  border-radius: 18px;
+  border-radius: 16px;
   padding: 18px;
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.34);
 }
@@ -236,11 +236,12 @@
 .profile-shortcut-card {
   text-align: left;
   border: 1px solid rgba(75, 113, 192, 0.35);
-  border-radius: 14px;
+  border-radius: 12px;
   background: linear-gradient(150deg, rgba(10, 16, 34, 0.92), rgba(7, 11, 22, 0.95));
   color: #e6efff;
   padding: 12px;
   cursor: pointer;
+  box-shadow: 0 10px 22px rgba(4, 14, 38, 0.28);
 }
 
 .profile-shortcut-card h4 {
@@ -272,6 +273,11 @@
 }
 
 @media (max-width: 840px) {
+  .profile-page {
+    padding-left: max(8px, env(safe-area-inset-left));
+    padding-right: max(8px, env(safe-area-inset-right));
+  }
+
   .profile-header {
     grid-template-columns: 1fr;
     justify-items: center;
@@ -299,6 +305,15 @@
 }
 
 @media (max-width: 560px) {
+  .profile-page {
+    padding: 8px max(6px, env(safe-area-inset-right)) 12px max(6px, env(safe-area-inset-left));
+  }
+
+  .profile-header {
+    border-radius: 12px;
+    padding: 14px 12px;
+  }
+
   .profile-posts-title {
     font-size: 26px;
   }
@@ -310,6 +325,15 @@
 
   .profile-posts-grid {
     grid-template-columns: 1fr;
+    gap: 8px;
+    margin-top: 12px;
+  }
+
+  .profile-post-card,
+  .profile-post-card img,
+  .profile-post-card video {
+    height: 220px;
+    border-radius: 10px;
   }
 }
 
@@ -385,3 +409,5 @@
     transform: none;
   }
 }
+
+

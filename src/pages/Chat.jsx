@@ -1,5 +1,5 @@
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   FiArrowLeft,
   FiCamera,
@@ -50,6 +50,7 @@ const CHAT_CUSTOM_STICKERS_KEY = "socialsea_chat_custom_stickers_v1";
 const CHAT_TRANSLATOR_KEY = "socialsea_chat_translator_v1";
 const CHAT_WALLPAPER_KEY = "socialsea_chat_wallpaper_v1";
 const BLOCKED_USERS_KEY = "socialsea_blocked_users_v1";
+const CHAT_SHARE_DRAFT_KEY = "socialsea_chat_share_draft_v1";
 const DELETE_FOR_EVERYONE_TOKEN = "__SS_DELETE_EVERYONE__:";
 const SIGN_ASSIST_TOKEN = "__SS_SIGN_ASSIST__:";
 const SIGN_VOICE_GENDERS = ["female", "male"];
@@ -309,6 +310,7 @@ const getStoredToken = () =>
 export default function Chat() {
   const navigate = useNavigate();
   const { contactId } = useParams();
+  const location = useLocation();
 
   const safeGetItem = (key) => {
     try {
@@ -341,6 +343,8 @@ export default function Chat() {
   const [searchUsers, setSearchUsers] = useState([]);
   const [sidebarSearchUsers, setSidebarSearchUsers] = useState([]);
   const [chatFallbackMode, setChatFallbackMode] = useState(false);
+  const [pendingShareDraft, setPendingShareDraft] = useState("");
+  const [shareHint, setShareHint] = useState("");
 
   const [incomingCall, setIncomingCall] = useState(null);
   const [callState, setCallState] = useState({
@@ -2406,6 +2410,39 @@ export default function Chat() {
   }, [contactId]);
 
   useEffect(() => {
+    const params = new URLSearchParams(location.search || "");
+    const fromQuery = String(params.get("share") || "").trim();
+    const fromState = String(location.state?.shareDraft || "").trim();
+    let fromStorage = "";
+    try {
+      fromStorage = String(sessionStorage.getItem(CHAT_SHARE_DRAFT_KEY) || "").trim();
+    } catch {
+      fromStorage = "";
+    }
+    const draft = fromState || fromQuery || fromStorage;
+    if (!draft) return;
+    setPendingShareDraft(draft);
+    setShareHint("Select a chat, then tap Send.");
+    try {
+      sessionStorage.removeItem(CHAT_SHARE_DRAFT_KEY);
+    } catch {
+      // ignore storage failures
+    }
+  }, [location.search, location.state]);
+
+  useEffect(() => {
+    if (!pendingShareDraft || !activeContactId) return;
+    setInputText((prev) => {
+      const base = String(prev || "").trim();
+      return base ? `${base}\n${pendingShareDraft}` : pendingShareDraft;
+    });
+    setShareHint("Video added to message box.");
+    setPendingShareDraft("");
+    const t = setTimeout(() => setShareHint(""), 1500);
+    return () => clearTimeout(t);
+  }, [pendingShareDraft, activeContactId]);
+
+  useEffect(() => {
     if (!activeContactId) return;
     shouldStickToBottomRef.current = true;
     loadThread(activeContactId).catch(() => {});
@@ -4290,6 +4327,7 @@ export default function Chat() {
           onChange={(e) => setQuery(e.target.value)}
         />
         {error && <p className="chat-error">{error}</p>}
+        {!error && !!shareHint && <p className="chat-empty">{shareHint}</p>}
         <div className="chat-contact-list">
           {filteredContacts.map((c) => (
             <button

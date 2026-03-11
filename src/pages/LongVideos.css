@@ -1,7 +1,8 @@
 .yt-watch-page {
-  max-width: 1560px;
+  width: 100%;
+  max-width: 1680px;
   margin: 0 auto;
-  padding: 8px 12px 24px;
+  padding: 8px 8px 24px;
 }
 
 .yt-topbar {
@@ -138,16 +139,20 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 12px;
-  max-width: 860px;
-  margin: 0 auto;
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
 }
 
 .watch-main {
   min-width: 0;
   border: 1px solid rgba(67, 83, 112, 0.45);
   border-radius: 14px;
-  background: #12151b;
+  background:
+    radial-gradient(130% 180% at 0% 0%, rgba(39, 96, 205, 0.18), transparent 56%),
+    #12151b;
   padding: 10px;
+  box-shadow: 0 12px 28px rgba(4, 14, 38, 0.36);
 }
 
 .watch-player-wrap {
@@ -161,9 +166,81 @@
 .watch-player {
   width: 100%;
   max-height: min(72vh, 680px);
-  object-fit: contain;
+  object-fit: cover;
   display: block;
   background: #000;
+  touch-action: none;
+}
+
+.watch-overlay-controls {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 6;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  opacity: 1;
+  transition: opacity 0.22s ease;
+  pointer-events: none;
+}
+
+.watch-overlay-controls.is-hidden {
+  opacity: 0;
+}
+
+.watch-nav-btn {
+  position: relative;
+  width: 46px;
+  height: 46px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: #ffffff;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.7);
+  transition: transform 0.15s ease, opacity 0.15s ease;
+  pointer-events: auto;
+}
+
+.watch-nav-btn:hover {
+  transform: scale(1.04);
+  opacity: 0.95;
+}
+
+.watch-nav-icon {
+  font-size: 1.36rem;
+  line-height: 1;
+}
+
+.watch-nav-play .watch-nav-icon {
+  font-size: 1.48rem;
+}
+
+.watch-nav-btn:active {
+  transform: scale(0.94);
+}
+
+.watch-gesture-hud {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  z-index: 6;
+  border: 1px solid rgba(150, 184, 246, 0.58);
+  border-radius: 999px;
+  background: rgba(5, 11, 23, 0.82);
+  color: #f1f7ff;
+  font-weight: 700;
+  font-size: 0.82rem;
+  padding: 6px 12px;
 }
 
 .watch-quality-btn {
@@ -208,13 +285,16 @@
 .watch-title {
   margin: 12px 2px 6px;
   color: #f2f7ff;
-  font-size: 1.34rem;
+  font-size: 1.38rem;
+  font-weight: 800;
+  letter-spacing: 0.15px;
   line-height: 1.3;
 }
 
 .watch-owner {
   margin: 0 2px;
-  color: #aebdd8;
+  color: #bdd0f2;
+  font-size: 0.95rem;
 }
 
 .watch-actions-row {
@@ -294,10 +374,13 @@
 .watch-side {
   border: 1px solid rgba(67, 83, 112, 0.45);
   border-radius: 14px;
-  background: #12151b;
+  background:
+    radial-gradient(130% 180% at 0% 0%, rgba(39, 96, 205, 0.14), transparent 56%),
+    #12151b;
   padding: 10px;
   max-height: none;
   overflow: visible;
+  box-shadow: 0 12px 28px rgba(4, 14, 38, 0.34);
 }
 
 .watch-side h3 {
@@ -380,15 +463,98 @@
 }
 
 @media (max-width: 700px) {
+  .yt-watch-page.is-watch-mode {
+    padding: 0 0 calc(12px + env(safe-area-inset-bottom));
+    background: #0b0b0b;
+  }
+
+  .yt-watch-page.is-watch-mode .yt-topbar,
+  .yt-watch-page.is-watch-mode .yt-chip-row {
+    display: none;
+  }
+
+  .yt-watch-page {
+    padding: 6px 0 calc(20px + env(safe-area-inset-bottom));
+  }
+
   .yt-topbar {
     grid-template-columns: 1fr;
+    padding: 6px 8px 10px;
+  }
+
+  .yt-chip-row {
+    padding: 6px 8px 14px;
+  }
+
+  .watch-main,
+  .watch-side {
+    border-radius: 12px;
+    padding: 8px;
+  }
+
+  .yt-watch-page.is-watch-mode .watch-main {
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    padding: 0;
+    background: #0b0b0b;
+  }
+
+  .yt-watch-page.is-watch-mode .watch-player-wrap {
+    border-radius: 0;
+    border: none;
+  }
+
+  .yt-watch-page.is-watch-mode .watch-player {
+    width: 100%;
+    height: auto;
+    max-height: none;
+    aspect-ratio: 16 / 9;
+    object-fit: contain;
+    background: #000;
+  }
+
+  .yt-watch-page.is-watch-mode .watch-title,
+  .yt-watch-page.is-watch-mode .watch-owner,
+  .yt-watch-page.is-watch-mode .watch-actions-row,
+  .yt-watch-page.is-watch-mode .watch-comments,
+  .yt-watch-page.is-watch-mode .watch-side {
+    margin-left: 10px;
+    margin-right: 10px;
+  }
+
+  .watch-title {
+    font-size: 1.2rem;
+  }
+
+  .watch-owner {
+    font-size: 0.9rem;
   }
 
   .yt-home-grid {
     grid-template-columns: 1fr;
+    gap: 10px;
+    padding: 0 4px;
   }
 
   .watch-item {
     grid-template-columns: 1fr;
+  }
+
+  .watch-nav-btn {
+    width: 40px;
+    height: 40px;
+  }
+
+  .watch-overlay-controls {
+    gap: 6px;
+  }
+
+  .watch-nav-icon {
+    font-size: 1.22rem;
+  }
+
+  .watch-nav-play .watch-nav-icon {
+    font-size: 1.32rem;
   }
 }

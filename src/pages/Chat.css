@@ -1,15 +1,16 @@
-﻿.chat-page {
+.chat-page {
   height: 100%;
+  min-height: 0;
   display: grid;
   grid-template-columns: 340px minmax(0, 1fr);
-  border: 1px solid rgba(86, 140, 234, 0.32);
-  border-radius: 20px;
+  border: none;
+  border-radius: 0;
   overflow: hidden;
   background:
     radial-gradient(950px 320px at -10% -20%, rgba(40, 112, 255, 0.2), transparent 62%),
     radial-gradient(720px 300px at 110% -10%, rgba(0, 196, 255, 0.14), transparent 65%),
     linear-gradient(160deg, #05112b 0%, #040d24 55%, #030a1b 100%);
-  box-shadow: 0 22px 54px rgba(3, 8, 20, 0.48);
+  box-shadow: none;
 }
 
 .chat-page.chat-single-pane,
@@ -1832,14 +1833,14 @@
 @media (max-width: 960px) {
   .chat-page {
     grid-template-columns: 1fr;
-    height: auto;
-    min-height: calc(100vh - 160px);
+    height: 100%;
+    min-height: 0;
   }
 
   .chat-sidebar {
     border-right: none;
     border-bottom: 1px solid rgba(56, 83, 140, 0.55);
-    max-height: 42vh;
+    max-height: none;
   }
 
   .call-videos {
@@ -1887,15 +1888,13 @@
 
 /* WhatsApp-like conversation layout */
 .chat-page.chat-single-pane {
-  border-radius: 14px;
-  border: 1px solid rgba(124, 195, 255, 0.44);
+  border-radius: 0;
+  border: none;
   background:
     radial-gradient(140% 120% at 0% 0%, rgba(24, 214, 255, 0.12), transparent 54%),
     radial-gradient(120% 110% at 100% 0%, rgba(255, 146, 88, 0.1), transparent 56%),
     #071a34;
-  box-shadow:
-    0 18px 44px rgba(2, 8, 20, 0.5),
-    0 0 0 1px rgba(123, 190, 255, 0.16) inset;
+  box-shadow: none;
   height: 100%;
   min-height: 0;
 }
@@ -2268,7 +2267,7 @@
   .chat-page.chat-single-pane {
     height: 100%;
     min-height: 100%;
-    border-radius: 12px;
+    border-radius: 0;
   }
 
   .chat-page.chat-single-pane .chat-main {
@@ -2465,3 +2464,5 @@
   font-size: 0.72rem;
   color: #9dd6ff;
 }
+
+

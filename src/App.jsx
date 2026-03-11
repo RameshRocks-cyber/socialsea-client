@@ -119,7 +119,7 @@ function AppRoutes() {
         className={`app-main ${showUserNavbar ? "with-user-nav" : ""} ${isChatRoute ? "chat-main-route" : ""} ${
           isChatConversationRoute ? "chat-conversation-route" : ""
         } ${isReelsRoute ? "reels-main-route" : ""} ${
-          showUserNavbar ? "bg-gradient-to-br from-blue-950 via-slate-900 to-blue-900 text-white" : ""
+          showUserNavbar ? "bg-black text-white" : ""
         }`}
       >
         <div className={`app-content ${isReelsRoute ? "reels-content" : ""} ${isChatRoute ? "chat-content" : ""}`}>

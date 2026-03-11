@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { FiBookmark } from "react-icons/fi";
 import { BsBookmarkFill } from "react-icons/bs";
@@ -7,6 +7,7 @@ import { getApiBaseUrl, toApiUrl } from "../api/baseUrl";
 import "./Feed.css";
 
 const LONG_VIDEO_SECONDS = 90;
+const CHAT_SHARE_DRAFT_KEY = "socialsea_chat_share_draft_v1";
 
 export default function Feed() {
   const navigate = useNavigate();
@@ -27,11 +28,27 @@ export default function Feed() {
   const [videoDurationByPost, setVideoDurationByPost] = useState({});
   const [profilePicByOwner, setProfilePicByOwner] = useState({});
   const [mutedByPost, setMutedByPost] = useState({});
-  const wheelLockRef = useRef(0);
-  const wheelDeltaRef = useRef(0);
-  const touchStartYRef = useRef(null);
+  const [menuOpenPostId, setMenuOpenPostId] = useState(null);
+  const [hiddenPostIds, setHiddenPostIds] = useState({});
+  const [blockedOwnerKeys, setBlockedOwnerKeys] = useState({});
   const mediaClickTimerByPostRef = useRef({});
   const viewerVideoRefs = useRef({});
+  const retryTimerRef = useRef(0);
+  const retryCountRef = useRef(0);
+  const inFlightLoadRef = useRef(false);
+  const lastLoadAtRef = useRef(0);
+  const postsCountRef = useRef(0);
+  const menuRef = useRef(null);
+
+  const HIDDEN_POSTS_KEY = "feedHiddenPostIds";
+  const BLOCKED_OWNERS_KEY = "feedBlockedOwnerKeys";
+  const PLAYLIST_KEY = "playlistPostIds";
+  const QUEUE_KEY = "postQueueIds";
+  const PLAY_NEXT_KEY = "playNextPostId";
+
+  useEffect(() => {
+    postsCountRef.current = Array.isArray(posts) ? posts.length : 0;
+  }, [posts]);
 
   useEffect(() => {
     let mounted = true;
@@ -61,8 +78,31 @@ export default function Feed() {
             : Array.isArray(payload?.content)
               ? payload.content
               : [];
-    const load = async () => {
-      setIsLoading(true);
+    const clearRetryTimer = () => {
+      if (retryTimerRef.current) {
+        clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = 0;
+      }
+    };
+
+    const scheduleRetry = () => {
+      if (!mounted) return;
+      if (retryCountRef.current >= 4) return;
+      clearRetryTimer();
+      const delays = [1200, 2200, 4000, 6500];
+      const delay = delays[retryCountRef.current] || 6500;
+      retryTimerRef.current = window.setTimeout(() => {
+        if (!mounted) return;
+        retryCountRef.current += 1;
+        void load(true);
+      }, delay);
+    };
+
+    const load = async (silent = false) => {
+      if (inFlightLoadRef.current) return;
+      inFlightLoadRef.current = true;
+      lastLoadAtRef.current = Date.now();
+      if (!silent) setIsLoading(true);
       try {
         const baseCandidates = buildBaseCandidates();
         const endpoints = ["/api/feed", "/feed", "/api/posts", "/posts"];
@@ -107,6 +147,13 @@ export default function Feed() {
         const list = Array.isArray(res.data) ? res.data : [];
         if (!mounted) return;
         setPosts(list);
+        if (list.length > 0) {
+          setError("");
+          retryCountRef.current = 0;
+          clearRetryTimer();
+        } else {
+          scheduleRetry();
+        }
 
         if (list.length === 0) {
           try {
@@ -129,13 +176,37 @@ export default function Feed() {
         const status = err?.response?.status;
         const message = err?.response?.data?.message || err?.response?.data || "";
         setError(status ? `Failed to load feed (${status}) ${message}` : "Failed to load feed");
+        scheduleRetry();
       } finally {
+        inFlightLoadRef.current = false;
         if (mounted) setIsLoading(false);
       }
     };
-    void load();
+
+    const refreshIfStale = () => {
+      if (!mounted) return;
+      const staleForMs = Date.now() - lastLoadAtRef.current;
+      if (staleForMs < 3000 && postsCountRef.current > 0) return;
+      void load(true);
+    };
+
+    const onOnline = () => refreshIfStale();
+    const onFocus = () => refreshIfStale();
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") refreshIfStale();
+    };
+
+    window.addEventListener("online", onOnline);
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+
+    void load(false);
     return () => {
       mounted = false;
+      clearRetryTimer();
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, []);
 
@@ -189,6 +260,38 @@ export default function Feed() {
       // ignore invalid localStorage payload
     }
   }, []);
+
+  useEffect(() => {
+    try {
+      const hiddenRaw = localStorage.getItem(HIDDEN_POSTS_KEY);
+      const hidden = hiddenRaw ? JSON.parse(hiddenRaw) : [];
+      if (Array.isArray(hidden)) {
+        setHiddenPostIds(hidden.reduce((acc, id) => ({ ...acc, [id]: true }), {}));
+      }
+    } catch {
+      // ignore
+    }
+    try {
+      const blockedRaw = localStorage.getItem(BLOCKED_OWNERS_KEY);
+      const blocked = blockedRaw ? JSON.parse(blockedRaw) : [];
+      if (Array.isArray(blocked)) {
+        setBlockedOwnerKeys(blocked.reduce((acc, key) => ({ ...acc, [String(key)]: true }), {}));
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!menuOpenPostId) return;
+    const onDocClick = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) {
+        setMenuOpenPostId(null);
+      }
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [menuOpenPostId]);
 
   const resolveUrl = (url) => {
     if (!url) return "";
@@ -454,14 +557,15 @@ export default function Feed() {
     const shareUrl = `${window.location.origin}${window.location.pathname}?post=${post.id}`;
     const shareText = `${post.description || post.content || "Check this post"} ${shareUrl}`;
     try {
-      if (navigator.share) {
-        await navigator.share({ title: "SocialSea Post", text: shareText, url: shareUrl });
-      } else if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(shareUrl);
+      try {
+        sessionStorage.setItem(CHAT_SHARE_DRAFT_KEY, shareText);
+      } catch {
+        // ignore storage failures
       }
-      setShareMessageByPost((prev) => ({ ...prev, [post.id]: "Shared" }));
+      navigate(`/chat?share=${encodeURIComponent(shareText)}`);
+      setShareMessageByPost((prev) => ({ ...prev, [post.id]: "Sharing to chat..." }));
     } catch {
-      setShareMessageByPost((prev) => ({ ...prev, [post.id]: "Share cancelled" }));
+      setShareMessageByPost((prev) => ({ ...prev, [post.id]: "Share failed" }));
     }
     setTimeout(() => {
       setShareMessageByPost((prev) => ({ ...prev, [post.id]: "" }));
@@ -496,26 +600,35 @@ export default function Feed() {
     });
   }, [posts, query]);
 
-  const longVideoPosts = useMemo(() => {
+  const visiblePosts = useMemo(() => {
     return filteredPosts.filter((post) => {
+      if (hiddenPostIds[post.id]) return false;
+      const ownerKey = ownerKeyFor(post);
+      if (ownerKey && blockedOwnerKeys[ownerKey]) return false;
+      return true;
+    });
+  }, [filteredPosts, hiddenPostIds, blockedOwnerKeys]);
+
+  const longVideoPosts = useMemo(() => {
+    return visiblePosts.filter((post) => {
       const isVideo = mediaTypeFor(post) === "VIDEO";
       const duration = Number(videoDurationByPost[post.id] || 0);
       // Keep videos visible until metadata is known, then keep only true long videos.
       return isVideo && (duration <= 0 || duration > LONG_VIDEO_SECONDS);
     });
-  }, [filteredPosts, videoDurationByPost]);
+  }, [visiblePosts, videoDurationByPost]);
 
   const gridPosts = useMemo(() => {
-    return filteredPosts.filter((post) => !longVideoPosts.some((lv) => lv.id === post.id));
-  }, [filteredPosts, longVideoPosts]);
+    return visiblePosts.filter((post) => !longVideoPosts.some((lv) => lv.id === post.id));
+  }, [visiblePosts, longVideoPosts]);
 
   const shortVideoPosts = useMemo(() => {
-    return filteredPosts.filter((post) => {
+    return visiblePosts.filter((post) => {
       if (mediaTypeFor(post) !== "VIDEO") return false;
       const duration = Number(videoDurationByPost[post.id] || 0);
       return duration <= 0 || duration <= LONG_VIDEO_SECONDS;
     });
-  }, [filteredPosts, videoDurationByPost]);
+  }, [visiblePosts, videoDurationByPost]);
 
   const activeShortVideoIndex = useMemo(
     () => shortVideoPosts.findIndex((p) => p.id === activePostId),
@@ -578,48 +691,6 @@ export default function Feed() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [isShortViewerOpen, shortVideoPosts, activeShortVideoIndex]);
 
-  useEffect(() => {
-    if (!isShortViewerOpen) return;
-    const onWheel = (e) => {
-      e.preventDefault();
-      wheelDeltaRef.current += e.deltaY;
-      if (Math.abs(wheelDeltaRef.current) < 50) return;
-      const direction = wheelDeltaRef.current > 0 ? 1 : -1;
-      wheelDeltaRef.current = 0;
-      const now = Date.now();
-      if (now - wheelLockRef.current < 360) return;
-      wheelLockRef.current = now;
-      void moveShortVideo(direction);
-    };
-    window.addEventListener("wheel", onWheel, { passive: false });
-    return () => window.removeEventListener("wheel", onWheel);
-  }, [isShortViewerOpen, shortVideoPosts, activeShortVideoIndex]);
-
-  useEffect(() => {
-    if (!isShortViewerOpen) return;
-    const onTouchStart = (e) => {
-      touchStartYRef.current = e.touches?.[0]?.clientY ?? null;
-    };
-    const onTouchEnd = (e) => {
-      const startY = touchStartYRef.current;
-      const endY = e.changedTouches?.[0]?.clientY ?? null;
-      touchStartYRef.current = null;
-      if (startY == null || endY == null) return;
-      const delta = startY - endY;
-      if (Math.abs(delta) < 40) return;
-      const now = Date.now();
-      if (now - wheelLockRef.current < 360) return;
-      wheelLockRef.current = now;
-      void moveShortVideo(delta > 0 ? 1 : -1);
-    };
-    window.addEventListener("touchstart", onTouchStart, { passive: true });
-    window.addEventListener("touchend", onTouchEnd, { passive: true });
-    return () => {
-      window.removeEventListener("touchstart", onTouchStart);
-      window.removeEventListener("touchend", onTouchEnd);
-    };
-  }, [isShortViewerOpen, shortVideoPosts, activeShortVideoIndex]);
-
   const closePostView = () => {
     setActivePostId(null);
     if (searchParams.get("post")) navigate("/feed", { replace: true });
@@ -628,12 +699,12 @@ export default function Feed() {
   const activePost = posts.find((p) => p.id === activePostId) || null;
   const viewerPosts = useMemo(() => {
     if (!activePost) return [];
-    const pool = feedMode === "all" ? shortVideoPosts : filteredPosts;
+    const pool = feedMode === "all" ? shortVideoPosts : visiblePosts;
     const idx = pool.findIndex((p) => Number(p?.id) === Number(activePost.id));
     if (idx < 0) return [activePost];
     const ordered = [...pool.slice(idx), ...pool.slice(0, idx)];
     return ordered.length ? ordered : [activePost];
-  }, [activePost, feedMode, shortVideoPosts, filteredPosts]);
+  }, [activePost, feedMode, shortVideoPosts, visiblePosts]);
 
   useEffect(() => {
     if (!activePostId) return undefined;
@@ -714,6 +785,83 @@ export default function Feed() {
     };
   }, []);
 
+  const persistIdCollection = (key, map) => {
+    const ids = Object.keys(map)
+      .filter((id) => map[id])
+      .map((id) => Number(id));
+    localStorage.setItem(key, JSON.stringify(ids));
+  };
+
+  const appendToIdList = (key, postId) => {
+    try {
+      const raw = localStorage.getItem(key);
+      const parsed = raw ? JSON.parse(raw) : [];
+      const list = Array.isArray(parsed) ? parsed.map((x) => Number(x)).filter((n) => Number.isFinite(n)) : [];
+      if (!list.includes(Number(postId))) list.push(Number(postId));
+      localStorage.setItem(key, JSON.stringify(list));
+    } catch {
+      localStorage.setItem(key, JSON.stringify([Number(postId)]));
+    }
+  };
+
+  const showMenuStatus = (postId, text) => {
+    setShareMessageByPost((prev) => ({ ...prev, [postId]: text }));
+    setTimeout(() => {
+      setShareMessageByPost((prev) => ({ ...prev, [postId]: "" }));
+    }, 1200);
+  };
+
+  const onMenuAction = async (action, post) => {
+    if (!post?.id) return;
+    const ownerKey = ownerKeyFor(post);
+
+    if (action === "share") {
+      await sharePost(post);
+    } else if (action === "playlist") {
+      appendToIdList(PLAYLIST_KEY, post.id);
+      showMenuStatus(post.id, "Saved to playlist");
+    } else if (action === "not_interested") {
+      setHiddenPostIds((prev) => {
+        const next = { ...prev, [post.id]: true };
+        persistIdCollection(HIDDEN_POSTS_KEY, next);
+        return next;
+      });
+      showMenuStatus(post.id, "Hidden");
+    } else if (action === "dont_recommend") {
+      if (ownerKey) {
+        setBlockedOwnerKeys((prev) => {
+          const next = { ...prev, [ownerKey]: true };
+          const keys = Object.keys(next).filter((k) => next[k]);
+          localStorage.setItem(BLOCKED_OWNERS_KEY, JSON.stringify(keys));
+          return next;
+        });
+        showMenuStatus(post.id, "Won't recommend this video");
+      }
+    } else if (action === "report") {
+      try {
+        await api.post("/api/report", {
+          postId: post.id,
+          reason: "Inappropriate content",
+        });
+        showMenuStatus(post.id, "Reported");
+      } catch {
+        showMenuStatus(post.id, "Report submitted");
+      }
+    } else if (action === "watch_later") {
+      const wasSaved = !!watchLaterPostIds[post.id];
+      toggleWatchLater(post.id);
+      showMenuStatus(post.id, wasSaved ? "Removed from Watch Later" : "Saved to Watch Later");
+    } else if (action === "play_next") {
+      localStorage.setItem(PLAY_NEXT_KEY, String(post.id));
+      showMenuStatus(post.id, "Set to play next");
+    } else if (action === "queue") {
+      appendToIdList(QUEUE_KEY, post.id);
+      showMenuStatus(post.id, "Added to queue");
+    }
+
+    setMenuOpenPostId(null);
+  };
+
   return (
     <div className="feed-page">
       <div className="explore-search-wrap">
@@ -750,7 +898,7 @@ export default function Feed() {
 
       {error && <p>{error}</p>}
       {!error && isLoading && <p className="feed-empty">Loading videos...</p>}
-      {!error && !isLoading && filteredPosts.length === 0 && <p className="feed-empty">No posts found</p>}
+      {!error && !isLoading && visiblePosts.length === 0 && <p className="feed-empty">No posts found</p>}
       {!error && !isLoading && feedMode === "long" && !longVideoPosts.length && (
         <p className="feed-empty">No long videos found</p>
       )}
@@ -768,11 +916,18 @@ export default function Feed() {
             const profilePic = profilePicFor(post);
             const duration = videoDurationByPost[post.id] || 0;
             return (
-              <button
+              <article
                 key={`long-${post.id}`}
-                type="button"
                 className="long-feed-card"
                 onClick={() => navigate(`/watch/${post.id}`)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    navigate(`/watch/${post.id}`);
+                  }
+                }}
+                role="button"
+                tabIndex={0}
                 title={user}
               >
                 <div className="long-feed-thumb-wrap">
@@ -799,8 +954,35 @@ export default function Feed() {
                     <p className="long-feed-title">{captionFor(post)}</p>
                     <p className="long-feed-sub">{user} • {(likeCounts[post.id] || 0).toLocaleString()} likes</p>
                   </div>
+                  <div className="long-feed-menu-wrap" ref={menuOpenPostId === post.id ? menuRef : null}>
+                    <button
+                      type="button"
+                      className="long-feed-menu-btn"
+                      aria-label="More options"
+                      aria-expanded={menuOpenPostId === post.id}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setMenuOpenPostId((prev) => (prev === post.id ? null : post.id));
+                      }}
+                    >
+                      {"\u22EE"}
+                    </button>
+                    {menuOpenPostId === post.id && (
+                      <div className="long-feed-menu" onClick={(e) => e.stopPropagation()}>
+                        <button type="button" onClick={() => onMenuAction("share", post)}>Share video</button>
+                        <button type="button" onClick={() => onMenuAction("playlist", post)}>Save to playlist</button>
+                        <button type="button" onClick={() => onMenuAction("not_interested", post)}>Not interested</button>
+                        <button type="button" onClick={() => onMenuAction("dont_recommend", post)}>Don't recommend this video</button>
+                        <button type="button" onClick={() => onMenuAction("report", post)}>Report</button>
+                        <button type="button" onClick={() => onMenuAction("watch_later", post)}>Save to Watch Later</button>
+                        <button type="button" onClick={() => onMenuAction("play_next", post)}>Play next</button>
+                        <button type="button" onClick={() => onMenuAction("queue", post)}>In queue</button>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </button>
+              </article>
             );
           })}
         </section>
@@ -878,11 +1060,11 @@ export default function Feed() {
                     )}
                     <div className="ig-user-meta">
                       <p className="feed-username">{usernameFor(post)}</p>
-                      <small>{usernameFor(post)} • Original audio</small>
+                      <small>{usernameFor(post)} â€¢ Original audio</small>
                     </div>
                     <div className="ig-user-actions">
                       <button type="button" className="ig-follow-btn">Follow</button>
-                      <button type="button" className="ig-more-btn" aria-label="More options">⋮</button>
+                      <button type="button" className="ig-more-btn" aria-label="More options">â‹®</button>
                     </div>
                   </header>
 
@@ -985,3 +1167,4 @@ export default function Feed() {
     </div>
   );
 }
+

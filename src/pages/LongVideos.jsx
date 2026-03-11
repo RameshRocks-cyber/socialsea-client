@@ -20,8 +20,13 @@ const WATCH_CATEGORIES = [
 
 export default function LongVideos() {
   const { postId } = useParams();
+  const isWatchMode = Boolean(postId);
   const navigate = useNavigate();
   const playerRef = useRef(null);
+  const playerWrapRef = useRef(null);
+  const gestureRef = useRef({ active: false, mode: "", startY: 0, startValue: 0, pointerId: null });
+  const gestureHudTimerRef = useRef(0);
+  const controlsHideTimerRef = useRef(0);
   const [allPosts, setAllPosts] = useState([]);
   const [videoDurationByPost, setVideoDurationByPost] = useState({});
   const [isLoading, setIsLoading] = useState(true);
@@ -38,6 +43,10 @@ export default function LongVideos() {
   const [showComments, setShowComments] = useState(true);
   const [searchText, setSearchText] = useState("");
   const [activeCategory, setActiveCategory] = useState("All");
+  const [playerBrightness, setPlayerBrightness] = useState(1);
+  const [gestureHud, setGestureHud] = useState("");
+  const [isPlayerPaused, setIsPlayerPaused] = useState(false);
+  const [controlsVisible, setControlsVisible] = useState(true);
 
   const toList = (payload) => {
     if (Array.isArray(payload)) return payload;
@@ -386,6 +395,8 @@ export default function LongVideos() {
 
   const activeVideo =
     longVideos.find((p) => String(p.id) === String(postId)) || filteredLongVideos[0] || longVideos[0] || null;
+  const watchSequence = filteredLongVideos.length ? filteredLongVideos : longVideos;
+  const activeVideoIndex = watchSequence.findIndex((p) => String(p.id) === String(activeVideo?.id));
 
   const withCloudinaryQuality = (url, quality) => {
     if (!url || quality === "auto") return url;
@@ -585,11 +596,140 @@ export default function LongVideos() {
     navigate(`/watch/${id}`);
   };
 
-  const isWatchMode = Boolean(postId);
+  const showGestureHud = (text) => {
+    setGestureHud(text);
+    if (gestureHudTimerRef.current) clearTimeout(gestureHudTimerRef.current);
+    gestureHudTimerRef.current = window.setTimeout(() => setGestureHud(""), 650);
+  };
+
+  const changeVideoByOffset = (offset) => {
+    const primary = watchSequence.length > 1 ? watchSequence : longVideos;
+    if (!primary.length) return;
+    const currentId = String(activeVideo?.id || "");
+    const idx = primary.findIndex((p) => String(p?.id) === currentId);
+    const currentIndex = idx >= 0 ? idx : 0;
+    const nextIndex = (currentIndex + offset + primary.length) % primary.length;
+    const next = primary[nextIndex];
+    if (next?.id != null) selectVideo(next.id);
+  };
+
+  const togglePlayPause = () => {
+    const video = playerRef.current;
+    if (!video) return;
+    if (video.paused) {
+      video.play().catch(() => {});
+    } else {
+      video.pause();
+    }
+  };
+
+  const showPlayerControls = (autoHide = true) => {
+    setControlsVisible(true);
+    if (controlsHideTimerRef.current) {
+      clearTimeout(controlsHideTimerRef.current);
+      controlsHideTimerRef.current = 0;
+    }
+    if (!autoHide || isPlayerPaused) return;
+    controlsHideTimerRef.current = window.setTimeout(() => {
+      setControlsVisible(false);
+      controlsHideTimerRef.current = 0;
+    }, 3000);
+  };
+
+  const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+
+  const handlePlayerPointerDown = (event) => {
+    if (event.target?.closest?.(".watch-overlay-controls")) return;
+    showPlayerControls(true);
+    const wrap = playerWrapRef.current;
+    if (!wrap) return;
+    const rect = wrap.getBoundingClientRect();
+    const mode = event.clientX - rect.left < rect.width / 2 ? "volume" : "brightness";
+    const video = playerRef.current;
+    const startValue = mode === "volume" ? Number(video?.volume ?? 1) : Number(playerBrightness || 1);
+    gestureRef.current = {
+      active: true,
+      mode,
+      startY: event.clientY,
+      startValue,
+      pointerId: event.pointerId
+    };
+    if (wrap.setPointerCapture) {
+      try {
+        wrap.setPointerCapture(event.pointerId);
+      } catch {
+        // no-op
+      }
+    }
+  };
+
+  const handlePlayerPointerMove = (event) => {
+    if (event.target?.closest?.(".watch-overlay-controls")) return;
+    showPlayerControls(true);
+    const meta = gestureRef.current;
+    const wrap = playerWrapRef.current;
+    if (!meta.active || !wrap) return;
+    if (meta.pointerId != null && event.pointerId !== meta.pointerId) return;
+
+    const rect = wrap.getBoundingClientRect();
+    const deltaRatio = (meta.startY - event.clientY) / Math.max(1, rect.height);
+    if (meta.mode === "volume") {
+      const nextVolume = clamp(meta.startValue + deltaRatio * 1.3, 0, 1);
+      if (playerRef.current) playerRef.current.volume = nextVolume;
+      showGestureHud(`Volume ${Math.round(nextVolume * 100)}%`);
+    } else if (meta.mode === "brightness") {
+      // Browser cannot control device screen brightness; apply video brightness filter instead.
+      const nextBrightness = clamp(meta.startValue + deltaRatio * 1.1, 0.5, 1.7);
+      setPlayerBrightness(nextBrightness);
+      showGestureHud(`Brightness ${Math.round(nextBrightness * 100)}%`);
+    }
+  };
+
+  const handlePlayerPointerUp = (event) => {
+    if (event.target?.closest?.(".watch-overlay-controls")) return;
+    const wrap = playerWrapRef.current;
+    if (wrap?.releasePointerCapture && gestureRef.current.pointerId != null) {
+      try {
+        wrap.releasePointerCapture(gestureRef.current.pointerId);
+      } catch {
+        // no-op
+      }
+    }
+    gestureRef.current = { active: false, mode: "", startY: 0, startValue: 0, pointerId: null };
+    if (event?.cancelable) event.preventDefault();
+  };
+
+  useEffect(() => {
+    return () => {
+      if (gestureHudTimerRef.current) clearTimeout(gestureHudTimerRef.current);
+      if (controlsHideTimerRef.current) clearTimeout(controlsHideTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isWatchMode) return;
+    showPlayerControls(true);
+  }, [isWatchMode, activeVideo?.id, isPlayerPaused]);
+
+  useEffect(() => {
+    if (!isWatchMode) return;
+    const onKeyDown = (e) => {
+      if (e.key === "ArrowRight") {
+        e.preventDefault();
+        changeVideoByOffset(1);
+      } else if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        changeVideoByOffset(-1);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isWatchMode, activeVideoIndex, watchSequence]);
+
   const relatedVideos = longVideos.filter((item) => String(item.id) !== String(activeVideo?.id));
 
   return (
-    <div className="yt-watch-page">
+    <div className={`yt-watch-page ${isWatchMode ? "is-watch-mode" : ""}`}>
       <header className="yt-topbar">
         <h2>SocialSea Watch</h2>
         <div className="yt-search-wrap">
@@ -669,7 +809,16 @@ export default function LongVideos() {
 
             {activeVideo && (
               <>
-                <div className="watch-player-wrap">
+                <div
+                  className="watch-player-wrap"
+                  ref={playerWrapRef}
+                  onPointerDown={handlePlayerPointerDown}
+                  onPointerMove={handlePlayerPointerMove}
+                  onPointerUp={handlePlayerPointerUp}
+                  onPointerCancel={handlePlayerPointerUp}
+                  onMouseMove={() => showPlayerControls(true)}
+                  onTouchStart={() => showPlayerControls(true)}
+                >
                   <video
                     key={`${activeVideo.id}-${selectedQuality}`}
                     ref={playerRef}
@@ -677,7 +826,55 @@ export default function LongVideos() {
                     controls
                     autoPlay
                     className="watch-player"
+                    style={{ filter: `brightness(${playerBrightness})` }}
+                    onPlay={() => {
+                      setIsPlayerPaused(false);
+                      showPlayerControls(true);
+                    }}
+                    onPause={() => {
+                      setIsPlayerPaused(true);
+                      showPlayerControls(false);
+                    }}
+                    onEnded={() => {
+                      setIsPlayerPaused(true);
+                      showPlayerControls(false);
+                    }}
                   />
+                  <div
+                    className={`watch-overlay-controls ${controlsVisible ? "" : "is-hidden"}`}
+                    aria-label="Playback controls"
+                  >
+                    <button
+                      type="button"
+                      className="watch-nav-btn watch-nav-prev"
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={() => changeVideoByOffset(-1)}
+                      title="Previous video"
+                      aria-label="Previous video"
+                    >
+                      <span className="watch-nav-icon">{"\u23EE"}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="watch-nav-btn watch-nav-play"
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={togglePlayPause}
+                      title={isPlayerPaused ? "Play" : "Pause"}
+                      aria-label={isPlayerPaused ? "Play" : "Pause"}
+                    >
+                      <span className="watch-nav-icon">{isPlayerPaused ? "\u25B6" : "\u23F8"}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="watch-nav-btn watch-nav-next"
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={() => changeVideoByOffset(1)}
+                      title="Next video"
+                      aria-label="Next video"
+                    >
+                      <span className="watch-nav-icon">{"\u23ED"}</span>
+                    </button>
+                  </div>
                   <button
                     type="button"
                     className="watch-quality-btn"
@@ -702,6 +899,7 @@ export default function LongVideos() {
                       ))}
                     </div>
                   )}
+                  {!!gestureHud && <div className="watch-gesture-hud">{gestureHud}</div>}
                 </div>
 
                 <h1 className="watch-title">{captionFor(activeVideo)}</h1>

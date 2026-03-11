@@ -4,37 +4,40 @@ import { clearAuthStorage } from "../auth";
 
 const BASE_URL = getApiBaseUrl();
 const AUTH_BASE_KEY = "socialsea_auth_base_url";
-const IS_HTTPS_PAGE =
-  typeof window !== "undefined" && window.location.protocol === "https:";
-const IS_LOCAL_DEV =
-  typeof window !== "undefined" &&
-  ["localhost", "127.0.0.1"].includes(String(window.location.hostname || "").toLowerCase());
-
-const FALLBACK_BASE_URLS = [
-  BASE_URL,
-  ...(IS_LOCAL_DEV
-    ? ["/api", "http://localhost:8080", "http://127.0.0.1:8080"]
-    : ["https://api.socialsea.co.in", "/api", "http://localhost:8080", "http://43.205.213.14:8080"]),
-]
-  .filter((value, index, arr) => value && arr.indexOf(value) === index)
-  .filter((value) => !(IS_HTTPS_PAGE && /^http:\/\//i.test(value)));
+const STORED_BASE_URL = (() => {
+  try {
+    return (
+      localStorage.getItem(AUTH_BASE_KEY) ||
+      sessionStorage.getItem(AUTH_BASE_KEY) ||
+      ""
+    );
+  } catch {
+    return "";
+  }
+})();
+const ACTIVE_BASE_URL = BASE_URL || STORED_BASE_URL;
 
 // Keep the last used API base for diagnostics/fallback continuity.
 // Do NOT force-clear auth on base change; fallback retries can temporarily switch base
 // and would otherwise log users out on refresh.
 try {
-  localStorage.setItem(AUTH_BASE_KEY, BASE_URL);
-  sessionStorage.setItem(AUTH_BASE_KEY, BASE_URL);
+  if (BASE_URL) {
+    localStorage.setItem(AUTH_BASE_KEY, BASE_URL);
+    sessionStorage.setItem(AUTH_BASE_KEY, BASE_URL);
+  } else if (ACTIVE_BASE_URL) {
+    localStorage.setItem(AUTH_BASE_KEY, ACTIVE_BASE_URL);
+    sessionStorage.setItem(AUTH_BASE_KEY, ACTIVE_BASE_URL);
+  }
 } catch {
   // ignore storage errors
 }
 
 const api = axios.create({
-  baseURL: BASE_URL,
+  baseURL: ACTIVE_BASE_URL,
 });
 
 const refreshClient = axios.create({
-  baseURL: BASE_URL,
+  baseURL: ACTIVE_BASE_URL,
   withCredentials: true,
 });
 
@@ -79,31 +82,6 @@ api.interceptors.response.use(
     const status = error?.response?.status;
     if (originalRequest?.skipAuth) {
       return Promise.reject(error);
-    }
-
-    // Network/CORS failures often come with no HTTP status. Retry on alternate API base URLs.
-    if (!error?.response && originalRequest) {
-      const tried = Array.isArray(originalRequest._triedBaseUrls)
-        ? originalRequest._triedBaseUrls
-        : [];
-      const currentBase = originalRequest.baseURL || api.defaults.baseURL || BASE_URL;
-      const nextBase = FALLBACK_BASE_URLS.find(
-        (base) => base !== currentBase && !tried.includes(base)
-      );
-
-      if (nextBase) {
-        originalRequest._triedBaseUrls = [...tried, currentBase];
-        originalRequest.baseURL = nextBase;
-        api.defaults.baseURL = nextBase;
-        refreshClient.defaults.baseURL = nextBase;
-        try {
-          localStorage.setItem(AUTH_BASE_KEY, nextBase);
-          sessionStorage.setItem(AUTH_BASE_KEY, nextBase);
-        } catch {
-          // ignore storage errors
-        }
-        return api(originalRequest);
-      }
     }
 
     // Only retry on 401 (NOT 403)

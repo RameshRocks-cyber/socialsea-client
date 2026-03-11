@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { FiBookmark } from "react-icons/fi";
 import { BsBookmarkFill } from "react-icons/bs";
 import api from "../api/axios";
@@ -18,6 +18,7 @@ const GESTURE_SWIPE_STABLE_FRAMES = 1;
 const GESTURE_SCRIPT_TF = "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js";
 const GESTURE_SCRIPT_HANDPOSE =
   "https://cdn.jsdelivr.net/npm/@tensorflow-models/handpose@0.0.7/dist/handpose.min.js";
+const CHAT_SHARE_DRAFT_KEY = "socialsea_chat_share_draft_v1";
 
 function loadScript(src, id) {
   if (document.getElementById(id)) return Promise.resolve();
@@ -33,6 +34,7 @@ function loadScript(src, id) {
 }
 
 export default function Reels() {
+  const navigate = useNavigate();
   const [reels, setReels] = useState([]);
   const [error, setError] = useState("");
   const [gestureEnabled, setGestureEnabled] = useState(false);
@@ -81,6 +83,8 @@ export default function Reels() {
   const currentIndexRef = useRef(0);
   const pendingScrollIndexRef = useRef(null);
   const gestureScrollLockRef = useRef(false);
+  const scrollIdleTimerRef = useRef(0);
+  const scrollRafRef = useRef(0);
   const likedPostIdsRef = useRef({});
   const likeBusyByPostRef = useRef({});
   const location = useLocation();
@@ -92,20 +96,12 @@ export default function Reels() {
   useEffect(() => {
     let cancelled = false;
     const buildBaseCandidates = () => {
-      const isLocalDev =
-        typeof window !== "undefined" &&
-        ["localhost", "127.0.0.1"].includes(String(window.location.hostname || "").toLowerCase());
       const storedBase =
         typeof window !== "undefined"
           ? localStorage.getItem("socialsea_auth_base_url") || sessionStorage.getItem("socialsea_auth_base_url")
           : "";
-      return [
-        api.defaults.baseURL,
-        storedBase,
-        getApiBaseUrl(),
-        import.meta.env.VITE_API_URL,
-        ...(isLocalDev ? ["http://localhost:8080", "http://127.0.0.1:8080", "/api"] : ["https://socialsea.co.in"]),
-      ].filter((v, i, arr) => v && arr.indexOf(v) === i);
+      const activeBase = String(api.defaults.baseURL || storedBase || getApiBaseUrl() || "").trim();
+      return activeBase ? [activeBase] : [];
     };
     const extractList = (payload) =>
       Array.isArray(payload)
@@ -301,6 +297,8 @@ export default function Reels() {
   useEffect(() => {
     return () => {
       if (tapTrackerRef.current.singleTapTimer) clearTimeout(tapTrackerRef.current.singleTapTimer);
+      if (scrollIdleTimerRef.current) clearTimeout(scrollIdleTimerRef.current);
+      if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current);
       stopGestureControl();
     };
   }, []);
@@ -469,16 +467,36 @@ export default function Reels() {
     };
   }, [reels]);
 
-  const onScroll = () => {
+  const snapToNearest = (behavior = "smooth") => {
     const el = containerRef.current;
     if (!el) return;
     const idx = Math.round(el.scrollTop / el.clientHeight);
     const bounded = Math.max(0, Math.min(reels.length - 1, idx));
-    if (bounded !== currentIndex) setCurrentIndex(bounded);
+    const targetTop = bounded * el.clientHeight;
+    if (Math.abs(el.scrollTop - targetTop) > 2) {
+      el.scrollTo({ top: targetTop, behavior });
+    }
+    if (bounded !== currentIndexRef.current) setCurrentIndex(bounded);
     if (pendingScrollIndexRef.current != null && bounded === pendingScrollIndexRef.current) {
       pendingScrollIndexRef.current = null;
       gestureScrollLockRef.current = false;
     }
+  };
+
+  const onScroll = () => {
+    const el = containerRef.current;
+    if (!el || !reels.length) return;
+
+    const idx = Math.round(el.scrollTop / el.clientHeight);
+    const bounded = Math.max(0, Math.min(reels.length - 1, idx));
+    if (bounded !== currentIndexRef.current) {
+      setCurrentIndex(bounded);
+    }
+
+    if (scrollIdleTimerRef.current) clearTimeout(scrollIdleTimerRef.current);
+    scrollIdleTimerRef.current = window.setTimeout(() => {
+      snapToNearest("smooth");
+    }, 150);
   };
 
   const likeReel = async (postId) => {
@@ -581,14 +599,15 @@ export default function Reels() {
     const shareUrl = `${window.location.origin}/reels?post=${reel.id}`;
     const shareText = `${reel.description || reel.content || "Check this reel"} ${shareUrl}`;
     try {
-      if (navigator.share) {
-        await navigator.share({ title: "SocialSea Reel", text: shareText, url: shareUrl });
-      } else if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(shareUrl);
+      try {
+        sessionStorage.setItem(CHAT_SHARE_DRAFT_KEY, shareText);
+      } catch {
+        // ignore storage failures
       }
-      setShareMessageByPost((prev) => ({ ...prev, [reel.id]: "Shared" }));
+      navigate(`/chat?share=${encodeURIComponent(shareText)}`);
+      setShareMessageByPost((prev) => ({ ...prev, [reel.id]: "Sharing to chat..." }));
     } catch {
-      setShareMessageByPost((prev) => ({ ...prev, [reel.id]: "Share cancelled" }));
+      setShareMessageByPost((prev) => ({ ...prev, [reel.id]: "Share failed" }));
     }
     setTimeout(() => setShareMessageByPost((prev) => ({ ...prev, [reel.id]: "" })), 1200);
   };
@@ -662,6 +681,7 @@ export default function Reels() {
     }
     pendingScrollIndexRef.current = bounded;
     gestureScrollLockRef.current = true;
+    if (scrollIdleTimerRef.current) clearTimeout(scrollIdleTimerRef.current);
     setCurrentIndex(bounded);
     container.scrollTo({ top: bounded * container.clientHeight, behavior: "smooth" });
     window.setTimeout(() => {
