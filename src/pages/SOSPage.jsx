@@ -8,6 +8,12 @@ const SOS_SESSION_KEY = "socialsea_sos_session_v1";
 const SOS_HISTORY_KEY = "socialsea_sos_history_v1";
 const SOS_SIGNAL_KEY = "socialsea_sos_signal_v1";
 const SOS_SIGNAL_CHANNEL = "socialsea_sos_signal_channel_v1";
+const SOS_LIVE_PREVIEW_CHANNEL = "socialsea_sos_live_preview_channel_v1";
+const SOS_LIVE_PREVIEW_FRAME_KEY = "socialsea_sos_live_preview_frame_v1";
+const SOS_LIVE_PREVIEW_FRAME_KEY_PREFIX = "socialsea_sos_live_preview_frame_v1_";
+const SOS_LIVE_RTC_SIGNAL_KEY = "socialsea_sos_live_rtc_signal_v1";
+const SOS_LIVE_RTC_OFFER_KEY_PREFIX = "socialsea_sos_live_rtc_offer_v1_";
+const SOS_LIVE_RTC_ANSWER_KEY_PREFIX = "socialsea_sos_live_rtc_answer_v1_";
 const HEARTBEAT_MS = 5000;
 const RADIUS_METERS = 5000;
 const LOCAL_SIGNAL_REBROADCAST_MS = 4000;
@@ -22,29 +28,34 @@ const emergencyBaseCandidates = () => {
   const isLocalDev =
     typeof window !== "undefined" &&
     ["localhost", "127.0.0.1"].includes(String(window.location.hostname || "").toLowerCase());
+  const isHttpsPage =
+    typeof window !== "undefined" &&
+    String(window.location.protocol || "").toLowerCase() === "https:";
   const storedBase =
     typeof window !== "undefined"
       ? localStorage.getItem("socialsea_auth_base_url") || sessionStorage.getItem("socialsea_auth_base_url")
       : "";
-  return uniqueNonEmpty(
+  const list = uniqueNonEmpty(
     isLocalDev
       ? [
+          "/api",
           "http://localhost:8080",
           "http://127.0.0.1:8080",
-          "/api",
+          getApiBaseUrl(),
           api.defaults.baseURL,
           storedBase,
-          getApiBaseUrl(),
-          import.meta.env.VITE_API_URL,
+          import.meta.env.VITE_API_URL
         ]
       : [
+          "/api",
+          getApiBaseUrl(),
           api.defaults.baseURL,
           storedBase,
-          getApiBaseUrl(),
           import.meta.env.VITE_API_URL,
-          "https://socialsea.co.in",
+          "https://socialsea.co.in"
         ]
   );
+  return list.filter((base) => !(isHttpsPage && /^http:\/\//i.test(String(base || ""))));
 };
 
 const buildEmergencyUrls = (suffix) => {
@@ -91,6 +102,23 @@ const writeJson = (key, value) => {
 };
 
 const nowIso = () => new Date().toISOString();
+const liveFrameKeyFor = (alertLikeId) =>
+  `${SOS_LIVE_PREVIEW_FRAME_KEY_PREFIX}${String(alertLikeId || "").trim()}`;
+const liveOfferKeyFor = (alertLikeId) =>
+  `${SOS_LIVE_RTC_OFFER_KEY_PREFIX}${String(alertLikeId || "").trim()}`;
+const liveAnswerKeyFor = (alertLikeId) =>
+  `${SOS_LIVE_RTC_ANSWER_KEY_PREFIX}${String(alertLikeId || "").trim()}`;
+const normalizeAlertId = (value) => String(value || "").trim();
+const alertIdsMatch = (a, b) => {
+  const left = normalizeAlertId(a);
+  const right = normalizeAlertId(b);
+  if (!left || !right) return false;
+  if (left.toLowerCase() === right.toLowerCase()) return true;
+  const nLeft = Number(left);
+  const nRight = Number(right);
+  if (Number.isFinite(nLeft) && Number.isFinite(nRight)) return nLeft === nRight;
+  return false;
+};
 
 const blobToDataUrl = (blob) =>
   new Promise((resolve, reject) => {
@@ -125,6 +153,12 @@ export default function SOSPage() {
     bytes: 0
   });
   const [backendStatus, setBackendStatus] = useState("Not sent yet");
+  const [liveFrameUrl, setLiveFrameUrl] = useState("");
+  const [liveStreamAvailable, setLiveStreamAvailable] = useState(false);
+  const lastFrameAtRef = useRef(0);
+  const hasMatchedLiveFrameRef = useRef(false);
+  const latestPreviewFrameRef = useRef("");
+  const latestPreviewFrameAtRef = useRef("");
 
   const watchIdRef = useRef(null);
   const mediaStreamRef = useRef(null);
@@ -134,7 +168,11 @@ export default function SOSPage() {
   const heartbeatTimerRef = useRef(null);
   const startTapRef = useRef({ count: 0, lastAt: 0 });
   const previewVideoRef = useRef(null);
+  const liveRemoteVideoRef = useRef(null);
   const sosSignalChannelRef = useRef(null);
+  const livePreviewChannelRef = useRef(null);
+  const senderRtcPeerRef = useRef(null);
+  const viewerRtcPeerRef = useRef(null);
 
   const session = useMemo(() => readJson(SOS_SESSION_KEY, null), []);
 
@@ -173,6 +211,50 @@ export default function SOSPage() {
     }
   };
 
+  const closeSenderRtcPeer = () => {
+    try {
+      senderRtcPeerRef.current?.close();
+    } catch {
+      // ignore
+    }
+    senderRtcPeerRef.current = null;
+  };
+
+  const closeViewerRtcPeer = () => {
+    try {
+      viewerRtcPeerRef.current?.close();
+    } catch {
+      // ignore
+    }
+    viewerRtcPeerRef.current = null;
+    setLiveStreamAvailable(false);
+    const node = liveRemoteVideoRef.current;
+    if (node?.srcObject) {
+      try {
+        node.pause();
+        node.srcObject = null;
+      } catch {
+        // ignore
+      }
+    }
+  };
+
+  const postLiveRtcSignal = (packet) => {
+    try {
+      if (!livePreviewChannelRef.current && typeof BroadcastChannel !== "undefined") {
+        livePreviewChannelRef.current = new BroadcastChannel(SOS_LIVE_PREVIEW_CHANNEL);
+      }
+      livePreviewChannelRef.current?.postMessage(packet);
+    } catch {
+      // ignore broadcast errors
+    }
+    try {
+      localStorage.setItem(SOS_LIVE_RTC_SIGNAL_KEY, JSON.stringify(packet));
+    } catch {
+      // ignore storage issues
+    }
+  };
+
   const getLocationOnce = () =>
     new Promise((resolve, reject) => {
       if (!navigator.geolocation) {
@@ -205,6 +287,7 @@ export default function SOSPage() {
           method,
           url,
           data,
+          timeout: 9000,
           ...extraConfig
         });
       } catch (err) {
@@ -219,11 +302,16 @@ export default function SOSPage() {
   const sendHeartbeat = async (forcedLocation) => {
     if (!alertId) return;
     try {
+      const latestFrame = String(latestPreviewFrameRef.current || "");
+      const latestFrameAt = String(latestPreviewFrameAtRef.current || "");
       const payload = {
         latitude: forcedLocation?.latitude ?? lastLocation?.latitude ?? null,
         longitude: forcedLocation?.longitude ?? lastLocation?.longitude ?? null,
         audioActive: recordingInfo.audio,
-        videoActive: recordingInfo.video
+        videoActive: recordingInfo.video,
+        // Backend fallback channel for cross-browser/profile live preview.
+        previewFrame: latestFrame || null,
+        previewFrameAt: latestFrameAt || null
       };
       await callEmergency("post", `${alertId}/heartbeat`, payload);
       setBackendStatus("Live connection active");
@@ -359,12 +447,15 @@ export default function SOSPage() {
       const reporterEmail = String(localStorage.getItem("email") || sessionStorage.getItem("email") || "").trim() || undefined;
       persistSession({
         active: true,
+        triggeredByCurrentBrowser: true,
         startedAt: startIso,
         elapsedSec: 0,
         lastLocation: initialLocation,
         locationCount: 1,
         alertId: null,
         alertDisplayId: null,
+        reporterUserId,
+        reporterEmail,
         backendStatus: "Sending trigger...",
         updatedAt: startIso
       });
@@ -403,6 +494,8 @@ export default function SOSPage() {
         persistSession({
           alertId: id,
           alertDisplayId: id ? String(id) : null,
+          reporterUserId,
+          reporterEmail,
           backendStatus: "SOS sent to backend (5km)",
           updatedAt: nowIso()
         });
@@ -425,10 +518,13 @@ export default function SOSPage() {
         persistSession({
           alertId: null,
           alertDisplayId: localId,
+          reporterUserId,
+          reporterEmail,
           backendStatus: backendMessage,
           updatedAt: nowIso()
         });
         broadcastSosSignal("triggered-local", {
+          localAlertId: localId,
           reporterUserId,
           reporterEmail,
           latitude: initialLocation.latitude,
@@ -522,11 +618,14 @@ export default function SOSPage() {
       };
       writeJson(SOS_SESSION_KEY, {
         active: false,
+        triggeredByCurrentBrowser: true,
         startedAt,
         stoppedAt,
         elapsedSec,
         alertId,
         alertDisplayId: alertDisplayId || (alertId ? String(alertId) : null),
+        reporterUserId: String(localStorage.getItem("userId") || sessionStorage.getItem("userId") || "").trim() || undefined,
+        reporterEmail: String(localStorage.getItem("email") || sessionStorage.getItem("email") || "").trim() || undefined,
         lastLocation,
         locationCount,
         recordingInfo: stoppedRecordingInfo,
@@ -537,6 +636,38 @@ export default function SOSPage() {
       setMessage("SOS stopped.");
       setRecordingInfo(stoppedRecordingInfo);
       setBackendStatus("Stopped");
+      const stoppedId = String(alertId || alertDisplayId || "").trim();
+      if (stoppedId) {
+        postLiveRtcSignal({
+          type: "rtc-stop",
+          alertId: stoppedId,
+          at: stoppedAt
+        });
+      }
+      closeSenderRtcPeer();
+      const clearPacket = {
+        type: "frame-clear",
+        alertId: stoppedId,
+        at: stoppedAt
+      };
+      latestPreviewFrameRef.current = "";
+      latestPreviewFrameAtRef.current = "";
+      try {
+        if (!livePreviewChannelRef.current && typeof BroadcastChannel !== "undefined") {
+          livePreviewChannelRef.current = new BroadcastChannel(SOS_LIVE_PREVIEW_CHANNEL);
+        }
+        livePreviewChannelRef.current?.postMessage(clearPacket);
+      } catch {
+        // ignore broadcast errors
+      }
+      try {
+        localStorage.setItem(SOS_LIVE_PREVIEW_FRAME_KEY, JSON.stringify(clearPacket));
+        if (stoppedId) {
+          localStorage.setItem(liveFrameKeyFor(stoppedId), JSON.stringify(clearPacket));
+        }
+      } catch {
+        // ignore storage errors
+      }
       broadcastSosSignal("stopped", {
         alertId,
         reporterUserId: String(localStorage.getItem("userId") || sessionStorage.getItem("userId") || "").trim() || undefined,
@@ -568,12 +699,12 @@ export default function SOSPage() {
   };
 
   useEffect(() => {
-    if (!alertId || status !== "active") return;
+    if (isLiveView || !alertId || status !== "active") return;
     sendHeartbeat();
     startHeartbeat();
     return () => stopHeartbeat();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [alertId, status, recordingInfo.audio, recordingInfo.video]);
+  }, [isLiveView, alertId, status, recordingInfo.audio, recordingInfo.video]);
 
   useEffect(() => {
     if (status !== "active" || isLiveView) return undefined;
@@ -589,6 +720,473 @@ export default function SOSPage() {
     }, LOCAL_SIGNAL_REBROADCAST_MS);
     return () => clearInterval(timer);
   }, [status, isLiveView, alertId, lastLocation?.latitude, lastLocation?.longitude]);
+
+  useEffect(() => {
+    if (isLiveView || status !== "active" || !recordingInfo.video) return undefined;
+    const stream = mediaStreamRef.current;
+    const initialPreviewNode = previewVideoRef.current;
+    if (!stream && !initialPreviewNode) return undefined;
+
+    try {
+      if (!livePreviewChannelRef.current && typeof BroadcastChannel !== "undefined") {
+        livePreviewChannelRef.current = new BroadcastChannel(SOS_LIVE_PREVIEW_CHANNEL);
+      }
+    } catch {
+      // Continue with localStorage fallback even if BroadcastChannel fails.
+    }
+
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d", { alpha: false });
+    if (!ctx) return undefined;
+    const videoTrack = stream?.getVideoTracks?.()?.[0] || null;
+    const canUseImageCapture = typeof ImageCapture !== "undefined" && videoTrack;
+    const imageCapture = canUseImageCapture ? new ImageCapture(videoTrack) : null;
+    let frameBusy = false;
+    const hiddenSource = document.createElement("video");
+    hiddenSource.playsInline = true;
+    hiddenSource.muted = true;
+    if (stream) {
+      hiddenSource.srcObject = stream;
+      hiddenSource.play().catch(() => {});
+    }
+
+    const sendFrame = async () => {
+      if (frameBusy) return;
+      frameBusy = true;
+      try {
+        let source = null;
+        let sourceWidth = 0;
+        let sourceHeight = 0;
+        let sourceBitmap = null;
+
+        if (imageCapture) {
+          try {
+            sourceBitmap = await imageCapture.grabFrame();
+            source = sourceBitmap;
+            sourceWidth = sourceBitmap?.width || 0;
+            sourceHeight = sourceBitmap?.height || 0;
+          } catch {
+            sourceBitmap = null;
+          }
+        }
+
+        if (!source) {
+          const previewNode = previewVideoRef.current;
+          const activeSource =
+            previewNode && (previewNode.videoWidth || 0) > 0 && (previewNode.videoHeight || 0) > 0
+              ? previewNode
+              : hiddenSource;
+          source = activeSource;
+          sourceWidth = activeSource.videoWidth || 0;
+          sourceHeight = activeSource.videoHeight || 0;
+        }
+
+        if (!sourceWidth || !sourceHeight) return;
+
+        const targetW = Math.min(480, sourceWidth);
+        const targetH = Math.max(1, Math.round((targetW * sourceHeight) / sourceWidth));
+        canvas.width = targetW;
+        canvas.height = targetH;
+        try {
+          ctx.drawImage(source, 0, 0, targetW, targetH);
+        } catch {
+          return;
+        } finally {
+          if (sourceBitmap?.close) sourceBitmap.close();
+        }
+
+        let frame = "";
+        try {
+          frame = canvas.toDataURL("image/jpeg", 0.62);
+        } catch {
+          frame = "";
+        }
+        if (!frame) return;
+        const activeId = String(alertId || alertDisplayId || "").trim();
+        if (!activeId) return;
+        const packet = {
+          type: "frame",
+          alertId: activeId,
+          at: nowIso(),
+          frame
+        };
+        latestPreviewFrameRef.current = frame;
+        latestPreviewFrameAtRef.current = packet.at;
+        try {
+          livePreviewChannelRef.current?.postMessage(packet);
+        } catch {
+          // ignore broadcast errors
+        }
+        try {
+          localStorage.setItem(SOS_LIVE_PREVIEW_FRAME_KEY, JSON.stringify(packet));
+          localStorage.setItem(liveFrameKeyFor(activeId), JSON.stringify(packet));
+        } catch {
+          // ignore storage issues
+        }
+      } finally {
+        frameBusy = false;
+      }
+    };
+
+    const timer = setInterval(() => {
+      void sendFrame();
+    }, 160);
+    return () => {
+      clearInterval(timer);
+      try {
+        hiddenSource.pause();
+        hiddenSource.srcObject = null;
+      } catch {
+        // ignore
+      }
+    };
+  }, [isLiveView, status, recordingInfo.video, alertId, alertDisplayId]);
+
+  useEffect(() => {
+    if (isLiveView || status !== "active") {
+      closeSenderRtcPeer();
+      return undefined;
+    }
+    const stream = mediaStreamRef.current;
+    const activeId = String(alertId || alertDisplayId || "").trim();
+    if (!stream || !activeId) return undefined;
+
+    let disposed = false;
+    let onMessage = null;
+    let onStorage = null;
+
+    const startSenderPeer = async () => {
+      try {
+        try {
+          if (!livePreviewChannelRef.current && typeof BroadcastChannel !== "undefined") {
+            livePreviewChannelRef.current = new BroadcastChannel(SOS_LIVE_PREVIEW_CHANNEL);
+          }
+        } catch {
+          // ignore
+        }
+        const channel = livePreviewChannelRef.current;
+        if (!channel) return;
+
+        closeSenderRtcPeer();
+        const pc = new RTCPeerConnection({
+          iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+        });
+        senderRtcPeerRef.current = pc;
+
+        stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+        pc.onicecandidate = (event) => {
+          if (!event?.candidate || disposed) return;
+          postLiveRtcSignal({
+            type: "rtc-candidate",
+            from: "sender",
+            alertId: activeId,
+            at: nowIso(),
+            candidate: event.candidate
+          });
+        };
+
+        onMessage = async (event) => {
+          if (disposed || senderRtcPeerRef.current !== pc) return;
+          const data = event?.data || {};
+          const type = String(data?.type || "");
+          const incomingId = String(data?.alertId || "").trim();
+          if (!incomingId || incomingId !== activeId) return;
+          try {
+            if (type === "rtc-answer" && data?.answer) {
+              if (!pc.currentRemoteDescription) {
+                await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+                setBackendStatus("Live stream connected");
+              }
+            } else if (type === "rtc-candidate" && data?.from === "viewer" && data?.candidate) {
+              await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+            } else if (type === "rtc-stop") {
+              closeSenderRtcPeer();
+            }
+          } catch {
+            // ignore rtc signaling errors
+          }
+        };
+        channel.addEventListener("message", onMessage);
+        onStorage = (event) => {
+          if (event?.key !== SOS_LIVE_RTC_SIGNAL_KEY || !event?.newValue) return;
+          try {
+            const data = JSON.parse(event.newValue);
+            void onMessage({ data });
+          } catch {
+            // ignore malformed payload
+          }
+        };
+        window.addEventListener("storage", onStorage);
+
+        const offer = await pc.createOffer({
+          offerToReceiveAudio: true,
+          offerToReceiveVideo: true
+        });
+        await pc.setLocalDescription(offer);
+        postLiveRtcSignal({
+          type: "rtc-offer",
+          from: "sender",
+          alertId: activeId,
+          at: nowIso(),
+          offer
+        });
+        setBackendStatus("Live stream initializing...");
+      } catch {
+        setBackendStatus("Live stream signaling failed");
+      }
+    };
+
+    void startSenderPeer();
+    return () => {
+      disposed = true;
+      if (livePreviewChannelRef.current && onMessage) {
+        livePreviewChannelRef.current.removeEventListener("message", onMessage);
+      }
+      if (onStorage) {
+        window.removeEventListener("storage", onStorage);
+      }
+      closeSenderRtcPeer();
+    };
+  }, [isLiveView, status, alertId, alertDisplayId, recordingInfo.audio, recordingInfo.video]);
+
+  useEffect(() => {
+    if (!isLiveView) return undefined;
+    const routeId = normalizeAlertId(routeAlertId);
+    if (!routeId) return undefined;
+    hasMatchedLiveFrameRef.current = false;
+    try {
+      if (!livePreviewChannelRef.current && typeof BroadcastChannel !== "undefined") {
+        livePreviewChannelRef.current = new BroadcastChannel(SOS_LIVE_PREVIEW_CHANNEL);
+      }
+    } catch {
+      // Continue with localStorage fallback even if BroadcastChannel fails.
+    }
+    const channel = livePreviewChannelRef.current;
+
+    const onMessage = (event) => {
+      const data = event?.data || {};
+      const type = String(data?.type || "");
+      if (type === "frame-clear") {
+        const incomingId = normalizeAlertId(data?.alertId);
+        if (!incomingId || !alertIdsMatch(incomingId, routeId)) return;
+        hasMatchedLiveFrameRef.current = false;
+        setLiveFrameUrl("");
+        return;
+      }
+      if (type !== "frame") return;
+      const incomingId = normalizeAlertId(data?.alertId);
+      const frame = String(data?.frame || "");
+      if (!frame) return;
+      const exactMatch = incomingId && alertIdsMatch(incomingId, routeId);
+      if (!exactMatch && hasMatchedLiveFrameRef.current) return;
+      if (exactMatch) hasMatchedLiveFrameRef.current = true;
+      lastFrameAtRef.current = Date.now();
+      setLiveFrameUrl(frame);
+      setBackendStatus("Live preview connected");
+    };
+
+    const readStorageFrame = () => {
+      try {
+        const raw =
+          localStorage.getItem(liveFrameKeyFor(routeId)) ||
+          localStorage.getItem(SOS_LIVE_PREVIEW_FRAME_KEY);
+        if (!raw) return;
+        const data = JSON.parse(raw);
+        const incomingId = normalizeAlertId(data?.alertId);
+        const type = String(data?.type || "");
+        if (type === "frame-clear") {
+          if (!incomingId || !alertIdsMatch(incomingId, routeId)) return;
+          hasMatchedLiveFrameRef.current = false;
+          setLiveFrameUrl("");
+          return;
+        }
+        const frame = String(data?.frame || "");
+        if (!frame) return;
+        const exactMatch = incomingId && alertIdsMatch(incomingId, routeId);
+        if (!exactMatch && hasMatchedLiveFrameRef.current) return;
+        if (exactMatch) hasMatchedLiveFrameRef.current = true;
+        lastFrameAtRef.current = Date.now();
+        setLiveFrameUrl(frame);
+        setBackendStatus("Live preview connected");
+      } catch {
+        // ignore storage issues
+      }
+    };
+
+    const onStorage = (event) => {
+      const perAlertKey = liveFrameKeyFor(routeId);
+      if (event?.key !== SOS_LIVE_PREVIEW_FRAME_KEY && event?.key !== perAlertKey) return;
+      readStorageFrame();
+    };
+
+    if (channel) channel.addEventListener("message", onMessage);
+    window.addEventListener("storage", onStorage);
+    const timer = setInterval(() => {
+      readStorageFrame();
+      if (lastFrameAtRef.current && Date.now() - lastFrameAtRef.current > 2200) {
+        setLiveFrameUrl("");
+      }
+    }, 160);
+    readStorageFrame();
+    return () => {
+      if (channel) channel.removeEventListener("message", onMessage);
+      window.removeEventListener("storage", onStorage);
+      clearInterval(timer);
+    };
+  }, [isLiveView, routeAlertId]);
+
+  useEffect(() => {
+    const node = liveRemoteVideoRef.current;
+    if (!isLiveView || !node) return undefined;
+    if (!liveStreamAvailable) {
+      try {
+        node.pause();
+        node.srcObject = null;
+      } catch {
+        // ignore
+      }
+      return undefined;
+    }
+    node.muted = true;
+    node.autoplay = true;
+    node.playsInline = true;
+    node.play().catch(() => {});
+    return undefined;
+  }, [isLiveView, liveStreamAvailable]);
+
+  useEffect(() => {
+    if (!isLiveView) {
+      closeViewerRtcPeer();
+      return undefined;
+    }
+    const routeId = normalizeAlertId(routeAlertId);
+    if (!routeId) return undefined;
+
+    let disposed = false;
+    let onMessage = null;
+
+    const ensureViewerPeer = () => {
+      if (viewerRtcPeerRef.current) return viewerRtcPeerRef.current;
+      const pc = new RTCPeerConnection({
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+      });
+      viewerRtcPeerRef.current = pc;
+      pc.ontrack = (event) => {
+        const remoteStream = event?.streams?.[0];
+        const node = liveRemoteVideoRef.current;
+        if (remoteStream && node) {
+          node.srcObject = remoteStream;
+          node.muted = true;
+          node.autoplay = true;
+          node.playsInline = true;
+          node.play().catch(() => {});
+          setLiveStreamAvailable(true);
+          setBackendStatus("Live stream connected");
+        }
+      };
+      pc.onicecandidate = (event) => {
+        if (!event?.candidate || disposed) return;
+        postLiveRtcSignal({
+          type: "rtc-candidate",
+          from: "viewer",
+          alertId: routeId,
+          at: nowIso(),
+          candidate: event.candidate
+        });
+      };
+      pc.onconnectionstatechange = () => {
+        const state = String(pc.connectionState || "");
+        if (state === "failed" || state === "closed" || state === "disconnected") {
+          setLiveStreamAvailable(false);
+        }
+      };
+      return pc;
+    };
+
+    const handleRtcPacket = async (data) => {
+      if (disposed) return;
+      const type = String(data?.type || "");
+      const incomingId = normalizeAlertId(data?.alertId);
+      if (!incomingId || !alertIdsMatch(incomingId, routeId)) return;
+      try {
+        if (type === "rtc-stop") {
+          closeViewerRtcPeer();
+          setLiveFrameUrl("");
+          return;
+        }
+        if (type === "rtc-offer" && data?.offer) {
+          closeViewerRtcPeer();
+          const pc = ensureViewerPeer();
+          await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          postLiveRtcSignal({
+            type: "rtc-answer",
+            from: "viewer",
+            alertId: routeId,
+            at: nowIso(),
+            answer
+          });
+          return;
+        }
+        if (type === "rtc-candidate" && data?.from === "sender" && data?.candidate) {
+          const pc = ensureViewerPeer();
+          await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+        }
+      } catch {
+        // ignore rtc errors, fallback preview still available
+      }
+    };
+
+    const startViewer = () => {
+      try {
+        if (!livePreviewChannelRef.current && typeof BroadcastChannel !== "undefined") {
+          livePreviewChannelRef.current = new BroadcastChannel(SOS_LIVE_PREVIEW_CHANNEL);
+        }
+      } catch {
+        // ignore
+      }
+      const channel = livePreviewChannelRef.current;
+      onMessage = (event) => {
+        void handleRtcPacket(event?.data || {});
+      };
+      if (channel) channel.addEventListener("message", onMessage);
+      const readStoredSignal = () => {
+        try {
+          const raw = localStorage.getItem(SOS_LIVE_RTC_SIGNAL_KEY);
+          if (!raw) return;
+          const payload = JSON.parse(raw);
+          void handleRtcPacket(payload);
+        } catch {
+          // ignore malformed payload
+        }
+      };
+      const onStorage = (event) => {
+        if (event?.key !== SOS_LIVE_RTC_SIGNAL_KEY || !event?.newValue) return;
+        try {
+          const payload = JSON.parse(event.newValue);
+          void handleRtcPacket(payload);
+        } catch {
+          // ignore malformed payload
+        }
+      };
+      window.addEventListener("storage", onStorage);
+      const timer = setInterval(readStoredSignal, 350);
+      readStoredSignal();
+      return () => {
+        if (channel && onMessage) channel.removeEventListener("message", onMessage);
+        window.removeEventListener("storage", onStorage);
+        clearInterval(timer);
+      };
+    };
+
+    const cleanupSignal = startViewer();
+    return () => {
+      disposed = true;
+      cleanupSignal?.();
+      closeViewerRtcPeer();
+    };
+  }, [isLiveView, routeAlertId]);
 
   useEffect(() => {
     const previewEl = previewVideoRef.current;
@@ -652,9 +1250,19 @@ export default function SOSPage() {
         }
         setRecordingInfo((prev) => ({
           ...prev,
-          audio: usedAssist ? prev.audio : Boolean(data.audioActive),
-          video: usedAssist ? prev.video : Boolean(data.videoActive)
+          audio: usedAssist ? Boolean(data.active) : Boolean(data.audioActive),
+          video: usedAssist ? Boolean(data.active) : Boolean(data.videoActive)
         }));
+        const backendFrame = String(
+          data.previewFrame || data.liveFrame || data.frame || data.lastPreviewFrame || data.lastFrame || ""
+        ).trim();
+        if (backendFrame) {
+          lastFrameAtRef.current = Date.now();
+          setLiveFrameUrl(backendFrame);
+          if (isLiveView) {
+            setBackendStatus("Live preview connected");
+          }
+        }
         setBackendStatus(
           data.active
             ? usedAssist
@@ -667,12 +1275,12 @@ export default function SOSPage() {
       }
     };
     poll();
-    const timer = setInterval(poll, HEARTBEAT_MS);
+    const timer = setInterval(poll, isLiveView ? 1200 : HEARTBEAT_MS);
     return () => {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [routeAlertId]);
+  }, [routeAlertId, isLiveView]);
 
   useEffect(() => {
     if (session?.active && !isLiveView) {
@@ -711,6 +1319,12 @@ export default function SOSPage() {
         sosSignalChannelRef.current.close();
         sosSignalChannelRef.current = null;
       }
+      if (livePreviewChannelRef.current) {
+        livePreviewChannelRef.current.close();
+        livePreviewChannelRef.current = null;
+      }
+      closeSenderRtcPeer();
+      closeViewerRtcPeer();
       if (tickTimerRef.current) clearInterval(tickTimerRef.current);
       stopHeartbeat();
       stopLocationWatch();
@@ -761,9 +1375,36 @@ export default function SOSPage() {
         <div className="sos-preview-card">
           <h3>Live Camera Preview</h3>
           <div className="sos-preview-shell">
-            <video ref={previewVideoRef} className="sos-preview-video" playsInline muted />
-            {!(recordingInfo.video && (status === "arming" || status === "active" || status === "stopping")) && (
+            {isLiveView && (
+              <video
+                ref={liveRemoteVideoRef}
+                className="sos-preview-video"
+                playsInline
+                autoPlay
+                muted
+                controls
+                style={{ display: liveStreamAvailable ? "block" : "none" }}
+                onClick={() => {
+                  const node = liveRemoteVideoRef.current;
+                  if (!node) return;
+                  try {
+                    node.muted = false;
+                    node.play().catch(() => {});
+                  } catch {
+                    // ignore
+                  }
+                }}
+              />
+            )}
+            {isLiveView && !liveStreamAvailable && !!liveFrameUrl && (
+              <img src={liveFrameUrl} alt="Live SOS preview" className="sos-preview-video" />
+            )}
+            {!isLiveView && <video ref={previewVideoRef} className="sos-preview-video" playsInline muted />}
+            {!isLiveView && !(recordingInfo.video && (status === "arming" || status === "active" || status === "stopping")) && (
               <div className="sos-preview-empty">Camera preview will appear when SOS recording starts.</div>
+            )}
+            {isLiveView && !liveStreamAvailable && !liveFrameUrl && (
+              <div className="sos-preview-empty">Waiting for live preview from SOS sender tab...</div>
             )}
           </div>
         </div>

@@ -207,7 +207,12 @@
 }
 
 .ss-sos-popup {
-  width: min(1160px, calc(100vw - 20px));
+  position: fixed;
+  top: 74px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 12000;
+  width: min(760px, calc(100vw - 20px));
   pointer-events: auto;
   border: 1px solid rgba(255, 170, 170, 0.62);
   background: linear-gradient(130deg, rgba(84, 11, 11, 0.95), rgba(40, 6, 6, 0.95));
@@ -581,6 +586,7 @@
   }
 
   .ss-sos-popup {
+    top: 10px;
     width: calc(100vw - 14px);
     font-size: 0.78rem;
     padding: 9px 10px;

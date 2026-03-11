@@ -1,12 +1,16 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import api from "../api/axios";
-import { toApiUrl } from "../api/baseUrl";
+import { getApiBaseUrl, toApiUrl } from "../api/baseUrl";
 import { clearAuthStorage } from "../auth";
 import "./Profile.css";
 
 const FOLLOWING_CACHE_KEY = "socialsea_following_cache_v1";
 const HIDDEN_PROFILE_POSTS_KEY = "socialsea_hidden_profile_posts_v1";
+const PROFILE_CACHE_KEY = "socialsea_profile_cache_v1";
+const PROFILE_REQ_TIMEOUT_MS = 2500;
+const POSTS_REQ_TIMEOUT_MS = 2500;
+const FOLLOWING_REQ_TIMEOUT_MS = 1800;
 
 const readFollowingCache = () => {
   try {
@@ -109,9 +113,9 @@ const getConnectionIdentityKeys = (entry) => {
   return keys;
 };
 
-const requestWithTimeout = (path, timeoutMs = 4500) =>
+const requestWithTimeout = (path, config = {}, timeoutMs = 4500) =>
   Promise.race([
-    api.get(path),
+    api.get(path, config),
     new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), timeoutMs))
   ]);
 
@@ -141,6 +145,30 @@ const extractFollowingFlag = (response, profileData) => {
   return null;
 };
 
+const readProfileCacheByKey = (key) => {
+  try {
+    const raw = localStorage.getItem(PROFILE_CACHE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    const entry = parsed?.[key];
+    return entry && typeof entry === "object" ? entry : null;
+  } catch {
+    return null;
+  }
+};
+
+const writeProfileCacheByKey = (key, value) => {
+  if (!key) return;
+  try {
+    const raw = localStorage.getItem(PROFILE_CACHE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    const next = parsed && typeof parsed === "object" ? { ...parsed } : {};
+    next[key] = { ...(value || {}), updatedAt: Date.now() };
+    localStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(next));
+  } catch {
+    // ignore cache issues
+  }
+};
+
 export default function Profile() {
   const { username } = useParams();
   const myUserId = sessionStorage.getItem("userId") || localStorage.getItem("userId");
@@ -163,10 +191,20 @@ export default function Profile() {
 
   useEffect(() => {
     let cancelled = false;
+    const cacheKey = String(username || "").trim().toLowerCase();
     setError("");
     setPostActionError("");
-    setProfile(null);
-    setPosts([]);
+    const cached = readProfileCacheByKey(cacheKey);
+    if (cached) {
+      setProfile(cached.profile || null);
+      setPosts(Array.isArray(cached.posts) ? cached.posts : []);
+      setFollowers(Number(cached.followers || 0));
+      setFollowingCount(Number(cached.followingCount || 0));
+      setIsFollowing(Boolean(cached.isFollowing));
+    } else {
+      setProfile(null);
+      setPosts([]);
+    }
 
     if (!username) {
       setError("User not found");
@@ -174,7 +212,22 @@ export default function Profile() {
     }
 
     const defaultBase = String(api?.defaults?.baseURL || "").replace(/\/+$/, "");
-    const baseCandidates = [defaultBase || undefined];
+    const storedBase = String(
+      localStorage.getItem("socialsea_auth_base_url") ||
+      sessionStorage.getItem("socialsea_auth_base_url") ||
+      ""
+    ).replace(/\/+$/, "");
+    const envBase = String(getApiBaseUrl() || "").replace(/\/+$/, "");
+    const isLocalHost =
+      typeof window !== "undefined" &&
+      ["localhost", "127.0.0.1"].includes(String(window.location.hostname || "").toLowerCase());
+    const baseCandidates = [
+      defaultBase || undefined,
+      storedBase || undefined,
+      envBase || undefined,
+      ...(isLocalHost ? ["http://localhost:8080", "http://127.0.0.1:8080", "/api"] : []),
+      "https://socialsea.co.in"
+    ].filter((value, index, arr) => value && arr.indexOf(value) === index);
 
       const normalizePosts = (items) => {
         const list = Array.isArray(items) ? items : [];
@@ -203,10 +256,10 @@ export default function Profile() {
       };
 
     const loadProfile = async () => {
-      let lastError = null;
-      for (const base of baseCandidates) {
-        try {
-          const res = await api.get(`/api/profile/${username}`, {
+      const fetchProfileAtBase = async (base) => {
+        const res = await requestWithTimeout(
+          `/api/profile/${username}`,
+          {
             baseURL: base,
             suppressAuthRedirect: true,
             params: { _: Date.now() },
@@ -214,73 +267,134 @@ export default function Profile() {
               "Cache-Control": "no-cache",
               Pragma: "no-cache"
             }
-          });
-          const data = res.data?.user || res.data || {};
-          if (!data || typeof data !== "object" || Object.keys(data).length === 0) {
-            continue;
-          }
+          },
+          PROFILE_REQ_TIMEOUT_MS
+        );
+        const data = res?.data?.user || res?.data || {};
+        if (!data || typeof data !== "object" || Object.keys(data).length === 0) {
+          throw new Error("empty_profile");
+        }
+        return { base, res, data };
+      };
 
-          if (cancelled) return null;
-          setProfile(data);
+      let payload = null;
+      let lastError = null;
+      const primaryBase = baseCandidates[0];
+      const fallbackBases = baseCandidates.filter((base) => base !== primaryBase).slice(0, 2);
 
-          const followKeys = [data?.id, data?.email, data?.username, username];
-          const extracted = extractFollowingFlag(res, data);
-          if (extracted === null) {
-            setIsFollowing(getCachedFollowing(followKeys));
+      try {
+        payload = await fetchProfileAtBase(primaryBase);
+      } catch (err) {
+        lastError = err;
+        if (fallbackBases.length) {
+          const settled = await Promise.allSettled(fallbackBases.map((base) => fetchProfileAtBase(base)));
+          const winner = settled.find((r) => r.status === "fulfilled");
+          if (winner?.status === "fulfilled") {
+            payload = winner.value;
           } else {
-            setIsFollowing(extracted);
-            updateFollowCache(followKeys, extracted);
+            const firstRejected = settled.find((r) => r.status === "rejected");
+            lastError = firstRejected?.reason || err;
           }
+        }
+      }
 
-          const followerCount = Number(
-            data?.followers ??
-            data?.followersCount ??
-            res.data?.followers ??
-            res.data?.followersCount ??
-            0
-          ) || 0;
-          setFollowers(Math.max(0, followerCount));
-          const initialFollowingCount = Number(
-            data?.following ??
-            data?.followingCount ??
-            res.data?.following ??
-            res.data?.followingCount ??
-            0
-          ) || 0;
-          setFollowingCount(Math.max(0, initialFollowingCount));
+      if (payload) {
+        const { base, res, data } = payload;
+        if (cancelled) return null;
+        setProfile(data);
 
-          const ownProfile =
-            username === "me" || Number(username) === Number(myUserId) || data?.id === Number(myUserId);
+        const followKeys = [data?.id, data?.email, data?.username, username];
+        const extracted = extractFollowingFlag(res, data);
+        if (extracted === null) {
+          setIsFollowing(getCachedFollowing(followKeys));
+        } else {
+          setIsFollowing(extracted);
+          updateFollowCache(followKeys, extracted);
+        }
 
-          if (extracted === null && !ownProfile && myUserId) {
-            const viewerCandidates = [myUserId, myEmail].filter(Boolean);
-            const targetId = String(data?.id || "").trim();
-            const paths = viewerCandidates
-              .flatMap((id) => getPathCandidates(id, "following"))
-              .filter((path, index, arr) => arr.indexOf(path) === index);
-            const responses = await Promise.allSettled(paths.map((path) => requestWithTimeout(path)));
-            for (const result of responses) {
-              if (result.status !== "fulfilled") continue;
-              const list = pickList(result.value?.data, "following");
-              if (!Array.isArray(list)) continue;
-              const found = list.some((entry) => normalizeUserId(entry) === targetId);
-              if (found) {
-                if (!cancelled) setIsFollowing(true);
-                updateFollowCache(followKeys, true);
-                break;
-              }
+        const followerCount = Number(
+          data?.followers ??
+          data?.followersCount ??
+          res?.data?.followers ??
+          res?.data?.followersCount ??
+          0
+        ) || 0;
+        setFollowers(Math.max(0, followerCount));
+        const initialFollowingCount = Number(
+          data?.following ??
+          data?.followingCount ??
+          res?.data?.following ??
+          res?.data?.followingCount ??
+          0
+        ) || 0;
+        setFollowingCount(Math.max(0, initialFollowingCount));
+
+        const ownProfile =
+          username === "me" || Number(username) === Number(myUserId) || data?.id === Number(myUserId);
+
+        if (extracted === null && !ownProfile && myUserId) {
+          const viewerCandidates = [myUserId, myEmail].filter(Boolean);
+          const targetId = String(data?.id || "").trim();
+          const paths = viewerCandidates
+            .flatMap((id) => getPathCandidates(id, "following"))
+            .filter((path, index, arr) => arr.indexOf(path) === index);
+          const responses = await Promise.allSettled(
+            paths.map((path) => requestWithTimeout(path, {}, FOLLOWING_REQ_TIMEOUT_MS))
+          );
+          for (const result of responses) {
+            if (result.status !== "fulfilled") continue;
+            const list = pickList(result.value?.data, "following");
+            if (!Array.isArray(list)) continue;
+            const found = list.some((entry) => normalizeUserId(entry) === targetId);
+            if (found) {
+              if (!cancelled) setIsFollowing(true);
+              updateFollowCache(followKeys, true);
+              break;
             }
           }
-
-          return { base, profileId: data?.id, profileData: data };
-        } catch (err) {
-          lastError = err;
         }
+
+        return {
+          base,
+          profileId: data?.id,
+          profileData: data,
+          resolvedIsFollowing: extracted === null ? getCachedFollowing(followKeys) : extracted,
+          resolvedFollowers: Math.max(0, followerCount),
+          resolvedFollowingCount: Math.max(0, initialFollowingCount)
+        };
       }
 
       if (lastError?.response?.status === 401) {
         navigate("/login");
         return null;
+      }
+      // Cached/stale numeric profile ids can break after backend/db switch.
+      // Fallback to current logged-in profile so app remains usable.
+      if (String(username || "").toLowerCase() !== "me") {
+        try {
+          const meRes = await requestWithTimeout(
+            "/api/profile/me",
+            {
+              suppressAuthRedirect: true,
+              params: { _: Date.now() },
+              headers: {
+                "Cache-Control": "no-cache",
+                Pragma: "no-cache"
+              }
+            },
+            PROFILE_REQ_TIMEOUT_MS
+          );
+          const meData = meRes?.data?.user || meRes?.data || {};
+          if (meData && typeof meData === "object" && Object.keys(meData).length > 0) {
+            if (!cancelled) {
+              setProfile(meData);
+              navigate("/profile/me", { replace: true });
+            }
+            return { base: defaultBase || undefined, profileId: meData?.id, profileData: meData };
+          }
+        } catch {
+          // continue to existing not-found flow
+        }
       }
       if (!cancelled) setError("User not found");
       return null;
@@ -295,20 +409,27 @@ export default function Profile() {
       ].filter(Boolean);
 
       let bestPosts = [];
-      for (const base of orderedBases) {
+      const fastBases = orderedBases.slice(0, 1);
+      const fallbackBases = orderedBases.slice(1, 3);
+
+      for (const base of fastBases) {
         for (const endpoint of endpointCandidates) {
           try {
-            const res = await api.get(endpoint, {
-              baseURL: base,
-              suppressAuthRedirect: true,
-              skipAuth: true,
-              skipRefresh: true,
-              params: { _: Date.now() },
-              headers: {
-                "Cache-Control": "no-cache",
-                Pragma: "no-cache"
-              }
-            });
+            const res = await requestWithTimeout(
+              endpoint,
+              {
+                baseURL: base,
+                suppressAuthRedirect: true,
+                skipAuth: true,
+                skipRefresh: true,
+                params: { _: Date.now() },
+                headers: {
+                  "Cache-Control": "no-cache",
+                  Pragma: "no-cache"
+                }
+              },
+              POSTS_REQ_TIMEOUT_MS
+            );
             const normalized = normalizePosts(res?.data);
             if (normalized.length > bestPosts.length) {
               bestPosts = normalized;
@@ -319,27 +440,75 @@ export default function Profile() {
         }
       }
 
+      if (!bestPosts.length) {
+        for (const base of fallbackBases) {
+          for (const endpoint of endpointCandidates) {
+            try {
+              const res = await requestWithTimeout(
+                endpoint,
+                {
+                  baseURL: base,
+                  suppressAuthRedirect: true,
+                  skipAuth: true,
+                  skipRefresh: true,
+                  params: { _: Date.now() },
+                  headers: {
+                    "Cache-Control": "no-cache",
+                    Pragma: "no-cache"
+                  }
+                },
+                POSTS_REQ_TIMEOUT_MS
+              );
+              const normalized = normalizePosts(res?.data);
+              if (normalized.length > bestPosts.length) {
+                bestPosts = normalized;
+              }
+            } catch {
+              // continue
+            }
+          }
+        }
+      }
+
       if (!cancelled) setPosts(bestPosts);
+      return bestPosts;
     };
 
     const run = async () => {
-      const profileResult = await loadProfile();
-      if (profileResult?.profileId && !cancelled) {
-        const profileData = profileResult?.profileData || { id: profileResult.profileId };
-        const safeFollowers = Number(
-          profileData?.followers ??
-          profileData?.followersCount ??
-          0
-        ) || 0;
-        const safeFollowing = Number(
-          profileData?.following ??
-          profileData?.followingCount ??
-          0
-        ) || 0;
-        setFollowers(Math.max(0, safeFollowers));
-        setFollowingCount(Math.max(0, safeFollowing));
+      try {
+        const profileResult = await loadProfile();
+        let loadedPosts = [];
+        if (profileResult?.profileId && !cancelled) {
+          const profileData = profileResult?.profileData || { id: profileResult.profileId };
+          const safeFollowers = Number(
+            profileData?.followers ??
+            profileData?.followersCount ??
+            0
+          ) || 0;
+          const safeFollowing = Number(
+            profileData?.following ??
+            profileData?.followingCount ??
+            0
+          ) || 0;
+          setFollowers(Math.max(0, safeFollowers));
+          setFollowingCount(Math.max(0, safeFollowing));
+        }
+        loadedPosts = await loadPosts(profileResult?.base, profileResult?.profileId);
+        if (!cancelled && profileResult?.profileData) {
+          writeProfileCacheByKey(cacheKey, {
+            profile: profileResult.profileData,
+            posts: loadedPosts,
+            followers: profileResult.resolvedFollowers,
+            followingCount: profileResult.resolvedFollowingCount,
+            isFollowing: profileResult.resolvedIsFollowing
+          });
+        }
+      } catch (err) {
+        if (!cancelled) {
+          const text = String(err?.message || "").toLowerCase();
+          setError(text.includes("timeout") ? "Profile load timeout. Check backend connection." : "Failed to load profile");
+        }
       }
-      await loadPosts(profileResult?.base, profileResult?.profileId);
     };
 
     run();

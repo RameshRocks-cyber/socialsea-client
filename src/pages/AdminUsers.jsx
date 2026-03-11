@@ -10,6 +10,7 @@ import {
 
 export default function AdminUsers() {
   const [users, setUsers] = useState([]);
+  const [userBaseById, setUserBaseById] = useState({});
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
   const [busyByUserId, setBusyByUserId] = useState({});
@@ -44,20 +45,32 @@ export default function AdminUsers() {
     return Array.from(byId.values());
   };
 
-  const loadUsers = async () => {
-    setError("");
-
+  const getBaseCandidates = () => {
     const defaultBase = String(api?.defaults?.baseURL || "").replace(/\/+$/, "");
-    const baseCandidates = [
+    const storedBase =
+      String(
+        sessionStorage.getItem("socialsea_auth_base_url") ||
+        localStorage.getItem("socialsea_auth_base_url") ||
+        ""
+      ).replace(/\/+$/, "");
+    return [
       defaultBase,
+      storedBase,
       "http://localhost:8080",
       "http://127.0.0.1:8080",
       "https://socialsea.co.in"
     ].filter((value, index, arr) => value && arr.indexOf(value) === index);
+  };
+
+  const loadUsers = async () => {
+    setError("");
+
+    const baseCandidates = getBaseCandidates();
 
     const endpointCandidates = ["/api/admin/users"];
 
     let bestUsers = [];
+    let bestSourceMap = {};
     let lastError = null;
 
     for (const base of baseCandidates) {
@@ -71,8 +84,13 @@ export default function AdminUsers() {
           });
 
           const list = dedupeUsers(normalizeUserList(res?.data).map(toUserShape).filter(isValidUser));
+          const sourceMap = {};
+          for (const item of list) {
+            sourceMap[String(item.id)] = base;
+          }
           if (list.length > bestUsers.length) {
             bestUsers = list;
+            bestSourceMap = sourceMap;
           }
         } catch (err) {
           lastError = err;
@@ -81,6 +99,7 @@ export default function AdminUsers() {
     }
 
     setUsers(bestUsers);
+    setUserBaseById(bestSourceMap);
 
     if (bestUsers.length === 0 && lastError) {
       console.error(lastError);
@@ -153,6 +172,77 @@ export default function AdminUsers() {
   const blockUser = async (user) => setUserBlockedState(user, true);
 
   const unblockUser = async (user) => setUserBlockedState(user, false);
+
+  const deleteUser = async (user) => {
+    const display = getUserDisplayName(user);
+    const confirmed = window.confirm(
+      `Delete user "${display}" (#${user.id}) permanently?\nThis action cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    setBusyByUserId((prev) => ({ ...prev, [user.id]: true }));
+    setError("");
+
+    try {
+      const sourceBase = String(userBaseById[String(user.id)] || "").trim();
+      const baseCandidates = [
+        sourceBase,
+        ...getBaseCandidates()
+      ].filter((value, index, arr) => value && arr.indexOf(value) === index);
+      const requestVariants = [
+        { method: "delete", url: `/api/admin/users/${user.id}` },
+        { method: "post", url: `/api/admin/users/${user.id}/delete` },
+        { method: "delete", url: `/api/admin/user/${user.id}` },
+        { method: "post", url: `/api/admin/user/${user.id}/delete` },
+        { method: "post", url: `/api/admin/delete-user/${user.id}` }
+      ];
+
+      let deleted = false;
+      let lastErr = null;
+      for (const baseURL of baseCandidates) {
+        for (const req of requestVariants) {
+          try {
+            await api.request({
+              method: req.method,
+              url: req.url,
+              baseURL,
+              suppressAuthRedirect: true
+            });
+            deleted = true;
+            break;
+          } catch (err) {
+            lastErr = err;
+            const status = Number(err?.response?.status || 0);
+            if (!(status === 400 || status === 401 || status === 403 || status === 404 || status === 405 || status >= 500 || !status)) {
+              throw err;
+            }
+          }
+        }
+        if (deleted) break;
+      }
+      if (!deleted) throw lastErr || new Error("Delete endpoint not reachable");
+
+      setUsers((prev) => prev.filter((item) => String(item?.id) !== String(user.id)));
+      setUserBaseById((prev) => {
+        const next = { ...prev };
+        delete next[String(user.id)];
+        return next;
+      });
+      setNotices((prev) => prev.filter((item) => !(item?.targetType === "user" && String(item?.targetId) === String(user.id))));
+      setNoticeTextByUserId((prev) => {
+        const next = { ...prev };
+        delete next[user.id];
+        return next;
+      });
+    } catch (err) {
+      console.error(err);
+      const status = err?.response?.status;
+      const message = err?.response?.data?.message || err?.message || "Failed to delete user";
+      setError(status ? `Failed to delete user (${status}): ${message}` : `Failed to delete user: ${message}`);
+    } finally {
+      setBusyByUserId((prev) => ({ ...prev, [user.id]: false }));
+    }
+  };
 
   const activeUsers = users.filter((user) => !user?.banned).length;
   const redNotices = notices.filter((notice) => notice.targetType === "user" && notice.severity === "red").length;
@@ -238,6 +328,9 @@ export default function AdminUsers() {
                         </button>
                         <button type="button" className="admin-btn success" onClick={() => unblockUser(user)} disabled={busy || !user?.banned}>
                           {busy && user?.banned ? "Unblocking..." : user?.banned ? "Unblock" : "Unblocked"}
+                        </button>
+                        <button type="button" className="admin-btn danger" onClick={() => deleteUser(user)} disabled={busy}>
+                          {busy ? "Working..." : "Delete User"}
                         </button>
                       </div>
                     </td>

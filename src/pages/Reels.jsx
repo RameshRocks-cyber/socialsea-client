@@ -13,8 +13,6 @@ const GESTURE_PLAY_TOGGLE_COOLDOWN_MS = 200;
 const GESTURE_POSE_HOLD_FRAMES = 2;
 const GESTURE_TWO_FINGER_HOLD_FRAMES = 2;
 const GESTURE_RESET_HOLD_FRAMES = 3;
-const GESTURE_PALM_SWIPE_MIN_PX = 24;
-const GESTURE_SWIPE_STABLE_FRAMES = 1;
 const GESTURE_SCRIPT_TF = "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js";
 const GESTURE_SCRIPT_HANDPOSE =
   "https://cdn.jsdelivr.net/npm/@tensorflow-models/handpose@0.0.7/dist/handpose.min.js";
@@ -76,9 +74,6 @@ export default function Reels() {
   const noPoseFramesRef = useRef(0);
   const activePoseRef = useRef("none");
   const poseConsumedRef = useRef(false);
-  const prevPalmXRef = useRef(null);
-  const palmMotionLockRef = useRef(false);
-  const swipeStableFramesRef = useRef(0);
   const reelsRef = useRef([]);
   const currentIndexRef = useRef(0);
   const pendingScrollIndexRef = useRef(null);
@@ -711,18 +706,42 @@ export default function Reels() {
   const readHandState = (landmarks) => {
     if (!landmarks || landmarks.length < 21) return null;
     const wrist = landmarks[0];
+    const thumbIp = landmarks[3];
     const indexMcp = landmarks[5];
+    const indexPip = landmarks[6];
+    const indexTip = landmarks[8];
     const middleMcp = landmarks[9];
+    const middlePip = landmarks[10];
+    const middleTip = landmarks[12];
+    const ringMcp = landmarks[13];
+    const ringPip = landmarks[14];
+    const ringTip = landmarks[16];
+    const pinkyMcp = landmarks[17];
+    const pinkyPip = landmarks[18];
+    const pinkyTip = landmarks[20];
     const thumbTip = landmarks[4];
 
     const handSize = Math.hypot(middleMcp[0] - wrist[0], middleMcp[1] - wrist[1]) || 1;
+    const extMargin = Math.max(3, handSize * 0.09);
+    const isFingerExtended = (tip, pip, mcp) =>
+      Number(tip?.[1]) < Number(pip?.[1]) - extMargin &&
+      Number(pip?.[1]) < Number(mcp?.[1]) - extMargin * 0.35;
+    const indexExtended = isFingerExtended(indexTip, indexPip, indexMcp);
+    const middleExtended = isFingerExtended(middleTip, middlePip, middleMcp);
+    const ringExtended = isFingerExtended(ringTip, ringPip, ringMcp);
+    const pinkyExtended = isFingerExtended(pinkyTip, pinkyPip, pinkyMcp);
+    const extendedCount = [indexExtended, middleExtended, ringExtended, pinkyExtended].filter(Boolean).length;
+
     const thumbToIndex = Math.hypot(thumbTip[0] - indexMcp[0], thumbTip[1] - indexMcp[1]);
     const thumbToWrist = Math.hypot(thumbTip[0] - wrist[0], thumbTip[1] - wrist[1]);
-    const thumbExtended = thumbToIndex > handSize * 0.42 && thumbToWrist > handSize * 0.45;
-    const thumbBent = thumbToIndex < handSize * 0.28 || thumbToWrist < handSize * 0.32;
+    const thumbBent =
+      thumbToIndex < handSize * 0.28 ||
+      thumbToWrist < handSize * 0.32 ||
+      (Number(thumbTip[1]) > Number(thumbIp[1]) + handSize * 0.04 && extendedCount <= 1);
 
+    if (indexExtended && extendedCount === 1) return { pose: "oneFinger", handSize };
+    if (extendedCount === 3) return { pose: "threeFingers", handSize };
     if (thumbBent) return { pose: "thumbBent", handSize };
-    if (thumbExtended) return { pose: "thumbMove", thumbX: Number(thumbTip[0]) || 0, handSize };
     return { pose: "none" };
   };
 
@@ -732,9 +751,6 @@ export default function Reels() {
     noPoseFramesRef.current = 0;
     activePoseRef.current = "none";
     poseConsumedRef.current = false;
-    prevPalmXRef.current = null;
-    palmMotionLockRef.current = false;
-    swipeStableFramesRef.current = 0;
     if (detectFrameRef.current) {
       cancelAnimationFrame(detectFrameRef.current);
       detectFrameRef.current = 0;
@@ -801,9 +817,6 @@ export default function Reels() {
             poseFramesRef.current = pose === "none" ? 0 : 1;
             if (pose === "none") {
               noPoseFramesRef.current = 1;
-              prevPalmXRef.current = null;
-              palmMotionLockRef.current = false;
-              swipeStableFramesRef.current = 0;
             } else {
               noPoseFramesRef.current = 0;
               poseConsumedRef.current = false;
@@ -817,65 +830,30 @@ export default function Reels() {
             if (noPoseFramesRef.current >= GESTURE_RESET_HOLD_FRAMES) {
               poseConsumedRef.current = false;
             }
-            prevPalmXRef.current = null;
-            palmMotionLockRef.current = false;
-            swipeStableFramesRef.current = 0;
-          }
-
-          if (pose === "thumbMove") {
-            const thumbX = Number(handState?.thumbX);
-            const handSize = Number(handState?.handSize) || 0;
-            const swipeThreshold = Math.max(GESTURE_PALM_SWIPE_MIN_PX, handSize * 0.14);
-            if (Number.isFinite(thumbX)) {
-              if (prevPalmXRef.current == null) {
-                prevPalmXRef.current = thumbX;
-              } else {
-                const dx = thumbX - prevPalmXRef.current;
-
-                if (Math.abs(dx) <= Math.max(5, swipeThreshold * 0.3)) {
-                  swipeStableFramesRef.current += 1;
-                } else {
-                  swipeStableFramesRef.current = 0;
-                }
-
-                if (swipeStableFramesRef.current >= GESTURE_SWIPE_STABLE_FRAMES) {
-                  palmMotionLockRef.current = false;
-                }
-
-                if (
-                  !poseConsumedRef.current &&
-                  !palmMotionLockRef.current &&
-                  !gestureScrollLockRef.current &&
-                  now - lastScrollAtRef.current > GESTURE_SCROLL_COOLDOWN_MS
-                ) {
-                  if (dx >= swipeThreshold) {
-                    lastScrollAtRef.current = now;
-                    poseConsumedRef.current = true;
-                    palmMotionLockRef.current = true;
-                    swipeStableFramesRef.current = 0;
-                    setGestureStatus("Thumb right: previous reel");
-                    scrollToIndex(currentIndexRef.current - 1);
-                  } else if (dx <= -swipeThreshold) {
-                    lastScrollAtRef.current = now;
-                    poseConsumedRef.current = true;
-                    palmMotionLockRef.current = true;
-                    swipeStableFramesRef.current = 0;
-                    setGestureStatus("Thumb left: next reel");
-                    scrollToIndex(currentIndexRef.current + 1);
-                  }
-                }
-
-                prevPalmXRef.current = thumbX;
-              }
-            }
-          } else {
-            prevPalmXRef.current = null;
-            palmMotionLockRef.current = false;
-            swipeStableFramesRef.current = 0;
           }
 
           if (!poseConsumedRef.current) {
             if (
+              pose === "oneFinger" &&
+              poseFramesRef.current >= GESTURE_POSE_HOLD_FRAMES &&
+              !gestureScrollLockRef.current &&
+              now - lastScrollAtRef.current > GESTURE_SCROLL_COOLDOWN_MS
+            ) {
+              lastScrollAtRef.current = now;
+              poseConsumedRef.current = true;
+              setGestureStatus("Index finger: next reel");
+              scrollToIndex(currentIndexRef.current + 1);
+            } else if (
+              pose === "threeFingers" &&
+              poseFramesRef.current >= GESTURE_POSE_HOLD_FRAMES &&
+              !gestureScrollLockRef.current &&
+              now - lastScrollAtRef.current > GESTURE_SCROLL_COOLDOWN_MS
+            ) {
+              lastScrollAtRef.current = now;
+              poseConsumedRef.current = true;
+              setGestureStatus("Three fingers: previous reel");
+              scrollToIndex(currentIndexRef.current - 1);
+            } else if (
               pose === "thumbBent" &&
               poseFramesRef.current >= GESTURE_POSE_HOLD_FRAMES &&
               now - lastLikeAtRef.current > GESTURE_LIKE_COOLDOWN_MS

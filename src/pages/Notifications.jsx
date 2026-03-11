@@ -88,6 +88,34 @@ const extractFollowingFlag = (item) => {
   return null;
 };
 
+const normalizeLiveUrl = (rawUrl, fallbackAlertId = "") => {
+  const raw = String(rawUrl || "").trim();
+  const fallbackId = String(fallbackAlertId || "").trim();
+  const appOrigin = typeof window !== "undefined" ? String(window.location.origin || "").replace(/\/+$/, "") : "";
+
+  const toLivePath = (id) => {
+    const safeId = String(id || "").trim();
+    if (!safeId) return "";
+    const path = `/sos/live/${encodeURIComponent(safeId)}`;
+    return appOrigin ? `${appOrigin}${path}` : path;
+  };
+
+  if (!raw) return toLivePath(fallbackId);
+
+  try {
+    const parsed = new URL(raw, appOrigin || "http://localhost");
+    const liveMatch = parsed.pathname.match(/\/sos\/live\/([^/?#]+)/i);
+    if (liveMatch?.[1]) return toLivePath(decodeURIComponent(liveMatch[1]));
+
+    const genericSosMatch = parsed.pathname.match(/\/sos\/(?!navigate\/)([^/?#]+)/i);
+    if (genericSosMatch?.[1]) return toLivePath(decodeURIComponent(genericSosMatch[1]));
+  } catch {
+    // keep original URL if parsing fails
+  }
+
+  return raw;
+};
+
 export default function Notifications() {
   const navigate = useNavigate();
   const [items, setItems] = useState([]);
@@ -147,8 +175,9 @@ export default function Notifications() {
       const found = urls.find((u) => u.includes(marker));
       return found ? found.replace(/[),.;]+$/g, "") : "";
     };
+    const resolvedAlertId = String(item?.alertId || item?.emergencyAlertId || item?.emergencyId || "").trim();
     return {
-      liveUrl: String(item?.liveUrl || pick("/sos/live/") || "").trim(),
+      liveUrl: normalizeLiveUrl(item?.liveUrl || pick("/sos/live/") || pick("/sos/"), resolvedAlertId),
       navigateUrl: String(item?.navigateUrl || pick("/sos/navigate/") || "").trim(),
       mapsUrl: String(item?.mapsUrl || pick("google.com/maps") || "").trim(),
     };

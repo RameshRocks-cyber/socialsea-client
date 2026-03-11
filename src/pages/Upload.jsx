@@ -2,6 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import api from "../api/axios";
 import "./Upload.css";
 
+const POST_GENRE_MAP_KEY = "socialsea_post_genre_map_v1";
+const MAX_UPLOAD_FILE_SIZE_BYTES = 80 * 1024 * 1024;
+
 const ASPECT_OPTIONS = [
   { label: "Original", value: "orig" },
   { label: "1:1", value: "1:1" },
@@ -63,9 +66,19 @@ function parseUploadError(err) {
   return "Upload failed";
 }
 
+const sanitizeCreatorSettings = (settings) => {
+  const next = { ...(settings || {}) };
+  if (!String(next.scheduleAt || "").trim()) {
+    delete next.scheduleAt;
+  }
+  return next;
+};
+
 export default function Upload() {
   const videoRef = useRef(null);
   const [file, setFile] = useState(null);
+  const [selectedFiles, setSelectedFiles] = useState([]);
+  const [activeFileIndex, setActiveFileIndex] = useState(0);
   const [previewUrl, setPreviewUrl] = useState("");
   const [caption, setCaption] = useState("");
   const [msg, setMsg] = useState("");
@@ -250,69 +263,140 @@ export default function Upload() {
     return new File([blob], `edited_${Date.now()}.jpg`, { type: "image/jpeg" });
   };
 
+  const resetUploadForm = () => {
+    setFile(null);
+    setSelectedFiles([]);
+    setActiveFileIndex(0);
+    setCaption("");
+    setEdits(defaultEdits);
+    setVideoMeta({ duration: 0, width: 0, height: 0 });
+    setActiveVideoTool("edit");
+    setExtraClips([]);
+    setVideoEdits({
+      trimStart: 0,
+      trimEnd: 0,
+      playbackSpeed: 1,
+      volume: 100,
+      muted: false,
+      brightness: 100,
+      contrast: 100,
+      saturation: 100,
+      filterPreset: "normal",
+      overlayText: "",
+      overlayOpacity: 70,
+      overlayMode: "screen",
+      sticker: "none",
+      captionsStyle: "classic",
+      voiceoverGain: 100,
+      importedAudioName: "",
+      extraClipCount: 0,
+      qualityTarget: "1080p",
+      coverMode: "auto"
+    });
+    setCreatorSettings({
+      audience: "public",
+      allowComments: true,
+      allowRemix: true,
+      allowDownload: false,
+      autoCaptions: true,
+      ageRestriction: "all",
+      category: "general",
+      scheduleAt: ""
+    });
+  };
+
   const upload = async () => {
-    if (!file) {
+    const filesToUpload = selectedFiles.length ? selectedFiles : file ? [file] : [];
+    if (!filesToUpload.length) {
       setMsg("File required");
       return;
     }
 
-    const form = new FormData();
-    const uploadFile = isImage ? await processImage(file) : file;
-    form.append("file", uploadFile);
-    if (caption?.trim()) form.append("caption", caption.trim());
-    if (isVideo) {
-      form.append(
-        "videoSettings",
-        JSON.stringify({
-          edits: videoEdits,
-          creatorSettings
-        })
-      );
-    }
-
     try {
       setLoading(true);
-      await api.post("/api/posts/upload", form, {
-        headers: { "Content-Type": "multipart/form-data" }
-      });
-      setMsg("Post uploaded successfully");
-      setFile(null);
-      setCaption("");
-      setEdits(defaultEdits);
-      setVideoMeta({ duration: 0, width: 0, height: 0 });
-      setActiveVideoTool("edit");
-      setExtraClips([]);
-      setVideoEdits({
-        trimStart: 0,
-        trimEnd: 0,
-        playbackSpeed: 1,
-        volume: 100,
-        muted: false,
-        brightness: 100,
-        contrast: 100,
-        saturation: 100,
-        filterPreset: "normal",
-        overlayText: "",
-        overlayOpacity: 70,
-        overlayMode: "screen",
-        sticker: "none",
-        captionsStyle: "classic",
-        voiceoverGain: 100,
-        importedAudioName: "",
-        extraClipCount: 0,
-        qualityTarget: "1080p",
-        coverMode: "auto"
-      });
-      setCreatorSettings({
-        audience: "public",
-        allowComments: true,
-        allowRemix: true,
-        allowDownload: false,
-        autoCaptions: true,
-        ageRestriction: "all",
-        category: "general",
-        scheduleAt: ""
-      });
+      let successCount = 0;
+      let failedCount = 0;
+      const failedMessages = [];
+      for (let i = 0; i < filesToUpload.length; i += 1) {
+        const currentFile = filesToUpload[i];
+        if (Number(currentFile?.size || 0) > MAX_UPLOAD_FILE_SIZE_BYTES) {
+          failedCount += 1;
+          failedMessages.push(`${currentFile?.name || "file"} is too large (max 80MB).`);
+          continue;
+        }
+        const currentIsImage = !!currentFile?.type?.startsWith("image/");
+        const currentIsVideo = !!currentFile?.type?.startsWith("video/");
+        const shouldApplyImageEdit = filesToUpload.length === 1 && currentIsImage && file && currentFile === file;
+
+        const form = new FormData();
+        const uploadFile = shouldApplyImageEdit ? await processImage(currentFile) : currentFile;
+        form.append("file", uploadFile);
+        if (caption?.trim()) form.append("caption", caption.trim());
+        if (currentIsVideo) {
+          const safeCreatorSettings = sanitizeCreatorSettings(creatorSettings);
+          form.append(
+            "videoSettings",
+            JSON.stringify({
+              edits: videoEdits,
+              creatorSettings: safeCreatorSettings
+            })
+          );
+        }
+
+        try {
+          let res = null;
+          try {
+            res = await api.post("/api/posts/upload", form, {
+              headers: { "Content-Type": "multipart/form-data" }
+            });
+          } catch (firstErr) {
+            const status = Number(firstErr?.response?.status || 0);
+            // Some backend variants fail on extra multipart fields; retry with strict file-only payload.
+            if (status >= 500) {
+              const fallbackForm = new FormData();
+              fallbackForm.append("file", uploadFile);
+              res = await api.post("/api/posts/upload", fallbackForm, {
+                headers: { "Content-Type": "multipart/form-data" }
+              });
+            } else {
+              throw firstErr;
+            }
+          }
+          if (!res) throw new Error("Upload failed");
+          successCount += 1;
+          try {
+            const createdId = String(res?.data?.id || res?.data?.postId || "").trim();
+            const selectedGenre = String(creatorSettings.category || "").trim().toLowerCase();
+            if (createdId && selectedGenre) {
+              const raw = localStorage.getItem(POST_GENRE_MAP_KEY);
+              const parsed = raw ? JSON.parse(raw) : {};
+              const next = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? { ...parsed } : {};
+              next[createdId] = selectedGenre;
+              localStorage.setItem(POST_GENRE_MAP_KEY, JSON.stringify(next));
+            }
+          } catch {
+            // ignore local genre cache errors
+          }
+        } catch (itemErr) {
+          const status = Number(itemErr?.response?.status || 0);
+          if (status >= 500 && currentFile?.size > 60 * 1024 * 1024) {
+            setMsg("Upload failed: video may be too large for backend limit. Try a smaller file.");
+          }
+          const itemReason = parseUploadError(itemErr);
+          failedMessages.push(
+            `${currentFile?.name || `File ${i + 1}`}: ${status ? `(${status}) ` : ""}${itemReason}`
+          );
+          failedCount += 1;
+        }
+      }
+      if (successCount > 0 && failedCount === 0) setMsg(`${successCount} post(s) uploaded successfully`);
+      else if (successCount > 0 && failedCount > 0) {
+        const details = failedMessages[0] ? ` First error: ${failedMessages[0]}` : "";
+        setMsg(`${successCount} uploaded, ${failedCount} failed.${details}`);
+      } else {
+        setMsg(failedMessages[0] || "Upload failed");
+      }
+      if (successCount > 0) resetUploadForm();
     } catch (err) {
       console.error(err);
       setMsg(parseUploadError(err));
@@ -332,8 +416,12 @@ export default function Upload() {
           <input
             type="file"
             accept="image/*,video/*"
+            multiple
             onChange={(e) => {
-              setFile(e.target.files?.[0] || null);
+              const nextFiles = Array.from(e.target.files || []);
+              setSelectedFiles(nextFiles);
+              setActiveFileIndex(0);
+              setFile(nextFiles[0] || null);
               setMsg("");
               setEdits(defaultEdits);
               setActiveVideoTool("edit");
@@ -342,6 +430,36 @@ export default function Upload() {
             }}
           />
         </label>
+        {selectedFiles.length > 1 && (
+          <>
+            <p className="video-note">
+              {selectedFiles.length} files selected. Clicking upload will create {selectedFiles.length} posts.
+            </p>
+            <div className="upload-selected-list" role="list" aria-label="Selected files">
+              {selectedFiles.map((selected, idx) => {
+                const isVideoFile = String(selected?.type || "").startsWith("video/");
+                const label = `${idx + 1}. ${selected?.name || "file"}`;
+                return (
+                  <button
+                    key={`${selected.name}-${selected.size}-${idx}`}
+                    type="button"
+                    role="listitem"
+                    className={`upload-selected-item ${activeFileIndex === idx ? "is-active" : ""}`}
+                    onClick={() => {
+                      setActiveFileIndex(idx);
+                      setFile(selected);
+                      setVideoMeta({ duration: 0, width: 0, height: 0 });
+                    }}
+                    title={label}
+                  >
+                    <span className="upload-selected-kind">{isVideoFile ? "Video" : "Image"}</span>
+                    <span className="upload-selected-name">{label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )}
 
         <input
           className="upload-caption"
@@ -821,15 +939,21 @@ export default function Upload() {
               </label>
 
               <label>
-                Category
+                Genre
                 <select
                   value={creatorSettings.category}
                   onChange={(e) => setCreatorSetting("category", e.target.value)}
                 >
                   <option value="general">General</option>
-                  <option value="education">Education</option>
-                  <option value="gaming">Gaming</option>
                   <option value="music">Music</option>
+                  <option value="mixes">Mixes</option>
+                  <option value="news">News</option>
+                  <option value="live">Live</option>
+                  <option value="comedy">Comedy</option>
+                  <option value="movies">Movies</option>
+                  <option value="gaming">Gaming</option>
+                  <option value="trending">Trending</option>
+                  <option value="education">Education</option>
                   <option value="fitness">Fitness</option>
                   <option value="vlog">Vlog</option>
                 </select>

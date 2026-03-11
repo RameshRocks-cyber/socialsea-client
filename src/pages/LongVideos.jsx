@@ -18,13 +18,25 @@ const WATCH_CATEGORIES = [
   "Trending"
 ];
 
+const WATCH_RAIL_ITEMS = ["Home", "Trending", "Subscriptions", "History", "Playlists", "Watch Later", "Liked Videos"];
+
 export default function LongVideos() {
   const { postId } = useParams();
   const isWatchMode = Boolean(postId);
   const navigate = useNavigate();
   const playerRef = useRef(null);
   const playerWrapRef = useRef(null);
-  const gestureRef = useRef({ active: false, mode: "", startY: 0, startValue: 0, pointerId: null });
+  const gestureRef = useRef({
+    active: false,
+    mode: "",
+    startX: 0,
+    startY: 0,
+    startValue: 0,
+    pointerId: null,
+    startedAt: 0
+  });
+  const lastTapRef = useRef({ at: 0, x: 0, y: 0 });
+  const seekHudRef = useRef({ direction: "", totalSeconds: 0, lastAt: 0 });
   const gestureHudTimerRef = useRef(0);
   const controlsHideTimerRef = useRef(0);
   const [allPosts, setAllPosts] = useState([]);
@@ -44,9 +56,14 @@ export default function LongVideos() {
   const [searchText, setSearchText] = useState("");
   const [activeCategory, setActiveCategory] = useState("All");
   const [playerBrightness, setPlayerBrightness] = useState(1);
-  const [gestureHud, setGestureHud] = useState("");
+  const [gestureHud, setGestureHud] = useState({ text: "", position: "bottom" });
   const [isPlayerPaused, setIsPlayerPaused] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(true);
+  const [isPlayerFullscreen, setIsPlayerFullscreen] = useState(false);
+  const [playerCurrentTime, setPlayerCurrentTime] = useState(0);
+  const [playerDuration, setPlayerDuration] = useState(0);
+  const [playerBufferedUntil, setPlayerBufferedUntil] = useState(0);
+  const [isSeeking, setIsSeeking] = useState(false);
 
   const toList = (payload) => {
     if (Array.isArray(payload)) return payload;
@@ -596,10 +613,10 @@ export default function LongVideos() {
     navigate(`/watch/${id}`);
   };
 
-  const showGestureHud = (text) => {
-    setGestureHud(text);
+  const showGestureHud = (text, position = "bottom", timeoutMs = 650) => {
+    setGestureHud({ text, position });
     if (gestureHudTimerRef.current) clearTimeout(gestureHudTimerRef.current);
-    gestureHudTimerRef.current = window.setTimeout(() => setGestureHud(""), 650);
+    gestureHudTimerRef.current = window.setTimeout(() => setGestureHud({ text: "", position: "bottom" }), timeoutMs);
   };
 
   const changeVideoByOffset = (offset) => {
@@ -623,13 +640,43 @@ export default function LongVideos() {
     }
   };
 
+  const syncPlayerTime = () => {
+    const video = playerRef.current;
+    if (!video) return;
+    const duration = Number(video.duration) || 0;
+    if (duration > 0) setPlayerDuration(duration);
+    let bufferedUntil = 0;
+    try {
+      const ranges = video.buffered;
+      if (ranges && ranges.length > 0) {
+        bufferedUntil = Number(ranges.end(ranges.length - 1)) || 0;
+      }
+    } catch {
+      bufferedUntil = 0;
+    }
+    if (duration > 0) {
+      setPlayerBufferedUntil(Math.min(duration, bufferedUntil));
+    } else {
+      setPlayerBufferedUntil(bufferedUntil);
+    }
+    if (!isSeeking) setPlayerCurrentTime(Number(video.currentTime) || 0);
+  };
+
+  const handleSeekTo = (rawValue) => {
+    const next = Math.max(0, Number(rawValue) || 0);
+    setPlayerCurrentTime(next);
+    const video = playerRef.current;
+    if (!video) return;
+    video.currentTime = next;
+  };
+
   const showPlayerControls = (autoHide = true) => {
     setControlsVisible(true);
     if (controlsHideTimerRef.current) {
       clearTimeout(controlsHideTimerRef.current);
       controlsHideTimerRef.current = 0;
     }
-    if (!autoHide || isPlayerPaused) return;
+    if (!autoHide || isPlayerPaused || isPlayerFullscreen) return;
     controlsHideTimerRef.current = window.setTimeout(() => {
       setControlsVisible(false);
       controlsHideTimerRef.current = 0;
@@ -638,21 +685,70 @@ export default function LongVideos() {
 
   const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
+  const enterPlayerFullscreen = async () => {
+    const wrap = playerWrapRef.current;
+    if (!wrap || document.fullscreenElement === wrap) return;
+    try {
+      await wrap.requestFullscreen();
+    } catch {
+      // no-op
+    }
+  };
+
+  const exitPlayerFullscreen = async () => {
+    const wrap = playerWrapRef.current;
+    if (!document.fullscreenElement) return;
+    if (!wrap || document.fullscreenElement !== wrap) return;
+    try {
+      await document.exitFullscreen();
+    } catch {
+      // no-op
+    }
+  };
+
+  const togglePlayerFullscreen = async () => {
+    const wrap = playerWrapRef.current;
+    if (!wrap) return;
+    if (document.fullscreenElement === wrap) {
+      await exitPlayerFullscreen();
+    } else {
+      await enterPlayerFullscreen();
+    }
+  };
+
   const handlePlayerPointerDown = (event) => {
-    if (event.target?.closest?.(".watch-overlay-controls")) return;
+    if (
+      event.target?.closest?.(".watch-overlay-controls") ||
+      event.target?.closest?.(".watch-corner-fullscreen") ||
+      event.target?.closest?.(".watch-quality-btn") ||
+      event.target?.closest?.(".watch-quality-menu") ||
+      event.target?.closest?.(".watch-progress-wrap")
+    ) return;
     showPlayerControls(true);
     const wrap = playerWrapRef.current;
     if (!wrap) return;
     const rect = wrap.getBoundingClientRect();
-    const mode = event.clientX - rect.left < rect.width / 2 ? "volume" : "brightness";
+    // Ignore the native control row area to avoid conflicts with browser controls.
+    if (event.clientY > rect.bottom - 72) return;
+    const centerZoneLeft = rect.left + rect.width * 0.25;
+    const centerZoneRight = rect.left + rect.width * 0.75;
+    const mode =
+      event.clientX >= centerZoneLeft && event.clientX <= centerZoneRight
+        ? "fullscreen"
+        : event.clientX - rect.left < rect.width / 2
+          ? "volume"
+          : "brightness";
     const video = playerRef.current;
-    const startValue = mode === "volume" ? Number(video?.volume ?? 1) : Number(playerBrightness || 1);
+    const startValue =
+      mode === "volume" ? Number(video?.volume ?? 1) : mode === "brightness" ? Number(playerBrightness || 1) : 0;
     gestureRef.current = {
       active: true,
       mode,
+      startX: event.clientX,
       startY: event.clientY,
       startValue,
-      pointerId: event.pointerId
+      pointerId: event.pointerId,
+      startedAt: Date.now()
     };
     if (wrap.setPointerCapture) {
       try {
@@ -664,7 +760,13 @@ export default function LongVideos() {
   };
 
   const handlePlayerPointerMove = (event) => {
-    if (event.target?.closest?.(".watch-overlay-controls")) return;
+    if (
+      event.target?.closest?.(".watch-overlay-controls") ||
+      event.target?.closest?.(".watch-corner-fullscreen") ||
+      event.target?.closest?.(".watch-quality-btn") ||
+      event.target?.closest?.(".watch-quality-menu") ||
+      event.target?.closest?.(".watch-progress-wrap")
+    ) return;
     showPlayerControls(true);
     const meta = gestureRef.current;
     const wrap = playerWrapRef.current;
@@ -673,6 +775,9 @@ export default function LongVideos() {
 
     const rect = wrap.getBoundingClientRect();
     const deltaRatio = (meta.startY - event.clientY) / Math.max(1, rect.height);
+    if (meta.mode === "fullscreen") {
+      return;
+    }
     if (meta.mode === "volume") {
       const nextVolume = clamp(meta.startValue + deltaRatio * 1.3, 0, 1);
       if (playerRef.current) playerRef.current.volume = nextVolume;
@@ -686,8 +791,59 @@ export default function LongVideos() {
   };
 
   const handlePlayerPointerUp = (event) => {
-    if (event.target?.closest?.(".watch-overlay-controls")) return;
+    if (
+      event.target?.closest?.(".watch-overlay-controls") ||
+      event.target?.closest?.(".watch-corner-fullscreen") ||
+      event.target?.closest?.(".watch-quality-btn") ||
+      event.target?.closest?.(".watch-quality-menu") ||
+      event.target?.closest?.(".watch-progress-wrap")
+    ) return;
+    const meta = gestureRef.current;
     const wrap = playerWrapRef.current;
+    const rect = wrap?.getBoundingClientRect();
+    const dy = event.clientY - (meta.startY || event.clientY);
+    const dx = event.clientX - (meta.startX || event.clientX);
+    const elapsedMs = Date.now() - (meta.startedAt || Date.now());
+    const isTap = Math.abs(dx) < 16 && Math.abs(dy) < 16 && elapsedMs < 280;
+    const isFullscreenSwipe = meta.mode === "fullscreen" && Math.abs(dy) > 110 && Math.abs(dx) < 60;
+
+    if (isFullscreenSwipe) {
+      if (dy < 0 && !isPlayerFullscreen) {
+        enterPlayerFullscreen();
+      } else if (dy > 0 && isPlayerFullscreen) {
+        exitPlayerFullscreen();
+      }
+    } else if (isTap) {
+      const prev = lastTapRef.current;
+      if (
+        prev.at > 0 &&
+        Date.now() - prev.at < 300 &&
+        Math.abs(event.clientX - prev.x) < 28 &&
+        Math.abs(event.clientY - prev.y) < 28
+      ) {
+        const video = playerRef.current;
+        if (video && rect) {
+          const isLeftSide = event.clientX < rect.left + rect.width / 2;
+          const delta = isLeftSide ? -10 : 10;
+          const nextTime = clamp((video.currentTime || 0) + delta, 0, Number(video.duration) || Number.MAX_SAFE_INTEGER);
+          video.currentTime = nextTime;
+          const now = Date.now();
+          const direction = isLeftSide ? "left" : "right";
+          const canStack = seekHudRef.current.direction === direction && now - seekHudRef.current.lastAt < 700;
+          const totalSeconds = canStack ? seekHudRef.current.totalSeconds + 10 : 10;
+          seekHudRef.current = { direction, totalSeconds, lastAt: now };
+          showGestureHud(
+            `${totalSeconds}s`,
+            isLeftSide ? "side-left" : "side-right",
+            720
+          );
+        }
+        lastTapRef.current = { at: 0, x: 0, y: 0 };
+      } else {
+        lastTapRef.current = { at: Date.now(), x: event.clientX, y: event.clientY };
+      }
+    }
+
     if (wrap?.releasePointerCapture && gestureRef.current.pointerId != null) {
       try {
         wrap.releasePointerCapture(gestureRef.current.pointerId);
@@ -695,12 +851,31 @@ export default function LongVideos() {
         // no-op
       }
     }
-    gestureRef.current = { active: false, mode: "", startY: 0, startValue: 0, pointerId: null };
+    gestureRef.current = {
+      active: false,
+      mode: "",
+      startX: 0,
+      startY: 0,
+      startValue: 0,
+      pointerId: null,
+      startedAt: 0
+    };
     if (event?.cancelable) event.preventDefault();
   };
 
   useEffect(() => {
+    const onFullscreenChange = () => {
+      const wrap = playerWrapRef.current;
+      const fsEl = document.fullscreenElement;
+
+      const isWrapFs = !!wrap && fsEl === wrap;
+      setIsPlayerFullscreen(isWrapFs);
+      if (!isWrapFs) showPlayerControls(true);
+    };
+
+    document.addEventListener("fullscreenchange", onFullscreenChange);
     return () => {
+      document.removeEventListener("fullscreenchange", onFullscreenChange);
       if (gestureHudTimerRef.current) clearTimeout(gestureHudTimerRef.current);
       if (controlsHideTimerRef.current) clearTimeout(controlsHideTimerRef.current);
     };
@@ -710,6 +885,34 @@ export default function LongVideos() {
     if (!isWatchMode) return;
     showPlayerControls(true);
   }, [isWatchMode, activeVideo?.id, isPlayerPaused]);
+
+  useEffect(() => {
+    seekHudRef.current = { direction: "", totalSeconds: 0, lastAt: 0 };
+  }, [activeVideo?.id]);
+
+  useEffect(() => {
+    setPlayerCurrentTime(0);
+    setPlayerDuration(0);
+    setPlayerBufferedUntil(0);
+    setIsSeeking(false);
+  }, [activeVideo?.id]);
+
+  useEffect(() => {
+    if (!isWatchMode || !activeVideo?.id) return;
+    const playerWrap = playerWrapRef.current;
+    if (!playerWrap) return;
+    let topOffset = 10;
+    const navWrap = document.querySelector(".ss-nav-wrap");
+    if (navWrap) {
+      const rect = navWrap.getBoundingClientRect();
+      // Apply offset only when navbar is fixed at top (desktop/tablet).
+      if (rect.top >= -1 && rect.top <= 24) {
+        topOffset = Math.max(topOffset, rect.bottom + 8);
+      }
+    }
+    const targetTop = window.scrollY + playerWrap.getBoundingClientRect().top - topOffset;
+    window.scrollTo({ top: Math.max(0, targetTop), behavior: "smooth" });
+  }, [isWatchMode, activeVideo?.id]);
 
   useEffect(() => {
     if (!isWatchMode) return;
@@ -756,50 +959,66 @@ export default function LongVideos() {
         ))}
       </div>
 
-      {!isWatchMode ? (
-        <section className="yt-home-grid">
-          {isLoading && <p className="watch-empty">Loading long videos...</p>}
-          {!isLoading && !filteredLongVideos.length && <p className="watch-empty">No long videos found.</p>}
-          {filteredLongVideos.map((video) => {
-            const raw = mediaUrlFor(video);
-            const url = resolveUrl(raw);
-            const duration = videoDurationByPost[video.id] || 0;
-            return (
-              <article
-                key={video.id}
-                className="yt-home-card"
-                role="button"
-                tabIndex={0}
-                onClick={() => selectVideo(video.id)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    selectVideo(video.id);
-                  }
-                }}
-              >
-                <div className="yt-home-thumb-wrap">
-                  <video
-                    src={url}
-                    muted
-                    playsInline
-                    preload="metadata"
-                    className="yt-home-thumb"
-                    onPlay={(event) => {
-                      event.currentTarget.pause();
-                      event.currentTarget.currentTime = 0;
+            {!isWatchMode ? (
+        <section className="yt-browse-shell">
+          <aside className="yt-left-rail" aria-label="Browse sections">
+            {WATCH_RAIL_ITEMS.map((item, idx) => (
+              <button key={item} type="button" className={`yt-rail-item ${idx === 0 ? "is-active" : ""}`}>
+                {item}
+              </button>
+            ))}
+          </aside>
+
+          <div className="yt-browse-main">
+            <section className="yt-home-grid">
+              {isLoading && <p className="watch-empty">Loading long videos...</p>}
+              {!isLoading && !filteredLongVideos.length && <p className="watch-empty">No long videos found.</p>}
+              {filteredLongVideos.map((video) => {
+                const raw = mediaUrlFor(video);
+                const url = resolveUrl(raw);
+                const duration = videoDurationByPost[video.id] || 0;
+                const owner = usernameFor(video);
+                return (
+                  <article
+                    key={video.id}
+                    className="yt-home-card"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => selectVideo(video.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        selectVideo(video.id);
+                      }
                     }}
-                  />
-                  <span className="yt-duration-badge">{duration > 0 ? formatDuration(duration) : "--:--"}</span>
-                </div>
-                <div className="yt-home-meta">
-                  <h4>{captionFor(video)}</h4>
-                  <p>{usernameFor(video)}</p>
-                  <small>{formatCompact(likeCounts[video.id] || 0)} likes â€¢ {relativeFrom(video?.createdAt)}</small>
-                </div>
-              </article>
-            );
-          })}
+                  >
+                    <div className="yt-home-thumb-wrap">
+                      <video
+                        src={url}
+                        muted
+                        playsInline
+                        preload="metadata"
+                        className="yt-home-thumb"
+                        onPlay={(event) => {
+                          event.currentTarget.pause();
+                          event.currentTarget.currentTime = 0;
+                        }}
+                      />
+                      <span className="yt-duration-badge">{duration > 0 ? formatDuration(duration) : "--:--"}</span>
+                    </div>
+                    <div className="yt-home-meta">
+                      <span className="yt-home-avatar" aria-hidden="true">{owner.charAt(0)}</span>
+                      <div className="yt-home-meta-text">
+                        <h4>{captionFor(video)}</h4>
+                        <p>{owner}</p>
+                        <small>{formatCompact(likeCounts[video.id] || 0)} views • {relativeFrom(video?.createdAt)}</small>
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+            </section>
+          </div>
         </section>
       ) : (
         <div className="watch-page">
@@ -823,22 +1042,31 @@ export default function LongVideos() {
                     key={`${activeVideo.id}-${selectedQuality}`}
                     ref={playerRef}
                     src={activeVideoUrl}
-                    controls
+                    controls={false}
+                    disablePictureInPicture
+                    disableRemotePlayback
                     autoPlay
                     className="watch-player"
                     style={{ filter: `brightness(${playerBrightness})` }}
                     onPlay={() => {
                       setIsPlayerPaused(false);
                       showPlayerControls(true);
+                      syncPlayerTime();
                     }}
                     onPause={() => {
                       setIsPlayerPaused(true);
                       showPlayerControls(false);
+                      syncPlayerTime();
                     }}
                     onEnded={() => {
                       setIsPlayerPaused(true);
                       showPlayerControls(false);
+                      syncPlayerTime();
                     }}
+                    onLoadedMetadata={syncPlayerTime}
+                    onDurationChange={syncPlayerTime}
+                    onTimeUpdate={syncPlayerTime}
+                    onProgress={syncPlayerTime}
                   />
                   <div
                     className={`watch-overlay-controls ${controlsVisible ? "" : "is-hidden"}`}
@@ -877,18 +1105,43 @@ export default function LongVideos() {
                   </div>
                   <button
                     type="button"
+                    className={`watch-corner-fullscreen ${controlsVisible ? "" : "is-hidden"}`}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={togglePlayerFullscreen}
+                    title={isPlayerFullscreen ? "Exit fullscreen" : "Fullscreen"}
+                    aria-label={isPlayerFullscreen ? "Exit fullscreen" : "Fullscreen"}
+                  >
+                    <svg className="watch-corner-fullscreen-icon" viewBox="0 0 24 24" aria-hidden="true">
+                      <path
+                        d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
                     className="watch-quality-btn"
+                    onPointerDown={(e) => e.stopPropagation()}
                     onClick={() => setShowQualityMenu((s) => !s)}
                   >
                     {selectedQuality === "auto" ? "Auto" : `${selectedQuality}p`}
                   </button>
                   {showQualityMenu && (
-                    <div className="watch-quality-menu">
+                    <div
+                      className="watch-quality-menu"
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => e.stopPropagation()}
+                    >
                       {QUALITY_OPTIONS.map((q) => (
                         <button
                           key={q}
                           type="button"
                           className={selectedQuality === q ? "is-active" : ""}
+                          onPointerDown={(e) => e.stopPropagation()}
                           onClick={() => {
                             setSelectedQuality(q);
                             setShowQualityMenu(false);
@@ -899,7 +1152,45 @@ export default function LongVideos() {
                       ))}
                     </div>
                   )}
-                  {!!gestureHud && <div className="watch-gesture-hud">{gestureHud}</div>}
+                  <div
+                    className="watch-progress-wrap"
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <span className="watch-time-inline">
+                      {formatDuration(playerCurrentTime)} / {formatDuration(playerDuration)}
+                    </span>
+                    <input
+                      type="range"
+                      min="0"
+                      max={Math.max(playerDuration, 0.1)}
+                      step="0.1"
+                      value={Math.min(playerCurrentTime, Math.max(playerDuration, 0.1))}
+                      className="watch-progress-range"
+                      style={{
+                        "--played": `${clamp(
+                          (Math.min(playerCurrentTime, Math.max(playerDuration, 0.1)) / Math.max(playerDuration, 0.1)) * 100,
+                          0,
+                          100
+                        )}%`,
+                        "--buffered": `${clamp(
+                          (Math.max(playerBufferedUntil, playerCurrentTime) / Math.max(playerDuration, 0.1)) * 100,
+                          0,
+                          100
+                        )}%`
+                      }}
+                      onMouseDown={() => setIsSeeking(true)}
+                      onTouchStart={() => setIsSeeking(true)}
+                      onMouseUp={() => setIsSeeking(false)}
+                      onTouchEnd={() => setIsSeeking(false)}
+                      onChange={(e) => handleSeekTo(e.target.value)}
+                    />
+                  </div>
+                  {!!gestureHud.text && (
+                    <div className={`watch-gesture-hud ${gestureHud.position === "side-left" ? "is-side-left" : ""} ${gestureHud.position === "side-right" ? "is-side-right" : ""}`}>
+                      {gestureHud.text}
+                    </div>
+                  )}
                 </div>
 
                 <h1 className="watch-title">{captionFor(activeVideo)}</h1>

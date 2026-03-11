@@ -45,29 +45,34 @@ const emergencyBaseCandidates = () => {
   const isLocalDev =
     typeof window !== "undefined" &&
     ["localhost", "127.0.0.1"].includes(String(window.location.hostname || "").toLowerCase());
+  const isHttpsPage =
+    typeof window !== "undefined" &&
+    String(window.location.protocol || "").toLowerCase() === "https:";
   const storedBase =
     typeof window !== "undefined"
       ? localStorage.getItem("socialsea_auth_base_url") || sessionStorage.getItem("socialsea_auth_base_url")
       : "";
-  return uniqueNonEmpty(
+  const list = uniqueNonEmpty(
     isLocalDev
       ? [
+          "/api",
           "http://localhost:8080",
           "http://127.0.0.1:8080",
-          "/api",
+          getApiBaseUrl(),
           api.defaults.baseURL,
           storedBase,
-          getApiBaseUrl(),
-          import.meta.env.VITE_API_URL,
+          import.meta.env.VITE_API_URL
         ]
       : [
+          "/api",
+          getApiBaseUrl(),
           api.defaults.baseURL,
           storedBase,
-          getApiBaseUrl(),
           import.meta.env.VITE_API_URL,
-          "https://socialsea.co.in",
+          "https://socialsea.co.in"
         ]
   );
+  return list.filter((base) => !(isHttpsPage && /^http:\/\//i.test(String(base || ""))));
 };
 
 const buildEmergencyUrls = (suffix) => {
@@ -94,6 +99,34 @@ const buildEmergencyUrls = (suffix) => {
   }
   urls.push(`/api/emergency/${path}`);
   return uniqueNonEmpty(urls);
+};
+
+const normalizeLiveUrl = (rawUrl, fallbackAlertId = "") => {
+  const raw = String(rawUrl || "").trim();
+  const fallbackId = String(fallbackAlertId || "").trim();
+  const appOrigin = typeof window !== "undefined" ? String(window.location.origin || "").replace(/\/+$/, "") : "";
+
+  const toLivePath = (id) => {
+    const safeId = String(id || "").trim();
+    if (!safeId) return "";
+    const path = `/sos/live/${encodeURIComponent(safeId)}`;
+    return appOrigin ? `${appOrigin}${path}` : path;
+  };
+
+  if (!raw) return toLivePath(fallbackId);
+
+  try {
+    const parsed = new URL(raw, appOrigin || "http://localhost");
+    const liveMatch = parsed.pathname.match(/\/sos\/live\/([^/?#]+)/i);
+    if (liveMatch?.[1]) return toLivePath(decodeURIComponent(liveMatch[1]));
+
+    const genericSosMatch = parsed.pathname.match(/\/sos\/(?!navigate\/)([^/?#]+)/i);
+    if (genericSosMatch?.[1]) return toLivePath(decodeURIComponent(genericSosMatch[1]));
+  } catch {
+    // keep original URL if parsing fails
+  }
+
+  return raw;
 };
 
 const readShowSosInNavbar = () => {
@@ -190,6 +223,7 @@ export default function Navbar() {
   const location = useLocation();
   const navigate = useNavigate();
   const myUserId = String(sessionStorage.getItem("userId") || localStorage.getItem("userId") || "").trim();
+  const myEmail = String(sessionStorage.getItem("email") || localStorage.getItem("email") || "").trim().toLowerCase();
   const onChatRoute = location.pathname === "/chat" || location.pathname.startsWith("/chat/");
   const onChatConversationRoute = location.pathname.startsWith("/chat/");
   const profileTarget = myUserId ? `/profile/${myUserId}` : "/profile/me";
@@ -218,6 +252,23 @@ export default function Navbar() {
   const items = ITEMS.map((item) =>
     item.label === "Profile" ? { ...item, to: profileTarget } : item
   );
+
+  const isOwnEmergency = ({ reporterEmail, reporterUserId } = {}) => {
+    const incomingEmail = String(reporterEmail || "").trim().toLowerCase();
+    const incomingUserId = String(reporterUserId || "").trim();
+    if (myEmail && incomingEmail && incomingEmail === myEmail) return true;
+    if (myUserId && incomingUserId && incomingUserId === myUserId) return true;
+    try {
+      const raw = localStorage.getItem(SOS_SESSION_KEY);
+      if (raw) {
+        const session = JSON.parse(raw);
+        if (session?.active && session?.triggeredByCurrentBrowser) return true;
+      }
+    } catch {
+      // ignore storage issues
+    }
+    return false;
+  };
 
   useEffect(() => {
     setShowSosInNavbar(readShowSosInNavbar());
@@ -374,6 +425,12 @@ export default function Navbar() {
   }, [sosPopup]);
 
   useEffect(() => {
+    if (location.pathname.startsWith("/sos")) {
+      setSosPopup(null);
+    }
+  }, [location.pathname]);
+
+  useEffect(() => {
     const readEpoch = (value) => {
       const t = new Date(value || "").getTime();
       return Number.isFinite(t) ? t : 0;
@@ -383,7 +440,7 @@ export default function Navbar() {
       if (!payload || typeof payload !== "object") return;
       if (options.requireFresh) {
         const atMs = readEpoch(payload.at);
-        if (!atMs || Date.now() - atMs > 15000) return;
+        if (!atMs || Date.now() - atMs > 120000) return;
       }
       const signalId = String(payload.id || payload.alertId || `${payload.type || "sos"}_${payload.at || ""}`);
       if (!signalId || seenLocalSignalsRef.current.has(signalId)) return;
@@ -405,21 +462,25 @@ export default function Navbar() {
       }
 
       const kind = String(payload.type || "").toLowerCase();
+      const resolvedAlertId = String(payload.alertId || payload.localAlertId || "").trim();
+      const signalReporterEmail = payload.reporterEmail || payload.senderEmail;
+      const signalReporterUserId = payload.reporterUserId || payload.senderUserId;
       if (kind === "stopped") {
-        suppressAlert(payload.alertId);
+        suppressAlert(resolvedAlertId);
         setSosPopup(null);
         return;
       }
-      if (!payload.alertId) return;
-      if (isAlertSeen(payload.alertId)) return;
-      if (isAlertSuppressed(payload.alertId)) {
+      if (isOwnEmergency({ reporterEmail: signalReporterEmail, reporterUserId: signalReporterUserId })) {
+        return;
+      }
+      if (resolvedAlertId && isAlertSuppressed(resolvedAlertId)) {
         setSosPopup(null);
         return;
       }
       showSosPopup("[EMERGENCY] SocialSea Emergengy SOS is asking for help", {
         isEmergency: true,
-        alertId: payload.alertId,
-        reporterEmail: payload.reporterEmail,
+        alertId: resolvedAlertId || undefined,
+        reporterEmail: signalReporterEmail,
         liveUrl: payload.liveUrl,
         navigateUrl: payload.navigateUrl,
         mapsUrl: payload.mapsUrl,
@@ -443,18 +504,28 @@ export default function Navbar() {
           if (location.pathname.startsWith("/sos")) return;
           const isActive = Boolean(session?.active);
           if (!isActive) {
-            const stoppedId = normalizeAlertId(session?.alertId);
+            const stoppedId = normalizeAlertId(session?.alertId || session?.alertDisplayId);
             if (stoppedId) {
               suppressAlert(stoppedId);
-              const currentId = normalizeAlertId(popupStateRef.current?.alertId);
-              if (!currentId || currentId === stoppedId) {
-                setSosPopup(null);
-              }
+            }
+            const isOwnStoppedSession =
+              Boolean(session?.triggeredByCurrentBrowser) ||
+              isOwnEmergency({ reporterEmail: session?.reporterEmail, reporterUserId: session?.reporterUserId });
+            if (isOwnStoppedSession) {
+              setSosPopup(null);
+              return;
+            }
+            const currentId = normalizeAlertId(popupStateRef.current?.alertId);
+            if (currentId && stoppedId && currentId === stoppedId) {
+              setSosPopup(null);
             }
             return;
           }
-          if (isAlertSuppressed(session?.alertId)) {
+          if (isAlertSuppressed(session?.alertId || session?.alertDisplayId)) {
             setSosPopup(null);
+            return;
+          }
+          if (isOwnEmergency({ reporterEmail: session?.reporterEmail, reporterUserId: session?.reporterUserId })) {
             return;
           }
           const sig = `${session?.startedAt || ""}|${session?.updatedAt || ""}|${session?.alertId || ""}`;
@@ -470,7 +541,7 @@ export default function Navbar() {
           }
           showSosPopup("[EMERGENCY] SocialSea Emergengy SOS is asking for help", {
             isEmergency: true,
-            alertId: session?.alertId,
+            alertId: session?.alertId || session?.alertDisplayId,
             latitude: session?.lastLocation?.latitude,
             longitude: session?.lastLocation?.longitude
           });
@@ -488,7 +559,7 @@ export default function Navbar() {
       try {
         const raw = localStorage.getItem(SOS_SIGNAL_KEY);
         if (!raw) return;
-        processSignal(JSON.parse(raw), { requireFresh: true });
+        processSignal(JSON.parse(raw), { requireFresh: false });
       } catch {
         // ignore parse/storage issues
       }
@@ -499,22 +570,32 @@ export default function Navbar() {
         if (!rawSession) return;
         const session = JSON.parse(rawSession);
         if (!session?.active) {
-          const stoppedId = normalizeAlertId(session?.alertId);
+          const stoppedId = normalizeAlertId(session?.alertId || session?.alertDisplayId);
           if (stoppedId) {
             suppressAlert(stoppedId);
-            const currentId = normalizeAlertId(popupStateRef.current?.alertId);
-            if (!currentId || currentId === stoppedId) {
-              setSosPopup(null);
-            }
+          }
+          const isOwnStoppedSession =
+            Boolean(session?.triggeredByCurrentBrowser) ||
+            isOwnEmergency({ reporterEmail: session?.reporterEmail, reporterUserId: session?.reporterUserId });
+          if (isOwnStoppedSession) {
+            setSosPopup(null);
+            return;
+          }
+          const currentId = normalizeAlertId(popupStateRef.current?.alertId);
+          if (currentId && stoppedId && currentId === stoppedId) {
+            setSosPopup(null);
           }
           return;
         }
-        if (isAlertSuppressed(session?.alertId)) {
+        if (isAlertSuppressed(session?.alertId || session?.alertDisplayId)) {
           setSosPopup(null);
           return;
         }
+        if (isOwnEmergency({ reporterEmail: session?.reporterEmail, reporterUserId: session?.reporterUserId })) {
+          return;
+        }
         const updatedAtMs = readEpoch(session?.updatedAt || session?.startedAt);
-        if (!updatedAtMs || Date.now() - updatedAtMs > 15000) return;
+        if (!updatedAtMs) return;
         const sig = `${session?.startedAt || ""}|${session?.updatedAt || ""}|${session?.alertId || ""}`;
         if (!sig.trim() || seenSessionSignalsRef.current.has(sig)) return;
         if (sig === lastHandledSessionSigRef.current) return;
@@ -528,7 +609,7 @@ export default function Navbar() {
         }
         showSosPopup("[EMERGENCY] SocialSea Emergengy SOS is asking for help", {
           isEmergency: true,
-          alertId: session?.alertId,
+          alertId: session?.alertId || session?.alertDisplayId,
           latitude: session?.lastLocation?.latitude,
           longitude: session?.lastLocation?.longitude
         });
@@ -563,69 +644,108 @@ export default function Navbar() {
 
   useEffect(() => {
     let disposed = false;
-    let pollingDisabled = false;
 
-    const pollEmergency = async () => {
-      if (pollingDisabled) return;
-      try {
-        let res = null;
-        let lastError = null;
-        const urls = buildEmergencyUrls("active");
-        for (const url of urls) {
-          const baseURL = /^https?:\/\//i.test(url) ? undefined : api.defaults.baseURL;
-          const path = /^https?:\/\//i.test(url) ? url : url;
-          try {
-            res = await api.get(path, {
-              baseURL,
-              suppressAuthRedirect: true,
-              skipAuth: true
-            });
-            break;
-          } catch (err) {
-            lastError = err;
-            const status = Number(err?.response?.status || 0);
-            if (!(status === 400 || status === 401 || status === 403 || status === 404 || status === 405 || status >= 500 || !status)) {
-              throw err;
-            }
+    const normalizeAlerts = (data) => {
+      if (Array.isArray(data)) return data;
+      if (Array.isArray(data?.alerts)) return data.alerts;
+      if (Array.isArray(data?.items)) return data.items;
+      if (data && typeof data === "object" && (data.active || data.alertId || data.alertDisplayId)) {
+        return [data];
+      }
+      return [];
+    };
+
+    const requestEmergencyData = async (suffix) => {
+      let res = null;
+      let lastError = null;
+      const urls = buildEmergencyUrls(suffix);
+      for (const url of urls) {
+        const baseURL = /^https?:\/\//i.test(url) ? undefined : api.defaults.baseURL;
+        const path = /^https?:\/\//i.test(url) ? url : url;
+        try {
+          res = await api.get(path, {
+            baseURL,
+            suppressAuthRedirect: true,
+            skipAuth: false
+          });
+          break;
+        } catch (err) {
+          lastError = err;
+          const status = Number(err?.response?.status || 0);
+          if (!(status === 400 || status === 401 || status === 403 || status === 404 || status === 405 || status >= 500 || !status)) {
+            throw err;
           }
         }
-        if (!res) throw lastError || new Error("Emergency endpoint unavailable");
+      }
+      if (!res) throw lastError || new Error("Emergency endpoint unavailable");
+      return res?.data;
+    };
+
+    const pollEmergency = async () => {
+      try {
+        const payloads = [];
+        try {
+          payloads.push(await requestEmergencyData("active"));
+        } catch {
+          // keep trying other source
+        }
+        try {
+          payloads.push(await requestEmergencyData("active-session"));
+        } catch {
+          // keep trying other source
+        }
+        if (!payloads.length) return;
 
         if (disposed) return;
-        const data = res?.data;
-        const alerts = Array.isArray(data)
-          ? data
-          : Array.isArray(data?.alerts)
-            ? data.alerts
-            : Array.isArray(data?.items)
-              ? data.items
-              : [];
-        const myEmail = String(sessionStorage.getItem("email") || localStorage.getItem("email") || "").trim().toLowerCase();
+        const alerts = payloads.flatMap((data) => normalizeAlerts(data));
+        const activeIds = new Set(
+          alerts
+            .filter((a) => (typeof a?.active === "boolean" ? a.active : true))
+            .map((a) => normalizeAlertId(a?.alertId || a?.alertDisplayId))
+            .filter(Boolean)
+        );
+        const currentPopup = popupStateRef.current;
+        const currentPopupId = normalizeAlertId(currentPopup?.alertId);
+
+        // Close stale emergency popup as soon as backend no longer reports active alerts.
+        if ((!alerts.length || !activeIds.size) && currentPopup?.isEmergency) {
+          setSosPopup(null);
+          return;
+        }
+        if (currentPopup?.isEmergency && currentPopupId && !activeIds.has(currentPopupId)) {
+          setSosPopup(null);
+        }
+
         for (const a of alerts) {
-          const id = String(a?.alertId || "");
+          const isActiveAlert = typeof a?.active === "boolean" ? a.active : true;
+          const id = String(a?.alertId || a?.alertDisplayId || "");
+          if (!isActiveAlert) {
+            if (id) suppressAlert(id);
+            const currentId = normalizeAlertId(popupStateRef.current?.alertId);
+            if (id && currentId && id === currentId) {
+              setSosPopup(null);
+            }
+            continue;
+          }
           if (!id || seenEmergencyAlertsRef.current.has(id)) continue;
-          if (isAlertSeen(id)) continue;
           if (isAlertSuppressed(id)) continue;
           seenEmergencyAlertsRef.current.add(id);
           const reporter = String(a?.reporterEmail || "").trim();
-          if (myEmail && reporter.toLowerCase() === myEmail) continue;
+          if (isOwnEmergency({ reporterEmail: reporter, reporterUserId: a?.reporterUserId || a?.userId })) continue;
           showSosPopup("[EMERGENCY] SocialSea Emergengy SOS is asking for help", {
             isEmergency: true,
             alertId: id,
             reporterEmail: reporter,
-            liveUrl: a?.liveUrl,
-            navigateUrl: a?.navigateUrl,
+            liveUrl: a?.liveUrl || a?.streamUrl,
+            navigateUrl: a?.navigateUrl || a?.locationUrl,
             mapsUrl: a?.mapsUrl,
-            latitude: a?.latitude,
-            longitude: a?.longitude
+            latitude: a?.latitude ?? a?.lastLocation?.latitude,
+            longitude: a?.longitude ?? a?.lastLocation?.longitude
           });
           break;
         }
       } catch (err) {
-        const status = Number(err?.response?.status || 0);
-        if (status === 401 || status === 403) {
-          pollingDisabled = true;
-        }
+        // keep polling; auth/session can recover later on mobile browsers
       }
     };
 
@@ -636,6 +756,54 @@ export default function Navbar() {
       clearInterval(timer);
     };
   }, [myUserId, location.pathname]);
+
+  useEffect(() => {
+    if (location.pathname.startsWith("/sos")) return undefined;
+    let disposed = false;
+
+    const forceFromActiveSession = () => {
+      try {
+        const raw = localStorage.getItem(SOS_SESSION_KEY);
+        if (!raw) {
+          if (popupStateRef.current?.isEmergency) setSosPopup(null);
+          return;
+        }
+        const session = JSON.parse(raw);
+        if (!session?.active) {
+          const stoppedId = normalizeAlertId(session?.alertId || session?.alertDisplayId);
+          const isOwnStoppedSession =
+            Boolean(session?.triggeredByCurrentBrowser) ||
+            isOwnEmergency({ reporterEmail: session?.reporterEmail, reporterUserId: session?.reporterUserId });
+          if (isOwnStoppedSession) {
+            setSosPopup(null);
+            return;
+          }
+          const currentId = normalizeAlertId(popupStateRef.current?.alertId);
+          if (!currentId || !stoppedId || currentId === stoppedId) setSosPopup(null);
+          return;
+        }
+        const fallbackAlertId = session?.alertId || session?.alertDisplayId || "";
+        if (isAlertSuppressed(fallbackAlertId)) return;
+        if (isOwnEmergency({ reporterEmail: session?.reporterEmail, reporterUserId: session?.reporterUserId })) return;
+        if (disposed) return;
+        showSosPopup("[EMERGENCY] SocialSea Emergengy SOS is asking for help", {
+          isEmergency: true,
+          alertId: fallbackAlertId || undefined,
+          latitude: session?.lastLocation?.latitude,
+          longitude: session?.lastLocation?.longitude
+        });
+      } catch {
+        // ignore parsing/storage issues
+      }
+    };
+
+    forceFromActiveSession();
+    const timer = setInterval(forceFromActiveSession, 1200);
+    return () => {
+      disposed = true;
+      clearInterval(timer);
+    };
+  }, [location.pathname]);
 
   const closeCameraStudio = () => {
     setCameraOpen(false);
@@ -702,6 +870,25 @@ export default function Navbar() {
   };
 
   const normalizeAlertId = (value) => String(value || "").trim();
+  const readOwnStoppedSessionState = () => {
+    try {
+      const raw = localStorage.getItem(SOS_SESSION_KEY);
+      if (!raw) return { isRecentOwnStop: false, alertId: "" };
+      const session = JSON.parse(raw);
+      const isOwn =
+        Boolean(session?.triggeredByCurrentBrowser) ||
+        isOwnEmergency({ reporterEmail: session?.reporterEmail, reporterUserId: session?.reporterUserId });
+      if (!isOwn || session?.active) return { isRecentOwnStop: false, alertId: "" };
+      const updatedMs = new Date(session?.updatedAt || session?.stoppedAt || "").getTime();
+      const isRecent = Number.isFinite(updatedMs) && Date.now() - updatedMs < 120000;
+      return {
+        isRecentOwnStop: Boolean(isRecent),
+        alertId: normalizeAlertId(session?.alertId || session?.alertDisplayId)
+      };
+    } catch {
+      return { isRecentOwnStop: false, alertId: "" };
+    }
+  };
 
   const isAlertSuppressed = (alertId) => {
     const id = normalizeAlertId(alertId);
@@ -749,7 +936,7 @@ export default function Navbar() {
     const lon = toFiniteNumber(options.longitude);
     const origin = typeof window !== "undefined" ? String(window.location.origin || "").replace(/\/+$/, "") : "";
 
-    const liveUrl = String(options.liveUrl || "").trim() || (idText ? `${origin}/sos/${encodeURIComponent(idText)}` : "");
+    const liveUrl = normalizeLiveUrl(options.liveUrl, idText);
     const navParams = new URLSearchParams();
     if (lat != null) navParams.set("lat", String(lat));
     if (lon != null) navParams.set("lon", String(lon));
@@ -785,7 +972,24 @@ export default function Navbar() {
 
   const showSosPopup = (message, options = {}) => {
     const nextPopup = buildSosPopupPayload(message, options);
-    if (nextPopup?.isEmergency && (isAlertSuppressed(nextPopup?.alertId) || isAlertSeen(nextPopup?.alertId))) {
+    const ownStopped = readOwnStoppedSessionState();
+    if (
+      nextPopup?.isEmergency &&
+      ownStopped.isRecentOwnStop &&
+      (!nextPopup?.alertId || !ownStopped.alertId || nextPopup.alertId === ownStopped.alertId)
+    ) {
+      setSosPopup(null);
+      return;
+    }
+    if (nextPopup?.isEmergency && location.pathname.startsWith("/sos")) {
+      setSosPopup(null);
+      return;
+    }
+    if (nextPopup?.isEmergency && isOwnEmergency({ reporterEmail: options?.reporterEmail, reporterUserId: options?.reporterUserId })) {
+      setSosPopup(null);
+      return;
+    }
+    if (nextPopup?.isEmergency && isAlertSuppressed(nextPopup?.alertId)) {
       setSosPopup(null);
       return;
     }
@@ -797,12 +1001,13 @@ export default function Navbar() {
         const raw = localStorage.getItem(SOS_NAV_CACHE_KEY);
         const cache = raw ? JSON.parse(raw) : {};
         const key = alertId || `loc_${Date.now()}`;
+        const normalizedLiveUrl = normalizeLiveUrl(options?.liveUrl, alertId);
         cache[key] = {
           alertId: alertId || null,
           latitude: lat,
           longitude: lon,
           reporterEmail: String(options?.reporterEmail || "").trim() || null,
-          liveUrl: String(options?.liveUrl || "").trim() || null,
+          liveUrl: normalizedLiveUrl || null,
           navigateUrl: String(options?.navigateUrl || "").trim() || null,
           mapsUrl: String(options?.mapsUrl || "").trim() || null,
           updatedAt: new Date().toISOString()
@@ -823,9 +1028,6 @@ export default function Navbar() {
       return;
     }
     popupMetaRef.current = { fingerprint, shownAt: now };
-    if (nextPopup?.isEmergency && nextPopup?.alertId) {
-      markAlertSeen(nextPopup.alertId);
-    }
     setSosPopup(nextPopup);
   };
 

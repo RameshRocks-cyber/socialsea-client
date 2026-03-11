@@ -35,26 +35,42 @@ function isFrontendLikeHost(host) {
   );
 }
 
+function isLocalBackendHost(host) {
+  const value = String(host || "").toLowerCase();
+  return value === "localhost" || value === "127.0.0.1";
+}
+
 export function getApiBaseUrl() {
   const forcedUrl = normalizeApiUrl(import.meta.env.VITE_API_BASE_URL);
-  if (forcedUrl) return forcedUrl;
+  const allowRemoteInLocal = String(import.meta.env.VITE_FORCE_REMOTE_API || "").toLowerCase() === "true";
 
   if (typeof window !== "undefined") {
     const host = String(window.location.hostname || "").toLowerCase();
+    const isLocalHost = host === "localhost" || host === "127.0.0.1";
     if (isFrontendLikeHost(host)) {
       // Always prefer same-origin proxy for deployed frontend hosts.
       return "/api";
     }
-    if (host === "localhost" || host === "127.0.0.1") {
+    if (isLocalHost) {
+      // In local dev, allow explicit override via VITE_API_BASE_URL.
+      // This lets local frontend target a remote backend intentionally.
+      if (forcedUrl) {
+        const forcedHost = hostFromUrl(forcedUrl);
+        if (isLocalBackendHost(forcedHost) || allowRemoteInLocal) {
+          return forcedUrl;
+        }
+      }
       const envUrl = normalizeApiUrl(import.meta.env.VITE_API_URL);
       const envHost = hostFromUrl(envUrl);
-      // In local dev, prefer local backend by default.
+      // In local dev, prefer local backend/proxy by default.
       if (!envUrl || envUrl.startsWith("/") || isFrontendLikeHost(envHost)) {
         return "http://localhost:8080";
       }
       return envUrl;
     }
   }
+
+  if (forcedUrl) return forcedUrl;
 
   const envUrl = normalizeApiUrl(import.meta.env.VITE_API_URL);
   if (envUrl) return envUrl;

@@ -189,7 +189,18 @@ export const loginWithPassword = ({ identifier, password }) => {
   const value = String(identifier || "").trim();
   const isHttpsPage =
     typeof window !== "undefined" && window.location.protocol === "https:";
+  const isLocalPage =
+    typeof window !== "undefined" &&
+    (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+  const storedAuthBase = normalizeBaseCandidate(
+    (typeof window !== "undefined" &&
+      (sessionStorage.getItem("socialsea_auth_base_url") || localStorage.getItem("socialsea_auth_base_url"))) ||
+      ""
+  );
   const baseCandidates = [
+    isLocalPage ? "http://localhost:8080" : "",
+    isLocalPage ? "/api" : "",
+    storedAuthBase,
     normalizeBaseCandidate(api.defaults.baseURL),
     normalizeBaseCandidate(import.meta.env.VITE_API_URL),
     "https://socialsea.co.in",
@@ -207,6 +218,7 @@ export const loginWithPassword = ({ identifier, password }) => {
 
   const run = async () => {
     let lastError = null;
+    const authErrors = [];
     for (const baseURL of baseCandidates) {
       for (const url of endpoints) {
         for (const body of payloads) {
@@ -226,6 +238,14 @@ export const loginWithPassword = ({ identifier, password }) => {
               htmlErr.response = { status: 404, data: textData };
               throw htmlErr;
             }
+            try {
+              if (baseURL) {
+                sessionStorage.setItem("socialsea_auth_base_url", String(baseURL));
+                localStorage.setItem("socialsea_auth_base_url", String(baseURL));
+              }
+            } catch {
+              // ignore storage errors
+            }
             return res;
           } catch (err) {
             lastError = err;
@@ -235,6 +255,12 @@ export const loginWithPassword = ({ identifier, password }) => {
             if (text.includes("otp") && text.includes("required")) {
               throw new Error("Password login endpoint is misconfigured (OTP required). Contact backend admin.");
             }
+            // Keep trying other backend candidates on auth failures too.
+            // This avoids false "Invalid password" when one backend is out-of-sync.
+            if (status === 401 || status === 403) {
+              authErrors.push(err);
+              continue;
+            }
             // Retry only for endpoint/transport failures; auth failures should return immediately.
             if (!(status === 404 || status === 405 || (status >= 500 && status <= 599) || !status)) {
               throw err;
@@ -243,7 +269,7 @@ export const loginWithPassword = ({ identifier, password }) => {
         }
       }
     }
-    throw lastError || new Error("Login failed");
+    throw authErrors[0] || lastError || new Error("Login failed");
   };
 
   return run();

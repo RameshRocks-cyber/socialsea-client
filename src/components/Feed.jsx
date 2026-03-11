@@ -8,12 +8,107 @@ import "./Feed.css";
 
 const LONG_VIDEO_SECONDS = 90;
 const CHAT_SHARE_DRAFT_KEY = "socialsea_chat_share_draft_v1";
+const POST_GENRE_MAP_KEY = "socialsea_post_genre_map_v1";
+const FEED_CACHE_KEY = "socialsea_feed_cache_v1";
+const FEED_YT_RAIL_ITEMS = ["Home", "Trending", "Subscriptions", "History", "Playlists", "Watch Later"];
+const FEED_YT_CATEGORIES = ["All", "Music", "Mixes", "News", "Live", "Comedy", "Movies", "Gaming", "Trending"];
+const FEED_CATEGORY_KEYWORDS = {
+  music: ["music", "song", "audio", "album", "lyrics", "singer", "melody"],
+  mixes: ["mix", "mixes", "remix", "mashup", "medley", "dj"],
+  news: ["news", "update", "breaking", "headline", "report"],
+  live: ["live", "livestream", "live stream", "streaming", "stream"],
+  comedy: ["comedy", "funny", "joke", "memes", "laugh", "standup"],
+  movies: ["movie", "movies", "cinema", "film", "trailer", "scene"],
+  gaming: ["gaming", "game", "gameplay", "esports", "pubg", "freefire", "bgmi", "minecraft", "valorant"],
+  trending: ["trending", "viral", "popular", "hot", "trend"]
+};
+
+const parseMaybeJson = (value) => {
+  if (!value || typeof value !== "string") return null;
+  const raw = value.trim();
+  if (!raw || (raw[0] !== "{" && raw[0] !== "[")) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+};
+
+const normalizeGenre = (value) =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, " ");
+
+const collectGenreTokens = (post, localGenreMap) => {
+  const tokens = new Set();
+  const add = (value) => {
+    const normalized = normalizeGenre(value);
+    if (normalized) tokens.add(normalized);
+  };
+  const addMany = (arr) => {
+    if (!Array.isArray(arr)) return;
+    arr.forEach((entry) => add(entry));
+  };
+
+  add(post?.category);
+  add(post?.genre);
+  add(post?.videoCategory);
+  add(post?.contentCategory);
+  add(post?.postCategory);
+  add(post?.creatorCategory);
+  add(post?.user?.category);
+  add(localGenreMap?.[String(post?.id || "")]);
+  addMany(post?.tags);
+  addMany(post?.hashtags);
+
+  const settings = parseMaybeJson(post?.videoSettings) || parseMaybeJson(post?.settings) || parseMaybeJson(post?.metadata);
+  if (settings && typeof settings === "object") {
+    add(settings?.category);
+    add(settings?.genre);
+    addMany(settings?.tags);
+    if (settings?.creatorSettings && typeof settings.creatorSettings === "object") {
+      add(settings.creatorSettings.category);
+      add(settings.creatorSettings.genre);
+      addMany(settings.creatorSettings.tags);
+    }
+  }
+
+  const text = `${post?.description || ""} ${post?.content || ""} ${post?.title || ""}`.toLowerCase();
+  Object.entries(FEED_CATEGORY_KEYWORDS).forEach(([category, keywords]) => {
+    if (keywords.some((word) => text.includes(word))) tokens.add(category);
+  });
+
+  return tokens;
+};
+
+const categoryMatchesPost = (post, selectedCategory, localGenreMap) => {
+  const category = normalizeGenre(selectedCategory);
+  if (!category || category === "all") return true;
+  const tokens = collectGenreTokens(post, localGenreMap);
+  if (tokens.has(category)) return true;
+  const keywords = FEED_CATEGORY_KEYWORDS[category] || [];
+  if (!keywords.length) return false;
+  const searchable = `${post?.description || ""} ${post?.content || ""} ${post?.title || ""}`.toLowerCase();
+  return keywords.some((word) => searchable.includes(word));
+};
+
+const readCachedFeedPosts = () => {
+  try {
+    const raw = localStorage.getItem(FEED_CACHE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    const list = Array.isArray(parsed?.posts) ? parsed.posts : Array.isArray(parsed) ? parsed : [];
+    return list.filter(Boolean);
+  } catch {
+    return [];
+  }
+};
 
 export default function Feed() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [feedMode, setFeedMode] = useState("long");
-  const [posts, setPosts] = useState([]);
+  const [posts, setPosts] = useState(() => readCachedFeedPosts());
   const [likeCounts, setLikeCounts] = useState({});
   const [likedPostIds, setLikedPostIds] = useState({});
   const [commentsByPost, setCommentsByPost] = useState({});
@@ -22,8 +117,10 @@ export default function Feed() {
   const [watchLaterPostIds, setWatchLaterPostIds] = useState({});
   const [shareMessageByPost, setShareMessageByPost] = useState({});
   const [error, setError] = useState("");
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(() => readCachedFeedPosts().length === 0);
   const [query, setQuery] = useState("");
+  const [longCategory, setLongCategory] = useState("All");
+  const [localGenreMap, setLocalGenreMap] = useState({});
   const [activePostId, setActivePostId] = useState(null);
   const [videoDurationByPost, setVideoDurationByPost] = useState({});
   const [profilePicByOwner, setProfilePicByOwner] = useState({});
@@ -49,6 +146,14 @@ export default function Feed() {
   useEffect(() => {
     postsCountRef.current = Array.isArray(posts) ? posts.length : 0;
   }, [posts]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return undefined;
+    document.body.classList.add("feed-no-swipe-back");
+    return () => {
+      document.body.classList.remove("feed-no-swipe-back");
+    };
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -147,6 +252,11 @@ export default function Feed() {
         const list = Array.isArray(res.data) ? res.data : [];
         if (!mounted) return;
         setPosts(list);
+        try {
+          localStorage.setItem(FEED_CACHE_KEY, JSON.stringify({ updatedAt: Date.now(), posts: list }));
+        } catch {
+          // ignore cache issues
+        }
         if (list.length > 0) {
           setError("");
           retryCountRef.current = 0;
@@ -175,7 +285,9 @@ export default function Feed() {
         if (!mounted) return;
         const status = err?.response?.status;
         const message = err?.response?.data?.message || err?.response?.data || "";
-        setError(status ? `Failed to load feed (${status}) ${message}` : "Failed to load feed");
+        if (!postsCountRef.current) {
+          setError(status ? `Failed to load feed (${status}) ${message}` : "Failed to load feed");
+        }
         scheduleRetry();
       } finally {
         inFlightLoadRef.current = false;
@@ -259,6 +371,34 @@ export default function Feed() {
     } catch {
       // ignore invalid localStorage payload
     }
+  }, []);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(POST_GENRE_MAP_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        setLocalGenreMap(parsed);
+      }
+    } catch {
+      // ignore bad local cache
+    }
+  }, []);
+
+  useEffect(() => {
+    const onStorage = (event) => {
+      if (event?.key !== POST_GENRE_MAP_KEY) return;
+      try {
+        const parsed = event?.newValue ? JSON.parse(event.newValue) : {};
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          setLocalGenreMap(parsed);
+        }
+      } catch {
+        // ignore bad local cache
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
   }, []);
 
   useEffect(() => {
@@ -618,6 +758,10 @@ export default function Feed() {
     });
   }, [visiblePosts, videoDurationByPost]);
 
+  const longVideoFeedPosts = useMemo(() => {
+    return longVideoPosts.filter((post) => categoryMatchesPost(post, longCategory, localGenreMap));
+  }, [longVideoPosts, longCategory, localGenreMap]);
+
   const gridPosts = useMemo(() => {
     return visiblePosts.filter((post) => !longVideoPosts.some((lv) => lv.id === post.id));
   }, [visiblePosts, longVideoPosts]);
@@ -744,7 +888,7 @@ export default function Feed() {
       });
 
       pauseOthers(bestVideo);
-      if (!bestVideo || bestRatio < 0.55) return;
+      if (!bestVideo || bestRatio < 0.75) return;
       try {
         const playAttempt = bestVideo.play();
         if (playAttempt?.catch) playAttempt.catch(() => {});
@@ -760,7 +904,7 @@ export default function Feed() {
         });
         playMostVisible();
       },
-      { threshold: [0, 0.2, 0.4, 0.55, 0.75, 1] }
+      { threshold: [0, 0.25, 0.5, 0.75, 0.9, 1] }
     );
 
     videos.forEach((video) => {
@@ -864,51 +1008,76 @@ export default function Feed() {
 
   return (
     <div className="feed-page">
-      <div className="explore-search-wrap">
-        <span className="explore-search-icon">{"\u2315"}</span>
-        <input
-          type="text"
-          placeholder="Search people or captions"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          className="explore-search-input"
-        />
-      </div>
+      <div className="feed-top-row">
+        <div className="explore-search-wrap">
+          <span className="explore-search-icon">{"\u2315"}</span>
+          <input
+            type="text"
+            placeholder="Search people or captions"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className="explore-search-input"
+          />
+        </div>
 
-      <div className="feed-mode-switch" role="tablist" aria-label="Feed mode">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={feedMode === "long"}
-          className={`feed-mode-btn ${feedMode === "long" ? "is-active" : ""}`}
-          onClick={() => setFeedMode("long")}
-        >
-          Long Videos
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={feedMode === "all"}
-          className={`feed-mode-btn ${feedMode === "all" ? "is-active" : ""}`}
-          onClick={() => setFeedMode("all")}
-        >
-          Short Videos
-        </button>
+        <div className="feed-mode-switch" role="tablist" aria-label="Feed mode">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={feedMode === "long"}
+            className={`feed-mode-btn ${feedMode === "long" ? "is-active" : ""}`}
+            onClick={() => setFeedMode("long")}
+          >
+            Long Videos
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={feedMode === "all"}
+            className={`feed-mode-btn ${feedMode === "all" ? "is-active" : ""}`}
+            onClick={() => setFeedMode("all")}
+          >
+            Short Videos
+          </button>
+        </div>
       </div>
 
       {error && <p>{error}</p>}
       {!error && isLoading && <p className="feed-empty">Loading videos...</p>}
       {!error && !isLoading && visiblePosts.length === 0 && <p className="feed-empty">No posts found</p>}
-      {!error && !isLoading && feedMode === "long" && !longVideoPosts.length && (
+      {!error && !isLoading && feedMode === "long" && !longVideoFeedPosts.length && (
         <p className="feed-empty">No long videos found</p>
       )}
       {!error && !isLoading && feedMode === "all" && !shortVideoPosts.length && (
         <p className="feed-empty">No short videos found</p>
       )}
 
-      {!!longVideoPosts.length && feedMode === "long" && (
-        <section className="long-video-feed">
-          {longVideoPosts.map((post) => {
+      {!!longVideoFeedPosts.length && feedMode === "long" && (
+        <section className="feed-yt-shell">
+          <aside className="feed-yt-rail">
+            {FEED_YT_RAIL_ITEMS.map((item, idx) => (
+              <button key={item} type="button" className={`feed-yt-rail-item ${idx === 0 ? "is-active" : ""}`}>
+                {item}
+              </button>
+            ))}
+          </aside>
+
+          <div className="feed-yt-main">
+            <div className="feed-yt-categories">
+              {FEED_YT_CATEGORIES.map((chip) => (
+                <button
+                  key={chip}
+                  type="button"
+                  className={`feed-yt-chip ${longCategory === chip ? "is-active" : ""}`}
+                  onClick={() => setLongCategory(chip)}
+                >
+                  {chip}
+                </button>
+              ))}
+            </div>
+
+            <div className="long-video-feed">
+          {longVideoFeedPosts.map((post) => {
             const rawUrl = post.contentUrl || post.mediaUrl || "";
             const mediaUrl = rawUrl.trim() ? resolveUrl(rawUrl.trim()) : "";
             if (!mediaUrl) return null;
@@ -960,6 +1129,14 @@ export default function Feed() {
                       className="long-feed-menu-btn"
                       aria-label="More options"
                       aria-expanded={menuOpenPostId === post.id}
+                      onPointerDown={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                      }}
+                      onTouchStart={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                      }}
                       onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
@@ -969,7 +1146,12 @@ export default function Feed() {
                       {"\u22EE"}
                     </button>
                     {menuOpenPostId === post.id && (
-                      <div className="long-feed-menu" onClick={(e) => e.stopPropagation()}>
+                      <div
+                        className="long-feed-menu"
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onTouchStart={(e) => e.stopPropagation()}
+                        onClick={(e) => e.stopPropagation()}
+                      >
                         <button type="button" onClick={() => onMenuAction("share", post)}>Share video</button>
                         <button type="button" onClick={() => onMenuAction("playlist", post)}>Save to playlist</button>
                         <button type="button" onClick={() => onMenuAction("not_interested", post)}>Not interested</button>
@@ -985,6 +1167,8 @@ export default function Feed() {
               </article>
             );
           })}
+            </div>
+          </div>
         </section>
       )}
 
@@ -1073,7 +1257,6 @@ export default function Feed() {
                       <video
                         ref={(node) => setViewerVideoRef(post.id, node)}
                         src={mediaUrl}
-                        autoPlay
                         loop
                         playsInline
                         preload="metadata"

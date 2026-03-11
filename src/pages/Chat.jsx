@@ -3375,6 +3375,30 @@ export default function Chat() {
   const openAttachPicker = () => attachInputRef.current?.click();
   const openCameraPicker = () => cameraInputRef.current?.click();
 
+  const normalizeSpeechChunk = (value) => String(value || "").replace(/\s+/g, " ").trim();
+  const mergeSpeechChunks = (baseText, nextText) => {
+    const base = normalizeSpeechChunk(baseText);
+    const next = normalizeSpeechChunk(nextText);
+    if (!next) return base;
+    if (!base) return next;
+
+    const baseLower = base.toLowerCase();
+    const nextLower = next.toLowerCase();
+    if (baseLower === nextLower || baseLower.includes(nextLower)) return base;
+    if (nextLower.includes(baseLower)) return next;
+
+    const maxOverlap = Math.min(base.length, next.length);
+    for (let size = maxOverlap; size > 0; size -= 1) {
+      const baseSuffix = baseLower.slice(-size);
+      const nextPrefix = nextLower.slice(0, size);
+      if (baseSuffix === nextPrefix) {
+        return `${base}${next.slice(size)}`.replace(/\s+/g, " ").trim();
+      }
+    }
+
+    return `${base} ${next}`.replace(/\s+/g, " ").trim();
+  };
+
   const stopSpeechTyping = () => {
     const recognition = speechRecognitionRef.current;
     if (!recognition) {
@@ -3424,22 +3448,14 @@ export default function Chat() {
 
           if (result.isFinal) {
             const currentFinal = speechFinalTranscriptRef.current;
-            const normalizedCurrent = currentFinal.toLowerCase();
-            const normalizedPart = part.toLowerCase();
-
-            // Avoid appending duplicated final chunks produced by continuous recognition.
-            if (!normalizedCurrent.endsWith(normalizedPart)) {
-              speechFinalTranscriptRef.current = `${currentFinal} ${part}`.replace(/\s+/g, " ").trim();
-            }
+            speechFinalTranscriptRef.current = mergeSpeechChunks(currentFinal, part);
           } else {
-            interim = `${interim} ${part}`.replace(/\s+/g, " ").trim();
+            interim = mergeSpeechChunks(interim, part);
           }
         }
 
         speechInterimTranscriptRef.current = interim;
-        const combined = `${speechFinalTranscriptRef.current} ${speechInterimTranscriptRef.current}`
-          .replace(/\s+/g, " ")
-          .trim();
+        const combined = mergeSpeechChunks(speechFinalTranscriptRef.current, speechInterimTranscriptRef.current);
 
         if (combined !== speechLastAppliedTextRef.current) {
           speechLastAppliedTextRef.current = combined;

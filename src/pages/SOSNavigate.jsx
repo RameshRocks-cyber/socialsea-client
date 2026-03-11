@@ -21,6 +21,34 @@ const haversineMeters = (lat1, lon1, lat2, lon2) => {
   return R * c;
 };
 
+const normalizeLiveUrl = (rawUrl, fallbackAlertId = "") => {
+  const raw = String(rawUrl || "").trim();
+  const fallbackId = String(fallbackAlertId || "").trim();
+  const appOrigin = typeof window !== "undefined" ? String(window.location.origin || "").replace(/\/+$/, "") : "";
+
+  const toLivePath = (id) => {
+    const safeId = String(id || "").trim();
+    if (!safeId) return "";
+    const path = `/sos/live/${encodeURIComponent(safeId)}`;
+    return appOrigin ? `${appOrigin}${path}` : path;
+  };
+
+  if (!raw) return toLivePath(fallbackId);
+
+  try {
+    const parsed = new URL(raw, appOrigin || "http://localhost");
+    const liveMatch = parsed.pathname.match(/\/sos\/live\/([^/?#]+)/i);
+    if (liveMatch?.[1]) return toLivePath(decodeURIComponent(liveMatch[1]));
+
+    const genericSosMatch = parsed.pathname.match(/\/sos\/(?!navigate\/)([^/?#]+)/i);
+    if (genericSosMatch?.[1]) return toLivePath(decodeURIComponent(genericSosMatch[1]));
+  } catch {
+    // keep original URL if parsing fails
+  }
+
+  return raw;
+};
+
 export default function SOSNavigate() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -47,7 +75,7 @@ export default function SOSNavigate() {
           latitude: queryLat,
           longitude: queryLon,
           reporterEmail: queryReporter || null,
-          liveUrl: queryLive || null,
+          liveUrl: normalizeLiveUrl(queryLive, alertId || "active") || null,
           mapsUrl: queryMaps || null,
           source: "query"
         };
@@ -66,7 +94,7 @@ export default function SOSNavigate() {
             latitude: cachedLat,
             longitude: cachedLon,
             reporterEmail: cached?.reporterEmail || null,
-            liveUrl: cached?.liveUrl || null,
+            liveUrl: normalizeLiveUrl(cached?.liveUrl, cached?.alertId || alertId || "active") || null,
             mapsUrl: cached?.mapsUrl || null,
             source: "cache"
           };
@@ -100,7 +128,10 @@ export default function SOSNavigate() {
           setError("SOS location is unavailable.");
           return;
         }
-        setPayload(data);
+        setPayload({
+          ...data,
+          liveUrl: normalizeLiveUrl(data?.liveUrl || data?.streamUrl, data?.alertId || alertId)
+        });
       } catch (err) {
         if (!active) return;
         const fallback = fallbackFromSearchAndCache();
