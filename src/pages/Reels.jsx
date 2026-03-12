@@ -45,7 +45,6 @@ export default function Reels() {
   const [commentTextByPost, setCommentTextByPost] = useState({});
   const [commentsOpenByPost, setCommentsOpenByPost] = useState({});
   const [savedPostIds, setSavedPostIds] = useState({});
-  const [watchLaterPostIds, setWatchLaterPostIds] = useState({});
   const [shareMessageByPost, setShareMessageByPost] = useState({});
   const [tapLikeBurstByPost, setTapLikeBurstByPost] = useState({});
   const [followingByKey, setFollowingByKey] = useState({});
@@ -240,18 +239,6 @@ export default function Reels() {
     }
   }, []);
 
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem("watchLaterPostIds");
-      if (!raw) return;
-      const ids = JSON.parse(raw);
-      if (!Array.isArray(ids)) return;
-      const map = ids.reduce((acc, id) => ({ ...acc, [id]: true }), {});
-      setWatchLaterPostIds(map);
-    } catch {
-      // ignore invalid localStorage payload
-    }
-  }, []);
 
   useEffect(() => {
     reels.forEach((reel, idx) => {
@@ -285,7 +272,10 @@ export default function Reels() {
     setCurrentIndex(idx);
     const container = containerRef.current;
     if (container) {
-      container.scrollTo({ top: idx * container.clientHeight, behavior: "smooth" });
+      const sections = Array.from(container.querySelectorAll(".reel-item"));
+      const target = sections[idx];
+      const nextTop = target ? target.offsetTop : idx * container.clientHeight;
+      container.scrollTo({ top: nextTop, behavior: "smooth" });
     }
   }, [reels, targetPostId]);
 
@@ -462,12 +452,40 @@ export default function Reels() {
     };
   }, [reels]);
 
+  const getNearestIndex = (scrollTop) => {
+    const container = containerRef.current;
+    if (!container || !reels.length) return 0;
+    const sections = Array.from(container.querySelectorAll(".reel-item"));
+    if (!sections.length) {
+      const idx = Math.round(container.scrollTop / Math.max(1, container.clientHeight));
+      return Math.max(0, Math.min(reels.length - 1, idx));
+    }
+    let bestIdx = 0;
+    let bestDist = Number.POSITIVE_INFINITY;
+    sections.forEach((section, idx) => {
+      const dist = Math.abs((section?.offsetTop || 0) - scrollTop);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestIdx = idx;
+      }
+    });
+    return Math.max(0, Math.min(reels.length - 1, bestIdx));
+  };
+
+  const scrollTopForIndex = (idx) => {
+    const container = containerRef.current;
+    if (!container) return 0;
+    const sections = Array.from(container.querySelectorAll(".reel-item"));
+    const target = sections[idx];
+    if (target) return target.offsetTop || 0;
+    return idx * container.clientHeight;
+  };
+
   const snapToNearest = (behavior = "smooth") => {
     const el = containerRef.current;
     if (!el) return;
-    const idx = Math.round(el.scrollTop / el.clientHeight);
-    const bounded = Math.max(0, Math.min(reels.length - 1, idx));
-    const targetTop = bounded * el.clientHeight;
+    const bounded = getNearestIndex(el.scrollTop);
+    const targetTop = scrollTopForIndex(bounded);
     if (Math.abs(el.scrollTop - targetTop) > 2) {
       el.scrollTo({ top: targetTop, behavior });
     }
@@ -482,8 +500,7 @@ export default function Reels() {
     const el = containerRef.current;
     if (!el || !reels.length) return;
 
-    const idx = Math.round(el.scrollTop / el.clientHeight);
-    const bounded = Math.max(0, Math.min(reels.length - 1, idx));
+    const bounded = getNearestIndex(el.scrollTop);
     if (bounded !== currentIndexRef.current) {
       setCurrentIndex(bounded);
     }
@@ -616,15 +633,6 @@ export default function Reels() {
     });
   };
 
-  const toggleWatchLater = (postId) => {
-    setWatchLaterPostIds((prev) => {
-      const next = { ...prev, [postId]: !prev[postId] };
-      const ids = Object.keys(next).filter((id) => next[id]).map((id) => Number(id));
-      localStorage.setItem("watchLaterPostIds", JSON.stringify(ids));
-      return next;
-    });
-  };
-
   const followOwner = async (reel) => {
     const followTarget = reel?.user?.email || reel?.username;
     if (!followTarget) return;
@@ -678,7 +686,7 @@ export default function Reels() {
     gestureScrollLockRef.current = true;
     if (scrollIdleTimerRef.current) clearTimeout(scrollIdleTimerRef.current);
     setCurrentIndex(bounded);
-    container.scrollTo({ top: bounded * container.clientHeight, behavior: "smooth" });
+    container.scrollTo({ top: scrollTopForIndex(bounded), behavior: "smooth" });
     window.setTimeout(() => {
       if (pendingScrollIndexRef.current === bounded) {
         pendingScrollIndexRef.current = null;
@@ -979,14 +987,6 @@ export default function Reels() {
                   title="Save"
                 >
                   <span>{savedPostIds[reel.id] ? <BsBookmarkFill /> : <FiBookmark />}</span>
-                </button>
-                <button
-                  type="button"
-                  className={`reel-action-btn ${watchLaterPostIds[reel.id] ? "is-active" : ""}`}
-                  onClick={() => toggleWatchLater(reel.id)}
-                  title="Watch Later"
-                >
-                  <span>{"\u23F2"}</span>
                 </button>
               </aside>
 

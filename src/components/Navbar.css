@@ -531,6 +531,9 @@
 
 @media (max-width: 560px) {
   .ss-nav-wrap.is-chat-conversation {
+    display: flex;
+  }
+  .ss-nav-wrap.is-chat-conversation .ss-nav {
     display: none;
   }
 

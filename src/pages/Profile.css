@@ -103,6 +103,10 @@
   box-shadow: 0 10px 26px rgba(0, 0, 0, 0.3);
 }
 
+.profile-post-card.is-playable {
+  cursor: pointer;
+}
+
 .profile-post-card img,
 .profile-post-card video {
   width: 100%;

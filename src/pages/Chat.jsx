@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   FiArrowLeft,
@@ -391,6 +391,7 @@ export default function Chat() {
   const [callError, setCallError] = useState("");
   const [isMuted, setIsMuted] = useState(false);
   const [isCameraOff, setIsCameraOff] = useState(false);
+  const [isSpeakerOn, setIsSpeakerOn] = useState(true);
   const [ringtoneMuted, setRingtoneMuted] = useState(false);
   const [callDurationSec, setCallDurationSec] = useState(0);
   const [callHistoryByContact, setCallHistoryByContact] = useState({});
@@ -574,6 +575,8 @@ export default function Chat() {
   const signApiUnavailableRef = useRef(false);
   const signLocalModelRef = useRef(null);
   const signLocalModelLoadingRef = useRef(null);
+  const signLivePollTimerRef = useRef(null);
+  const signLastDetectedTextRef = useRef("");
 
   const TRANSLATE_LANG_OPTIONS = [
     { value: "en", label: "English" },
@@ -1016,6 +1019,23 @@ export default function Chat() {
     callStateRef.current = callState;
   }, [callState]);
 
+  const applySpeakerState = useCallback((speakerOn) => {
+    const remoteVideoEl = remoteVideoRef.current;
+    const remoteAudioEl = remoteAudioRef.current;
+    if (remoteVideoEl) {
+      remoteVideoEl.muted = !speakerOn;
+      if (speakerOn) remoteVideoEl.play?.().catch(() => {});
+    }
+    if (remoteAudioEl) {
+      remoteAudioEl.muted = !speakerOn;
+      if (speakerOn) remoteAudioEl.play?.().catch(() => {});
+    }
+  }, []);
+
+  useEffect(() => {
+    applySpeakerState(isSpeakerOn);
+  }, [applySpeakerState, isSpeakerOn, callState.phase, callState.mode]);
+
   useEffect(() => {
     if (callState.phase === "idle") {
       callStartedAtRef.current = null;
@@ -1065,7 +1085,8 @@ export default function Chat() {
       remoteAudioEl.srcObject = remoteStream;
       remoteAudioEl.play?.().catch(() => {});
     }
-  }, [callState.phase, callState.mode]);
+    applySpeakerState(isSpeakerOn);
+  }, [applySpeakerState, callState.phase, callState.mode, isSpeakerOn]);
 
   useEffect(() => {
     const unlockAudio = () => {
@@ -1456,6 +1477,7 @@ export default function Chat() {
     setCallPhaseNote("");
     setIsMuted(false);
     setIsCameraOff(false);
+    setIsSpeakerOn(true);
   };
 
   const closePeer = () => {
@@ -1540,6 +1562,7 @@ export default function Chat() {
       remoteAudioRef.current.srcObject = remoteStream;
       remoteAudioRef.current.play?.().catch(() => {});
     }
+    applySpeakerState(isSpeakerOn);
 
     const markConnected = () => {
       clearDisconnectGuardTimer();
@@ -1600,6 +1623,7 @@ export default function Chat() {
         remoteAudioRef.current.srcObject = remoteStream;
         remoteAudioRef.current.play?.().catch(() => {});
       }
+      applySpeakerState(isSpeakerOn);
       markConnected();
     };
 
@@ -1723,6 +1747,29 @@ export default function Chat() {
       if (Number.isFinite(signalMs) && signalMs > 0 && Date.now() - signalMs > CALL_SIGNAL_MAX_AGE_MS) {
         return;
       }
+      const nextMode = signal?.mode === "video" ? "video" : "audio";
+      if (
+        current.phase !== "idle" &&
+        current.peerId === fromId &&
+        current.phase !== "dialing" &&
+        current.phase !== "connecting" &&
+        signal?.sdp &&
+        peerRef.current
+      ) {
+        try {
+          await peerRef.current.setRemoteDescription({ type: "offer", sdp: signal.sdp });
+          const answer = await peerRef.current.createAnswer();
+          answer.sdp = applySdpQualityHints(answer.sdp, nextMode);
+          await peerRef.current.setLocalDescription(answer);
+          tuneSendersForQuality(peerRef.current, nextMode);
+          sendSignal(fromId, { type: "answer", mode: nextMode, sdp: answer.sdp });
+          setCallState((prev) => (prev.phase === "idle" ? prev : { ...prev, mode: nextMode, phase: "connecting" }));
+          if (nextMode === "video") setIsCameraOff(false);
+        } catch {
+          finishCall(false, "Failed to update call");
+        }
+        return;
+      }
       if (current.phase !== "idle") {
         // Handle call-collision (both users pressed call at the same time):
         // if the offer is from the same peer we are dialing, switch to incoming
@@ -1771,7 +1818,12 @@ export default function Chat() {
       try {
         await peerRef.current.setRemoteDescription({ type: "answer", sdp: signal.sdp });
         stopOutgoingRing();
-        setCallState((prev) => ({ ...prev, phase: "connecting" }));
+        setCallState((prev) => ({
+          ...prev,
+          phase: prev.phase === "in-call" ? "in-call" : "connecting",
+          mode: signal?.mode === "video" ? "video" : prev.mode
+        }));
+        if (signal?.mode === "video") setIsCameraOff(false);
       } catch {
         finishCall(false, "Failed to establish call");
       }
@@ -1918,10 +1970,6 @@ export default function Chat() {
     if (!activeContactId) return;
     if (activeContactId === myUserId) {
       setCallError("Cannot call your own account");
-      return;
-    }
-    if (chatFallbackMode) {
-      setCallError("Calls need backend WebSocket connection");
       return;
     }
     if (callStateRef.current.phase !== "idle") return;
@@ -2087,12 +2135,71 @@ export default function Chat() {
     setIsMuted(nextMuted);
   };
 
+  const toggleSpeaker = () => {
+    setIsSpeakerOn((prev) => !prev);
+  };
+
   const toggleCamera = () => {
     const videoTrack = localStreamRef.current?.getVideoTracks?.()[0];
     if (!videoTrack) return;
     const nextOff = !isCameraOff;
     videoTrack.enabled = !nextOff;
     setIsCameraOff(nextOff);
+  };
+
+  const upgradeCallToVideo = async () => {
+    const current = callStateRef.current;
+    if (!current?.peerId || current.phase === "idle" || current.mode === "video") return;
+    const pc = peerRef.current;
+    const localStream = localStreamRef.current;
+    if (!pc || !localStream) {
+      setCallError("Call is not ready for video switch");
+      return;
+    }
+
+    try {
+      setCallError("");
+      let videoTrack = localStream.getVideoTracks?.()[0] || null;
+      if (!videoTrack) {
+        const cameraStream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            width: { ideal: 1280, max: 1920 },
+            height: { ideal: 720, max: 1080 },
+            frameRate: { ideal: 30, max: 30 }
+          }
+        });
+        videoTrack = cameraStream.getVideoTracks?.()[0] || null;
+        if (!videoTrack) throw new Error("no-video-track");
+        localStream.addTrack(videoTrack);
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = localStream;
+          localVideoRef.current.play?.().catch(() => {});
+        }
+      }
+
+      const existingVideoSender = pc.getSenders().find((sender) => sender?.track?.kind === "video");
+      if (existingVideoSender) {
+        await existingVideoSender.replaceTrack(videoTrack);
+      } else {
+        pc.addTrack(videoTrack, localStream);
+      }
+
+      tuneSendersForQuality(pc, "video");
+      const offer = await pc.createOffer();
+      offer.sdp = applySdpQualityHints(offer.sdp, "video");
+      await pc.setLocalDescription(offer);
+
+      setCallState((prev) => (prev.phase === "idle" ? prev : { ...prev, mode: "video", phase: "connecting" }));
+      setIsCameraOff(false);
+      sendSignal(current.peerId, {
+        type: "offer",
+        mode: "video",
+        sdp: offer.sdp
+      });
+    } catch {
+      setCallError("Could not switch to video. Allow camera and try again.");
+      window.setTimeout(() => setCallError(""), 2500);
+    }
   };
 
   const loadConversations = async () => {
@@ -2958,7 +3065,7 @@ export default function Chat() {
     }
   };
 
-  const detectLocalSignText = async (videoEl) => {
+  const detectLocalSignText = useCallback(async (videoEl) => {
     if (!videoEl || !videoEl.videoWidth || !videoEl.videoHeight) return "";
     try {
       await loadExternalScript(SIGN_LOCAL_TF_SCRIPT, "tfjs-chat-sign");
@@ -2978,7 +3085,43 @@ export default function Chat() {
     } catch {
       return "";
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    if (!signAssistEnabled || callState.mode !== "video" || callState.phase === "idle") {
+      if (signLivePollTimerRef.current) {
+        clearInterval(signLivePollTimerRef.current);
+        signLivePollTimerRef.current = null;
+      }
+      return;
+    }
+
+    signLastDetectedTextRef.current = "";
+    setSignAssistStatus((prev) => prev || "Sign Assist is live. Show your hand to camera.");
+
+    const tick = async () => {
+      if (signAssistBusy) return;
+      const video = localVideoRef.current;
+      if (!video || !video.videoWidth || !video.videoHeight) return;
+      const detected = String(await detectLocalSignText(video)).trim();
+      if (!detected || detected === signLastDetectedTextRef.current) return;
+      signLastDetectedTextRef.current = detected;
+      setSignAssistText(detected);
+      setSignAssistStatus("Live sign detected. Review and send.");
+    };
+
+    void tick();
+    signLivePollTimerRef.current = setInterval(() => {
+      void tick();
+    }, 900);
+
+    return () => {
+      if (signLivePollTimerRef.current) {
+        clearInterval(signLivePollTimerRef.current);
+        signLivePollTimerRef.current = null;
+      }
+    };
+  }, [signAssistEnabled, callState.mode, callState.phase, signAssistBusy, detectLocalSignText]);
 
   const captureSignAssistFromVideo = async () => {
     const video = localVideoRef.current;
@@ -4519,6 +4662,12 @@ export default function Chat() {
               <button type="button" className="call-ring-toggle" onClick={toggleMute}>
                 {isMuted ? "Unmute mic" : "Mute mic"}
               </button>
+              <button type="button" className="call-ring-toggle" onClick={toggleSpeaker}>
+                {isSpeakerOn ? "Speaker on" : "Speaker off"}
+              </button>
+              <button type="button" className="call-ring-toggle" onClick={upgradeCallToVideo}>
+                Switch to video
+              </button>
               <button type="button" className="call-decline" onClick={() => finishCall(true)}>
                 <FiPhoneOff /> End Call
               </button>
@@ -4645,6 +4794,9 @@ export default function Chat() {
               <button type="button" className="call-control" onClick={toggleMute} title="Mute/Unmute">
                 {isMuted ? <FiMicOff /> : <FiMic />}
               </button>
+              <button type="button" className="call-control" onClick={toggleSpeaker} title="Speaker on/off">
+                {isSpeakerOn ? <FiVolume2 /> : <FiVolumeX />}
+              </button>
               <button type="button" className="call-control" onClick={toggleCamera} title="Camera on/off">
                 {isCameraOff ? <FiVideoOff /> : <FiVideo />}
               </button>
@@ -4702,7 +4854,7 @@ export default function Chat() {
                   className="call-action"
                   title="Audio call"
                   onClick={() => startOutgoingCall("audio")}
-                  disabled={chatFallbackMode || callActive || !!incomingCall}
+                  disabled={callActive || !!incomingCall}
                 >
                   <FiPhone />
                 </button>
@@ -4711,7 +4863,7 @@ export default function Chat() {
                   className="call-action"
                   title="Video call"
                   onClick={() => startOutgoingCall("video")}
-                  disabled={chatFallbackMode || callActive || !!incomingCall}
+                  disabled={callActive || !!incomingCall}
                 >
                   <FiVideo />
                 </button>
@@ -4892,6 +5044,14 @@ export default function Chat() {
                       <button type="button" className="call-control" onClick={toggleMute} title="Mute/Unmute">
                         {isMuted ? <FiMicOff /> : <FiMic />}
                       </button>
+                      <button type="button" className="call-control" onClick={toggleSpeaker} title="Speaker on/off">
+                        {isSpeakerOn ? <FiVolume2 /> : <FiVolumeX />}
+                      </button>
+                      {callState.mode === "audio" && (
+                        <button type="button" className="call-control" onClick={upgradeCallToVideo} title="Switch to video">
+                          <FiVideo />
+                        </button>
+                      )}
                       <button type="button" className="call-hangup" onClick={() => finishCall(true)}>
                         <FiPhoneOff />
                       </button>
@@ -5394,6 +5554,8 @@ export default function Chat() {
     </div>
   );
 }
+
+
 
 
 

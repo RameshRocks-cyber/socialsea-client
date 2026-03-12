@@ -187,89 +187,44 @@ export const registerWithPassword = ({ username, email, password, otp }) => {
 
 export const loginWithPassword = ({ identifier, password }) => {
   const value = String(identifier || "").trim();
-  const isHttpsPage =
-    typeof window !== "undefined" && window.location.protocol === "https:";
-  const isLocalPage =
-    typeof window !== "undefined" &&
-    (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
-  const storedAuthBase = normalizeBaseCandidate(
-    (typeof window !== "undefined" &&
-      (sessionStorage.getItem("socialsea_auth_base_url") || localStorage.getItem("socialsea_auth_base_url"))) ||
-      ""
-  );
-  const baseCandidates = [
-    isLocalPage ? "http://localhost:8080" : "",
-    isLocalPage ? "/api" : "",
-    storedAuthBase,
-    normalizeBaseCandidate(api.defaults.baseURL),
-    normalizeBaseCandidate(import.meta.env.VITE_API_URL),
-    "https://socialsea.co.in",
-  ]
-    .filter((v, i, arr) => v && arr.indexOf(v) === i)
-    .filter((v) => !(isHttpsPage && /^http:\/\//i.test(v)));
+  const looksLikeEmail = /@/.test(value);
 
-  // Password-only login flow (NO OTP endpoint probing).
-  const payloads = [
-    { username: value, password },
-    { identifier: value, password },
-    { email: value, password },
-  ];
-  const endpoints = ["/api/auth/login"];
+  const payloads = looksLikeEmail
+    ? [
+        { email: value, password },
+        { identifier: value, password },
+        { username: value, password },
+      ]
+    : [
+        { username: value, password },
+        { identifier: value, password },
+        { email: value, password },
+      ];
 
   const run = async () => {
     let lastError = null;
-    const authErrors = [];
-    for (const baseURL of baseCandidates) {
-      for (const url of endpoints) {
-        for (const body of payloads) {
-          try {
-            const res = await api.request({
-              method: "POST",
-              url,
-              data: body,
-              baseURL,
-              skipAuth: true,
-              timeout: 9000,
-            });
-            const textData = typeof res?.data === "string" ? res.data.trim() : "";
-            if (textData && (/^\s*<!doctype html/i.test(textData) || /<html[\s>]/i.test(textData))) {
-              // Web host fallback page instead of API JSON; continue to next base candidate.
-              const htmlErr = new Error("Received HTML instead of API response");
-              htmlErr.response = { status: 404, data: textData };
-              throw htmlErr;
-            }
-            try {
-              if (baseURL) {
-                sessionStorage.setItem("socialsea_auth_base_url", String(baseURL));
-                localStorage.setItem("socialsea_auth_base_url", String(baseURL));
-              }
-            } catch {
-              // ignore storage errors
-            }
-            return res;
-          } catch (err) {
-            lastError = err;
-            const status = err?.response?.status;
-            const text = String(err?.response?.data?.message || err?.response?.data || err?.message || "").toLowerCase();
-            // If backend asks for OTP here, stop immediately because this screen is password-only.
-            if (text.includes("otp") && text.includes("required")) {
-              throw new Error("Password login endpoint is misconfigured (OTP required). Contact backend admin.");
-            }
-            // Keep trying other backend candidates on auth failures too.
-            // This avoids false "Invalid password" when one backend is out-of-sync.
-            if (status === 401 || status === 403) {
-              authErrors.push(err);
-              continue;
-            }
-            // Retry only for endpoint/transport failures; auth failures should return immediately.
-            if (!(status === 404 || status === 405 || (status >= 500 && status <= 599) || !status)) {
-              throw err;
-            }
-          }
+    for (const body of payloads) {
+      try {
+        return await api.request({
+          method: "POST",
+          url: "/api/auth/login",
+          data: body,
+          skipAuth: true,
+          timeout: 9000,
+        });
+      } catch (err) {
+        lastError = err;
+        const status = err?.response?.status;
+        const text = String(err?.response?.data?.message || err?.response?.data || err?.message || "").toLowerCase();
+        if (text.includes("otp") && text.includes("required")) {
+          throw new Error("Password login endpoint is misconfigured (OTP required). Contact backend admin.");
+        }
+        if (!(status === 400 || status === 401 || status === 403 || status === 404 || status === 405 || (status >= 500 && status <= 599) || !status)) {
+          throw err;
         }
       }
     }
-    throw authErrors[0] || lastError || new Error("Login failed");
+    throw lastError || new Error("Login failed");
   };
 
   return run();

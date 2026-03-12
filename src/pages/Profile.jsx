@@ -618,6 +618,13 @@ export default function Profile() {
     return toApiUrl(url);
   };
 
+  const openPostInPlayer = (post) => {
+    if (!post || !post?.isVideo) return;
+    const postId = String(post?.id || "").trim();
+    if (!postId) return;
+    navigate(`/watch/${encodeURIComponent(postId)}`);
+  };
+
   const clearHoldTimer = () => {
     if (holdTimerRef.current) {
       clearTimeout(holdTimerRef.current);
@@ -751,7 +758,8 @@ export default function Profile() {
             {posts.map((post, index) => (
               <div
                 key={`${String(post?.id ?? "post")}-${index}`}
-                className={`profile-post-card ${String(deleteRevealPostId || "") === String(post?.id || "") ? "is-delete-visible" : ""}`}
+                className={`profile-post-card ${post?.isVideo ? "is-playable" : ""} ${String(deleteRevealPostId || "") === String(post?.id || "") ? "is-delete-visible" : ""}`}
+                onClick={() => openPostInPlayer(post)}
                 onPointerDown={(event) => handleCardPointerDown(event, post?.id)}
                 onPointerUp={handleCardPointerEnd}
                 onPointerCancel={handleCardPointerEnd}

@@ -26,10 +26,13 @@ const ITEMS = [
   { to: "/profile/me", icon: FiUser, label: "Profile", match: (p) => p.startsWith("/profile") },
 ];
 const CALL_ACCEPT_TARGET_KEY = "socialsea_call_accept_target_v1";
+const CALL_SIGNAL_LOCAL_KEY = "socialsea_call_signal_local_v1";
+const CALL_SIGNAL_CHANNEL = "socialsea-call-signal";
 const SETTINGS_KEY = "socialsea_settings_v1";
 const SOS_SIGNAL_KEY = "socialsea_sos_signal_v1";
 const SOS_SIGNAL_CHANNEL = "socialsea_sos_signal_channel_v1";
 const SOS_SESSION_KEY = "socialsea_sos_session_v1";
+const SOS_OWN_STOP_AT_KEY = "socialsea_sos_own_stop_at_v1";
 const SOS_LAST_SIGNAL_ID_KEY = "socialsea_sos_last_signal_id_v1";
 const SOS_LAST_SESSION_SIG_KEY = "socialsea_sos_last_session_sig_v1";
 const SOS_NAV_CACHE_KEY = "socialsea_sos_nav_cache_v1";
@@ -241,6 +244,7 @@ export default function Navbar() {
   const seenSessionSignalsRef = useRef(new Set());
   const seenAlertIdsRef = useRef(readSeenAlertIds());
   const suppressedAlertIdsRef = useRef(readSuppressedAlertIds());
+  const ownSosStopUntilRef = useRef(0);
   const popupStateRef = useRef(null);
   const popupMetaRef = useRef({ fingerprint: "", shownAt: 0 });
   const sosSignalChannelRef = useRef(null);
@@ -351,13 +355,72 @@ export default function Navbar() {
     };
   }, [myUserId, onChatRoute]);
 
+  useEffect(() => {
+    // On chat screen, Chat.jsx owns call UI/signals. Keep navbar banner closed there.
+    if (onChatRoute && incomingCall) {
+      setIncomingCall(null);
+    }
+  }, [onChatRoute, incomingCall]);
+
+  useEffect(() => {
+    const terminalTypes = new Set(["hangup", "reject", "busy", "answer", "accepted", "ended"]);
+
+    const maybeCloseFromSignal = (signal) => {
+      if (!signal || !incomingCall?.fromUserId) return;
+      const type = String(signal?.type || "").toLowerCase();
+      const fromId = String(signal?.fromUserId || signal?.fromId || "");
+      const toId = String(signal?.toUserId || signal?.toId || "");
+      const meId = String(myUserId || "");
+      const peerId = String(incomingCall.fromUserId || "");
+      const fromPeerToMe = fromId === peerId && (!meId || !toId || toId === meId);
+      const fromMeToPeer = fromId === meId && toId === peerId;
+      if (terminalTypes.has(type) && (fromPeerToMe || fromMeToPeer)) {
+        setIncomingCall(null);
+      }
+    };
+
+    const onStorage = (event) => {
+      if (event?.key !== CALL_SIGNAL_LOCAL_KEY || !event?.newValue) return;
+      try {
+        const payload = JSON.parse(event.newValue);
+        maybeCloseFromSignal(payload?.signal || payload);
+      } catch {
+        // ignore malformed signal payload
+      }
+    };
+
+    let channel = null;
+    if (typeof BroadcastChannel !== "undefined") {
+      try {
+        channel = new BroadcastChannel(CALL_SIGNAL_CHANNEL);
+        channel.addEventListener("message", (event) => {
+          const data = event?.data;
+          if (!data || data.kind !== "call-signal") return;
+          maybeCloseFromSignal(data.signal);
+        });
+      } catch {
+        channel = null;
+      }
+    }
+
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      if (channel) {
+        channel.close();
+      }
+    };
+  }, [incomingCall?.fromUserId, myUserId]);
+
   const openIncomingCall = () => {
     if (!incomingCall?.fromUserId) return;
+    setIncomingCall(null);
     navigate(`/chat/${incomingCall.fromUserId}`);
   };
 
   const acceptIncomingCall = () => {
     if (!incomingCall?.fromUserId) return;
+    setIncomingCall(null);
     try {
       sessionStorage.setItem(
         CALL_ACCEPT_TARGET_KEY,
@@ -425,9 +488,70 @@ export default function Navbar() {
   }, [sosPopup]);
 
   useEffect(() => {
+    try {
+      const stored = Number(sessionStorage.getItem(SOS_OWN_STOP_AT_KEY) || localStorage.getItem(SOS_OWN_STOP_AT_KEY) || 0);
+      if (Number.isFinite(stored) && stored > Date.now()) {
+        ownSosStopUntilRef.current = stored;
+      } else {
+        ownSosStopUntilRef.current = 0;
+      }
+    } catch {
+      ownSosStopUntilRef.current = 0;
+    }
+  }, []);
+
+  useEffect(() => {
     if (location.pathname.startsWith("/sos")) {
       setSosPopup(null);
     }
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (location.pathname.startsWith("/sos")) return undefined;
+    let disposed = false;
+    const syncOwnSosStopState = () => {
+      if (disposed) return;
+      try {
+        const raw = localStorage.getItem(SOS_SESSION_KEY);
+        if (!raw) {
+          if (popupStateRef.current?.isEmergency) setSosPopup(null);
+          return;
+        }
+        const session = JSON.parse(raw);
+        const isOwnSession =
+          Boolean(session?.triggeredByCurrentBrowser) ||
+          isOwnEmergency({ reporterEmail: session?.reporterEmail, reporterUserId: session?.reporterUserId });
+        if (!isOwnSession) return;
+        if (session?.active) {
+          ownSosStopUntilRef.current = 0;
+          try {
+            sessionStorage.removeItem(SOS_OWN_STOP_AT_KEY);
+            localStorage.removeItem(SOS_OWN_STOP_AT_KEY);
+          } catch {
+            // ignore storage issues
+          }
+          return;
+        }
+        const until = Date.now() + 45000;
+        ownSosStopUntilRef.current = until;
+        setSosPopup(null);
+        try {
+          sessionStorage.setItem(SOS_OWN_STOP_AT_KEY, String(until));
+          localStorage.setItem(SOS_OWN_STOP_AT_KEY, String(until));
+        } catch {
+          // ignore storage issues
+        }
+      } catch {
+        // ignore parse/storage issues
+      }
+    };
+
+    syncOwnSosStopState();
+    const timer = setInterval(syncOwnSosStopState, 700);
+    return () => {
+      disposed = true;
+      clearInterval(timer);
+    };
   }, [location.pathname]);
 
   useEffect(() => {
@@ -466,6 +590,19 @@ export default function Navbar() {
       const signalReporterEmail = payload.reporterEmail || payload.senderEmail;
       const signalReporterUserId = payload.reporterUserId || payload.senderUserId;
       if (kind === "stopped") {
+        const isOwnStopped =
+          Boolean(payload?.triggeredByCurrentBrowser) ||
+          isOwnEmergency({ reporterEmail: signalReporterEmail, reporterUserId: signalReporterUserId });
+        if (isOwnStopped) {
+          const until = Date.now() + 45000;
+          ownSosStopUntilRef.current = until;
+          try {
+            sessionStorage.setItem(SOS_OWN_STOP_AT_KEY, String(until));
+            localStorage.setItem(SOS_OWN_STOP_AT_KEY, String(until));
+          } catch {
+            // ignore storage issues
+          }
+        }
         suppressAlert(resolvedAlertId);
         setSosPopup(null);
         return;
@@ -972,6 +1109,10 @@ export default function Navbar() {
 
   const showSosPopup = (message, options = {}) => {
     const nextPopup = buildSosPopupPayload(message, options);
+    if (nextPopup?.isEmergency && ownSosStopUntilRef.current > Date.now()) {
+      setSosPopup(null);
+      return;
+    }
     const ownStopped = readOwnStoppedSessionState();
     if (
       nextPopup?.isEmergency &&

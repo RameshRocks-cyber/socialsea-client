@@ -803,13 +803,16 @@
   .yt-watch-page.is-watch-mode .watch-player-wrap {
     border-radius: 0;
     border: none;
+    height: 100svh;
+    height: 100dvh;
+    background: #000;
   }
 
   .yt-watch-page.is-watch-mode .watch-player {
     width: 100%;
-    height: auto;
+    height: 100%;
     max-height: none;
-    aspect-ratio: 16 / 9;
+    aspect-ratio: auto;
     object-fit: contain;
     background: #000;
   }

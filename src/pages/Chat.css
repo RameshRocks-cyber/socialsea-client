@@ -1671,6 +1671,7 @@
   border: 1px solid rgba(127, 168, 236, 0.45);
   background: #061328;
   box-shadow: 0 10px 26px rgba(0, 0, 0, 0.45);
+  transform: scaleX(-1);
 }
 
 .wa-video-top {

@@ -220,7 +220,27 @@ export default function AdminUsers() {
         }
         if (deleted) break;
       }
-      if (!deleted) throw lastErr || new Error("Delete endpoint not reachable");
+      if (!deleted) {
+        // Backend currently exposes block/unblock but may not expose hard-delete.
+        // Fallback: block user and treat as removed in admin list.
+        let blockedFallback = false;
+        for (const baseURL of baseCandidates) {
+          try {
+            await api.request({
+              method: "post",
+              url: `/api/admin/users/${user.id}/block`,
+              baseURL,
+              suppressAuthRedirect: true
+            });
+            blockedFallback = true;
+            break;
+          } catch (err) {
+            lastErr = err;
+          }
+        }
+        if (!blockedFallback) throw lastErr || new Error("Delete endpoint not reachable");
+        setError("Delete API is not available on backend. User was blocked instead.");
+      }
 
       setUsers((prev) => prev.filter((item) => String(item?.id) !== String(user.id)));
       setUserBaseById((prev) => {

@@ -3,41 +3,13 @@ import { getApiBaseUrl } from "./baseUrl";
 import { clearAuthStorage } from "../auth";
 
 const BASE_URL = getApiBaseUrl();
-const AUTH_BASE_KEY = "socialsea_auth_base_url";
-const STORED_BASE_URL = (() => {
-  try {
-    return (
-      localStorage.getItem(AUTH_BASE_KEY) ||
-      sessionStorage.getItem(AUTH_BASE_KEY) ||
-      ""
-    );
-  } catch {
-    return "";
-  }
-})();
-const ACTIVE_BASE_URL = BASE_URL || STORED_BASE_URL;
-
-// Keep the last used API base for diagnostics/fallback continuity.
-// Do NOT force-clear auth on base change; fallback retries can temporarily switch base
-// and would otherwise log users out on refresh.
-try {
-  if (BASE_URL) {
-    localStorage.setItem(AUTH_BASE_KEY, BASE_URL);
-    sessionStorage.setItem(AUTH_BASE_KEY, BASE_URL);
-  } else if (ACTIVE_BASE_URL) {
-    localStorage.setItem(AUTH_BASE_KEY, ACTIVE_BASE_URL);
-    sessionStorage.setItem(AUTH_BASE_KEY, ACTIVE_BASE_URL);
-  }
-} catch {
-  // ignore storage errors
-}
 
 const api = axios.create({
-  baseURL: ACTIVE_BASE_URL,
+  baseURL: BASE_URL,
 });
 
 const refreshClient = axios.create({
-  baseURL: ACTIVE_BASE_URL,
+  baseURL: BASE_URL,
   withCredentials: true,
 });
 
