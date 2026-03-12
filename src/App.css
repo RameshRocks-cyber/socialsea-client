@@ -69,10 +69,6 @@
 
   .app-main.reels-main-route.with-user-nav {
     padding-top: 0;
-    padding-bottom: 90px;
-  }
-
-  .app-main.chat-main-route.chat-conversation-route.with-user-nav {
     padding-bottom: 0;
   }
 

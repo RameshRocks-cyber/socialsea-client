@@ -409,13 +409,28 @@
 
   .reels-page,
   .reel-item {
-    height: calc(100vh - 140px);
+    height: 100vh;
     border-radius: 0;
+  }
+
+  .reels-page {
+    background: #02040d;
+  }
+
+  .reels-container {
+    height: 100%;
+  }
+
+  .reel-item {
+    padding: 0;
+    place-items: stretch;
   }
 
   .reel-frame {
     width: 100%;
-    max-height: calc(100vh - 150px);
+    height: 100%;
+    max-height: none;
+    aspect-ratio: auto;
     border-radius: 0;
     border-left: none;
     border-right: none;

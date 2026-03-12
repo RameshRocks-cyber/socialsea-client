@@ -72,7 +72,7 @@ body {
   color: #fff;
   min-width: 320px;
   overflow-x: hidden;
-  filter: brightness(var(--ss-site-brightness)) saturate(1.06);
+  filter: none;
 }
 
 body.ss-themed .app-main.with-user-nav {

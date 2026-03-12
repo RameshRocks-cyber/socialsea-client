@@ -538,13 +538,6 @@ export default function Navbar() {
   }, []);
 
   useEffect(() => {
-    if (location.pathname.startsWith("/sos")) {
-      setSosPopup(null);
-    }
-  }, [location.pathname]);
-
-  useEffect(() => {
-    if (location.pathname.startsWith("/sos")) return undefined;
     let disposed = false;
     const syncOwnSosStopState = () => {
       if (disposed) return;
@@ -607,12 +600,6 @@ export default function Navbar() {
       if (!signalId || seenLocalSignalsRef.current.has(signalId)) return;
       if (signalId === lastHandledSignalIdRef.current) return;
 
-      // Keep SOS page itself clean; do not consume the signal here,
-      // so other app pages/windows can still show the popup.
-      if (location.pathname.startsWith("/sos")) {
-        return;
-      }
-
       seenLocalSignalsRef.current.add(signalId);
       if (seenLocalSignalsRef.current.size > 1000) seenLocalSignalsRef.current.clear();
       lastHandledSignalIdRef.current = signalId;
@@ -672,7 +659,6 @@ export default function Navbar() {
       if (event?.key === SOS_SESSION_KEY && event.newValue) {
         try {
           const session = JSON.parse(event.newValue);
-          if (location.pathname.startsWith("/sos")) return;
           const isActive = Boolean(session?.active);
           if (!isActive) {
             const stoppedId = normalizeAlertId(session?.alertId || session?.alertDisplayId);
@@ -733,7 +719,6 @@ export default function Navbar() {
       }
 
       try {
-        if (location.pathname.startsWith("/sos")) return;
         const rawSession = localStorage.getItem(SOS_SESSION_KEY);
         if (!rawSession) return;
         const session = JSON.parse(rawSession);
@@ -878,42 +863,40 @@ export default function Navbar() {
 
         if (disposed) return;
         const alerts = payloads.flatMap((data) => normalizeAlerts(data));
-        const activeIds = new Set(
-          alerts
-            .filter((a) => (typeof a?.active === "boolean" ? a.active : true))
-            .map((a) => normalizeAlertId(a?.alertId || a?.alertDisplayId))
-            .filter(Boolean)
-        );
+        const activeAlerts = alerts.filter((a) => (typeof a?.active === "boolean" ? a.active : true));
+        const activeKeys = new Set(activeAlerts.map((a) => buildEmergencyDedupeKey(a)).filter(Boolean));
         const currentPopup = popupStateRef.current;
-        const currentPopupId = normalizeAlertId(currentPopup?.alertId);
+        const currentPopupKey = normalizeAlertId(currentPopup?.dedupeKey || currentPopup?.alertId);
 
         // Close stale emergency popup as soon as backend no longer reports active alerts.
-        if ((!alerts.length || !activeIds.size) && currentPopup?.isEmergency) {
+        if (!activeAlerts.length && currentPopup?.isEmergency) {
           setSosPopup(null);
           return;
         }
-        if (currentPopup?.isEmergency && currentPopupId && !activeIds.has(currentPopupId)) {
+        if (currentPopup?.isEmergency && currentPopupKey && activeKeys.size && !activeKeys.has(currentPopupKey)) {
           setSosPopup(null);
         }
 
         for (const a of alerts) {
           const isActiveAlert = typeof a?.active === "boolean" ? a.active : true;
-          const id = String(a?.alertId || a?.alertDisplayId || "");
+          const id = String(a?.alertId || a?.alertDisplayId || "").trim();
+          const dedupeKey = buildEmergencyDedupeKey(a);
           if (!isActiveAlert) {
             if (id) suppressAlert(id);
-            const currentId = normalizeAlertId(popupStateRef.current?.alertId);
-            if (id && currentId && id === currentId) {
+            const currentKey = normalizeAlertId(popupStateRef.current?.dedupeKey || popupStateRef.current?.alertId);
+            if (dedupeKey && currentKey && dedupeKey === currentKey) {
               setSosPopup(null);
             }
             continue;
           }
-          if (!id || seenEmergencyAlertsRef.current.has(id)) continue;
+          if (!dedupeKey || seenEmergencyAlertsRef.current.has(dedupeKey)) continue;
           if (isAlertSuppressed(id)) continue;
-          seenEmergencyAlertsRef.current.add(id);
+          seenEmergencyAlertsRef.current.add(dedupeKey);
           const reporter = String(a?.reporterEmail || "").trim();
           showSosPopup("[EMERGENCY] SocialSea Emergengy SOS is asking for help", {
             isEmergency: true,
             alertId: id,
+            dedupeKey,
             reporterEmail: reporter,
             liveUrl: a?.liveUrl || a?.streamUrl,
             navigateUrl: a?.navigateUrl || a?.locationUrl,
@@ -937,7 +920,6 @@ export default function Navbar() {
   }, [myUserId, location.pathname]);
 
   useEffect(() => {
-    if (location.pathname.startsWith("/sos")) return undefined;
     let disposed = false;
 
     const forceFromActiveSession = () => {
@@ -967,6 +949,7 @@ export default function Navbar() {
         showSosPopup("[EMERGENCY] SocialSea Emergengy SOS is asking for help", {
           isEmergency: true,
           alertId: fallbackAlertId || undefined,
+          dedupeKey: fallbackAlertId || "session_active",
           latitude: session?.lastLocation?.latitude,
           longitude: session?.lastLocation?.longitude
         });
@@ -1048,6 +1031,17 @@ export default function Navbar() {
   };
 
   const normalizeAlertId = (value) => String(value || "").trim();
+  const buildEmergencyDedupeKey = (alertLike = {}) => {
+    const id = normalizeAlertId(alertLike?.alertId || alertLike?.alertDisplayId);
+    if (id) return id;
+    const reporter =
+      String(alertLike?.reporterUserId || "").trim() ||
+      String(alertLike?.reporterEmail || "").trim().toLowerCase() ||
+      "unknown";
+    const lat = String(alertLike?.latitude ?? alertLike?.lastLocation?.latitude ?? "").trim();
+    const lon = String(alertLike?.longitude ?? alertLike?.lastLocation?.longitude ?? "").trim();
+    return `active_${reporter}_${lat}_${lon}`.replace(/\s+/g, "_");
+  };
   const readOwnStoppedSessionState = () => {
     try {
       const raw = localStorage.getItem(SOS_SESSION_KEY);
@@ -1135,6 +1129,7 @@ export default function Navbar() {
     return {
       text,
       alertId: idText || "",
+      dedupeKey: String(options?.dedupeKey || idText || "").trim(),
       isEmergency:
         Boolean(options.isEmergency) ||
         /\bemergency\b/i.test(text) ||
@@ -1160,10 +1155,6 @@ export default function Navbar() {
       ownStopped.isRecentOwnStop &&
       (!nextPopup?.alertId || !ownStopped.alertId || nextPopup.alertId === ownStopped.alertId)
     ) {
-      setSosPopup(null);
-      return;
-    }
-    if (nextPopup?.isEmergency && location.pathname.startsWith("/sos")) {
       setSosPopup(null);
       return;
     }
@@ -1195,12 +1186,12 @@ export default function Navbar() {
     } catch {
       // ignore storage issues
     }
-    const fingerprint = `${nextPopup?.alertId || ""}|${nextPopup?.text || ""}|${nextPopup?.locationUrl || ""}`;
+    const fingerprint = `${nextPopup?.dedupeKey || nextPopup?.alertId || ""}|${nextPopup?.text || ""}|${nextPopup?.locationUrl || ""}`;
     const now = Date.now();
     const last = popupMetaRef.current;
     const current = popupStateRef.current;
     const currentFingerprint = current
-      ? `${current?.alertId || ""}|${current?.text || ""}|${current?.locationUrl || ""}`
+      ? `${current?.dedupeKey || current?.alertId || ""}|${current?.text || ""}|${current?.locationUrl || ""}`
       : "";
     if (fingerprint && (fingerprint === currentFingerprint || (fingerprint === last.fingerprint && now - last.shownAt < 1500))) {
       return;
