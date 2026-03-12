@@ -538,14 +538,28 @@
   }
 
   .ss-nav-wrap {
+    position: fixed;
     top: auto;
-    bottom: 8px;
+    bottom: calc(10px + env(safe-area-inset-bottom));
+    left: 0;
+    right: 0;
+    padding: 0 8px;
+    margin-top: 0;
+    margin-bottom: 0;
   }
 
   .ss-nav {
-    width: calc(100vw - 14px);
+    width: min(420px, calc(100vw - 16px));
     padding: 8px 10px;
-    border-radius: 14px;
+    border-radius: 18px;
+    background:
+      radial-gradient(130% 140% at 5% -20%, rgba(255, 255, 255, 0.04), transparent 52%),
+      radial-gradient(120% 140% at 100% 0%, rgba(255, 255, 255, 0.03), transparent 56%),
+      rgba(5, 5, 5, 0.94);
+    border: 1px solid rgba(84, 84, 84, 0.48);
+    box-shadow:
+      0 14px 30px rgba(0, 0, 0, 0.58),
+      inset 0 1px 0 rgba(255, 255, 255, 0.05);
   }
 
   .ss-brand { display: none; }
@@ -553,28 +567,41 @@
   .ss-links {
     width: 100%;
     justify-content: space-between;
+    gap: 4px;
   }
 
   .ss-sos-mobile {
     display: inline-flex;
     margin-right: 2px;
-    height: 24px;
+    height: 26px;
     min-width: 42px;
   }
 
   .ss-link {
-    padding: 9px 10px;
+    min-width: 42px;
+    min-height: 42px;
+    padding: 9px;
+    justify-content: center;
+    border-radius: 999px;
   }
 
   .ss-link-icon {
     font-size: 1.08rem;
   }
 
+  .ss-link.is-active {
+    background: linear-gradient(180deg, rgba(48, 48, 48, 0.96), rgba(18, 18, 18, 0.96));
+    border-color: rgba(96, 96, 96, 0.72);
+    box-shadow:
+      0 10px 20px rgba(0, 0, 0, 0.42),
+      inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  }
+
   .ss-call-banner {
     width: calc(100vw - 14px);
     padding: 9px 10px;
     border-radius: 12px;
-    margin-bottom: 4px;
+    margin-bottom: 74px;
   }
 
   .ss-call-text {
