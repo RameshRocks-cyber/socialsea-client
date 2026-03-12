@@ -280,6 +280,9 @@ export default function SOSPage() {
 
   const callEmergency = async (method, suffix, data = undefined, extraConfig = {}) => {
     const urls = buildEmergencyUrls(suffix);
+    const suffixText = String(suffix || "").toLowerCase();
+    const isPublicEmergencyEndpoint =
+      suffixText === "trigger" || suffixText === "active" || suffixText === "active-session";
     let lastErr = null;
     for (const url of urls) {
       try {
@@ -293,7 +296,23 @@ export default function SOSPage() {
       } catch (err) {
         lastErr = err;
         const status = Number(err?.response?.status || 0);
-        if (status === 401 || status === 403) throw err;
+        if ((status === 401 || status === 403) && isPublicEmergencyEndpoint) {
+          try {
+            return await api.request({
+              method,
+              url,
+              data,
+              timeout: 9000,
+              skipAuth: true,
+              skipRefresh: true,
+              suppressAuthRedirect: true,
+              ...extraConfig
+            });
+          } catch (retryErr) {
+            lastErr = retryErr;
+          }
+        }
+        if ((status === 401 || status === 403) && !isPublicEmergencyEndpoint) throw err;
       }
     }
     throw lastErr || new Error("Emergency request failed");

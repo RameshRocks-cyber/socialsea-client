@@ -3,9 +3,9 @@
   padding: 14px clamp(8px, 2.4vw, 20px) 24px;
   color: #eef4ff;
   background:
-    radial-gradient(1100px 380px at 15% -10%, rgba(42, 120, 255, 0.2), transparent 70%),
-    radial-gradient(900px 300px at 95% -20%, rgba(0, 210, 255, 0.12), transparent 74%),
-    #04070f;
+    radial-gradient(1100px 380px at 15% -10%, rgba(90, 96, 110, 0.16), transparent 70%),
+    radial-gradient(900px 300px at 95% -20%, rgba(58, 64, 76, 0.12), transparent 74%),
+    #050507;
 }
 
 .profile-header {
@@ -13,8 +13,8 @@
   grid-template-columns: 140px minmax(0, 1fr);
   gap: 26px;
   align-items: center;
-  background: linear-gradient(145deg, rgba(12, 20, 42, 0.8), rgba(8, 12, 24, 0.9));
-  border: 1px solid rgba(82, 126, 224, 0.28);
+  background: linear-gradient(145deg, rgba(19, 21, 26, 0.84), rgba(8, 8, 10, 0.94));
+  border: 1px solid rgba(90, 96, 110, 0.26);
   border-radius: 16px;
   padding: 18px;
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.34);
@@ -25,9 +25,9 @@
   height: 140px;
   border-radius: 50%;
   object-fit: cover;
-  border: 2px solid rgba(126, 180, 255, 0.68);
-  background: #0f1729;
-  box-shadow: 0 0 0 4px rgba(49, 85, 162, 0.28);
+  border: 2px solid rgba(154, 162, 178, 0.52);
+  background: #111318;
+  box-shadow: 0 0 0 4px rgba(72, 78, 92, 0.24);
 }
 
 .profile-name {
@@ -40,13 +40,13 @@
 
 .bio {
   margin: 8px 0 0;
-  color: #bfd2f5;
+  color: #c8ced8;
   font-size: 16px;
 }
 
 .profile-stats {
   margin: 12px 0 0;
-  color: #e3ecff;
+  color: #e7ebf2;
   font-size: 18px;
   display: flex;
   align-items: center;
@@ -66,7 +66,7 @@
 }
 
 .profile-stat-link:hover {
-  background: rgba(67, 109, 191, 0.25);
+  background: rgba(80, 86, 98, 0.22);
 }
 
 .profile-stat-dot {
@@ -75,7 +75,7 @@
 
 .profile-divider {
   margin: 18px 0;
-  border-color: rgba(74, 106, 174, 0.35);
+  border-color: rgba(80, 86, 98, 0.28);
 }
 
 .profile-posts-title {
@@ -87,8 +87,8 @@
 
 .profile-posts-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
   margin-top: 20px;
 }
 
@@ -98,8 +98,8 @@
   height: auto;
   overflow: hidden;
   border-radius: 12px;
-  background: #0a0f1f;
-  border: 1px solid rgba(66, 92, 155, 0.35);
+  background: #0d0f13;
+  border: 1px solid rgba(72, 78, 92, 0.28);
   box-shadow: 0 10px 26px rgba(0, 0, 0, 0.3);
 }
 
@@ -134,7 +134,7 @@
   margin-top: 12px;
   padding: 10px 18px;
   border-radius: 10px;
-  background: linear-gradient(135deg, #2d74ff, #2152c8);
+  background: linear-gradient(135deg, #4b5563, #374151);
   color: white;
   border: none;
   cursor: pointer;
@@ -144,7 +144,7 @@
 
 .edit-profile-btn:hover {
   transform: translateY(-1px);
-  box-shadow: 0 10px 22px rgba(37, 99, 235, 0.45);
+  box-shadow: 0 10px 22px rgba(31, 41, 55, 0.42);
 }
 
 .profile-actions {
@@ -156,8 +156,8 @@
 }
 
 .profile-follow-btn {
-  border: 1px solid rgba(111, 180, 255, 0.52);
-  background: linear-gradient(135deg, #2f86ff, #2056d6 54%, #1b3e9b);
+  border: 1px solid rgba(112, 122, 138, 0.34);
+  background: linear-gradient(135deg, #4b5563, #374151 54%, #1f2937);
   color: #fff;
   border-radius: 12px;
   min-width: 138px;
@@ -165,8 +165,8 @@
   font-weight: 800;
   letter-spacing: 0.2px;
   box-shadow:
-    0 10px 24px rgba(28, 90, 228, 0.45),
-    0 0 0 1px rgba(179, 218, 255, 0.2) inset;
+    0 10px 24px rgba(31, 41, 55, 0.38),
+    0 0 0 1px rgba(203, 213, 225, 0.08) inset;
   cursor: pointer;
   transition: transform 0.18s ease, filter 0.18s ease, box-shadow 0.18s ease;
 }
@@ -177,11 +177,11 @@
 }
 
 .profile-follow-btn.is-following {
-  border-color: rgba(130, 225, 194, 0.58);
-  background: linear-gradient(135deg, #1a7a74, #145f5d 54%, #0f4c52);
+  border-color: rgba(108, 114, 124, 0.34);
+  background: linear-gradient(135deg, #3f3f46, #2b2b31 54%, #18181b);
   box-shadow:
-    0 10px 24px rgba(17, 103, 97, 0.42),
-    0 0 0 1px rgba(175, 250, 221, 0.18) inset;
+    0 10px 24px rgba(24, 24, 27, 0.34),
+    0 0 0 1px rgba(212, 212, 216, 0.07) inset;
 }
 
 .profile-follow-btn.is-loading,
@@ -205,7 +205,7 @@
 }
 
 .profile-cta {
-  border: 1px solid rgba(101, 148, 241, 0.35);
+  border: 1px solid rgba(98, 106, 120, 0.28);
   color: #fff;
   padding: 10px 14px;
   border-radius: 10px;
@@ -220,15 +220,15 @@
 }
 
 .profile-cta-edit {
-  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  background: linear-gradient(135deg, #475569, #334155);
 }
 
 .profile-cta-upload {
-  background: linear-gradient(135deg, #16a34a, #15803d);
+  background: linear-gradient(135deg, #52525b, #3f3f46);
 }
 
 .profile-cta-settings {
-  background: linear-gradient(135deg, #7c3aed, #5b21b6);
+  background: linear-gradient(135deg, #44403c, #292524);
 }
 
 .profile-shortcuts {
@@ -240,13 +240,13 @@
 
 .profile-shortcut-card {
   text-align: left;
-  border: 1px solid rgba(75, 113, 192, 0.35);
+  border: 1px solid rgba(72, 78, 92, 0.26);
   border-radius: 12px;
-  background: linear-gradient(150deg, rgba(10, 16, 34, 0.92), rgba(7, 11, 22, 0.95));
+  background: linear-gradient(150deg, rgba(18, 20, 24, 0.94), rgba(8, 8, 10, 0.96));
   color: #e6efff;
   padding: 12px;
   cursor: pointer;
-  box-shadow: 0 10px 22px rgba(4, 14, 38, 0.28);
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.28);
 }
 
 .profile-shortcut-card h4 {
@@ -257,7 +257,7 @@
 .profile-shortcut-card p {
   margin: 0;
   font-size: 13px;
-  color: #a8bcdf;
+  color: #b7bec9;
   line-height: 1.35;
 }
 
@@ -306,6 +306,12 @@
 
   .profile-posts-grid {
     grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 1280px) {
+  .profile-posts-grid {
+    grid-template-columns: repeat(4, 1fr);
   }
 }
 

@@ -136,6 +136,7 @@ export default function Feed() {
   const lastLoadAtRef = useRef(0);
   const postsCountRef = useRef(0);
   const menuRef = useRef(null);
+  const postViewBackdropRef = useRef(null);
 
   const HIDDEN_POSTS_KEY = "feedHiddenPostIds";
   const BLOCKED_OWNERS_KEY = "feedBlockedOwnerKeys";
@@ -645,8 +646,21 @@ export default function Feed() {
     }
   };
 
-  const togglePostMute = (postId) => {
-    setMutedByPost((prev) => ({ ...prev, [postId]: !prev[postId] }));
+  const toggleAllViewerVideosMute = () => {
+    const videos = Object.values(viewerVideoRefs.current).filter(Boolean);
+    if (!videos.length) return;
+    const shouldMuteAll = videos.some((video) => !video.muted);
+    setMutedByPost((prev) => {
+      const next = { ...prev };
+      viewerPosts.forEach((post) => {
+        if (mediaTypeFor(post) !== "VIDEO") return;
+        next[post.id] = shouldMuteAll;
+      });
+      return next;
+    });
+    videos.forEach((video) => {
+      video.muted = shouldMuteAll;
+    });
   };
 
   const handleViewerMediaClick = (post) => {
@@ -654,7 +668,7 @@ export default function Feed() {
     const existing = mediaClickTimerByPostRef.current[post.id];
     if (existing) clearTimeout(existing);
     mediaClickTimerByPostRef.current[post.id] = setTimeout(() => {
-      togglePostMute(post.id);
+      toggleAllViewerVideosMute();
       mediaClickTimerByPostRef.current[post.id] = null;
     }, 240);
   };
@@ -843,12 +857,14 @@ export default function Feed() {
   const activePost = posts.find((p) => p.id === activePostId) || null;
   const viewerPosts = useMemo(() => {
     if (!activePost) return [];
-    const pool = feedMode === "all" ? shortVideoPosts : visiblePosts;
+    const activeType = mediaTypeFor(activePost);
+    const videoPool = visiblePosts.filter((p) => mediaTypeFor(p) === "VIDEO");
+    const pool = activeType === "VIDEO" ? videoPool : [activePost];
     const idx = pool.findIndex((p) => Number(p?.id) === Number(activePost.id));
     if (idx < 0) return [activePost];
     const ordered = [...pool.slice(idx), ...pool.slice(0, idx)];
     return ordered.length ? ordered : [activePost];
-  }, [activePost, feedMode, shortVideoPosts, visiblePosts]);
+  }, [activePost, visiblePosts]);
 
   useEffect(() => {
     if (!activePostId) return undefined;
@@ -861,12 +877,13 @@ export default function Feed() {
 
   useEffect(() => {
     if (!activePostId) return undefined;
-    const videos = Object.values(viewerVideoRefs.current).filter(Boolean);
-    if (!videos.length) return undefined;
+    const rootEl = postViewBackdropRef.current || null;
+    if (!rootEl) return undefined;
 
     const visibilityByVideo = new Map();
+    const observedVideos = new Set();
     const pauseOthers = (keep) => {
-      videos.forEach((video) => {
+      observedVideos.forEach((video) => {
         if (video === keep) return;
         try {
           video.pause();
@@ -879,7 +896,7 @@ export default function Feed() {
     const playMostVisible = () => {
       let bestVideo = null;
       let bestRatio = 0;
-      videos.forEach((video) => {
+      observedVideos.forEach((video) => {
         const ratio = Number(visibilityByVideo.get(video) || 0);
         if (ratio > bestRatio) {
           bestRatio = ratio;
@@ -888,7 +905,7 @@ export default function Feed() {
       });
 
       pauseOthers(bestVideo);
-      if (!bestVideo || bestRatio < 0.75) return;
+      if (!bestVideo || bestRatio < 0.6) return;
       try {
         const playAttempt = bestVideo.play();
         if (playAttempt?.catch) playAttempt.catch(() => {});
@@ -904,19 +921,32 @@ export default function Feed() {
         });
         playMostVisible();
       },
-      { threshold: [0, 0.25, 0.5, 0.75, 0.9, 1] }
+      { root: rootEl, threshold: [0, 0.25, 0.5, 0.75, 0.9, 1] }
     );
 
-    videos.forEach((video) => {
-      visibilityByVideo.set(video, 0);
-      observer.observe(video);
-    });
+    const syncObservedVideos = () => {
+      const videos = rootEl.querySelectorAll("video.feed-media-view");
+      videos.forEach((video) => {
+        if (observedVideos.has(video)) return;
+        observedVideos.add(video);
+        visibilityByVideo.set(video, 0);
+        observer.observe(video);
+      });
+    };
 
+    syncObservedVideos();
+    const syncTimer = setInterval(() => {
+      syncObservedVideos();
+      playMostVisible();
+    }, 220);
     const rafId = requestAnimationFrame(playMostVisible);
     return () => {
       cancelAnimationFrame(rafId);
+      clearInterval(syncTimer);
       observer.disconnect();
       pauseOthers(null);
+      observedVideos.clear();
+      visibilityByVideo.clear();
     };
   }, [activePostId, viewerPosts]);
 
@@ -1218,8 +1248,11 @@ export default function Feed() {
       )}
 
       {activePost && (
-        <div className="post-view-backdrop" onClick={closePostView}>
+        <div className="post-view-backdrop" ref={postViewBackdropRef} onClick={closePostView}>
           <div className="post-view-stack" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="post-view-exit-btn" onClick={closePostView} aria-label="Close viewer">
+              {"<"}
+            </button>
             {viewerPosts.map((post, idx) => {
               const isPrimary = idx === 0;
               const raw = post.contentUrl || post.mediaUrl || "";
@@ -1248,7 +1281,6 @@ export default function Feed() {
                     </div>
                     <div className="ig-user-actions">
                       <button type="button" className="ig-follow-btn">Follow</button>
-                      <button type="button" className="ig-more-btn" aria-label="More options">â‹®</button>
                     </div>
                   </header>
 
@@ -1258,6 +1290,7 @@ export default function Feed() {
                         ref={(node) => setViewerVideoRef(post.id, node)}
                         src={mediaUrl}
                         loop
+                        controls
                         playsInline
                         preload="metadata"
                         muted={mutedByPost[post.id] ?? true}
@@ -1287,14 +1320,6 @@ export default function Feed() {
                       </button>
                       <button type="button" onClick={() => sharePost(post)} title="Share">
                         <span className="action-icon">{"\u2934"}</span>
-                      </button>
-                      <button
-                        type="button"
-                        className={watchLaterPostIds[post.id] ? "is-saved is-active" : ""}
-                        onClick={() => toggleWatchLater(post.id)}
-                        title="Watch Later"
-                      >
-                        <span className="action-icon">{"\u23F2"}</span>
                       </button>
                     </div>
 

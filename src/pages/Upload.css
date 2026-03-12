@@ -6,8 +6,8 @@
 
 .upload-panel {
   width: min(940px, 100%);
-  background: #060b1a;
-  border: 1px solid #1f2f5e;
+  background: #0a0a0a;
+  border: 1px solid #343434;
   border-radius: 14px;
   padding: 14px;
   color: #f4f8ff;
@@ -19,15 +19,15 @@
 
 .upload-subtitle {
   margin: 4px 0 12px;
-  color: #9eb6e6;
+  color: #aaaaaa;
 }
 
 .upload-file-pick {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  border: 1px solid #2b63c6;
-  background: #1b4ea8;
+  border: 1px solid #4d4d4d;
+  background: #202020;
   color: #fff;
   border-radius: 10px;
   padding: 8px 12px;
@@ -43,8 +43,8 @@
   width: 100%;
   margin-top: 10px;
   border-radius: 10px;
-  border: 1px solid #28457f;
-  background: #0f1830;
+  border: 1px solid #444444;
+  background: #151515;
   color: #f4f8ff;
   padding: 9px 12px;
 }
@@ -57,8 +57,8 @@
   width: min(430px, 100%);
   overflow: hidden;
   border-radius: 14px;
-  border: 1px solid #264785;
-  background: #090f1f;
+  border: 1px solid #3e3e3e;
+  background: #0b0b0b;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -76,7 +76,7 @@
   width: min(430px, 100%);
   max-height: 540px;
   border-radius: 14px;
-  border: 1px solid #264785;
+  border: 1px solid #3e3e3e;
   background: #000;
 }
 
@@ -86,16 +86,16 @@
 
 .video-meta-line {
   margin: 6px 2px 0;
-  color: #9cb1dc;
+  color: #a7a7a7;
   font-size: 12px;
 }
 
 .upload-tools {
   margin-top: 12px;
-  border: 1px solid #1f2f5e;
+  border: 1px solid #343434;
   border-radius: 12px;
   padding: 10px;
-  background: linear-gradient(180deg, #0b1330 0%, #081126 100%);
+  background: linear-gradient(180deg, #121212 0%, #080808 100%);
 }
 
 .tool-row {
@@ -107,7 +107,7 @@
 
 .tool-row > span {
   width: 86px;
-  color: #bad2ff;
+  color: #c4c4c4;
   font-size: 13px;
   font-weight: 700;
 }
@@ -119,8 +119,8 @@
 }
 
 .pill-group button {
-  border: 1px solid #2b63c6;
-  background: #112955;
+  border: 1px solid #4d4d4d;
+  background: #1b1b1b;
   color: #e8f0ff;
   border-radius: 999px;
   padding: 6px 10px;
@@ -131,12 +131,12 @@
 
 .pill-group button:hover {
   transform: translateY(-1px);
-  border-color: #4e86eb;
-  background: #173a77;
+  border-color: #888888;
+  background: #303030;
 }
 
 .pill-group button.active {
-  background: #2b63c6;
+  background: #3a3a3a;
 }
 
 .slider-grid {
@@ -150,7 +150,7 @@
   flex-direction: column;
   gap: 4px;
   font-size: 12px;
-  color: #d4e2ff;
+  color: #d2d2d2;
 }
 
 .slider-grid input[type="range"] {
@@ -159,8 +159,8 @@
 
 .reset-btn {
   margin-top: 10px;
-  border: 1px solid #405885;
-  background: #111a2f;
+  border: 1px solid #585858;
+  background: #181818;
   color: #fff;
   border-radius: 999px;
   padding: 6px 12px;
@@ -169,7 +169,7 @@
 
 .video-note {
   margin-top: 10px;
-  color: #9cb1dc;
+  color: #a7a7a7;
   font-size: 13px;
 }
 
@@ -181,8 +181,8 @@
 
 .upload-selected-item {
   width: 100%;
-  border: 1px solid #244078;
-  background: #0b1732;
+  border: 1px solid #3d3d3d;
+  background: #121212;
   color: #e8f0ff;
   border-radius: 10px;
   padding: 8px 10px;
@@ -194,17 +194,17 @@
 }
 
 .upload-selected-item.is-active {
-  border-color: #4e86eb;
-  background: #123064;
+  border-color: #888888;
+  background: #262626;
 }
 
 .upload-selected-kind {
-  border: 1px solid #2b63c6;
+  border: 1px solid #4d4d4d;
   border-radius: 999px;
   padding: 2px 8px;
   font-size: 11px;
-  color: #bad2ff;
-  background: #0b2348;
+  color: #c4c4c4;
+  background: #1d1d1d;
   flex: 0 0 auto;
 }
 
@@ -229,9 +229,9 @@
 }
 
 .video-action-bar button {
-  border: 1px solid #2b436f;
-  background: #101a34;
-  color: #d4e2ff;
+  border: 1px solid #4f4f4f;
+  background: #151515;
+  color: #d2d2d2;
   border-radius: 12px;
   padding: 8px 6px;
   font-size: 14px;
@@ -244,8 +244,8 @@
 }
 
 .video-action-bar button.active {
-  border-color: #4e86eb;
-  background: #173a77;
+  border-color: #888888;
+  background: #303030;
   color: #fff;
 }
 
@@ -256,24 +256,24 @@
 
 .video-tool-panel {
   margin-bottom: 10px;
-  border: 1px solid #1f2f5e;
+  border: 1px solid #343434;
   border-radius: 12px;
   padding: 8px;
-  background: #0d152c;
+  background: #101010;
 }
 
 .video-tool-panel input[type="text"] {
   border-radius: 10px;
-  border: 1px solid #2b436f;
-  background: #0f1830;
+  border: 1px solid #4f4f4f;
+  background: #151515;
   color: #f4f8ff;
   padding: 8px 10px;
 }
 
 .toggle-btn {
-  border: 1px solid #2b436f;
-  background: #0f1830;
-  color: #d4e2ff;
+  border: 1px solid #4f4f4f;
+  background: #151515;
+  color: #d2d2d2;
   border-radius: 10px;
   padding: 8px 10px;
   cursor: pointer;
@@ -281,8 +281,8 @@
 }
 
 .toggle-btn.active {
-  border-color: #4e86eb;
-  background: #173a77;
+  border-color: #888888;
+  background: #303030;
   color: #fff;
 }
 
@@ -297,15 +297,15 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  color: #d4e2ff;
+  color: #d2d2d2;
   font-size: 11px;
 }
 
 .creator-settings-grid select,
 .creator-settings-grid input {
   border-radius: 10px;
-  border: 1px solid #2b436f;
-  background: #0f1830;
+  border: 1px solid #4f4f4f;
+  background: #151515;
   color: #f4f8ff;
   padding: 6px 9px;
   font-size: 13px;
@@ -323,8 +323,8 @@
 
 .upload-submit {
   margin-top: 12px;
-  border: 1px solid #2b63c6;
-  background: #2477ff;
+  border: 1px solid #4d4d4d;
+  background: #2f2f2f;
   color: #fff;
   border-radius: 10px;
   padding: 8px 12px;
@@ -340,7 +340,7 @@
 
 .upload-msg {
   margin-top: 10px;
-  color: #d7e8ff;
+  color: #d5d5d5;
 }
 
 @media (max-width: 760px) {
@@ -352,3 +352,4 @@
     grid-template-columns: 1fr;
   }
 }
+

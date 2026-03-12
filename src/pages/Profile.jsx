@@ -11,6 +11,7 @@ const PROFILE_CACHE_KEY = "socialsea_profile_cache_v1";
 const PROFILE_REQ_TIMEOUT_MS = 2500;
 const POSTS_REQ_TIMEOUT_MS = 2500;
 const FOLLOWING_REQ_TIMEOUT_MS = 1800;
+const MAX_SHORT_VIDEO_SECONDS = 90;
 
 const readFollowingCache = () => {
   try {
@@ -169,6 +170,43 @@ const writeProfileCacheByKey = (key, value) => {
   }
 };
 
+const durationFromPost = (post) => {
+  const candidates = [
+    post?.durationSeconds,
+    post?.videoDurationSeconds,
+    post?.duration,
+    post?.videoDuration,
+    post?.length,
+    post?.durationMs,
+    post?.videoDurationMs
+  ];
+
+  for (const raw of candidates) {
+    if (raw == null || raw === "") continue;
+    const text = String(raw).trim();
+    if (!text) continue;
+    if (/^\d+:\d{1,2}(:\d{1,2})?$/.test(text)) {
+      const parts = text.split(":").map((value) => Number(value));
+      if (parts.every((value) => Number.isFinite(value) && value >= 0)) {
+        if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+        if (parts.length === 2) return parts[0] * 60 + parts[1];
+      }
+    }
+    const value = Number(text);
+    if (!Number.isFinite(value) || value <= 0) continue;
+    if (/ms$/i.test(text) || value > 10000) return value / 1000;
+    return value;
+  }
+
+  return 0;
+};
+
+const isPortraitVideo = (post) => {
+  const width = Number(post?.width || post?.videoWidth || post?.mediaWidth || post?.media?.width || 0);
+  const height = Number(post?.height || post?.videoHeight || post?.mediaHeight || post?.media?.height || 0);
+  return width > 0 && height > 0 && height > width;
+};
+
 export default function Profile() {
   const { username } = useParams();
   const myUserId = sessionStorage.getItem("userId") || localStorage.getItem("userId");
@@ -186,6 +224,7 @@ export default function Profile() {
   const [postActionError, setPostActionError] = useState("");
   const [deletingPostIds, setDeletingPostIds] = useState({});
   const [deleteRevealPostId, setDeleteRevealPostId] = useState(null);
+  const [videoMetaByPost, setVideoMetaByPost] = useState({});
   const holdTimerRef = useRef(null);
   const deleteRevealHideTimerRef = useRef(null);
 
@@ -244,12 +283,23 @@ export default function Profile() {
             post?.videoUrl ||
             post?.media?.url ||
             "";
-          const typeRaw = String(post?.type || post?.mediaType || post?.mimeType || "").toLowerCase();
+          const typeRaw = String(post?.type || post?.mediaType || post?.mimeType || post?.contentType || "").toLowerCase();
+            const durationSeconds = durationFromPost(post);
             const isVideo =
               post?.reel === true ||
               typeRaw.includes("video") ||
               /\.(mp4|webm|ogg|mov|m4v)(\?|$)/i.test(contentUrl);
-            return { ...post, contentUrl, isVideo };
+            const isShortVideo =
+              post?.reel === true ||
+              post?.isShort === true ||
+              post?.shortVideo === true ||
+              post?.short === true ||
+              post?.isReel === true ||
+              typeRaw.includes("reel") ||
+              typeRaw.includes("short") ||
+              (durationSeconds > 0 && durationSeconds <= MAX_SHORT_VIDEO_SECONDS) ||
+              isPortraitVideo(post);
+            return { ...post, contentUrl, isVideo, isShortVideo, durationSeconds };
           })
           .filter((post) => {
             const idText = String(post?.id || "").trim();
@@ -622,7 +672,41 @@ export default function Profile() {
     if (!post || !post?.isVideo) return;
     const postId = String(post?.id || "").trim();
     if (!postId) return;
+    const measured = videoMetaByPost[postId] || {};
+    const measuredDuration = Number(measured?.duration || 0);
+    const measuredWidth = Number(measured?.width || 0);
+    const measuredHeight = Number(measured?.height || 0);
+    const isMeasuredPortrait = measuredWidth > 0 && measuredHeight > 0 && measuredHeight > measuredWidth;
+    const isMeasuredShort = measuredDuration > 0 && measuredDuration <= MAX_SHORT_VIDEO_SECONDS;
+    if (post?.isShortVideo || isMeasuredShort || isMeasuredPortrait) {
+      navigate(`/reels?post=${encodeURIComponent(postId)}`);
+      return;
+    }
     navigate(`/watch/${encodeURIComponent(postId)}`);
+  };
+
+  const handleProfileVideoMeta = (postId, event) => {
+    const idText = String(postId || "").trim();
+    if (!idText) return;
+    const video = event?.currentTarget;
+    if (!video) return;
+    const nextMeta = {
+      duration: Number(video.duration) || 0,
+      width: Number(video.videoWidth) || 0,
+      height: Number(video.videoHeight) || 0
+    };
+    setVideoMetaByPost((prev) => {
+      const current = prev[idText];
+      if (
+        current &&
+        Number(current.duration || 0) === nextMeta.duration &&
+        Number(current.width || 0) === nextMeta.width &&
+        Number(current.height || 0) === nextMeta.height
+      ) {
+        return prev;
+      }
+      return { ...prev, [idText]: nextMeta };
+    });
   };
 
   const clearHoldTimer = () => {
@@ -738,10 +822,6 @@ export default function Profile() {
                 <h4>Anonymous Feed</h4>
                 <p>See all approved anonymous posts and interactions.</p>
               </button>
-              <button type="button" className="profile-shortcut-card" onClick={() => navigate("/chat")}>
-                <h4>Messages</h4>
-                <p>Continue conversations and find people faster.</p>
-              </button>
               <button type="button" className="profile-shortcut-card" onClick={() => navigate("/live-recordings")}>
                 <h4>Recorded Live (Private)</h4>
                 <p>View SOS recorded live videos. These are private and not shared in feed.</p>
@@ -774,7 +854,9 @@ export default function Profile() {
                     autoPlay
                     muted
                     loop
+                    preload="metadata"
                     playsInline
+                    onLoadedMetadata={(event) => handleProfileVideoMeta(post?.id, event)}
                     onContextMenu={(e) => e.preventDefault()}
                   />
                 )}

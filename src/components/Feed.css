@@ -44,8 +44,8 @@ body.feed-no-swipe-back {
   margin: 0;
   padding: 3px;
   border-radius: 999px;
-  border: 1px solid rgba(74, 119, 198, 0.45);
-  background: linear-gradient(180deg, rgba(20, 38, 70, 0.96), rgba(11, 24, 46, 0.96));
+  border: 1px solid rgba(42, 42, 42, 0.82);
+  background: linear-gradient(180deg, rgba(16, 16, 16, 0.96), rgba(7, 7, 7, 0.96));
   flex: 0 0 auto;
   white-space: nowrap;
 }
@@ -63,9 +63,9 @@ body.feed-no-swipe-back {
 }
 
 .feed-mode-btn.is-active {
-  background: linear-gradient(180deg, #2b5db3, #244d94);
-  color: #f6f9ff;
-  box-shadow: 0 6px 14px rgba(13, 41, 88, 0.45);
+  background: linear-gradient(180deg, #2a2a2a, #151515);
+  color: #f6f6f6;
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.45);
 }
 
 .feed-mode-btn:hover {
@@ -82,8 +82,8 @@ body.feed-no-swipe-back {
   width: 100%;
   height: 42px;
   border-radius: 999px;
-  border: 1px solid rgba(73, 127, 220, 0.48);
-  background: linear-gradient(180deg, #152d52, #112546);
+  border: 1px solid rgba(42, 42, 42, 0.82);
+  background: linear-gradient(180deg, #151515, #0c0c0c);
   color: #f3f7ff;
   padding: 0 14px 0 38px;
   font-size: 14px;
@@ -92,14 +92,14 @@ body.feed-no-swipe-back {
 
 .explore-search-input:focus {
   outline: none;
-  border-color: #3f79e2;
-  box-shadow: 0 0 0 3px rgba(63, 121, 226, 0.2);
+  border-color: #545454;
+  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.24);
 }
 
 .explore-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
 }
 
 .instagram-grid {
@@ -110,18 +110,20 @@ body.feed-no-swipe-back {
   position: relative;
   border: none;
   padding: 0;
-  background: #000;
+  background: linear-gradient(180deg, #070707, #020202);
   aspect-ratio: 3 / 4;
   cursor: pointer;
   overflow: hidden;
-  border-radius: 12px;
-  border: 1px solid rgba(72, 113, 190, 0.32);
+  border-radius: 14px;
+  border: 1px solid rgba(34, 34, 34, 0.92);
+  box-shadow: 0 10px 22px rgba(1, 8, 20, 0.34);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
 }
 
 .explore-tile.long-video-tile {
   grid-column: 1 / -1;
   aspect-ratio: 16 / 9;
-  border-radius: 12px;
+  border-radius: 14px;
 }
 
 .explore-tile.tall {
@@ -139,11 +141,18 @@ body.feed-no-swipe-back {
   height: 100%;
   object-fit: cover;
   display: block;
-  transition: transform 0.25s ease;
+  transition: transform 0.28s ease, filter 0.28s ease;
 }
 
 .explore-tile:hover .explore-media {
-  transform: scale(1.06);
+  transform: scale(1.04);
+  filter: saturate(1.08) contrast(1.03);
+}
+
+.explore-tile:hover {
+  transform: translateY(-2px);
+  border-color: rgba(74, 74, 74, 0.96);
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.45);
 }
 
 .explore-overlay {
@@ -190,7 +199,7 @@ body.feed-no-swipe-back {
   display: grid;
   gap: 6px;
   padding-right: 10px;
-  border-right: 1px solid rgba(76, 109, 175, 0.28);
+  border-right: 1px solid rgba(28, 28, 28, 0.92);
 }
 
 .feed-yt-rail-item {
@@ -206,12 +215,12 @@ body.feed-no-swipe-back {
 }
 
 .feed-yt-rail-item:hover {
-  background: rgba(70, 112, 190, 0.2);
+  background: rgba(34, 34, 34, 0.82);
   color: #eef5ff;
 }
 
 .feed-yt-rail-item.is-active {
-  background: rgba(101, 136, 205, 0.28);
+  background: rgba(44, 44, 44, 0.92);
   color: #ffffff;
 }
 
@@ -232,10 +241,10 @@ body.feed-no-swipe-back {
 }
 
 .feed-yt-chip {
-  border: 1px solid rgba(98, 126, 185, 0.36);
+  border: 1px solid rgba(40, 40, 40, 0.9);
   border-radius: 10px;
-  background: #1d2432;
-  color: #dce9ff;
+  background: #141414;
+  color: #f0f0f0;
   font-size: 0.86rem;
   font-weight: 700;
   padding: 6px 12px;
@@ -244,9 +253,9 @@ body.feed-no-swipe-back {
 }
 
 .feed-yt-chip.is-active {
-  background: #eef4ff;
-  color: #101726;
-  border-color: #eef4ff;
+  background: #f2f2f2;
+  color: #111111;
+  border-color: #f2f2f2;
 }
 
 .long-video-feed {
@@ -300,8 +309,8 @@ body.feed-no-swipe-back {
   font-size: 11px;
   font-weight: 700;
   color: #fff;
-  background: rgba(3, 8, 20, 0.78);
-  border: 1px solid rgba(146, 185, 255, 0.28);
+  background: rgba(0, 0, 0, 0.78);
+  border: 1px solid rgba(42, 42, 42, 0.84);
   box-shadow: 0 6px 14px rgba(0, 0, 0, 0.35);
 }
 
@@ -318,7 +327,7 @@ body.feed-no-swipe-back {
   width: 30px;
   height: 30px;
   border-radius: 999px;
-  background: linear-gradient(135deg, #1f6fff, #47b5ff);
+  background: linear-gradient(135deg, #2b2b2b, #0f0f0f);
   color: #fff;
   display: inline-flex;
   align-items: center;
@@ -369,10 +378,10 @@ body.feed-no-swipe-back {
 .long-feed-menu-btn {
   width: 30px;
   height: 30px;
-  border: 1px solid rgba(118, 162, 245, 0.36);
+  border: 1px solid rgba(42, 42, 42, 0.86);
   border-radius: 999px;
-  background: rgba(9, 17, 35, 0.74);
-  color: #e9f2ff;
+  background: rgba(10, 10, 10, 0.84);
+  color: #f1f1f1;
   font-size: 18px;
   line-height: 1;
   cursor: pointer;
@@ -384,9 +393,9 @@ body.feed-no-swipe-back {
   right: 0;
   z-index: 30;
   min-width: 210px;
-  border: 1px solid rgba(94, 136, 214, 0.4);
+  border: 1px solid rgba(42, 42, 42, 0.86);
   border-radius: 12px;
-  background: rgba(7, 12, 24, 0.97);
+  background: rgba(10, 10, 10, 0.97);
   box-shadow: 0 16px 34px rgba(3, 8, 18, 0.55);
   overflow: hidden;
 }
@@ -403,7 +412,7 @@ body.feed-no-swipe-back {
 }
 
 .long-feed-menu button:hover {
-  background: rgba(56, 104, 198, 0.26);
+  background: rgba(38, 38, 38, 0.92);
 }
 
 .post-view-backdrop {
@@ -427,7 +436,28 @@ body.feed-no-swipe-back {
 .post-view-stack {
   width: min(720px, 100%);
   display: grid;
-  gap: 10px;
+  gap: 0;
+}
+
+.post-view-exit-btn {
+  justify-self: start;
+  position: sticky;
+  top: 8px;
+  left: 0;
+  z-index: 15;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  background: rgba(16, 16, 16, 0.92);
+  color: #f1f1f1;
+  border-radius: 999px;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .post-view-card {
@@ -435,7 +465,7 @@ body.feed-no-swipe-back {
   max-height: none;
   overflow: auto;
   background: #000;
-  border: 1px solid rgba(45, 58, 86, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 16px;
   box-shadow: 0 18px 36px rgba(0, 0, 0, 0.42);
   -ms-overflow-style: none;
@@ -451,14 +481,14 @@ body.feed-no-swipe-back {
   align-items: center;
   gap: 10px;
   padding: 12px 14px;
-  border-bottom: 1px solid rgba(53, 67, 95, 0.5);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
 }
 
 .feed-avatar {
   width: 34px;
   height: 34px;
   border-radius: 999px;
-  background: linear-gradient(135deg, #1f6fff, #47b5ff);
+  background: linear-gradient(135deg, #2a2a2a, #141414);
   color: #fff;
   display: inline-flex;
   align-items: center;
@@ -487,6 +517,13 @@ body.feed-no-swipe-back {
   object-fit: contain;
   display: block;
   background: #000;
+}
+
+.feed-media-view::-webkit-media-controls-play-button,
+.feed-media-view::-webkit-media-controls-overlay-play-button,
+.feed-media-view::-webkit-media-controls-start-playback-button {
+  display: none !important;
+  -webkit-appearance: none;
 }
 
 .feed-actions {
@@ -541,7 +578,7 @@ body.feed-no-swipe-back {
 }
 
 .feed-actions button.is-saved {
-  color: #9ac8ff;
+  color: #d0d0d0;
 }
 
 .feed-likes-line {
@@ -560,14 +597,14 @@ body.feed-no-swipe-back {
 
 .feed-share-status {
   margin: 4px 12px 0;
-  color: #9ac8ff;
+  color: #d0d0d0;
   font-size: 12px;
 }
 
 .feed-comments {
   margin: 0;
   background: #000;
-  border-top: 1px solid rgba(40, 49, 69, 0.68);
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 0 0 16px 16px;
   padding: 8px 10px 10px;
 }
@@ -581,15 +618,15 @@ body.feed-no-swipe-back {
 .feed-comment-input-row input {
   flex: 1;
   border-radius: 10px;
-  border: 1px solid rgba(64, 75, 98, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.2);
   background: rgba(9, 10, 14, 0.95);
   color: #f3f8ff;
   padding: 8px 11px;
 }
 
 .feed-comment-input-row button {
-  border: 1px solid rgba(74, 119, 198, 0.56);
-  background: linear-gradient(180deg, rgba(29, 66, 125, 0.96), rgba(21, 50, 98, 0.96));
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  background: linear-gradient(180deg, rgba(36, 36, 36, 0.96), rgba(24, 24, 24, 0.96));
   padding: 7px 12px;
   color: #f3f9ff;
   font-weight: 700;
@@ -597,14 +634,14 @@ body.feed-no-swipe-back {
 
 .feed-comment-item {
   padding: 7px 2px;
-  border-bottom: 1px solid rgba(45, 57, 78, 0.44);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   font-size: 13px;
   color: #dceaff;
 }
 
 .ig-post-context {
   padding: 12px 14px 6px;
-  border-bottom: 1px solid rgba(39, 47, 63, 0.62);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .ig-post-tags {
@@ -634,7 +671,7 @@ body.feed-no-swipe-back {
 }
 
 .ig-user-meta small {
-  color: #cad1de;
+  color: #bdbdbd;
   font-size: 12px;
 }
 
@@ -646,8 +683,8 @@ body.feed-no-swipe-back {
 }
 
 .ig-follow-btn {
-  border: 1px solid rgba(76, 92, 124, 0.8);
-  background: #1f2735;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: #212121;
   color: #f4f8ff;
   border-radius: 11px;
   height: 42px;
@@ -710,7 +747,8 @@ body.feed-no-swipe-back {
   }
 
   .explore-grid {
-    gap: 4px;
+    gap: 6px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .explore-tile.long-video-tile {
@@ -742,6 +780,10 @@ body.feed-no-swipe-back {
 }
 
 @media (max-width: 1100px) {
+  .explore-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .feed-yt-shell {
     grid-template-columns: 1fr;
   }
@@ -752,6 +794,18 @@ body.feed-no-swipe-back {
 
   .long-video-feed {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1500px) {
+  .explore-grid {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1400px) {
+  .explore-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 

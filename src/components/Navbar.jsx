@@ -28,6 +28,7 @@ const ITEMS = [
 const CALL_ACCEPT_TARGET_KEY = "socialsea_call_accept_target_v1";
 const CALL_SIGNAL_LOCAL_KEY = "socialsea_call_signal_local_v1";
 const CALL_SIGNAL_CHANNEL = "socialsea-call-signal";
+const CALL_SIGNAL_MAX_AGE_MS = 45000;
 const SETTINGS_KEY = "socialsea_settings_v1";
 const SOS_SIGNAL_KEY = "socialsea_sos_signal_v1";
 const SOS_SIGNAL_CHANNEL = "socialsea_sos_signal_channel_v1";
@@ -153,7 +154,7 @@ const readSessionValue = (key) => {
 
 const readSuppressedAlertIds = () => {
   try {
-    const raw = localStorage.getItem(SOS_SUPPRESSED_ALERTS_KEY);
+    const raw = sessionStorage.getItem(SOS_SUPPRESSED_ALERTS_KEY);
     const arr = raw ? JSON.parse(raw) : [];
     if (!Array.isArray(arr)) return new Set();
     return new Set(arr.map((id) => String(id || "").trim()).filter(Boolean));
@@ -164,7 +165,7 @@ const readSuppressedAlertIds = () => {
 
 const readSeenAlertIds = () => {
   try {
-    const raw = localStorage.getItem(SOS_SEEN_ALERTS_KEY);
+    const raw = sessionStorage.getItem(SOS_SEEN_ALERTS_KEY);
     const arr = raw ? JSON.parse(raw) : [];
     if (!Array.isArray(arr)) return new Set();
     return new Set(arr.map((id) => String(id || "").trim()).filter(Boolean));
@@ -238,6 +239,7 @@ export default function Navbar() {
   const [cameraBusy, setCameraBusy] = useState(false);
   const [activeLensId, setActiveLensId] = useState("colorful");
   const seenSignalRef = useRef(new Set());
+  const incomingCallRef = useRef(null);
   const sosTapRef = useRef({ count: 0, lastAt: 0 });
   const seenEmergencyAlertsRef = useRef(new Set());
   const seenLocalSignalsRef = useRef(new Set());
@@ -257,6 +259,10 @@ export default function Navbar() {
     item.label === "Profile" ? { ...item, to: profileTarget } : item
   );
 
+  useEffect(() => {
+    incomingCallRef.current = incomingCall;
+  }, [incomingCall]);
+
   const isOwnEmergency = ({ reporterEmail, reporterUserId } = {}) => {
     const incomingEmail = String(reporterEmail || "").trim().toLowerCase();
     const incomingUserId = String(reporterUserId || "").trim();
@@ -266,7 +272,12 @@ export default function Navbar() {
       const raw = localStorage.getItem(SOS_SESSION_KEY);
       if (raw) {
         const session = JSON.parse(raw);
-        if (session?.active && session?.triggeredByCurrentBrowser) return true;
+        const sessionReporterEmail = String(session?.reporterEmail || "").trim().toLowerCase();
+        const sessionReporterUserId = String(session?.reporterUserId || "").trim();
+        if (myEmail && sessionReporterEmail && sessionReporterEmail === myEmail) return true;
+        if (myUserId && sessionReporterUserId && sessionReporterUserId === myUserId) return true;
+        // Backward compatibility for very old local session records that don't store reporter identity.
+        if (session?.triggeredByCurrentBrowser && !sessionReporterEmail && !sessionReporterUserId) return true;
       }
     } catch {
       // ignore storage issues
@@ -312,13 +323,35 @@ export default function Navbar() {
         if (disposed) return;
         const list = Array.isArray(res.data) ? res.data : [];
 
-        if (incomingCall?.fromUserId) {
+        const toSignalMs = (signal) => {
+          const rawTs = signal?.timestamp ?? signal?.at ?? signal?.createdAt ?? signal?.updatedAt ?? 0;
+          const parsedTs = Number(rawTs);
+          if (Number.isFinite(parsedTs)) {
+            return parsedTs > 1000000000000 ? parsedTs : parsedTs * 1000;
+          }
+          const asDate = new Date(String(rawTs || "")).getTime();
+          return Number.isFinite(asDate) ? asDate : 0;
+        };
+
+        const terminalTypes = new Set(["hangup", "reject", "busy", "answer", "accepted", "ended"]);
+        const latestTerminalByPeer = new Map();
+        for (const signal of list) {
+          const type = String(signal?.type || "").toLowerCase();
+          const fromId = String(signal?.fromUserId || "");
+          if (!fromId || !terminalTypes.has(type)) continue;
+          const signalMs = toSignalMs(signal);
+          const prev = latestTerminalByPeer.get(fromId) || 0;
+          if (signalMs >= prev) latestTerminalByPeer.set(fromId, signalMs);
+        }
+
+        const activeIncoming = incomingCallRef.current;
+        if (activeIncoming?.fromUserId) {
           const staleSignal = list.find((signal) => {
             const type = String(signal?.type || "").toLowerCase();
             const fromId = String(signal?.fromUserId || "");
             return (
-              fromId === String(incomingCall.fromUserId) &&
-              ["hangup", "reject", "busy", "answer", "accepted", "ended"].includes(type)
+              fromId === String(activeIncoming.fromUserId) &&
+              terminalTypes.has(type)
             );
           });
           if (staleSignal) {
@@ -330,6 +363,10 @@ export default function Navbar() {
           const type = String(signal?.type || "").toLowerCase();
           const fromId = String(signal?.fromUserId || "");
           if (type !== "offer" || !fromId || fromId === String(myUserId)) continue;
+          const signalMs = toSignalMs(signal);
+          if (signalMs > 0 && Date.now() - signalMs > CALL_SIGNAL_MAX_AGE_MS) continue;
+          const terminalMs = latestTerminalByPeer.get(fromId) || 0;
+          if ((terminalMs > 0 && signalMs <= terminalMs) || (terminalMs > 0 && signalMs <= 0)) continue;
           const signature = `${type}|${fromId}|${signal?.timestamp || ""}|${signal?.sdp || ""}`;
           if (seenSignalRef.current.has(signature)) continue;
           seenSignalRef.current.add(signature);
@@ -607,9 +644,6 @@ export default function Navbar() {
         setSosPopup(null);
         return;
       }
-      if (isOwnEmergency({ reporterEmail: signalReporterEmail, reporterUserId: signalReporterUserId })) {
-        return;
-      }
       if (resolvedAlertId && isAlertSuppressed(resolvedAlertId)) {
         setSosPopup(null);
         return;
@@ -660,9 +694,6 @@ export default function Navbar() {
           }
           if (isAlertSuppressed(session?.alertId || session?.alertDisplayId)) {
             setSosPopup(null);
-            return;
-          }
-          if (isOwnEmergency({ reporterEmail: session?.reporterEmail, reporterUserId: session?.reporterUserId })) {
             return;
           }
           const sig = `${session?.startedAt || ""}|${session?.updatedAt || ""}|${session?.alertId || ""}`;
@@ -726,9 +757,6 @@ export default function Navbar() {
         }
         if (isAlertSuppressed(session?.alertId || session?.alertDisplayId)) {
           setSosPopup(null);
-          return;
-        }
-        if (isOwnEmergency({ reporterEmail: session?.reporterEmail, reporterUserId: session?.reporterUserId })) {
           return;
         }
         const updatedAtMs = readEpoch(session?.updatedAt || session?.startedAt);
@@ -796,6 +824,8 @@ export default function Navbar() {
       let res = null;
       let lastError = null;
       const urls = buildEmergencyUrls(suffix);
+      const suffixText = String(suffix || "").toLowerCase();
+      const isPublicEmergencyEndpoint = suffixText === "active" || suffixText === "active-session";
       for (const url of urls) {
         const baseURL = /^https?:\/\//i.test(url) ? undefined : api.defaults.baseURL;
         const path = /^https?:\/\//i.test(url) ? url : url;
@@ -809,6 +839,19 @@ export default function Navbar() {
         } catch (err) {
           lastError = err;
           const status = Number(err?.response?.status || 0);
+          if ((status === 401 || status === 403) && isPublicEmergencyEndpoint) {
+            try {
+              res = await api.get(path, {
+                baseURL,
+                suppressAuthRedirect: true,
+                skipAuth: true,
+                skipRefresh: true
+              });
+              break;
+            } catch (retryErr) {
+              lastError = retryErr;
+            }
+          }
           if (!(status === 400 || status === 401 || status === 403 || status === 404 || status === 405 || status >= 500 || !status)) {
             throw err;
           }
@@ -868,7 +911,6 @@ export default function Navbar() {
           if (isAlertSuppressed(id)) continue;
           seenEmergencyAlertsRef.current.add(id);
           const reporter = String(a?.reporterEmail || "").trim();
-          if (isOwnEmergency({ reporterEmail: reporter, reporterUserId: a?.reporterUserId || a?.userId })) continue;
           showSosPopup("[EMERGENCY] SocialSea Emergengy SOS is asking for help", {
             isEmergency: true,
             alertId: id,
@@ -921,7 +963,6 @@ export default function Navbar() {
         }
         const fallbackAlertId = session?.alertId || session?.alertDisplayId || "";
         if (isAlertSuppressed(fallbackAlertId)) return;
-        if (isOwnEmergency({ reporterEmail: session?.reporterEmail, reporterUserId: session?.reporterUserId })) return;
         if (disposed) return;
         showSosPopup("[EMERGENCY] SocialSea Emergengy SOS is asking for help", {
           isEmergency: true,
@@ -1042,7 +1083,7 @@ export default function Navbar() {
     if (!id) return;
     seenAlertIdsRef.current.add(id);
     try {
-      localStorage.setItem(
+      sessionStorage.setItem(
         SOS_SEEN_ALERTS_KEY,
         JSON.stringify(Array.from(seenAlertIdsRef.current).slice(-1000))
       );
@@ -1057,7 +1098,7 @@ export default function Navbar() {
     markAlertSeen(id);
     suppressedAlertIdsRef.current.add(id);
     try {
-      localStorage.setItem(
+      sessionStorage.setItem(
         SOS_SUPPRESSED_ALERTS_KEY,
         JSON.stringify(Array.from(suppressedAlertIdsRef.current).slice(-500))
       );
@@ -1123,10 +1164,6 @@ export default function Navbar() {
       return;
     }
     if (nextPopup?.isEmergency && location.pathname.startsWith("/sos")) {
-      setSosPopup(null);
-      return;
-    }
-    if (nextPopup?.isEmergency && isOwnEmergency({ reporterEmail: options?.reporterEmail, reporterUserId: options?.reporterUserId })) {
       setSosPopup(null);
       return;
     }

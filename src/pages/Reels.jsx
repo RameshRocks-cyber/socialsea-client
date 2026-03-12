@@ -84,7 +84,7 @@ export default function Reels() {
   const location = useLocation();
   const targetPostId = useMemo(() => {
     const params = new URLSearchParams(location.search);
-    return Number(params.get("post") || 0);
+    return String(params.get("post") || "").trim();
   }, [location.search]);
 
   useEffect(() => {
@@ -143,6 +143,29 @@ export default function Reels() {
       if (lastErr) throw lastErr;
       return [];
     };
+    const fetchOne = async (endpoints) => {
+      const bases = buildBaseCandidates();
+      let lastErr = null;
+      for (const baseURL of bases) {
+        for (const url of endpoints) {
+          try {
+            const res = await api.request({
+              method: "GET",
+              url,
+              baseURL,
+              timeout: 10000,
+              suppressAuthRedirect: true,
+            });
+            const body = res?.data?.post || res?.data?.item || res?.data?.data || res?.data;
+            if (body && typeof body === "object" && !Array.isArray(body)) return body;
+          } catch (err) {
+            lastErr = err;
+          }
+        }
+      }
+      if (lastErr) throw lastErr;
+      return null;
+    };
 
     const loadShortVideos = async () => {
       try {
@@ -160,6 +183,15 @@ export default function Reels() {
         };
         fromFeed.forEach((item) => pushItem(item, "feed"));
         fromReels.forEach((item) => pushItem(item, "reels"));
+        if (targetPostId) {
+          const directItem = await fetchOne([
+            `/api/posts/${encodeURIComponent(targetPostId)}`,
+            `/posts/${encodeURIComponent(targetPostId)}`,
+            `/api/feed/${encodeURIComponent(targetPostId)}`,
+            `/feed/${encodeURIComponent(targetPostId)}`,
+          ]).catch(() => null);
+          if (directItem) pushItem(directItem, "target");
+        }
 
         const merged = Array.from(byKey.values());
         const filtered = await Promise.all(
@@ -181,13 +213,22 @@ export default function Reels() {
             }
 
             // /api/reels is expected to be short-video scoped; keep entries even if metadata is unavailable.
-            return source === "reels" ? item : null;
+            return source === "reels" || source === "target" ? item : null;
           })
         );
 
         if (!cancelled) {
           setError("");
-          setReels(filtered.filter(Boolean));
+          const nextReels = filtered.filter(Boolean);
+          if (targetPostId) {
+            const pickedIndex = nextReels.findIndex((item) => String(item?.id || "").trim() === targetPostId);
+            if (pickedIndex > 0) {
+              const picked = nextReels[pickedIndex];
+              nextReels.splice(pickedIndex, 1);
+              nextReels.unshift(picked);
+            }
+          }
+          setReels(nextReels);
         }
       } catch (err) {
         console.error(err);
@@ -267,7 +308,7 @@ export default function Reels() {
 
   useEffect(() => {
     if (!targetPostId || !reels.length) return;
-    const idx = reels.findIndex((r) => Number(r.id) === Number(targetPostId));
+    const idx = reels.findIndex((r) => String(r?.id || "").trim() === targetPostId);
     if (idx < 0) return;
     setCurrentIndex(idx);
     const container = containerRef.current;
@@ -286,7 +327,7 @@ export default function Reels() {
       if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current);
       stopGestureControl();
     };
-  }, []);
+  }, [targetPostId]);
 
   useEffect(() => {
     reelsRef.current = reels;

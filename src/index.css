@@ -12,6 +12,7 @@
   --ss-theme-bg-soft: #231a14;
   --ss-theme-border: rgba(141, 106, 74, 0.5);
   --ss-theme-text: #f2e7da;
+  --ss-site-brightness: 1.14;
 }
 
 body.ss-theme-mankind {
@@ -71,6 +72,7 @@ body {
   color: #fff;
   min-width: 320px;
   overflow-x: hidden;
+  filter: brightness(var(--ss-site-brightness)) saturate(1.06);
 }
 
 body.ss-themed .app-main.with-user-nav {
@@ -198,7 +200,7 @@ body,
 .settings-page,
 .profile-page,
 .ss-nav {
-  background: #0a1220 !important;
+  background: #0b0b0b !important;
   background-image: none !important;
   color: #f7fbff !important;
 }
@@ -217,18 +219,18 @@ body,
 .ss-nav-icon-btn,
 .ss-nav .ss-nav-item,
 .ss-nav .ss-nav-link {
-  background: #1c2a44 !important;
+  background: #1a1a1a !important;
   background-image: none !important;
   color: #f7fbff !important;
-  border-color: rgba(255, 255, 255, 0.28) !important;
+  border-color: rgba(0, 0, 0, 0.88) !important;
 }
 
 .feed-mode-btn.is-active,
 .yt-chip.is-active,
 .watch-action-btn.is-active {
-  background: #2d4268 !important;
+  background: #2a2a2a !important;
   color: #fff !important;
-  border-color: rgba(255, 255, 255, 0.42) !important;
+  border-color: rgba(0, 0, 0, 0.92) !important;
 }
 
 .explore-tile,
@@ -240,7 +242,15 @@ body,
 .post-view-card,
 .settings-section,
 .profile-shortcut-card {
-  background: #121f34 !important;
-  border-color: rgba(255, 255, 255, 0.24) !important;
+  background: #111111 !important;
+  border-color: rgba(0, 0, 0, 0.9) !important;
   box-shadow: none !important;
+}
+
+/* Full-width site layout: remove page-level centered width caps */
+.app-content > * {
+  width: 100%;
+  max-width: 100% !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
 }

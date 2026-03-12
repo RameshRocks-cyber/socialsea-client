@@ -1,14 +1,14 @@
 .yt-watch-page {
   width: 100%;
-  max-width: 1680px;
-  margin: 0 auto;
+  max-width: 100%;
+  margin: 0;
   padding: 8px 8px 24px;
 }
 
 .yt-watch-page.is-watch-mode {
   max-width: 100%;
-  padding: 0;
-  background: #0b0b0b;
+  padding: 8px 10px 24px;
+  background: transparent;
 }
 
 .yt-watch-page.is-watch-mode .yt-topbar,
@@ -17,21 +17,27 @@
 }
 
 .yt-watch-page.is-watch-mode .watch-page {
-  gap: 0;
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  gap: 18px;
 }
 
 .yt-watch-page.is-watch-mode .watch-main,
 .yt-watch-page.is-watch-mode .watch-side {
-  border: none;
-  border-radius: 0;
-  box-shadow: none;
-  background: #0b0b0b;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  background: transparent;
   padding: 0;
 }
 
 .yt-watch-page.is-watch-mode .watch-player-wrap {
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  border-radius: 12px;
   border: none;
-  border-radius: 0;
 }
 
 .yt-watch-page.is-watch-mode .watch-title,
@@ -39,17 +45,17 @@
 .yt-watch-page.is-watch-mode .watch-actions-row,
 .yt-watch-page.is-watch-mode .watch-comments,
 .yt-watch-page.is-watch-mode .watch-side h3 {
-  margin-left: 10px;
-  margin-right: 10px;
+  margin-left: 0;
+  margin-right: 0;
 }
 
 .yt-watch-page.is-watch-mode .watch-list {
-  gap: 0;
+  gap: 10px;
 }
 
 .yt-watch-page.is-watch-mode .watch-item {
   border: none;
-  border-radius: 0;
+  border-radius: 12px;
   background: transparent;
 }
 
@@ -247,8 +253,8 @@
 
 .watch-page {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 390px);
+  gap: 18px;
   width: 100%;
   max-width: 100%;
   margin: 0;
@@ -256,21 +262,30 @@
 
 .watch-main {
   min-width: 0;
-  border: 1px solid rgba(67, 83, 112, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 14px;
-  background:
-    radial-gradient(130% 180% at 0% 0%, rgba(39, 96, 205, 0.18), transparent 56%),
-    #12151b;
-  padding: 10px;
-  box-shadow: 0 12px 28px rgba(4, 14, 38, 0.36);
+  background: transparent;
+  padding: 0;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5);
 }
 
 .watch-player-wrap {
   position: relative;
-  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  max-height: min(70vh, 760px);
+  margin: 0 auto;
+  border-radius: 0;
   overflow: hidden;
   background: #000;
-  border: 1px solid rgba(71, 89, 121, 0.44);
+  border: none;
+  touch-action: none;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.06),
+    0 18px 42px rgba(0, 0, 0, 0.58);
 }
 
 .watch-player-wrap:fullscreen {
@@ -283,11 +298,13 @@
 
 .watch-player {
   width: 100%;
-  max-height: min(72vh, 680px);
-  object-fit: cover;
+  height: 100%;
+  max-height: none;
+  object-fit: contain;
   display: block;
   background: #000;
   touch-action: none;
+  will-change: transform;
 }
 
 .watch-player::-webkit-media-controls-fullscreen-button {
@@ -375,9 +392,9 @@
   bottom: 16px;
   transform: translateX(-50%);
   z-index: 8;
-  border: 1px solid rgba(150, 184, 246, 0.58);
+  border: 1px solid rgba(255, 255, 255, 0.22);
   border-radius: 999px;
-  background: rgba(5, 11, 23, 0.82);
+  background: rgba(16, 16, 16, 0.86);
   color: #f1f7ff;
   font-weight: 700;
   font-size: 0.82rem;
@@ -405,15 +422,24 @@
   position: absolute;
   top: 10px;
   right: 10px;
-  border: 1px solid rgba(165, 187, 230, 0.45);
-  background: rgba(9, 16, 31, 0.86);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(20, 20, 20, 0.9);
   color: #eff4ff;
   border-radius: 8px;
   padding: 7px 9px;
   font-size: 0.76rem;
   font-weight: 700;
   cursor: pointer;
-  z-index: 8;
+  z-index: 9;
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 0.22s ease, visibility 0.22s ease;
+}
+
+.watch-quality-btn.is-hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .watch-corner-fullscreen {
@@ -454,8 +480,7 @@
 }
 
 .watch-player-wrap:fullscreen .watch-overlay-controls,
-.watch-player-wrap:fullscreen .watch-gesture-hud,
-.watch-player-wrap:fullscreen .watch-quality-btn {
+.watch-player-wrap:fullscreen .watch-gesture-hud {
   opacity: 1;
 }
 
@@ -463,10 +488,42 @@
   position: absolute;
   top: 44px;
   right: 10px;
+  min-width: 220px;
+  max-width: min(320px, calc(100vw - 24px));
+  padding: 8px;
   border-radius: 10px;
-  overflow: hidden;
-  border: 1px solid rgba(165, 187, 230, 0.45);
-  background: rgba(8, 13, 23, 0.96);
+  border: 1px solid rgba(0, 0, 0, 0.35);
+  background: transparent;
+  box-shadow: none;
+  z-index: 12;
+}
+
+.watch-settings-toggle {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: #eaf1ff;
+  text-align: left;
+  padding: 8px 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 700;
+}
+
+.watch-settings-section + .watch-settings-section {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.watch-settings-title {
+  margin: 0 0 6px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: #dfe9ff;
+  letter-spacing: 0.02em;
 }
 
 .watch-quality-menu button {
@@ -481,7 +538,43 @@
 
 .watch-quality-menu button.is-active,
 .watch-quality-menu button:hover {
-  background: rgba(55, 106, 194, 0.34);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.watch-settings-range {
+  width: 100%;
+  accent-color: #000;
+}
+
+.watch-settings-range::-webkit-slider-runnable-track {
+  height: 5px;
+  background: rgba(0, 0, 0, 0.45);
+  border-radius: 999px;
+}
+
+.watch-settings-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid #000;
+  background: #000;
+  margin-top: -4px;
+}
+
+.watch-settings-range::-moz-range-track {
+  height: 5px;
+  background: rgba(0, 0, 0, 0.45);
+  border-radius: 999px;
+}
+
+.watch-settings-range::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid #000;
+  background: #000;
 }
 
 .watch-progress-wrap {
@@ -585,7 +678,7 @@
 
 .watch-owner {
   margin: 0 2px;
-  color: #bdd0f2;
+  color: #b7b7b7;
   font-size: 0.95rem;
 }
 
@@ -597,9 +690,9 @@
 }
 
 .watch-action-btn {
-  border: 1px solid rgba(112, 130, 167, 0.48);
-  background: #2a2f37;
-  color: #eaf1ff;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: transparent;
+  color: #f1f1f1;
   border-radius: 999px;
   padding: 7px 12px;
   font-size: 0.78rem;
@@ -608,8 +701,8 @@
 }
 
 .watch-action-btn.is-active {
-  border-color: rgba(119, 181, 255, 0.72);
-  background: #163c6e;
+  border-color: rgba(255, 255, 255, 0.45);
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .watch-action-btn.dislike.is-active {
@@ -619,8 +712,8 @@
 
 .watch-comments {
   margin-top: 14px;
-  border: 1px solid rgba(67, 83, 112, 0.45);
-  background: #171b22;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: transparent;
   border-radius: 12px;
   padding: 10px;
 }
@@ -633,18 +726,18 @@
 }
 
 .watch-comment-input-row input {
-  border: 1px solid rgba(114, 140, 187, 0.44);
+  border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 10px;
-  background: #0f131a;
+  background: transparent;
   color: #edf4ff;
   padding: 8px 10px;
   outline: none;
 }
 
 .watch-comment-input-row button {
-  border: 1px solid rgba(114, 140, 187, 0.44);
+  border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 10px;
-  background: #2a3550;
+  background: transparent;
   color: #f0f4ff;
   padding: 8px 12px;
   font-weight: 700;
@@ -652,7 +745,7 @@
 }
 
 .watch-comment-item {
-  border-top: 1px solid rgba(77, 95, 129, 0.35);
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
   padding: 7px 2px;
   color: #eaf1ff;
   font-size: 0.86rem;
@@ -660,61 +753,66 @@
 }
 
 .watch-comment-item strong {
-  color: #bbd1ff;
+  color: #dddddd;
 }
 
 .watch-side {
-  border: 1px solid rgba(67, 83, 112, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 14px;
-  background:
-    radial-gradient(130% 180% at 0% 0%, rgba(39, 96, 205, 0.14), transparent 56%),
-    #12151b;
-  padding: 10px;
-  max-height: none;
-  overflow: visible;
-  box-shadow: 0 12px 28px rgba(4, 14, 38, 0.34);
+  background: transparent;
+  padding: 0;
+  max-height: calc(100vh - 124px);
+  overflow: auto;
+  position: sticky;
+  top: 78px;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.46);
 }
 
 .watch-side h3 {
-  margin: 2px 2px 10px;
+  margin: 12px 12px 10px;
+  padding: 6px 8px;
   color: #f3f7ff;
 }
 
 .watch-list {
   display: flex;
   flex-direction: column;
-  gap: 9px;
+  gap: 0;
 }
 
 .watch-item {
-  border: 1px solid rgba(72, 88, 118, 0.42);
-  border-radius: 11px;
-  background: #1a1f27;
+  border: none;
+  border-radius: 0;
+  background: transparent;
   display: grid;
-  grid-template-columns: 1fr;
-  gap: 0;
+  grid-template-columns: 172px minmax(0, 1fr);
+  gap: 10px;
   cursor: pointer;
   overflow: hidden;
+  align-items: stretch;
 }
 
 .watch-item:hover {
-  border-color: rgba(121, 155, 217, 0.7);
+  filter: brightness(1.03);
 }
 
 .watch-item-thumb-wrap {
   position: relative;
+  height: 100%;
 }
 
 .watch-item-thumb {
   width: 100%;
+  height: 100%;
+  min-height: 96px;
   aspect-ratio: 16 / 9;
-  object-fit: contain;
+  object-fit: cover;
   display: block;
   background: #000;
 }
 
 .watch-item-text {
-  padding: 10px;
+  padding: 10px 10px 10px 0;
 }
 
 .watch-item-text p {
@@ -731,7 +829,7 @@
 .watch-item-text small {
   display: block;
   margin-top: 4px;
-  color: #aebdd7;
+  color: #a7a7a7;
   font-size: 0.78rem;
 }
 
@@ -759,6 +857,17 @@
 
   .watch-side {
     max-height: none;
+    position: static;
+    top: auto;
+  }
+
+  .watch-item {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .watch-item-text {
+    padding: 10px;
   }
 }
 
@@ -803,8 +912,9 @@
   .yt-watch-page.is-watch-mode .watch-player-wrap {
     border-radius: 0;
     border: none;
-    height: 100svh;
-    height: 100dvh;
+    aspect-ratio: 16 / 9;
+    height: auto;
+    max-height: min(46vh, 340px);
     background: #000;
   }
 
@@ -813,7 +923,7 @@
     height: 100%;
     max-height: none;
     aspect-ratio: auto;
-    object-fit: contain;
+    object-fit: cover;
     background: #000;
   }
 

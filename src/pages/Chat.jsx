@@ -252,18 +252,18 @@ const STICKER_PACKS = [
   { id: "travel", label: "Travel", value: "??????" }
 ];
 const VIDEO_FILTER_PRESETS = [
-  { id: "beauty_soft", label: "Beauty", css: "brightness(1.06) saturate(1.14) contrast(1.05)" },
-  { id: "studio_clear", label: "Studio", css: "brightness(1.08) contrast(1.1) saturate(1.06)" },
-  { id: "porcelain", label: "Porcelain", css: "brightness(1.12) contrast(0.96) saturate(1.08)" },
-  { id: "warm_glow", label: "Warm Glow", css: "brightness(1.08) saturate(1.16) sepia(0.14)" },
-  { id: "golden_hour", label: "Golden Hour", css: "brightness(1.09) saturate(1.2) sepia(0.18) hue-rotate(-8deg)" },
-  { id: "cool_luxe", label: "Cool Luxe", css: "brightness(1.04) contrast(1.1) saturate(0.95) hue-rotate(10deg)" },
-  { id: "vivid_pop", label: "Vivid Pop", css: "brightness(1.08) contrast(1.16) saturate(1.32)" },
-  { id: "cute_blush", label: "Cute Blush", css: "brightness(1.1) contrast(1.02) saturate(1.22) hue-rotate(-12deg)" },
-  { id: "comic_pop", label: "Comic Pop", css: "contrast(1.35) saturate(1.4) brightness(1.05)" },
-  { id: "retro_film", label: "Retro Film", css: "sepia(0.28) contrast(1.08) saturate(0.96) brightness(1.05)" },
-  { id: "mono_classic", label: "Mono Classic", css: "grayscale(1) contrast(1.12) brightness(1.05)" },
-  { id: "cinema_noir", label: "Cinema Noir", css: "grayscale(1) contrast(1.28) brightness(0.92)" }
+  { id: "beauty_soft", label: "Beauty", short: "B", css: "brightness(1.06) saturate(1.14) contrast(1.05)" },
+  { id: "studio_clear", label: "Studio", short: "S", css: "brightness(1.08) contrast(1.1) saturate(1.06)" },
+  { id: "porcelain", label: "Porcelain", short: "P", css: "brightness(1.12) contrast(0.96) saturate(1.08)" },
+  { id: "warm_glow", label: "Warm Glow", short: "W", css: "brightness(1.08) saturate(1.16) sepia(0.14)" },
+  { id: "golden_hour", label: "Golden Hour", short: "G", css: "brightness(1.09) saturate(1.2) sepia(0.18) hue-rotate(-8deg)" },
+  { id: "cool_luxe", label: "Cool Luxe", short: "C", css: "brightness(1.04) contrast(1.1) saturate(0.95) hue-rotate(10deg)" },
+  { id: "vivid_pop", label: "Vivid Pop", short: "V", css: "brightness(1.08) contrast(1.16) saturate(1.32)" },
+  { id: "cute_blush", label: "Cute Blush", short: "U", css: "brightness(1.1) contrast(1.02) saturate(1.22) hue-rotate(-12deg)" },
+  { id: "comic_pop", label: "Comic Pop", short: "CP", css: "contrast(1.35) saturate(1.4) brightness(1.05)" },
+  { id: "retro_film", label: "Retro Film", short: "R", css: "sepia(0.28) contrast(1.08) saturate(0.96) brightness(1.05)" },
+  { id: "mono_classic", label: "Mono Classic", short: "M", css: "grayscale(1) contrast(1.12) brightness(1.05)" },
+  { id: "cinema_noir", label: "Cinema Noir", short: "N", css: "grayscale(1) contrast(1.28) brightness(0.92)" }
 ];
 
 const fileToDataUrl = (file) =>
@@ -4772,28 +4772,25 @@ export default function Chat() {
             )}
             {showVideoFilters && (
               <div className="wa-video-filter-panel" role="listbox" aria-label="Video filters">
-                {VIDEO_FILTER_PRESETS.map((preset) => (
-                  <button
-                    key={preset.id}
-                    type="button"
-                    role="option"
-                    aria-selected={videoFilterId === preset.id}
-                    className={`wa-filter-chip ${videoFilterId === preset.id ? "is-selected" : ""}`}
-                    onClick={() => {
-                      setVideoFilterId(preset.id);
-                      setShowVideoFilters(false);
-                    }}
-                    title={preset.label}
-                  >
-                    {preset.label}
-                  </button>
-                ))}
+                <div className="wa-filter-circle-grid">
+                  {VIDEO_FILTER_PRESETS.map((preset) => (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      role="option"
+                      aria-selected={videoFilterId === preset.id}
+                      className={`wa-filter-circle ${videoFilterId === preset.id ? "is-selected" : ""}`}
+                      onClick={() => setVideoFilterId(preset.id)}
+                      title={preset.label}
+                    >
+                      <span>{preset.short || preset.label.slice(0, 1)}</span>
+                    </button>
+                  ))}
+                </div>
+                <div className="wa-filter-selected-label">{activeVideoFilter?.label || "Beauty"}</div>
               </div>
             )}
             <div className="wa-video-controls">
-              <button type="button" className="call-control" onClick={toggleMute} title="Mute/Unmute">
-                {isMuted ? <FiMicOff /> : <FiMic />}
-              </button>
               <button type="button" className="call-control" onClick={toggleSpeaker} title="Speaker on/off">
                 {isSpeakerOn ? <FiVolume2 /> : <FiVolumeX />}
               </button>
@@ -4814,9 +4811,6 @@ export default function Chat() {
                 onClick={() => setSignAssistEnabled((prev) => !prev)}
                 title="Sign assist">
                 <MdSignLanguage />
-              </button>
-              <button type="button" className="call-hangup" onClick={() => finishCall(true)}>
-                <FiPhoneOff />
               </button>
             </div>
           </div>
@@ -5041,9 +5035,6 @@ export default function Chat() {
                     )}
 
                     <div className="in-call-controls">
-                      <button type="button" className="call-control" onClick={toggleMute} title="Mute/Unmute">
-                        {isMuted ? <FiMicOff /> : <FiMic />}
-                      </button>
                       <button type="button" className="call-control" onClick={toggleSpeaker} title="Speaker on/off">
                         {isSpeakerOn ? <FiVolume2 /> : <FiVolumeX />}
                       </button>
