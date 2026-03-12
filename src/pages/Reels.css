@@ -1,6 +1,7 @@
 .reels-page {
   position: relative;
-  height: calc(100vh - 96px);
+  height: 100vh;
+  height: 100dvh;
   background: radial-gradient(130% 130% at 50% -5%, #12234b 0%, #070d1f 45%, #02040d 100%);
   border-radius: 18px;
   overflow: hidden;
@@ -80,7 +81,8 @@
 
 .reel-item {
   position: relative;
-  height: calc(100vh - 96px);
+  height: 100vh;
+  height: 100dvh;
   scroll-snap-align: start;
   scroll-snap-stop: always;
   display: grid;
@@ -94,7 +96,7 @@
   position: relative;
   width: min(100%, 430px);
   aspect-ratio: 9 / 16;
-  max-height: calc(100vh - 120px);
+  max-height: calc(100dvh - 24px);
   border-radius: 22px;
   overflow: hidden;
   border: 1px solid rgba(159, 193, 255, 0.22);
@@ -408,13 +410,25 @@
   }
 
   .reels-page,
+  .reels-container,
+  .reel-item,
+  .reel-frame {
+    width: 100vw;
+    max-width: 100vw;
+    margin: 0;
+    border-radius: 0;
+  }
+
+  .reels-page,
   .reel-item {
     height: 100vh;
-    border-radius: 0;
+    height: calc(100dvh - (58px + env(safe-area-inset-bottom)));
+    min-height: 0;
   }
 
   .reels-page {
     background: #02040d;
+    overflow: hidden;
   }
 
   .reels-container {
@@ -424,16 +438,15 @@
   .reel-item {
     padding: 0;
     place-items: stretch;
+    background: #02040d;
   }
 
   .reel-frame {
-    width: 100%;
     height: 100%;
     max-height: none;
     aspect-ratio: auto;
-    border-radius: 0;
-    border-left: none;
-    border-right: none;
+    border: none;
+    box-shadow: none;
   }
 
   .reel-actions {

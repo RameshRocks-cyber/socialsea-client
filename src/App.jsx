@@ -51,10 +51,10 @@ function AppRoutes() {
     location.pathname === "/login" ||
     location.pathname === "/register" ||
     location.pathname === "/forgot-password";
-  const showUserNavbar = authed && !location.pathname.startsWith("/admin") && !isAuthScreen;
   const isReelsRoute = location.pathname === "/reels";
   const isChatRoute = location.pathname === "/chat" || location.pathname.startsWith("/chat/");
   const isChatConversationRoute = location.pathname.startsWith("/chat/");
+  const showUserNavbar = authed && !location.pathname.startsWith("/admin") && !isAuthScreen && !isChatConversationRoute;
 
   useEffect(() => {
     const handleVideoPlay = (event) => {

@@ -136,11 +136,12 @@ const normalizeLiveUrl = (rawUrl, fallbackAlertId = "") => {
 const readShowSosInNavbar = () => {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
-    if (!raw) return false;
+    if (!raw) return true;
     const parsed = JSON.parse(raw);
-    return Boolean(parsed?.showSosInNavbar);
+    if (typeof parsed?.showSosInNavbar === "boolean") return parsed.showSosInNavbar;
+    return true;
   } catch {
-    return false;
+    return true;
   }
 };
 
@@ -171,6 +172,17 @@ const readSeenAlertIds = () => {
     return new Set(arr.map((id) => String(id || "").trim()).filter(Boolean));
   } catch {
     return new Set();
+  }
+};
+
+const readIsSosActive = () => {
+  try {
+    const raw = localStorage.getItem(SOS_SESSION_KEY);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw);
+    return Boolean(parsed?.active);
+  } catch {
+    return false;
   }
 };
 
@@ -233,6 +245,7 @@ export default function Navbar() {
   const profileTarget = myUserId ? `/profile/${myUserId}` : "/profile/me";
   const [incomingCall, setIncomingCall] = useState(null);
   const [showSosInNavbar, setShowSosInNavbar] = useState(readShowSosInNavbar);
+  const [sosActive, setSosActive] = useState(readIsSosActive);
   const [sosPopup, setSosPopup] = useState(null);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraError, setCameraError] = useState("");
@@ -294,9 +307,17 @@ export default function Navbar() {
       if (!event || event.key === SETTINGS_KEY) {
         setShowSosInNavbar(readShowSosInNavbar());
       }
+      if (!event || event.key === SOS_SESSION_KEY) {
+        setSosActive(readIsSosActive());
+      }
     };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
+  useEffect(() => {
+    const timer = setInterval(() => setSosActive(readIsSosActive()), 1200);
+    return () => clearInterval(timer);
   }, []);
 
   useEffect(() => {
@@ -799,7 +820,10 @@ export default function Navbar() {
       if (Array.isArray(data)) return data;
       if (Array.isArray(data?.alerts)) return data.alerts;
       if (Array.isArray(data?.items)) return data.items;
-      if (data && typeof data === "object" && (data.active || data.alertId || data.alertDisplayId)) {
+      if (Array.isArray(data?.data)) return data.data;
+      if (Array.isArray(data?.result)) return data.result;
+      if (Array.isArray(data?.payload)) return data.payload;
+      if (data && typeof data === "object" && (data.active || data.alertId || data.alertDisplayId || data.latitude || data.longitude || data.reporterEmail)) {
         return [data];
       }
       return [];
@@ -849,15 +873,13 @@ export default function Navbar() {
     const pollEmergency = async () => {
       try {
         const payloads = [];
-        try {
-          payloads.push(await requestEmergencyData("active"));
-        } catch {
-          // keep trying other source
-        }
-        try {
-          payloads.push(await requestEmergencyData("active-session"));
-        } catch {
-          // keep trying other source
+        const suffixes = ["active", "active-session", "assist/active", "assist/active-session"];
+        for (const suffix of suffixes) {
+          try {
+            payloads.push(await requestEmergencyData(suffix));
+          } catch {
+            // keep trying other source
+          }
         }
         if (!payloads.length) return;
 
@@ -889,8 +911,10 @@ export default function Navbar() {
             }
             continue;
           }
-          if (!dedupeKey || seenEmergencyAlertsRef.current.has(dedupeKey)) continue;
+          if (!dedupeKey) continue;
           if (isAlertSuppressed(id)) continue;
+          const currentKey = normalizeAlertId(popupStateRef.current?.dedupeKey || popupStateRef.current?.alertId);
+          if (currentKey && dedupeKey === currentKey) continue;
           seenEmergencyAlertsRef.current.add(dedupeKey);
           const reporter = String(a?.reporterEmail || "").trim();
           showSosPopup("[EMERGENCY] SocialSea Emergengy SOS is asking for help", {
@@ -1232,9 +1256,14 @@ export default function Navbar() {
           )}
         </Link>
 
-        <div className="ss-links">
+        <div className={`ss-links ${showSosInNavbar ? "has-sos" : ""}`}>
           {showSosInNavbar && (
-            <button type="button" className="ss-sos-mobile" title="Emergency SOS" onClick={onSosTap}>
+            <button
+              type="button"
+              className={`ss-sos-mobile ${sosActive ? "is-active" : ""}`}
+              title={sosActive ? "Emergency SOS Active" : "Emergency SOS"}
+              onClick={onSosTap}
+            >
               SOS
             </button>
           )}
