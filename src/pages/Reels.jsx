@@ -943,7 +943,20 @@ export default function Reels() {
           title={`${gestureEnabled ? "Disable hand signals" : "Enable hand signals"} - ${gestureStatus}`}
           aria-label={gestureEnabled ? "Disable hand signals" : "Enable hand signals"}
         >
-          {"\u270B"}
+          <svg
+            className="reels-gesture-icon"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path
+              d="M7.5 11.5V5a1.5 1.5 0 0 1 3 0v6.5M11 11.5V4.5a1.5 1.5 0 0 1 3 0v7M14.5 11.5V7a1.5 1.5 0 0 1 3 0v7.5M6.5 11.5v4.5c0 2.5 2 4.5 4.5 4.5h2.5c2.76 0 5-2.24 5-5v-1.5"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
         </button>
         {gestureError && <p className="reels-gesture-error">{gestureError}</p>}
       </div>

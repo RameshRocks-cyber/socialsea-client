@@ -44,8 +44,13 @@ export function getApiBaseUrl() {
     const host = String(window.location.hostname || "").toLowerCase();
     const isLocalHost = host === "localhost" || host === "127.0.0.1";
     if (isFrontendLikeHost(host)) {
-      // Always prefer same-origin proxy for deployed frontend hosts.
-      return "/api";
+      // Deployed frontend should target the API host directly.
+      const envUrl = normalizeApiUrl(import.meta.env.VITE_API_URL);
+      const envHost = hostFromUrl(envUrl);
+      if (envUrl && !isFrontendLikeHost(envHost)) {
+        return envUrl;
+      }
+      return "https://api.socialsea.co.in";
     }
     if (isLocalHost) {
       const envUrl = normalizeApiUrl(import.meta.env.VITE_API_URL);

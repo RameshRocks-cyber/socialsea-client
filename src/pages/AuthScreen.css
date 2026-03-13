@@ -148,19 +148,26 @@
 }
 
 .auth-password-row {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 8px;
+  position: relative;
+  display: flex;
   align-items: center;
 }
 
+.auth-password-input {
+  padding-right: 72px;
+}
+
 .auth-password-toggle {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
   border: 1px solid rgba(116, 174, 239, 0.46);
-  background: rgba(9, 30, 62, 0.86);
+  background: rgba(9, 30, 62, 0.92);
   color: #d9ecff;
-  border-radius: 12px;
-  padding: 10px 12px;
-  font-size: 0.85rem;
+  border-radius: 10px;
+  padding: 6px 10px;
+  font-size: 0.78rem;
   font-weight: 700;
   cursor: pointer;
 }

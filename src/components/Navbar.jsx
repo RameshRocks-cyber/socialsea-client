@@ -257,6 +257,7 @@ export default function Navbar() {
   const seenEmergencyAlertsRef = useRef(new Set());
   const seenLocalSignalsRef = useRef(new Set());
   const seenSessionSignalsRef = useRef(new Set());
+  const seenNotificationIdsRef = useRef(new Set());
   const seenAlertIdsRef = useRef(readSeenAlertIds());
   const suppressedAlertIdsRef = useRef(readSuppressedAlertIds());
   const ownSosStopUntilRef = useRef(0);

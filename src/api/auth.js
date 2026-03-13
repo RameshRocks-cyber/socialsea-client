@@ -5,7 +5,7 @@ const looksLikeHtml = (value) =>
   typeof value === "string" &&
   (/^\s*<!doctype html/i.test(value) || /<html[\s>]/i.test(value));
 
-const BAD_OTP_HOSTS = new Set(["api.socialsea.co.in", "43.205.213.14"]);
+const BAD_OTP_HOSTS = new Set(["43.205.213.14"]);
 
 const normalizeBaseCandidate = (rawValue) => {
   const value = String(rawValue || "").trim().replace(/\/+$/, "");
@@ -45,7 +45,14 @@ const buildOtpBaseCandidates = () => {
     defaultBase,
     envBase,
   ];
-  const deployedCandidates = [stored, defaultBase, envBase, "/api", "https://socialsea.co.in"];
+  const deployedCandidates = [
+    stored,
+    defaultBase,
+    envBase,
+    "https://api.socialsea.co.in",
+    "/api",
+    "https://socialsea.co.in",
+  ];
 
   const candidates = (isLocalPage ? localCandidates : deployedCandidates)
     .filter((v, i, arr) => v && arr.indexOf(v) === i)
