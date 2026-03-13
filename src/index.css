@@ -75,6 +75,24 @@ body {
   filter: none;
 }
 
+html,
+body,
+#root,
+.app-main,
+.app-content {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+html::-webkit-scrollbar,
+body::-webkit-scrollbar,
+#root::-webkit-scrollbar,
+.app-main::-webkit-scrollbar,
+.app-content::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
 body.ss-themed .app-main.with-user-nav {
   background:
     radial-gradient(65% 55% at 10% -12%, color-mix(in srgb, var(--ss-theme-accent) 28%, transparent), transparent 70%),
@@ -175,7 +193,7 @@ a {
 }
 
 .app-route-wrap.with-navbar {
-  padding-top: 60px;
+  padding-top: 0;
 }
 
 /* Global black palette override */

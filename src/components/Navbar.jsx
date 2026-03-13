@@ -242,7 +242,7 @@ export default function Navbar() {
   const myEmail = String(sessionStorage.getItem("email") || localStorage.getItem("email") || "").trim().toLowerCase();
   const onChatRoute = location.pathname === "/chat" || location.pathname.startsWith("/chat/");
   const onChatConversationRoute = location.pathname.startsWith("/chat/");
-  const profileTarget = myUserId ? `/profile/${myUserId}` : "/profile/me";
+  const profileTarget = "/profile/me";
   const [incomingCall, setIncomingCall] = useState(null);
   const [showSosInNavbar, setShowSosInNavbar] = useState(readShowSosInNavbar);
   const [sosActive, setSosActive] = useState(readIsSosActive);

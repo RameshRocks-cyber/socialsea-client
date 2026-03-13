@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import api from "../api/axios";
+import { buildProfilePath, getProfileIdentifier } from "../utils/profileRoute";
 import { toApiUrl } from "../api/baseUrl";
 import "./FollowConnections.css";
 
@@ -544,8 +545,8 @@ export default function FollowConnections() {
   }, [titleName, username, kind]);
 
   const openProfile = (person) => {
-    if (!person?.id) return;
-    navigate(`/profile/${person.id}`);
+    if (!person) return;
+    navigate(buildProfilePath(person));
   };
 
   const openChat = (person) => {
@@ -560,14 +561,14 @@ export default function FollowConnections() {
           <button
             type="button"
             className={`follow-tab ${kind === "followers" ? "active" : ""}`}
-            onClick={() => navigate(`/profile/${username}/followers`)}
+            onClick={() => navigate(`/profile/${encodeURIComponent(getProfileIdentifier(titleName, username) || "me")}/followers`)}
           >
             Followers
           </button>
           <button
             type="button"
             className={`follow-tab ${kind === "following" ? "active" : ""}`}
-            onClick={() => navigate(`/profile/${username}/following`)}
+            onClick={() => navigate(`/profile/${encodeURIComponent(getProfileIdentifier(titleName, username) || "me")}/following`)}
           >
             Following
           </button>

@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { FiAlertTriangle, FiBell, FiHeart, FiMapPin, FiMessageCircle, FiUserPlus, FiVideo } from "react-icons/fi";
 import api from "../api/axios";
 import { toApiUrl } from "../api/baseUrl";
+import { buildProfilePath } from "../utils/profileRoute";
 import "./Notifications.css";
 
 const EMAIL_REGEX = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
@@ -340,7 +341,7 @@ export default function Notifications() {
   const openActorProfile = (identifier) => {
     const safe = String(identifier || "").trim();
     if (!safe) return;
-    navigate(`/profile/${encodeURIComponent(safe)}`);
+    navigate(buildProfilePath(safe));
   };
 
   const handleFollow = async (item) => {

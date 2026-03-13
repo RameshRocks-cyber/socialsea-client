@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import api from "../api/axios";
 import { loginWithPassword, registerWithPassword } from "../api/auth";
 import { clearAuthStorage } from "../auth";
+import { persistProfileIdentity } from "../utils/profileRoute";
 import "./AuthScreen.css";
 
 function parseErrorMessage(err, fallback) {
@@ -76,6 +77,7 @@ export default function Login() {
     try {
       const profileRes = await api.get("/api/profile/me");
       const profile = profileRes?.data || {};
+      persistProfileIdentity(profile);
       const completed =
         Boolean(profile?.profileCompleted) ||
         Boolean(String(profile?.name || "").trim()) ||

@@ -6,6 +6,9 @@
 }
 
 .app-main {
+  --shell-max-width: 1720px;
+  --shell-gutter: clamp(12px, 2vw, 28px);
+  --user-nav-offset: 72px;
   min-height: 100vh;
 }
 
@@ -21,30 +24,42 @@
 }
 
 .app-main.chat-main-route.with-user-nav {
-  padding-top: 82px;
+  padding-top: var(--user-nav-offset);
 }
 
 .app-main.with-user-nav {
-  padding-top: 82px;
+  padding-top: var(--user-nav-offset);
+}
+
+.app-main.reels-main-route.with-user-nav {
+  height: 100vh;
+  height: 100dvh;
+  min-height: 100vh;
+  min-height: 100dvh;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 .app-content {
+  width: min(100%, var(--shell-max-width));
   max-width: 100%;
-  width: 100%;
-  margin: 0;
-  padding: 8px 12px 24px;
+  margin: 0 auto;
+  padding: 0 var(--shell-gutter) 28px;
 }
 
 .app-content.reels-content {
   max-width: 100%;
   padding: 0;
+  height: calc(100vh - var(--user-nav-offset));
+  height: calc(100dvh - var(--user-nav-offset));
+  overflow: hidden;
 }
 
 .app-content.chat-content {
   height: auto;
   flex: 1 1 auto;
   min-height: 0;
-  width: 100%;
+  width: min(100%, 100vw);
   max-width: 100%;
   margin: 0;
   padding: 0;
@@ -56,7 +71,69 @@
   padding-inline: 0;
 }
 
-@media (max-width: 560px) {
+@media (max-width: 1024px) {
+  .app-main {
+    --shell-gutter: clamp(10px, 2vw, 18px);
+    --user-nav-offset: 68px;
+  }
+
+  .app-content {
+    padding-bottom: 24px;
+  }
+}
+
+@media (max-width: 768px) {
+  .app-main {
+    --user-nav-offset: 0px;
+    --shell-gutter: 8px;
+  }
+
+  .app-main.with-user-nav {
+    padding-top: 6px;
+    padding-bottom: calc(82px + env(safe-area-inset-bottom));
+  }
+
+  .app-main.chat-main-route.with-user-nav {
+    padding-top: 4px;
+    padding-bottom: calc(82px + env(safe-area-inset-bottom));
+  }
+
+  .app-main.reels-main-route.with-user-nav {
+    padding-top: 0;
+    padding-bottom: 0;
+    height: 100vh;
+    height: 100dvh;
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
+
+  .app-content {
+    width: 100%;
+    padding: 4px var(--shell-gutter) 18px;
+  }
+
+  .app-content.reels-content {
+    padding: 0;
+    height: calc(100vh - (56px + env(safe-area-inset-bottom)));
+    height: calc(100dvh - (56px + env(safe-area-inset-bottom)));
+  }
+
+  .app-content.chat-content {
+    height: auto;
+    flex: 1 1 auto;
+    min-height: 0;
+    width: 100%;
+    padding: 0;
+    overflow: hidden;
+    box-sizing: border-box;
+  }
+}
+
+@media (max-width: 480px) {
+  .app-main {
+    --user-nav-offset: 0px;
+  }
+
   .app-main.with-user-nav {
     padding-top: 6px;
     padding-bottom: 90px;
@@ -68,8 +145,12 @@
   }
 
   .app-main.reels-main-route.with-user-nav {
-    padding-top: 90px;
+    padding-top: 0;
     padding-bottom: 0;
+    height: 100vh;
+    height: 100dvh;
+    min-height: 100vh;
+    min-height: 100dvh;
   }
 
   .app-content {
@@ -79,6 +160,8 @@
 
   .app-content.reels-content {
     padding: 0;
+    height: calc(100vh - (56px + env(safe-area-inset-bottom)));
+    height: calc(100dvh - (56px + env(safe-area-inset-bottom)));
   }
 
   .app-content.chat-content {

@@ -35,7 +35,7 @@ export const isAuthenticated = () => {
   return false;
 };
 
-const AUTH_KEYS = ["accessToken", "token", "refreshToken", "userId", "role", "profileCompleted"];
+const AUTH_KEYS = ["accessToken", "token", "refreshToken", "userId", "role", "profileCompleted", "email", "username", "name"];
 
 export const clearAuthStorage = () => {
   AUTH_KEYS.forEach((key) => {

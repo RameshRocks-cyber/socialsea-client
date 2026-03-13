@@ -1,6 +1,8 @@
 .chat-page {
   height: 100%;
   min-height: 0;
+  margin-top: 0 !important;
+  padding-top: 0 !important;
   display: grid;
   grid-template-columns: 340px minmax(0, 1fr);
   border: none;
@@ -52,7 +54,9 @@
 
 .chat-sidebar {
   border-right: 1px solid rgba(44, 44, 44, 0.82);
-  padding: 14px 12px;
+  padding: 0 12px 12px;
+  margin-top: 0 !important;
+  padding-top: 0 !important;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -65,6 +69,8 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  margin-top: 0 !important;
+  padding-top: 0 !important;
 }
 
 .chat-sidebar-head h2 {

@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import api from "../api/axios";
 import { getApiBaseUrl, toApiUrl } from "../api/baseUrl";
 import { clearAuthStorage } from "../auth";
+import { buildProfilePath, getProfileIdentifier, persistProfileIdentity } from "../utils/profileRoute";
 import "./Profile.css";
 
 const FOLLOWING_CACHE_KEY = "socialsea_following_cache_v1";
@@ -211,6 +212,8 @@ export default function Profile() {
   const { username } = useParams();
   const myUserId = sessionStorage.getItem("userId") || localStorage.getItem("userId");
   const myEmail = sessionStorage.getItem("email") || localStorage.getItem("email");
+  const myName = sessionStorage.getItem("name") || localStorage.getItem("name");
+  const myUsername = sessionStorage.getItem("username") || localStorage.getItem("username");
   const navigate = useNavigate();
   const [profile, setProfile] = useState(null);
   const [posts, setPosts] = useState([]);
@@ -227,9 +230,15 @@ export default function Profile() {
   const [videoMetaByPost, setVideoMetaByPost] = useState({});
   const holdTimerRef = useRef(null);
   const deleteRevealHideTimerRef = useRef(null);
+  const profileRouteKey = getProfileIdentifier(profile, username, myUsername, myName, myEmail, myUserId) || "me";
 
   const isOwnProfile =
-    username === "me" || Number(username) === Number(myUserId) || profile?.id === Number(myUserId);
+    username === "me" ||
+    Number(username) === Number(myUserId) ||
+    String(username || "").trim().toLowerCase() === String(myUsername || "").trim().toLowerCase() ||
+    String(username || "").trim().toLowerCase() === String(myEmail || "").trim().toLowerCase() ||
+    String(username || "").trim().toLowerCase() === String(myName || "").trim().toLowerCase() ||
+    profile?.id === Number(myUserId);
 
   useEffect(() => {
     let cancelled = false;
@@ -355,6 +364,7 @@ export default function Profile() {
         const { base, res, data } = payload;
         if (cancelled) return null;
         setProfile(data);
+        persistProfileIdentity(data);
 
         const followKeys = [data?.id, data?.email, data?.username, username];
         const extracted = extractFollowingFlag(res, data);
@@ -441,7 +451,8 @@ export default function Profile() {
           if (meData && typeof meData === "object" && Object.keys(meData).length > 0) {
             if (!cancelled) {
               setProfile(meData);
-              navigate("/profile/me", { replace: true });
+              persistProfileIdentity(meData);
+              navigate(buildProfilePath(meData), { replace: true });
             }
             return { base: defaultBase || undefined, profileId: meData?.id, profileData: meData };
           }
@@ -568,7 +579,7 @@ export default function Profile() {
     return () => {
       cancelled = true;
     };
-  }, [username, navigate, myUserId, myEmail]);
+  }, [username, navigate, myUserId, myEmail, myUsername, myName]);
 
   const handleFollow = async () => {
     if (loading) return;
@@ -769,7 +780,7 @@ export default function Profile() {
                 <button
                   type="button"
                   className="profile-stat-link"
-                  onClick={() => navigate(`/profile/${username}/followers`)}
+                  onClick={() => navigate(`/profile/${encodeURIComponent(profileRouteKey)}/followers`)}
                 >
                   <b>{followers}</b> followers
                 </button>
@@ -777,7 +788,7 @@ export default function Profile() {
                 <button
                   type="button"
                   className="profile-stat-link"
-                  onClick={() => navigate(`/profile/${username}/following`)}
+                  onClick={() => navigate(`/profile/${encodeURIComponent(profileRouteKey)}/following`)}
                 >
                   <b>{followingCount}</b> following
                 </button>

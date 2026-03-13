@@ -1,6 +1,6 @@
-.ss-nav-wrap {
+﻿.ss-nav-wrap {
   position: fixed;
-  top: clamp(8px, 1.2vw, 12px);
+  top: 0;
   left: 0;
   right: 0;
   z-index: 22000;
@@ -8,21 +8,23 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 0;
   pointer-events: auto;
   visibility: visible;
   opacity: 1;
 }
 
 .ss-nav {
-  width: min(1180px, calc(100vw - clamp(12px, 3vw, 24px)));
+  width: min(100%, calc(var(--shell-max-width, 1720px) - (var(--shell-gutter, 24px) * 2)));
+  min-height: 56px;
   pointer-events: auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: clamp(8px, 1.2vw, 14px);
-  padding: clamp(8px, 1.1vw, 10px) clamp(10px, 1.6vw, 14px);
-  border-radius: 16px;
+  gap: clamp(10px, 1vw, 16px);
+  padding: 10px 14px;
+  margin: 10px auto 0;
+  border-radius: 18px;
   border: 1px solid rgba(255, 255, 255, 0.14);
   background:
     radial-gradient(130% 140% at 5% -20%, rgba(0, 0, 0, 0.34), transparent 52%),
@@ -42,8 +44,8 @@
 }
 
 .ss-camera-btn {
-  width: 30px;
-  height: 30px;
+  width: 28px;
+  height: 28px;
   border-radius: 10px;
   border: 1px solid rgba(58, 58, 58, 0.82);
   background: rgba(18, 18, 18, 0.88);
@@ -66,8 +68,8 @@
 }
 
 .ss-brand-logo {
-  width: 34px;
-  height: 34px;
+  width: 30px;
+  height: 30px;
   border-radius: 10px;
   object-fit: cover;
   border: 1px solid rgba(58, 58, 58, 0.82);
@@ -75,7 +77,7 @@
 }
 
 .ss-brand-text {
-  font-size: clamp(1.1rem, 2vw, 1.45rem);
+  font-size: clamp(1rem, 1.7vw, 1.28rem);
   line-height: 1;
   font-weight: 800;
   letter-spacing: 0.2px;
@@ -122,6 +124,8 @@
   align-items: center;
   gap: 6px;
   min-width: 0;
+  flex: 1 1 auto;
+  justify-content: flex-end;
 }
 
 .ss-link {
@@ -133,7 +137,7 @@
   font-weight: 600;
   border: 1px solid transparent;
   border-radius: 999px;
-  padding: clamp(7px, 0.9vw, 8px) clamp(8px, 1.2vw, 11px);
+  padding: clamp(6px, 0.75vw, 7px) clamp(8px, 1.1vw, 10px);
   transition: all 0.22s ease;
   white-space: nowrap;
 }
@@ -152,11 +156,11 @@
 }
 
 .ss-link-icon {
-  font-size: 1rem;
+  font-size: 0.95rem;
 }
 
 .ss-link-text {
-  font-size: clamp(0.78rem, 1.2vw, 0.86rem);
+  font-size: clamp(0.74rem, 1.05vw, 0.82rem);
   letter-spacing: 0.15px;
 }
 
@@ -520,6 +524,11 @@
 }
 
 @media (max-width: 1080px) {
+  .ss-nav {
+    min-height: 52px;
+    padding: 8px 12px;
+  }
+
   .ss-brand-text {
     font-size: 1.1rem;
   }
@@ -534,6 +543,21 @@
 
   .ss-link-icon {
     font-size: 1.06rem;
+  }
+}
+
+@media (max-width: 900px) {
+  .ss-nav {
+    border-radius: 16px;
+  }
+
+  .ss-camera-btn,
+  .ss-sos-chip {
+    display: none;
+  }
+
+  .ss-links {
+    gap: 4px;
   }
 }
 
@@ -555,6 +579,7 @@
     max-width: 100vw;
     min-height: calc(56px + env(safe-area-inset-bottom));
     padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
+    margin: 0;
     border-radius: 0;
     background: rgba(6, 6, 8, 0.98);
     border-top: 1px solid rgba(80, 80, 80, 0.5);

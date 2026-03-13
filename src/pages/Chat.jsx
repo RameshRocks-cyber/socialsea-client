@@ -18,6 +18,7 @@ import {
 } from "react-icons/fi";
 import { MdSignLanguage } from "react-icons/md";
 import api from "../api/axios";
+import { buildProfilePath } from "../utils/profileRoute";
 import { getApiBaseUrl, toApiUrl } from "../api/baseUrl";
 import { clearAuthStorage } from "../auth";
 import { SETTINGS_KEY, readSoundPrefs } from "./soundPrefs";
@@ -3374,8 +3375,8 @@ export default function Chat() {
   };
 
   const goToProfile = (contact) => {
-    if (!contact?.id) return;
-    navigate(`/profile/${contact.id}`);
+    if (!contact) return;
+    navigate(buildProfilePath(contact));
   };
 
   const blockActiveContact = () => {

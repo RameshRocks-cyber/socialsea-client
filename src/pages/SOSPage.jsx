@@ -14,6 +14,7 @@ const SOS_LIVE_PREVIEW_FRAME_KEY_PREFIX = "socialsea_sos_live_preview_frame_v1_"
 const SOS_LIVE_RTC_SIGNAL_KEY = "socialsea_sos_live_rtc_signal_v1";
 const SOS_LIVE_RTC_OFFER_KEY_PREFIX = "socialsea_sos_live_rtc_offer_v1_";
 const SOS_LIVE_RTC_ANSWER_KEY_PREFIX = "socialsea_sos_live_rtc_answer_v1_";
+const SOS_ACTIVE_OWNER_KEY = "socialsea_sos_active_owner_v1";
 const HEARTBEAT_MS = 5000;
 const RADIUS_METERS = 5000;
 const LOCAL_SIGNAL_REBROADCAST_MS = 4000;
@@ -98,6 +99,18 @@ const writeJson = (key, value) => {
     localStorage.setItem(key, JSON.stringify(value));
   } catch {
     // ignore storage errors
+  }
+};
+
+const setSosActiveOwner = (isOwner) => {
+  try {
+    if (isOwner) {
+      sessionStorage.setItem(SOS_ACTIVE_OWNER_KEY, "1");
+    } else {
+      sessionStorage.removeItem(SOS_ACTIVE_OWNER_KEY);
+    }
+  } catch {
+    // ignore storage issues
   }
 };
 
@@ -478,6 +491,7 @@ export default function SOSPage() {
         backendStatus: "Sending trigger...",
         updatedAt: startIso
       });
+      setSosActiveOwner(true);
       broadcastSosSignal("triggering", {
         reporterUserId,
         reporterEmail,
@@ -559,6 +573,7 @@ export default function SOSPage() {
       setStatus("idle");
       setMessage(err?.message || "Failed to start SOS");
       persistSession({ active: false, updatedAt: nowIso() });
+      setSosActiveOwner(false);
       stopLocationWatch();
       cleanupMedia();
       stopHeartbeat();
@@ -651,6 +666,7 @@ export default function SOSPage() {
         backendStatus: "Stopped",
         updatedAt: stoppedAt
       });
+      setSosActiveOwner(false);
       setStatus("stopped");
       setMessage("SOS stopped.");
       setRecordingInfo(stoppedRecordingInfo);

@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { FiBookmark } from "react-icons/fi";
+import { FiBookmark, FiMessageCircle, FiSend, FiVolume2, FiVolumeX } from "react-icons/fi";
 import { BsBookmarkFill } from "react-icons/bs";
+import { HiHandThumbUp, HiOutlineHandThumbUp } from "react-icons/hi2";
 import api from "../api/axios";
 import { getApiBaseUrl, toApiUrl } from "../api/baseUrl";
 import "./Reels.css";
 
-const MAX_REEL_SECONDS = 90;
+const MAX_REEL_SECONDS = 60;
 const GESTURE_SCROLL_COOLDOWN_MS = 200;
 const GESTURE_LIKE_COOLDOWN_MS = 200;
 const GESTURE_PLAY_TOGGLE_COOLDOWN_MS = 200;
@@ -949,7 +950,7 @@ export default function Reels() {
       <div className="reels-container" ref={containerRef} onScroll={onScroll}>
         {error && <p className="reel-state">{error}</p>}
         {!error && reels.length === 0 && (
-          <p className="reel-state">No reels yet (only videos up to 90 seconds are shown).</p>
+          <p className="reel-state">No reels yet (only videos up to 60 seconds are shown).</p>
         )}
 
         {reels.map((reel, idx) => {
@@ -968,118 +969,120 @@ export default function Reels() {
 
           return (
             <section className="reel-item" key={reel.id} data-reel-idx={idx}>
-              <div className="reel-frame">
-                <video
-                  ref={(el) => {
-                    if (el) videoRefs.current[reel.id] = el;
-                  }}
-                  src={videoUrl}
-                  loop
-                  muted={allMuted}
-                  playsInline
-                  controls={false}
-                  className="reel-video"
-                  onClick={(event) => handleReelTap(reel, event)}
-                />
-                <div className="reel-gradient-top" />
-                <div className="reel-gradient-bottom" />
-                <div className="reel-top-bar">
-                  <h3 className="reel-top-title">Reels</h3>
-                  <span className="reel-top-chip">For You</span>
-                </div>
-              </div>
-
-              {tapLikeBurstByPost[reel.id] && <div className="reel-like-burst">{"\u{1F44C}"}</div>}
-
-              <aside className="reel-actions">
-                <button
-                  type="button"
-                  className="reel-action-btn"
-                  onClick={toggleMute}
-                  title={allMuted ? "Unmute all reels" : "Mute all reels"}
-                >
-                  <span>{allMuted ? "\u{1F507}" : "\u{1F50A}"}</span>
-                </button>
-                <button
-                  type="button"
-                  className={`reel-action-btn ${likedPostIds[reel.id] ? "is-active" : ""}`}
-                  onClick={() => likeReel(reel.id)}
-                  title="Like"
-                >
-                  <span>{"\u{1F44C}"}</span>
-                  <small>{likeCounts[reel.id] || 0}</small>
-                </button>
-                <button
-                  type="button"
-                  className="reel-action-btn"
-                  onClick={() => toggleComments(reel.id)}
-                  title="Comment"
-                >
-                  <span>{"\u{1F5E8}"}</span>
-                  <small>{comments.length}</small>
-                </button>
-                <button type="button" className="reel-action-btn" onClick={() => shareReel(reel)} title="Share">
-                  <span>{"\u2934"}</span>
-                </button>
-                <button
-                  type="button"
-                  className="reel-action-btn reel-save-btn"
-                  onClick={() => toggleSave(reel.id)}
-                  title="Save"
-                >
-                  <span>{savedPostIds[reel.id] ? <BsBookmarkFill /> : <FiBookmark />}</span>
-                </button>
-              </aside>
-
-              <div className="reel-bottom-meta">
-                <div className="reel-owner-row">
-                  {ownerPic ? (
-                    <img src={ownerPic} alt={ownerName} className="reel-owner-avatar reel-owner-avatar-img" />
-                  ) : (
-                    <span className="reel-owner-avatar">{ownerName.charAt(0).toUpperCase()}</span>
-                  )}
-                  <Link 
-                    to={`/profile/${reel.user?.email || reel.user?.username || reel.username || "me"}`}
-                    className="reel-owner hover:underline"
-                  >
-                    {ownerName}
-                  </Link>
-                  {!isOwnReel && (
-                    <button
-                      type="button"
-                      className="reel-follow-btn"
-                      onClick={() => followOwner(reel)}
-                      disabled={isFollowing}
-                    >
-                      {isFollowing ? "Following" : "Follow +"}
-                    </button>
-                  )}
-                </div>
-                <p className="reel-caption">{caption}</p>
-              </div>
-
-              {shareMessageByPost[reel.id] && <p className="reel-share-status">{shareMessageByPost[reel.id]}</p>}
-
-              {commentsOpenByPost[reel.id] && (
-                <div className="reel-comments">
-                  <div className="reel-comment-input-row">
-                    <input
-                      type="text"
-                      placeholder="Write a comment..."
-                      value={commentTextByPost[reel.id] || ""}
-                      onChange={(e) =>
-                        setCommentTextByPost((prev) => ({ ...prev, [reel.id]: e.target.value }))
-                      }
-                    />
-                    <button type="button" onClick={() => submitComment(reel.id)}>Post</button>
+              <div className="reel-stage">
+                <div className="reel-frame">
+                  <video
+                    ref={(el) => {
+                      if (el) videoRefs.current[reel.id] = el;
+                    }}
+                    src={videoUrl}
+                    loop
+                    muted={allMuted}
+                    playsInline
+                    controls={false}
+                    className="reel-video"
+                    onClick={(event) => handleReelTap(reel, event)}
+                  />
+                  <div className="reel-gradient-top" />
+                  <div className="reel-gradient-bottom" />
+                  <div className="reel-top-bar">
+                    <h3 className="reel-top-title">Reels</h3>
+                    <span className="reel-top-chip">For You</span>
                   </div>
-                  {comments.map((comment) => (
-                    <div className="reel-comment-item" key={comment.id}>
-                      <strong>{comment.user?.name || comment.user?.email || "User"}:</strong> {comment.text}
-                    </div>
-                  ))}
                 </div>
-              )}
+
+                {tapLikeBurstByPost[reel.id] && <div className="reel-like-burst">{"\u{1F44C}"}</div>}
+
+                <aside className="reel-actions">
+                  <button
+                    type="button"
+                    className="reel-action-btn"
+                    onClick={toggleMute}
+                    title={allMuted ? "Unmute all reels" : "Mute all reels"}
+                  >
+                    <span>{allMuted ? <FiVolumeX /> : <FiVolume2 />}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`reel-action-btn ${likedPostIds[reel.id] ? "is-active" : ""}`}
+                    onClick={() => likeReel(reel.id)}
+                    title="Like"
+                  >
+                    <span>{likedPostIds[reel.id] ? <HiHandThumbUp /> : <HiOutlineHandThumbUp />}</span>
+                    <small>{likeCounts[reel.id] || 0}</small>
+                  </button>
+                  <button
+                    type="button"
+                    className="reel-action-btn"
+                    onClick={() => toggleComments(reel.id)}
+                    title="Comment"
+                  >
+                    <span><FiMessageCircle /></span>
+                    <small>{comments.length}</small>
+                  </button>
+                  <button type="button" className="reel-action-btn" onClick={() => shareReel(reel)} title="Share">
+                    <span><FiSend /></span>
+                  </button>
+                  <button
+                    type="button"
+                    className="reel-action-btn reel-save-btn"
+                    onClick={() => toggleSave(reel.id)}
+                    title="Save"
+                  >
+                    <span>{savedPostIds[reel.id] ? <BsBookmarkFill /> : <FiBookmark />}</span>
+                  </button>
+                </aside>
+
+                <div className="reel-bottom-meta">
+                  <div className="reel-owner-row">
+                    {ownerPic ? (
+                      <img src={ownerPic} alt={ownerName} className="reel-owner-avatar reel-owner-avatar-img" />
+                    ) : (
+                      <span className="reel-owner-avatar">{ownerName.charAt(0).toUpperCase()}</span>
+                    )}
+                    <Link
+                      to={`/profile/${reel.user?.email || reel.user?.username || reel.username || "me"}`}
+                      className="reel-owner hover:underline"
+                    >
+                      {ownerName}
+                    </Link>
+                    {!isOwnReel && (
+                      <button
+                        type="button"
+                        className="reel-follow-btn"
+                        onClick={() => followOwner(reel)}
+                        disabled={isFollowing}
+                      >
+                        {isFollowing ? "Following" : "Follow +"}
+                      </button>
+                    )}
+                  </div>
+                  <p className="reel-caption">{caption}</p>
+                </div>
+
+                {shareMessageByPost[reel.id] && <p className="reel-share-status">{shareMessageByPost[reel.id]}</p>}
+
+                {commentsOpenByPost[reel.id] && (
+                  <div className="reel-comments">
+                    <div className="reel-comment-input-row">
+                      <input
+                        type="text"
+                        placeholder="Write a comment..."
+                        value={commentTextByPost[reel.id] || ""}
+                        onChange={(e) =>
+                          setCommentTextByPost((prev) => ({ ...prev, [reel.id]: e.target.value }))
+                        }
+                      />
+                      <button type="button" onClick={() => submitComment(reel.id)}>Post</button>
+                    </div>
+                    {comments.map((comment) => (
+                      <div className="reel-comment-item" key={comment.id}>
+                        <strong>{comment.user?.name || comment.user?.email || "User"}:</strong> {comment.text}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </section>
           );
         })}

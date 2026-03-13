@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
+import { buildProfilePath, persistProfileIdentity } from "../utils/profileRoute";
 
 const NAME_HINT = "3-20 chars: lowercase letters, numbers, dot, underscore";
 
@@ -47,9 +48,10 @@ export default function ProfileSetup() {
         setName(existingName);
         setBio(existingBio);
         setPreview(existingPic);
+        persistProfileIdentity(p);
 
         if (completed && !isEditMode) {
-          navigate(`/profile/${id || "me"}`, { replace: true });
+          navigate(buildProfilePath(p, id), { replace: true });
           return;
         }
       })
@@ -120,9 +122,11 @@ export default function ProfileSetup() {
       if (photo) form.append("profilePic", photo);
 
       const res = await api.post("/api/profile/setup", form);
-      const savedId = String(res?.data?.id || userId || localStorage.getItem("userId") || "me");
+      const savedProfile = res?.data?.user || res?.data || {};
+      const savedId = String(savedProfile?.id || userId || localStorage.getItem("userId") || "me");
+      persistProfileIdentity(savedProfile);
       localStorage.setItem("profileCompleted", "true");
-      navigate(`/profile/${savedId}`, { replace: true });
+      navigate(buildProfilePath(savedProfile, savedId), { replace: true });
     } catch (err) {
       const message = err?.response?.data?.message || "Failed to update profile";
       const serverSuggestions = err?.response?.data?.suggestions;
