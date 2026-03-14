@@ -55,25 +55,12 @@ export default function ForgotPassword() {
     try {
       const res = await forgotPassword(identifier.trim());
       const payload = res?.data || {};
-      const serverDebugOtp = String(payload?.debugOtp || "").trim();
       const deliveryFailed = payload?.deliveryFailed === true;
       setOtpSent(true);
-      if (canShowDebugOtp && serverDebugOtp) {
-        setDebugOtp(serverDebugOtp);
-        setOtp(serverDebugOtp);
-      }
       if (deliveryFailed) {
-        setSuccess(
-          serverDebugOtp
-            ? "Email delivery failed. Debug OTP has been auto-filled for local testing."
-            : "Email delivery failed on server."
-        );
+        setSuccess("Email delivery failed on server.");
       } else {
-        setSuccess(
-          serverDebugOtp
-            ? "OTP sent. Debug OTP was auto-filled. Enter your new password."
-            : "OTP sent. Check Inbox/Spam, then enter OTP and your new password."
-        );
+        setSuccess("OTP sent. Check Inbox/Spam, then enter OTP and your new password.");
       }
     } catch (err) {
       setError(parseErrorMessage(err, "Failed to send OTP."));
@@ -215,7 +202,6 @@ export default function ForgotPassword() {
 
         {error && <p className="auth-error">{error}</p>}
         {success && <p className="auth-success">{success}</p>}
-        {canShowDebugOtp && !!debugOtp && <p className="auth-debug-otp">Debug OTP: {debugOtp}</p>}
 
         <p className="auth-foot">
           Remembered it? <Link to="/login">Back to login</Link>

@@ -25,6 +25,29 @@ const uniqueNonEmpty = (arr) =>
     return arr.indexOf(v) === i;
   });
 
+const BAD_EMERGENCY_HOSTS = new Set([
+  "localhost",
+  "127.0.0.1",
+  "43.205.213.14",
+  "socialsea.co.in",
+  "www.socialsea.co.in"
+]);
+
+const normalizeEmergencyBase = (rawBase) => {
+  const value = String(rawBase || "").trim().replace(/\/+$/, "");
+  if (!value) return "";
+  if (value === "/api") return "";
+  if (value.startsWith("/")) return value;
+  if (!/^https?:\/\//i.test(value)) return "";
+  try {
+    const host = new URL(value).hostname.toLowerCase();
+    if (BAD_EMERGENCY_HOSTS.has(host)) return "";
+  } catch {
+    return "";
+  }
+  return value;
+};
+
 const emergencyBaseCandidates = () => {
   const isLocalDev =
     typeof window !== "undefined" &&
@@ -36,26 +59,21 @@ const emergencyBaseCandidates = () => {
     typeof window !== "undefined"
       ? localStorage.getItem("socialsea_auth_base_url") || sessionStorage.getItem("socialsea_auth_base_url")
       : "";
-  const list = uniqueNonEmpty(
+  const rawList = uniqueNonEmpty(
     isLocalDev
       ? [
-          "/api",
           "http://localhost:8080",
-          "http://127.0.0.1:8080",
-          getApiBaseUrl(),
-          api.defaults.baseURL,
-          storedBase,
-          import.meta.env.VITE_API_URL
+          "http://127.0.0.1:8080"
         ]
       : [
-          "/api",
           getApiBaseUrl(),
           api.defaults.baseURL,
           storedBase,
           import.meta.env.VITE_API_URL,
-          "https://socialsea.co.in"
+          "https://api.socialsea.co.in"
         ]
   );
+  const list = uniqueNonEmpty(rawList.map(normalizeEmergencyBase).filter(Boolean));
   return list.filter((base) => !(isHttpsPage && /^http:\/\//i.test(String(base || ""))));
 };
 
@@ -295,7 +313,7 @@ export default function SOSPage() {
     const urls = buildEmergencyUrls(suffix);
     const suffixText = String(suffix || "").toLowerCase();
     const isPublicEmergencyEndpoint =
-      suffixText === "trigger" || suffixText === "active" || suffixText === "active-session";
+      suffixText === "trigger" || suffixText === "active";
     let lastErr = null;
     for (const url of urls) {
       try {

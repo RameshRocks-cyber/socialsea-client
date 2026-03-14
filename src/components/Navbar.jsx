@@ -45,6 +45,29 @@ const uniqueNonEmpty = (arr) =>
     return arr.indexOf(v) === i;
   });
 
+const BAD_EMERGENCY_HOSTS = new Set([
+  "localhost",
+  "127.0.0.1",
+  "43.205.213.14",
+  "socialsea.co.in",
+  "www.socialsea.co.in"
+]);
+
+const normalizeEmergencyBase = (rawBase) => {
+  const value = String(rawBase || "").trim().replace(/\/+$/, "");
+  if (!value) return "";
+  if (value === "/api") return "";
+  if (value.startsWith("/")) return value;
+  if (!/^https?:\/\//i.test(value)) return "";
+  try {
+    const host = new URL(value).hostname.toLowerCase();
+    if (BAD_EMERGENCY_HOSTS.has(host)) return "";
+  } catch {
+    return "";
+  }
+  return value;
+};
+
 const emergencyBaseCandidates = () => {
   const isLocalDev =
     typeof window !== "undefined" &&
@@ -56,26 +79,22 @@ const emergencyBaseCandidates = () => {
     typeof window !== "undefined"
       ? localStorage.getItem("socialsea_auth_base_url") || sessionStorage.getItem("socialsea_auth_base_url")
       : "";
-  const list = uniqueNonEmpty(
+  const rawList = uniqueNonEmpty(
     isLocalDev
       ? [
-          "/api",
           "http://localhost:8080",
-          "http://127.0.0.1:8080",
-          getApiBaseUrl(),
-          api.defaults.baseURL,
-          storedBase,
-          import.meta.env.VITE_API_URL
+          "http://127.0.0.1:8080"
         ]
       : [
-          "/api",
           getApiBaseUrl(),
           api.defaults.baseURL,
           storedBase,
           import.meta.env.VITE_API_URL,
-          "https://socialsea.co.in"
+          "https://api.socialsea.co.in"
         ]
   );
+
+  const list = uniqueNonEmpty(rawList.map(normalizeEmergencyBase).filter(Boolean));
   return list.filter((base) => !(isHttpsPage && /^http:\/\//i.test(String(base || ""))));
 };
 
@@ -242,6 +261,7 @@ export default function Navbar() {
   const myEmail = String(sessionStorage.getItem("email") || localStorage.getItem("email") || "").trim().toLowerCase();
   const onChatRoute = location.pathname === "/chat" || location.pathname.startsWith("/chat/");
   const onChatConversationRoute = location.pathname.startsWith("/chat/");
+  const isOnSosRoute = location.pathname.startsWith("/sos");
   const profileTarget = "/profile/me";
   const [incomingCall, setIncomingCall] = useState(null);
   const [showSosInNavbar, setShowSosInNavbar] = useState(readShowSosInNavbar);
@@ -278,20 +298,23 @@ export default function Navbar() {
   }, [incomingCall]);
 
   const isOwnEmergency = ({ reporterEmail, reporterUserId } = {}) => {
-    const incomingEmail = String(reporterEmail || "").trim().toLowerCase();
-    const incomingUserId = String(reporterUserId || "").trim();
-    if (myEmail && incomingEmail && incomingEmail === myEmail) return true;
-    if (myUserId && incomingUserId && incomingUserId === myUserId) return true;
     try {
       const raw = localStorage.getItem(SOS_SESSION_KEY);
       if (raw) {
         const session = JSON.parse(raw);
         const sessionReporterEmail = String(session?.reporterEmail || "").trim().toLowerCase();
         const sessionReporterUserId = String(session?.reporterUserId || "").trim();
-        if (myEmail && sessionReporterEmail && sessionReporterEmail === myEmail) return true;
-        if (myUserId && sessionReporterUserId && sessionReporterUserId === myUserId) return true;
-        // Backward compatibility for very old local session records that don't store reporter identity.
-        if (session?.triggeredByCurrentBrowser && !sessionReporterEmail && !sessionReporterUserId) return true;
+        const incomingEmail = String(reporterEmail || "").trim().toLowerCase();
+        const incomingUserId = String(reporterUserId || "").trim();
+        // Only suppress on this browser if the local SOS session is active or was triggered here.
+        if (session?.triggeredByCurrentBrowser) return true;
+        if (
+          session?.active &&
+          ((sessionReporterEmail && incomingEmail && sessionReporterEmail === incomingEmail) ||
+            (sessionReporterUserId && incomingUserId && sessionReporterUserId === incomingUserId))
+        ) {
+          return true;
+        }
       }
     } catch {
       // ignore storage issues
@@ -545,6 +568,12 @@ export default function Navbar() {
   useEffect(() => {
     popupStateRef.current = sosPopup;
   }, [sosPopup]);
+
+  useEffect(() => {
+    if (isOnSosRoute && popupStateRef.current?.isEmergency) {
+      setSosPopup(null);
+    }
+  }, [isOnSosRoute]);
 
   useEffect(() => {
     try {
@@ -835,7 +864,7 @@ export default function Navbar() {
       let lastError = null;
       const urls = buildEmergencyUrls(suffix);
       const suffixText = String(suffix || "").toLowerCase();
-      const isPublicEmergencyEndpoint = suffixText === "active" || suffixText === "active-session";
+      const isPublicEmergencyEndpoint = suffixText === "active";
       for (const url of urls) {
         const baseURL = /^https?:\/\//i.test(url) ? undefined : api.defaults.baseURL;
         const path = /^https?:\/\//i.test(url) ? url : url;
@@ -874,7 +903,7 @@ export default function Navbar() {
     const pollEmergency = async () => {
       try {
         const payloads = [];
-        const suffixes = ["active", "active-session", "assist/active", "assist/active-session"];
+        const suffixes = ["active", "assist/active"];
         for (const suffix of suffixes) {
           try {
             payloads.push(await requestEmergencyData(suffix));
@@ -949,6 +978,10 @@ export default function Navbar() {
 
     const forceFromActiveSession = () => {
       try {
+        if (isOnSosRoute) {
+          if (popupStateRef.current?.isEmergency) setSosPopup(null);
+          return;
+        }
         const raw = localStorage.getItem(SOS_SESSION_KEY);
         if (!raw) {
           if (popupStateRef.current?.isEmergency) setSosPopup(null);
@@ -989,7 +1022,7 @@ export default function Navbar() {
       disposed = true;
       clearInterval(timer);
     };
-  }, [location.pathname]);
+  }, [location.pathname, isOnSosRoute]);
 
   const closeCameraStudio = () => {
     setCameraOpen(false);
@@ -1170,6 +1203,21 @@ export default function Navbar() {
 
   const showSosPopup = (message, options = {}) => {
     const nextPopup = buildSosPopupPayload(message, options);
+    if (nextPopup?.isEmergency && readIsSosActive()) {
+      setSosPopup(null);
+      return;
+    }
+    if (nextPopup?.isEmergency && isOnSosRoute) {
+      setSosPopup(null);
+      return;
+    }
+    if (
+      nextPopup?.isEmergency &&
+      isOwnEmergency({ reporterEmail: options?.reporterEmail, reporterUserId: options?.reporterUserId })
+    ) {
+      setSosPopup(null);
+      return;
+    }
     if (nextPopup?.isEmergency && ownSosStopUntilRef.current > Date.now()) {
       setSosPopup(null);
       return;
@@ -1307,7 +1355,7 @@ export default function Navbar() {
         </div>
       )}
 
-      {sosPopup && (() => {
+      {!isOnSosRoute && sosPopup && (() => {
         const popupData = typeof sosPopup === "string" ? buildSosPopupPayload(sosPopup) : sosPopup;
         return (
         <div className="ss-sos-popup" role="status" aria-live="polite">

@@ -78,7 +78,8 @@ function AppRoutes() {
     let active = true;
     let watchId = null;
     let lastSentAt = 0;
-    const minSendGapMs = 60000;
+    const minSendGapMs = 30000;
+    let intervalId = null;
 
     const sendPresence = (latitude, longitude) => {
       if (!active) return;
@@ -86,29 +87,77 @@ function AppRoutes() {
       const now = Date.now();
       if (now - lastSentAt < minSendGapMs) return;
       lastSentAt = now;
-      api.post("/api/emergency/presence", { latitude, longitude }).catch(() => {});
+      const payload = { latitude, longitude };
+      const bases = [
+        "http://localhost:8080",
+        "http://127.0.0.1:8080"
+      ].filter(Boolean);
+      bases.forEach((baseURL, index) => {
+        api
+          .request({
+            method: "POST",
+            url: "/api/emergency/presence",
+            data: payload,
+            baseURL,
+            skipAuth: true
+          })
+          .catch(() => {
+            if (index === bases.length - 1) {
+              // ignore final failure
+            }
+          });
+      });
     };
 
     const onPos = (pos) => {
       sendPresence(pos?.coords?.latitude, pos?.coords?.longitude);
     };
 
-    navigator.geolocation.getCurrentPosition(onPos, () => {}, {
-      enableHighAccuracy: true,
-      timeout: 10000,
-      maximumAge: 30000
-    });
+    const requestOnce = () => {
+      navigator.geolocation.getCurrentPosition(onPos, () => {}, {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 15000
+      });
+    };
+
+    if (navigator.permissions?.query) {
+      navigator.permissions
+        .query({ name: "geolocation" })
+        .then((status) => {
+          if (!active) return;
+          if (status.state === "granted") {
+            requestOnce();
+          } else {
+            // Trigger prompt for users who haven't granted location yet.
+            requestOnce();
+          }
+        })
+        .catch(() => {
+          requestOnce();
+        });
+    } else {
+      requestOnce();
+    }
     watchId = navigator.geolocation.watchPosition(onPos, () => {}, {
       enableHighAccuracy: true,
       timeout: 12000,
       maximumAge: 60000
     });
 
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") requestOnce();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    intervalId = setInterval(requestOnce, 30000);
+
     return () => {
       active = false;
       if (watchId != null && navigator.geolocation) {
         navigator.geolocation.clearWatch(watchId);
       }
+      if (intervalId) clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [authed, isAuthScreen]);
 
