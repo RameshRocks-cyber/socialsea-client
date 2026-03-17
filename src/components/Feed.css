@@ -23,6 +23,54 @@ body.feed-no-swipe-back {
   min-width: 0;
 }
 
+.live-share-banner {
+  margin: 10px 0 18px;
+  padding: 12px 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(196, 149, 91, 0.45);
+  background: linear-gradient(135deg, rgba(25, 20, 16, 0.92), rgba(12, 10, 8, 0.96));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+}
+
+.live-share-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.live-share-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ff6a3d;
+  box-shadow: 0 0 10px rgba(255, 106, 61, 0.7);
+}
+
+.live-share-title {
+  margin: 0;
+  font-weight: 700;
+  color: #f2e7da;
+}
+
+.live-share-sub {
+  margin: 2px 0 0;
+  font-size: 0.85rem;
+  color: rgba(242, 231, 218, 0.7);
+}
+
+.live-share-btn {
+  border: none;
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-weight: 700;
+  background: linear-gradient(135deg, #c4955b, #9f6f4a);
+  color: #1b1108;
+}
+
 .explore-search-wrap {
   position: relative;
   z-index: 2;
@@ -526,6 +574,25 @@ body.feed-no-swipe-back {
 .feed-media-view::-webkit-media-controls-start-playback-button {
   display: none !important;
   -webkit-appearance: none;
+}
+
+.feed-media-view {
+  accent-color: #111;
+  color-scheme: dark;
+}
+
+.feed-media-view::-webkit-media-controls-panel {
+  background: rgba(0, 0, 0, 0.78);
+}
+
+.feed-media-view::-webkit-media-controls-play-button,
+.feed-media-view::-webkit-media-controls-pause-button,
+.feed-media-view::-webkit-media-controls-timeline,
+.feed-media-view::-webkit-media-controls-current-time-display,
+.feed-media-view::-webkit-media-controls-time-remaining-display,
+.feed-media-view::-webkit-media-controls-mute-button,
+.feed-media-view::-webkit-media-controls-volume-slider {
+  filter: grayscale(1) brightness(0.6);
 }
 
 .feed-actions {

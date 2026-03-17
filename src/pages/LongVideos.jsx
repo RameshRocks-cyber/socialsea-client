@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import api from "../api/axios";
+import { readLiveBroadcast, subscribeLiveBroadcast } from "../utils/liveBroadcast";
 import "./LongVideos.css";
 
 const LONG_VIDEO_SECONDS = 90;
@@ -24,6 +25,7 @@ export default function LongVideos() {
   const { postId } = useParams();
   const isWatchMode = Boolean(postId);
   const navigate = useNavigate();
+  const [liveBroadcast, setLiveBroadcast] = useState(() => readLiveBroadcast());
   const playerRef = useRef(null);
   const playerWrapRef = useRef(null);
   const pinchRef = useRef({
@@ -81,6 +83,11 @@ export default function LongVideos() {
   const [isSeeking, setIsSeeking] = useState(false);
   const [playerZoom, setPlayerZoom] = useState({ scale: 1, x: 0, y: 0 });
   const [playerVolume, setPlayerVolume] = useState(1);
+
+  useEffect(() => {
+    const unsubscribe = subscribeLiveBroadcast((next) => setLiveBroadcast(next));
+    return () => unsubscribe();
+  }, []);
 
   const toList = (payload) => {    if (Array.isArray(payload)) return payload;    if (Array.isArray(payload?.content)) return payload.content;    if (Array.isArray(payload?.items)) return payload.items;    if (Array.isArray(payload?.data)) return payload.data;
     return [];
@@ -550,6 +557,17 @@ export default function LongVideos() {
     return `${n}`;
   };
 
+  const formatLiveElapsed = (startedAt) => {
+    const start = Number(startedAt || 0);
+    if (!start) return "Just now";
+    const diffSec = Math.max(0, Math.floor((Date.now() - start) / 1000));
+    if (diffSec < 60) return `${diffSec}s ago`;
+    const diffMin = Math.floor(diffSec / 60);
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffHr = Math.floor(diffMin / 60);
+    return `${diffHr}h ago`;
+  };
+
   const relativeFrom = (value) => {    if (!value) return "recently";
     const d = new Date(value);    if (!Number.isFinite(d.getTime())) return "recently";
     const diffMs = Date.now() - d.getTime();
@@ -970,6 +988,24 @@ export default function LongVideos() {
           />
         </div>
       </header>
+
+      {liveBroadcast && (
+        <div className="watch-live-banner" role="button" tabIndex={0} onClick={() => navigate("/live/start")}>
+          <div className="watch-live-left">
+            <span className="watch-live-dot" />
+            <div>
+              <p className="watch-live-title">Live now</p>
+              <p className="watch-live-sub">
+                {liveBroadcast.title || `${liveBroadcast.hostName || "Creator"} is live`} •{" "}
+                {formatLiveElapsed(liveBroadcast.startedAt)}
+              </p>
+            </div>
+          </div>
+          <button type="button" className="watch-live-btn">
+            Watch Live
+          </button>
+        </div>
+      )}
 
       <div className="yt-chip-row">
         {WATCH_CATEGORIES.map((chip) => (

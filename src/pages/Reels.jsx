@@ -5,6 +5,7 @@ import { BsBookmarkFill } from "react-icons/bs";
 import { HiHandThumbUp, HiOutlineHandThumbUp } from "react-icons/hi2";
 import api from "../api/axios";
 import { getApiBaseUrl, toApiUrl } from "../api/baseUrl";
+import { readLiveBroadcast, subscribeLiveBroadcast } from "../utils/liveBroadcast";
 import "./Reels.css";
 
 const MAX_REEL_SECONDS = 60;
@@ -36,6 +37,7 @@ export default function Reels() {
   const navigate = useNavigate();
   const [reels, setReels] = useState([]);
   const [error, setError] = useState("");
+  const [liveBroadcast, setLiveBroadcast] = useState(() => readLiveBroadcast());
   const [gestureEnabled, setGestureEnabled] = useState(false);
   const [gestureStatus, setGestureStatus] = useState("Hand signals are off");
   const [gestureError, setGestureError] = useState("");
@@ -196,8 +198,10 @@ export default function Reels() {
 
         const merged = Array.from(byKey.values());
         const filtered = await Promise.all(
-          merged.map(async ({ item, source }) => {
+          merged.map(async ({ item }) => {
             if (getMediaType(item) !== "VIDEO") return null;
+            const explicitReel = isExplicitReel(item);
+            if (!explicitReel) return null;
 
             const rawUrl = item.contentUrl || item.mediaUrl || "";
             const mediaUrl = resolveUrl(String(rawUrl).trim());
@@ -213,8 +217,8 @@ export default function Reels() {
               return measuredDuration <= MAX_REEL_SECONDS ? item : null;
             }
 
-            // /api/reels is expected to be short-video scoped; keep entries even if metadata is unavailable.
-            return source === "reels" || source === "target" ? item : null;
+            // Keep only explicit reels when metadata is unavailable.
+            return explicitReel ? item : null;
           })
         );
 
@@ -241,6 +245,11 @@ export default function Reels() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = subscribeLiveBroadcast((next) => setLiveBroadcast(next));
+    return () => unsubscribe();
   }, []);
 
   useEffect(() => {
@@ -379,6 +388,18 @@ export default function Reels() {
     return item?.reel ? "VIDEO" : "IMAGE";
   };
 
+  const isExplicitReel = (item) => {
+    if (!item || typeof item !== "object") return false;
+    if (item?.reel === true || item?.reel === "true") return true;
+    if (item?.isReel === true || item?.isReel === "true") return true;
+    if (item?.isShortVideo === true || item?.isShortVideo === "true") return true;
+    if (item?.isShort === true || item?.short === true || item?.shortVideo === true) return true;
+    const rawType = String(item?.type || item?.mediaType || item?.contentType || "")
+      .trim()
+      .toLowerCase();
+    return rawType.includes("reel") || rawType.includes("short");
+  };
+
   const durationFromPost = (post) => {
     const candidates = [
       post?.durationSeconds,
@@ -411,6 +432,17 @@ export default function Reels() {
       .filter(Boolean)
       .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
       .join(" ");
+  };
+
+  const formatLiveElapsed = (startedAt) => {
+    const start = Number(startedAt || 0);
+    if (!start) return "Just now";
+    const diffSec = Math.max(0, Math.floor((Date.now() - start) / 1000));
+    if (diffSec < 60) return `${diffSec}s ago`;
+    const diffMin = Math.floor(diffSec / 60);
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffHr = Math.floor(diffMin / 60);
+    return `${diffHr}h ago`;
   };
 
   const reelOwnerKey = (reel) => String(reel?.user?.id || reel?.user?.email || reel?.username || reel?.id);
@@ -935,6 +967,21 @@ export default function Reels() {
 
   return (
     <div className="reels-page">
+      {liveBroadcast && (
+        <div className="reels-live-banner" role="button" tabIndex={0} onClick={() => navigate("/live/start")}>
+          <span className="reels-live-dot" />
+          <div className="reels-live-text">
+            <strong>Live now</strong>
+            <small>
+              {liveBroadcast.title || `${liveBroadcast.hostName || "Creator"} is live`} •{" "}
+              {formatLiveElapsed(liveBroadcast.startedAt)}
+            </small>
+          </div>
+          <button type="button" className="reels-live-btn">
+            Watch Live
+          </button>
+        </div>
+      )}
       <div className="reels-gesture-toggle">
         <button
           type="button"

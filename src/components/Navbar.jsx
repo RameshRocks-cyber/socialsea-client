@@ -267,6 +267,7 @@ export default function Navbar() {
   const [showSosInNavbar, setShowSosInNavbar] = useState(readShowSosInNavbar);
   const [sosActive, setSosActive] = useState(readIsSosActive);
   const [sosPopup, setSosPopup] = useState(null);
+  const [sosUserLocation, setSosUserLocation] = useState(null);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraError, setCameraError] = useState("");
   const [cameraBusy, setCameraBusy] = useState(false);
@@ -281,9 +282,14 @@ export default function Navbar() {
   const seenAlertIdsRef = useRef(readSeenAlertIds());
   const suppressedAlertIdsRef = useRef(readSuppressedAlertIds());
   const ownSosStopUntilRef = useRef(0);
+  const sosEmergencyMissesRef = useRef(0);
+  const sosPopupStickyRef = useRef(false);
+  const sosPopupStickyIdRef = useRef("");
   const popupStateRef = useRef(null);
   const popupMetaRef = useRef({ fingerprint: "", shownAt: 0 });
   const sosSignalChannelRef = useRef(null);
+  const sosUserLocationRef = useRef(null);
+  const sosLocationWatchRef = useRef(null);
   const lastHandledSignalIdRef = useRef(readSessionValue(SOS_LAST_SIGNAL_ID_KEY));
   const lastHandledSessionSigRef = useRef(readSessionValue(SOS_LAST_SESSION_SIG_KEY));
   const cameraVideoRef = useRef(null);
@@ -296,6 +302,33 @@ export default function Navbar() {
   useEffect(() => {
     incomingCallRef.current = incomingCall;
   }, [incomingCall]);
+
+  useEffect(() => {
+    if (!navigator.geolocation) return undefined;
+    const onPosition = (pos) => {
+      const next = {
+        latitude: pos.coords.latitude,
+        longitude: pos.coords.longitude,
+        accuracy: pos.coords.accuracy,
+        at: Date.now()
+      };
+      sosUserLocationRef.current = next;
+      setSosUserLocation(next);
+    };
+    const onError = () => {};
+    const watchId = navigator.geolocation.watchPosition(onPosition, onError, {
+      enableHighAccuracy: true,
+      maximumAge: 10000,
+      timeout: 10000
+    });
+    sosLocationWatchRef.current = watchId;
+    return () => {
+      if (watchId != null && navigator.geolocation) {
+        navigator.geolocation.clearWatch(watchId);
+      }
+      sosLocationWatchRef.current = null;
+    };
+  }, []);
 
   const isOwnEmergency = ({ reporterEmail, reporterUserId } = {}) => {
     try {
@@ -570,9 +603,7 @@ export default function Navbar() {
   }, [sosPopup]);
 
   useEffect(() => {
-    if (isOnSosRoute && popupStateRef.current?.isEmergency) {
-      setSosPopup(null);
-    }
+    if (!popupStateRef.current) return;
   }, [isOnSosRoute]);
 
   useEffect(() => {
@@ -664,13 +695,13 @@ export default function Navbar() {
       const resolvedAlertId = String(payload.alertId || payload.localAlertId || "").trim();
       const signalReporterEmail = payload.reporterEmail || payload.senderEmail;
       const signalReporterUserId = payload.reporterUserId || payload.senderUserId;
-      if (kind === "stopped") {
-        const isOwnStopped =
-          Boolean(payload?.triggeredByCurrentBrowser) ||
-          isOwnEmergency({ reporterEmail: signalReporterEmail, reporterUserId: signalReporterUserId });
-        if (isOwnStopped) {
-          const until = Date.now() + 45000;
-          ownSosStopUntilRef.current = until;
+        if (kind === "stopped") {
+          const isOwnStopped =
+            Boolean(payload?.triggeredByCurrentBrowser) ||
+            isOwnEmergency({ reporterEmail: signalReporterEmail, reporterUserId: signalReporterUserId });
+          if (isOwnStopped) {
+            const until = Date.now() + 45000;
+            ownSosStopUntilRef.current = until;
           try {
             sessionStorage.setItem(SOS_OWN_STOP_AT_KEY, String(until));
             localStorage.setItem(SOS_OWN_STOP_AT_KEY, String(until));
@@ -678,23 +709,32 @@ export default function Navbar() {
             // ignore storage issues
           }
         }
-        suppressAlert(resolvedAlertId);
-        setSosPopup(null);
-        return;
-      }
+          suppressAlert(resolvedAlertId);
+          sosPopupStickyRef.current = false;
+          sosPopupStickyIdRef.current = "";
+          setSosPopup(null);
+          return;
+        }
       if (resolvedAlertId && isAlertSuppressed(resolvedAlertId)) {
         setSosPopup(null);
         return;
       }
+      const withinRadius = isWithinSosRadius({
+        latitude: payload.latitude,
+        longitude: payload.longitude,
+        radiusMeters: payload.radiusMeters
+      });
+      if (!withinRadius) return;
       showSosPopup("[EMERGENCY] SocialSea Emergengy SOS is asking for help", {
         isEmergency: true,
         alertId: resolvedAlertId || undefined,
         reporterEmail: signalReporterEmail,
-        liveUrl: payload.liveUrl,
+        liveUrl: payload.liveUrl || payload.streamUrl || payload.liveStreamUrl || payload.stream,
         navigateUrl: payload.navigateUrl,
         mapsUrl: payload.mapsUrl,
         latitude: payload.latitude,
-        longitude: payload.longitude
+        longitude: payload.longitude,
+        radiusMeters: payload.radiusMeters
       });
     };
 
@@ -916,12 +956,27 @@ export default function Navbar() {
         if (disposed) return;
         const alerts = payloads.flatMap((data) => normalizeAlerts(data));
         const activeAlerts = alerts.filter((a) => (typeof a?.active === "boolean" ? a.active : true));
+        if (activeAlerts.length) {
+          sosEmergencyMissesRef.current = 0;
+        } else {
+          sosEmergencyMissesRef.current += 1;
+        }
         const activeKeys = new Set(activeAlerts.map((a) => buildEmergencyDedupeKey(a)).filter(Boolean));
         const currentPopup = popupStateRef.current;
         const currentPopupKey = normalizeAlertId(currentPopup?.dedupeKey || currentPopup?.alertId);
 
-        // Close stale emergency popup as soon as backend no longer reports active alerts.
+        // Close stale emergency popup only when backend is consistently inactive
+        // and local SOS session isn't marked active.
         if (!activeAlerts.length && currentPopup?.isEmergency) {
+          if (readIsSosActive()) {
+            sosEmergencyMissesRef.current = 0;
+            return;
+          }
+          if (sosEmergencyMissesRef.current < 3) {
+            return;
+          }
+          sosPopupStickyRef.current = false;
+          sosPopupStickyIdRef.current = "";
           setSosPopup(null);
           return;
         }
@@ -943,6 +998,7 @@ export default function Navbar() {
           }
           if (!dedupeKey) continue;
           if (isAlertSuppressed(id)) continue;
+          if (!isWithinSosRadius(a)) continue;
           const currentKey = normalizeAlertId(popupStateRef.current?.dedupeKey || popupStateRef.current?.alertId);
           if (currentKey && dedupeKey === currentKey) continue;
           seenEmergencyAlertsRef.current.add(dedupeKey);
@@ -952,11 +1008,12 @@ export default function Navbar() {
             alertId: id,
             dedupeKey,
             reporterEmail: reporter,
-            liveUrl: a?.liveUrl || a?.streamUrl,
+            liveUrl: a?.liveUrl || a?.streamUrl || a?.liveStreamUrl || a?.stream,
             navigateUrl: a?.navigateUrl || a?.locationUrl,
             mapsUrl: a?.mapsUrl,
             latitude: a?.latitude ?? a?.lastLocation?.latitude,
-            longitude: a?.longitude ?? a?.lastLocation?.longitude
+            longitude: a?.longitude ?? a?.lastLocation?.longitude,
+            radiusMeters: a?.radiusMeters ?? a?.radius ?? a?.radiusKm
           });
           break;
         }
@@ -978,17 +1035,17 @@ export default function Navbar() {
 
     const forceFromActiveSession = () => {
       try {
-        if (isOnSosRoute) {
-          if (popupStateRef.current?.isEmergency) setSosPopup(null);
-          return;
-        }
         const raw = localStorage.getItem(SOS_SESSION_KEY);
         if (!raw) {
           if (popupStateRef.current?.isEmergency) setSosPopup(null);
+          sosEmergencyMissesRef.current = 0;
           return;
         }
         const session = JSON.parse(raw);
         if (!session?.active) {
+          sosEmergencyMissesRef.current = 3;
+          sosPopupStickyRef.current = false;
+          sosPopupStickyIdRef.current = "";
           const stoppedId = normalizeAlertId(session?.alertId || session?.alertDisplayId);
           const isOwnStoppedSession =
             Boolean(session?.triggeredByCurrentBrowser) ||
@@ -1004,6 +1061,7 @@ export default function Navbar() {
         const fallbackAlertId = session?.alertId || session?.alertDisplayId || "";
         if (isAlertSuppressed(fallbackAlertId)) return;
         if (disposed) return;
+        sosEmergencyMissesRef.current = 0;
         showSosPopup("[EMERGENCY] SocialSea Emergengy SOS is asking for help", {
           isEmergency: true,
           alertId: fallbackAlertId || undefined,
@@ -1086,6 +1144,38 @@ export default function Navbar() {
   const toFiniteNumber = (value) => {
     const n = Number(value);
     return Number.isFinite(n) ? n : null;
+  };
+
+  const haversineDistanceMeters = (lat1, lon1, lat2, lon2) => {
+    const toRad = (deg) => (deg * Math.PI) / 180;
+    const r = 6371000;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return r * c;
+  };
+
+  const resolveRadiusMeters = (alertLike = {}) => {
+    const rawMeters = toFiniteNumber(alertLike?.radiusMeters ?? alertLike?.radius);
+    if (rawMeters != null) return rawMeters;
+    const rawKm = toFiniteNumber(alertLike?.radiusKm ?? alertLike?.radius_km);
+    if (rawKm != null) return rawKm * 1000;
+    return 5000;
+  };
+
+  const isWithinSosRadius = (alertLike = {}) => {
+    const user = sosUserLocationRef.current;
+    const userLat = toFiniteNumber(user?.latitude);
+    const userLon = toFiniteNumber(user?.longitude);
+    const alertLat = toFiniteNumber(alertLike?.latitude ?? alertLike?.lat ?? alertLike?.lastLocation?.latitude);
+    const alertLon = toFiniteNumber(alertLike?.longitude ?? alertLike?.lon ?? alertLike?.lastLocation?.longitude);
+    if (userLat == null || userLon == null || alertLat == null || alertLon == null) return true;
+    const radius = resolveRadiusMeters(alertLike);
+    const distance = haversineDistanceMeters(userLat, userLon, alertLat, alertLon);
+    return distance <= radius;
   };
 
   const normalizeAlertId = (value) => String(value || "").trim();
@@ -1203,21 +1293,6 @@ export default function Navbar() {
 
   const showSosPopup = (message, options = {}) => {
     const nextPopup = buildSosPopupPayload(message, options);
-    if (nextPopup?.isEmergency && readIsSosActive()) {
-      setSosPopup(null);
-      return;
-    }
-    if (nextPopup?.isEmergency && isOnSosRoute) {
-      setSosPopup(null);
-      return;
-    }
-    if (
-      nextPopup?.isEmergency &&
-      isOwnEmergency({ reporterEmail: options?.reporterEmail, reporterUserId: options?.reporterUserId })
-    ) {
-      setSosPopup(null);
-      return;
-    }
     if (nextPopup?.isEmergency && ownSosStopUntilRef.current > Date.now()) {
       setSosPopup(null);
       return;
@@ -1266,11 +1341,30 @@ export default function Navbar() {
     const currentFingerprint = current
       ? `${current?.dedupeKey || current?.alertId || ""}|${current?.text || ""}|${current?.locationUrl || ""}`
       : "";
+    const nextKey = normalizeAlertId(nextPopup?.dedupeKey || nextPopup?.alertId);
+    if (nextPopup?.isEmergency && sosPopupStickyRef.current && popupStateRef.current?.isEmergency) {
+      if (!nextKey || nextKey === sosPopupStickyIdRef.current) {
+        return;
+      }
+    }
     if (fingerprint && (fingerprint === currentFingerprint || (fingerprint === last.fingerprint && now - last.shownAt < 1500))) {
       return;
     }
     popupMetaRef.current = { fingerprint, shownAt: now };
-    setSosPopup(nextPopup);
+    setSosPopup((prev) => {
+      const next = (() => {
+        if (!prev) return nextPopup;
+      if (!prev.isEmergency && nextPopup.isEmergency) return nextPopup;
+      if (prev.isEmergency && nextPopup.isEmergency) return prev;
+      if (prev.dedupeKey && nextPopup.dedupeKey && prev.dedupeKey === nextPopup.dedupeKey) return prev;
+      return nextPopup;
+      })();
+      if (next?.isEmergency) {
+        sosPopupStickyRef.current = true;
+        sosPopupStickyIdRef.current = nextKey || "";
+      }
+      return next;
+    });
   };
 
   const openPopupUrl = (url) => {
@@ -1355,7 +1449,7 @@ export default function Navbar() {
         </div>
       )}
 
-      {!isOnSosRoute && sosPopup && (() => {
+      {sosPopup && (() => {
         const popupData = typeof sosPopup === "string" ? buildSosPopupPayload(sosPopup) : sosPopup;
         return (
         <div className="ss-sos-popup" role="status" aria-live="polite">

@@ -4,6 +4,7 @@ import { FiBookmark } from "react-icons/fi";
 import { BsBookmarkFill } from "react-icons/bs";
 import api from "../api/axios";
 import { getApiBaseUrl, toApiUrl } from "../api/baseUrl";
+import { readLiveBroadcast, subscribeLiveBroadcast } from "../utils/liveBroadcast";
 import "./Feed.css";
 
 const LONG_VIDEO_SECONDS = 90;
@@ -109,6 +110,7 @@ export default function Feed() {
   const [searchParams] = useSearchParams();
   const [feedMode, setFeedMode] = useState("long");
   const [posts, setPosts] = useState(() => readCachedFeedPosts());
+  const [liveBroadcast, setLiveBroadcast] = useState(() => readLiveBroadcast());
   const [likeCounts, setLikeCounts] = useState({});
   const [likedPostIds, setLikedPostIds] = useState({});
   const [commentsByPost, setCommentsByPost] = useState({});
@@ -147,6 +149,11 @@ export default function Feed() {
   useEffect(() => {
     postsCountRef.current = Array.isArray(posts) ? posts.length : 0;
   }, [posts]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeLiveBroadcast((next) => setLiveBroadcast(next));
+    return () => unsubscribe();
+  }, []);
 
   useEffect(() => {
     if (typeof document === "undefined") return undefined;
@@ -663,6 +670,17 @@ export default function Feed() {
     });
   };
 
+  const formatLiveElapsed = (startedAt) => {
+    const start = Number(startedAt || 0);
+    if (!start) return "Just now";
+    const diffSec = Math.max(0, Math.floor((Date.now() - start) / 1000));
+    if (diffSec < 60) return `${diffSec}s ago`;
+    const diffMin = Math.floor(diffSec / 60);
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffHr = Math.floor(diffMin / 60);
+    return `${diffHr}h ago`;
+  };
+
   const handleViewerMediaClick = (post) => {
     if (!post || mediaTypeFor(post) !== "VIDEO") return;
     const existing = mediaClickTimerByPostRef.current[post.id];
@@ -1071,6 +1089,24 @@ export default function Feed() {
           </button>
         </div>
       </div>
+
+      {liveBroadcast && (
+        <div className="live-share-banner" role="button" tabIndex={0} onClick={() => navigate("/live/start")}>
+          <div className="live-share-left">
+            <span className="live-share-dot" />
+            <div>
+              <p className="live-share-title">Live now</p>
+              <p className="live-share-sub">
+                {liveBroadcast.title || `${liveBroadcast.hostName || "Creator"} is live`} •{" "}
+                {formatLiveElapsed(liveBroadcast.startedAt)}
+              </p>
+            </div>
+          </div>
+          <button type="button" className="live-share-btn">
+            Watch Live
+          </button>
+        </div>
+      )}
 
       {error && <p>{error}</p>}
       {!error && isLoading && <p className="feed-empty">Loading videos...</p>}

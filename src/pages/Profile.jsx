@@ -9,6 +9,7 @@ import "./Profile.css";
 const FOLLOWING_CACHE_KEY = "socialsea_following_cache_v1";
 const HIDDEN_PROFILE_POSTS_KEY = "socialsea_hidden_profile_posts_v1";
 const PROFILE_CACHE_KEY = "socialsea_profile_cache_v1";
+const HIGHLIGHTS_STORAGE_KEY = "socialsea_highlights_v1";
 const PROFILE_REQ_TIMEOUT_MS = 2500;
 const POSTS_REQ_TIMEOUT_MS = 2500;
 const FOLLOWING_REQ_TIMEOUT_MS = 1800;
@@ -85,6 +86,24 @@ const readHiddenProfilePostIds = () => {
     return new Set(parsed.map((id) => String(id || "").trim()).filter(Boolean));
   } catch {
     return new Set();
+  }
+};
+
+const readHighlights = () => {
+  try {
+    const raw = localStorage.getItem(HIGHLIGHTS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
+const writeHighlights = (next) => {
+  try {
+    localStorage.setItem(HIGHLIGHTS_STORAGE_KEY, JSON.stringify(next));
+  } catch {
+    // ignore storage issues
   }
 };
 
@@ -228,6 +247,11 @@ export default function Profile() {
   const [deletingPostIds, setDeletingPostIds] = useState({});
   const [deleteRevealPostId, setDeleteRevealPostId] = useState(null);
   const [videoMetaByPost, setVideoMetaByPost] = useState({});
+  const [profileTab, setProfileTab] = useState("posts");
+  const [createSheetOpen, setCreateSheetOpen] = useState(false);
+  const [highlights, setHighlights] = useState(() => readHighlights());
+  const [activeHighlight, setActiveHighlight] = useState(null);
+  const [activeHighlightIndex, setActiveHighlightIndex] = useState(0);
   const holdTimerRef = useRef(null);
   const deleteRevealHideTimerRef = useRef(null);
   const profileRouteKey = getProfileIdentifier(profile, username, myUsername, myName, myEmail, myUserId) || "me";
@@ -762,6 +786,64 @@ export default function Profile() {
     navigate("/login");
   };
 
+  const reels = posts.filter((post) => post?.isShortVideo);
+  const normalPosts = posts.filter((post) => !post?.isShortVideo);
+  const visiblePosts = profileTab === "reels" ? reels : normalPosts;
+
+  const openCreateSheet = () => {
+    setCreateSheetOpen(true);
+  };
+
+  const closeCreateSheet = () => {
+    setCreateSheetOpen(false);
+  };
+
+  const handleCreateAction = (kind) => {
+    closeCreateSheet();
+    if (kind === "post") {
+      navigate("/upload");
+      return;
+    }
+    if (kind === "reel") {
+      navigate("/upload?type=reel");
+      return;
+    }
+    if (kind === "live") {
+      navigate("/live/start");
+      return;
+    }
+    if (kind === "story") {
+      navigate("/story/create");
+      return;
+    }
+    if (kind === "highlights") {
+      navigate("/highlights/create");
+    }
+  };
+
+  const resolveHighlightMediaUrl = (raw) => {
+    if (!raw) return "";
+    return String(raw).startsWith("http") ? String(raw) : toApiUrl(String(raw));
+  };
+  const isHighlightVideo = (url) =>
+    /\.(mp4|mov|webm|mkv|m4v|avi|mpg|mpeg|3gp|ogv)(\?|#|$)/i.test(String(url || ""));
+  const openHighlight = (highlight) => {
+    if (!highlight?.items?.length) return;
+    setActiveHighlight(highlight);
+    setActiveHighlightIndex(0);
+  };
+  const closeHighlight = () => {
+    setActiveHighlight(null);
+    setActiveHighlightIndex(0);
+  };
+  const deleteHighlight = (id) => {
+    setHighlights((prev) => {
+      const next = prev.filter((item) => String(item?.id || "") !== String(id || ""));
+      writeHighlights(next);
+      return next;
+    });
+  };
+
   return (
     <div className="profile-page">
       {error && <div>{error}</div>}
@@ -812,8 +894,8 @@ export default function Profile() {
                   <button className="profile-cta profile-cta-edit" onClick={() => navigate("/profile-setup?mode=edit")}>
                     Edit Profile
                   </button>
-                  <button className="profile-cta profile-cta-upload" onClick={() => navigate("/upload")}>
-                    Add Post
+                  <button className="profile-cta profile-cta-upload" onClick={openCreateSheet}>
+                    Create
                   </button>
                   <button className="profile-cta profile-cta-settings" onClick={() => navigate("/settings")}>
                     Settings
@@ -840,13 +922,83 @@ export default function Profile() {
             </section>
           )}
 
+          {isOwnProfile && highlights.length > 0 && (
+            <section className="profile-highlights">
+              <div className="profile-highlights-head">
+                <h3>Highlights</h3>
+                <button type="button" className="profile-highlights-add" onClick={() => navigate("/highlights/create")}>
+                  + New
+                </button>
+              </div>
+              <div className="profile-highlights-row">
+                {highlights.map((highlight) => {
+                  const coverRaw =
+                    highlight?.coverUrl || highlight?.items?.[0]?.mediaUrl || highlight?.items?.[0]?.url || "";
+                  const coverUrl = resolveHighlightMediaUrl(coverRaw);
+                  const isVideo = isHighlightVideo(coverUrl);
+                  return (
+                    <div key={highlight.id} className="profile-highlight-card">
+                      <button type="button" className="profile-highlight-thumb" onClick={() => openHighlight(highlight)}>
+                        {coverUrl ? (
+                          isVideo ? (
+                            <video src={coverUrl} muted playsInline preload="metadata" />
+                          ) : (
+                            <img src={coverUrl} alt={highlight.title} />
+                          )
+                        ) : (
+                          <span>{String(highlight.title || "H").slice(0, 1).toUpperCase()}</span>
+                        )}
+                      </button>
+                      <div className="profile-highlight-meta">
+                        <p>{highlight.title}</p>
+                        <small>{highlight.items?.length || 0} stories</small>
+                      </div>
+                      <button
+                        type="button"
+                        className="profile-highlight-delete"
+                        onClick={() => deleteHighlight(highlight.id)}
+                        title="Delete highlight"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
           <hr className="profile-divider" />
 
-          <h3 className="profile-posts-title">Posts</h3>
+          <div className="profile-posts-head">
+            <h3 className="profile-posts-title">Posts</h3>
+            <div className="profile-post-tabs" role="tablist" aria-label="Profile post filters">
+              <button
+                type="button"
+                className={`profile-post-tab ${profileTab === "posts" ? "is-active" : ""}`}
+                onClick={() => setProfileTab("posts")}
+                role="tab"
+                aria-selected={profileTab === "posts"}
+              >
+                Posts ({normalPosts.length})
+              </button>
+              <button
+                type="button"
+                className={`profile-post-tab ${profileTab === "reels" ? "is-active" : ""}`}
+                onClick={() => setProfileTab("reels")}
+                role="tab"
+                aria-selected={profileTab === "reels"}
+              >
+                Reels ({reels.length})
+              </button>
+            </div>
+          </div>
           {postActionError && <p className="profile-posts-error">{postActionError}</p>}
           <div className="profile-posts-grid">
-            {posts.length === 0 && <p>No posts yet</p>}
-            {posts.map((post, index) => (
+            {visiblePosts.length === 0 && (
+              <p>{profileTab === "reels" ? "No reels yet" : "No posts yet"}</p>
+            )}
+            {visiblePosts.map((post, index) => (
               <div
                 key={`${String(post?.id ?? "post")}-${index}`}
                 className={`profile-post-card ${post?.isVideo ? "is-playable" : ""} ${String(deleteRevealPostId || "") === String(post?.id || "") ? "is-delete-visible" : ""}`}
@@ -897,6 +1049,108 @@ export default function Profile() {
             </button>
           )}
         </>
+      )}
+
+      {activeHighlight && activeHighlight?.items?.length > 0 && (
+        <div className="profile-highlight-viewer-backdrop" onClick={closeHighlight}>
+          <div className="profile-highlight-viewer" onClick={(event) => event.stopPropagation()}>
+            <button type="button" className="profile-highlight-viewer-close" onClick={closeHighlight}>
+              ×
+            </button>
+            {(() => {
+              const items = activeHighlight.items || [];
+              const activeItem = items[activeHighlightIndex];
+              const mediaUrl = resolveHighlightMediaUrl(activeItem?.mediaUrl || activeItem?.url || "");
+              const isVideo = isHighlightVideo(mediaUrl);
+              const caption = String(activeItem?.storyText || activeItem?.caption || "").trim();
+              return (
+                <>
+                  <div className="profile-highlight-viewer-media">
+                    {mediaUrl ? (
+                      isVideo ? (
+                        <video src={mediaUrl} autoPlay playsInline controls />
+                      ) : (
+                        <img src={mediaUrl} alt={caption || activeHighlight.title} />
+                      )
+                    ) : (
+                      <div className="profile-highlight-viewer-empty">Story media not available</div>
+                    )}
+                  </div>
+                  {(caption || activeHighlight.title) && (
+                    <p className="profile-highlight-viewer-caption">{caption || activeHighlight.title}</p>
+                  )}
+                  {items.length > 1 && (
+                    <div className="profile-highlight-viewer-nav">
+                      <button
+                        type="button"
+                        onClick={() => setActiveHighlightIndex((prev) => Math.max(0, prev - 1))}
+                        disabled={activeHighlightIndex <= 0}
+                      >
+                        Prev
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setActiveHighlightIndex((prev) => Math.min(items.length - 1, prev + 1))}
+                        disabled={activeHighlightIndex >= items.length - 1}
+                      >
+                        Next
+                      </button>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+
+      {isOwnProfile && createSheetOpen && (
+        <div className="profile-create-backdrop" onClick={closeCreateSheet}>
+          <section className="profile-create-sheet" onClick={(event) => event.stopPropagation()}>
+            <div className="profile-create-handle" aria-hidden="true" />
+            <div className="profile-create-head">
+              <h3 className="profile-create-title">Create</h3>
+              <p className="profile-create-subtitle">Choose how you want to share today.</p>
+            </div>
+            <div className="profile-create-grid">
+              <button type="button" className="profile-create-card accent-reel" onClick={() => handleCreateAction("reel")}>
+                <span className="profile-create-symbol" aria-hidden="true">▶</span>
+                <div>
+                  <span className="profile-create-label">Reel</span>
+                  <small>Short video with music</small>
+                </div>
+              </button>
+              <button type="button" className="profile-create-card accent-post" onClick={() => handleCreateAction("post")}>
+                <span className="profile-create-symbol" aria-hidden="true">▦</span>
+                <div>
+                  <span className="profile-create-label">Post</span>
+                  <small>Photo or long video</small>
+                </div>
+              </button>
+              <button type="button" className="profile-create-card accent-story" onClick={() => handleCreateAction("story")}>
+                <span className="profile-create-symbol" aria-hidden="true">◌</span>
+                <div>
+                  <span className="profile-create-label">Story</span>
+                  <small>24 hour updates</small>
+                </div>
+              </button>
+              <button type="button" className="profile-create-card accent-highlights" onClick={() => handleCreateAction("highlights")}>
+                <span className="profile-create-symbol" aria-hidden="true">✦</span>
+                <div>
+                  <span className="profile-create-label">Highlights</span>
+                  <small>Pin your best moments</small>
+                </div>
+              </button>
+              <button type="button" className="profile-create-card accent-live" onClick={() => handleCreateAction("live")}>
+                <span className="profile-create-symbol" aria-hidden="true">◎</span>
+                <div>
+                  <span className="profile-create-label">Live</span>
+                  <small>Go live with your audience</small>
+                </div>
+              </button>
+            </div>
+          </section>
+        </div>
       )}
     </div>
   );

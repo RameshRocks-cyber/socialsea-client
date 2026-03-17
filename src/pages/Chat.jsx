@@ -19,6 +19,7 @@ import {
   FiVideoOff
 } from "react-icons/fi";
 import { MdSignLanguage } from "react-icons/md";
+import { Room, RoomEvent, createLocalTracks } from "livekit-client";
 import api from "../api/axios";
 import { buildProfilePath } from "../utils/profileRoute";
 import { getApiBaseUrl, toApiUrl } from "../api/baseUrl";
@@ -37,11 +38,17 @@ const CHAT_MESSAGE_LOCAL_KEY = "socialsea_chat_message_local_v1";
 const CHAT_MESSAGE_CHANNEL = "socialsea-chat-message";
 const CALL_ACCEPT_TARGET_KEY = "socialsea_call_accept_target_v1";
 const CALL_RING_MS = 30000;
+const STORY_STORAGE_KEY = "socialsea_stories_v1";
 const CALL_POLL_MS = 1200;
 const CALL_SIGNAL_MAX_AGE_MS = 45000;
 const CALL_REJOIN_KEY = "socialsea_call_rejoin_v1";
 const CALL_REJOIN_MAX_AGE_MS = 10 * 60 * 1000;
+const CALL_REJOIN_RETRY_MS = 6000;
+const CALL_REJOIN_MAX_RETRIES = 2;
+const CALL_REFRESH_GRACE_MS = 20000;
+const CALL_REFRESH_GRACE_KEY = "socialsea_call_refresh_grace_v1";
 const CHAT_ONLINE_WINDOW_MS = 600000;
+const LIVEKIT_URL = import.meta.env.VITE_LIVEKIT_URL || "";
 const RTC_CONFIG = {
   iceServers: [
     { urls: "stun:stun.l.google.com:19302" },
@@ -123,7 +130,12 @@ const CHAT_WALLPAPER_PRESETS = [
   { id: "none", label: "Dark", image: "" },
   { id: "night-grid", label: "Night Grid", image: createWallpaperSvgData("#070b14", "#121a2a", "#6f85ae", "#d4e4ff") },
   { id: "dark-cyan", label: "Dark Cyan", image: createWallpaperSvgData("#061018", "#122434", "#3f7999", "#b8ecff") },
-  { id: "graphite", label: "Graphite", image: createWallpaperSvgData("#090909", "#1a1d23", "#8a8d95", "#f4f4f4") }
+  { id: "graphite", label: "Graphite", image: createWallpaperSvgData("#090909", "#1a1d23", "#8a8d95", "#f4f4f4") },
+  { id: "midnight", label: "Midnight", image: createWallpaperSvgData("#04070d", "#0a0f16", "#3b4a5e", "#c6d6ea") },
+  { id: "obsidian", label: "Obsidian", image: createWallpaperSvgData("#050505", "#0d0d0f", "#4a4a4d", "#d9d9db") },
+  { id: "charcoal", label: "Charcoal", image: createWallpaperSvgData("#0b0b0b", "#151517", "#5d5d62", "#e1e1e4") },
+  { id: "iron", label: "Iron", image: createWallpaperSvgData("#06080b", "#101419", "#4e5a67", "#d2dbe6") },
+  { id: "ink", label: "Ink", image: createWallpaperSvgData("#030407", "#0a0c10", "#384052", "#c0c9d6") }
 ];
 
 const DEFAULT_WALLPAPER_PRESET_ID = "graphite";
@@ -369,6 +381,32 @@ export default function Chat() {
     }
   };
 
+  const readStoryCache = () => {
+    try {
+      const raw = safeGetItem(STORY_STORAGE_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const normalizeStoryList = (list) => {
+    if (!Array.isArray(list)) return [];
+    const now = Date.now();
+    return list
+      .filter((item) => {
+        const expiresAt = Number(item?.expiresAt || 0);
+        return !expiresAt || expiresAt > now;
+      })
+      .slice(0, 20);
+  };
+
+  const writeStoryCache = (list) => {
+    safeSetItem(STORY_STORAGE_KEY, JSON.stringify(list));
+  };
+
   const persistCallRejoin = (payload) => {
     try {
       sessionStorage.setItem(CALL_REJOIN_KEY, JSON.stringify({ ...payload, at: Date.now() }));
@@ -382,6 +420,14 @@ export default function Chat() {
       sessionStorage.removeItem(CALL_REJOIN_KEY);
     } catch {
       // ignore storage issues
+    }
+  };
+
+  const writeRefreshGrace = () => {
+    try {
+      localStorage.setItem(CALL_REFRESH_GRACE_KEY, String(Date.now()));
+    } catch {
+      // ignore
     }
   };
 
@@ -409,7 +455,8 @@ export default function Chat() {
     mode: "audio",
     peerId: "",
     peerName: "",
-    initiatedByMe: false
+    initiatedByMe: false,
+    provider: "webrtc"
   });
   const [groupCallActive, setGroupCallActive] = useState(false);
   const [groupRoomId, setGroupRoomId] = useState("");
@@ -452,6 +499,9 @@ export default function Chat() {
   const [speechLang, setSpeechLang] = useState("en-IN");
   const [speechLangOptions, setSpeechLangOptions] = useState(() => buildSpeechLangOptions());
   const [showHeaderMenu, setShowHeaderMenu] = useState(false);
+  const [showCallMenu, setShowCallMenu] = useState(false);
+  const [showWallpaperPanel, setShowWallpaperPanel] = useState(false);
+  const [showBackButton] = useState(true);
   const [translatorEnabled, setTranslatorEnabled] = useState(() => {
     try {
       const raw = localStorage.getItem(CHAT_TRANSLATOR_KEY);
@@ -484,9 +534,15 @@ export default function Chat() {
   const [translatorError, setTranslatorError] = useState("");
   const [showScrollDown, setShowScrollDown] = useState(false);
   const [nowTick, setNowTick] = useState(Date.now());
+  const [storyItems, setStoryItems] = useState(() => normalizeStoryList(readStoryCache()));
+  const [storyViewerIndex, setStoryViewerIndex] = useState(null);
+  const [storyOptionsOpen, setStoryOptionsOpen] = useState(false);
   const [soundPrefs, setSoundPrefs] = useState(readSoundPrefs);
   const [hasRemoteVideo, setHasRemoteVideo] = useState(false);
   const [hasRemoteAudio, setHasRemoteAudio] = useState(false);
+  const [pipEnabled, setPipEnabled] = useState(false);
+  const [pipActive, setPipActive] = useState(false);
+  const pipDismissedRef = useRef(false);
   const groupPeersRef = useRef(new Map());
   const groupStreamsRef = useRef(new Map());
   const groupActiveRef = useRef(false);
@@ -569,10 +625,17 @@ export default function Chat() {
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const remoteAudioRef = useRef(null);
+  const livekitRoomRef = useRef(null);
+  const livekitRoomIdRef = useRef("");
+  const livekitConnectingRef = useRef(false);
   const callTimeoutRef = useRef(null);
   const callStateRef = useRef(callState);
   const callStartedAtRef = useRef(null);
   const callConnectedLoggedRef = useRef(false);
+  const rejoinRetryTimerRef = useRef(null);
+  const rejoinRetryCountRef = useRef(0);
+  const rejoinPayloadRef = useRef(null);
+  const rejoinGraceUntilRef = useRef(0);
   const audioCtxRef = useRef(null);
   const remoteAudioCtxRef = useRef(null);
   const remoteAudioSourceRef = useRef(null);
@@ -582,6 +645,8 @@ export default function Chat() {
   const customRingtoneAudioRef = useRef(null);
   const disconnectGuardTimerRef = useRef(null);
   const historyRef = useRef({});
+  const storyLongPressTimeoutRef = useRef(null);
+  const storyLongPressTriggeredRef = useRef(false);
   const seenSignalsRef = useRef(new Set());
   const longPressTimerRef = useRef(null);
   const touchStartPointRef = useRef({ x: 0, y: 0 });
@@ -606,6 +671,8 @@ export default function Chat() {
   const speechLastAppliedTextRef = useRef("");
   const headerMenuWrapRef = useRef(null);
   const headerMenuRef = useRef(null);
+  const callMenuRef = useRef(null);
+  const wallpaperPanelRef = useRef(null);
   const translationCacheRef = useRef({});
   const threadRef = useRef(null);
   const shouldStickToBottomRef = useRef(true);
@@ -780,6 +847,7 @@ export default function Chat() {
     if (!draft.image) return;
     setWallpaperDraft(draft);
     setShowWallpaperEditor(true);
+    setShowWallpaperPanel(false);
   };
 
   const closeWallpaperEditor = () => {
@@ -1113,6 +1181,34 @@ export default function Chat() {
   }, [applySpeakerState, isSpeakerOn, callState.phase, callState.mode]);
 
   useEffect(() => {
+    const supported =
+      typeof document !== "undefined" &&
+      "pictureInPictureEnabled" in document &&
+      document.pictureInPictureEnabled;
+    setPipEnabled(Boolean(supported));
+  }, []);
+
+  useEffect(() => {
+    const el = remoteVideoRef.current;
+    if (!el || typeof el.addEventListener !== "function") return undefined;
+    const onEnter = () => {
+      pipDismissedRef.current = false;
+      setPipActive(true);
+    };
+    const onLeave = () => {
+      setPipActive(false);
+      pipDismissedRef.current = true;
+    };
+    el.addEventListener("enterpictureinpicture", onEnter);
+    el.addEventListener("leavepictureinpicture", onLeave);
+    return () => {
+      el.removeEventListener("enterpictureinpicture", onEnter);
+      el.removeEventListener("leavepictureinpicture", onLeave);
+    };
+  }, []);
+
+
+  useEffect(() => {
     if (callState.phase === "idle") {
       callStartedAtRef.current = null;
       setCallDurationSec(0);
@@ -1185,6 +1281,22 @@ export default function Chat() {
   useEffect(() => {
     const timer = setInterval(() => setNowTick(Date.now()), 30000);
     return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const refreshStories = () => {
+      setStoryItems(normalizeStoryList(readStoryCache()));
+    };
+    refreshStories();
+    const onStorage = (event) => {
+      if (event?.key === STORY_STORAGE_KEY) refreshStories();
+    };
+    window.addEventListener("storage", onStorage);
+    const pruneTimer = setInterval(refreshStories, 60000);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      clearInterval(pruneTimer);
+    };
   }, []);
 
   useEffect(() => {
@@ -1551,6 +1663,13 @@ export default function Chat() {
     }
   };
 
+  const clearRejoinRetryTimer = () => {
+    if (rejoinRetryTimerRef.current) {
+      clearTimeout(rejoinRetryTimerRef.current);
+      rejoinRetryTimerRef.current = null;
+    }
+  };
+
   const setupRemoteAudioPipeline = useCallback(
     (stream) => {
       if (!stream?.getAudioTracks?.().length) return;
@@ -1588,9 +1707,160 @@ export default function Chat() {
     }
     const hasVideo = s.getVideoTracks().some((t) => t.readyState !== "ended");
     const hasAudio = s.getAudioTracks().some((t) => t.readyState !== "ended");
-    setHasRemoteVideo(hasVideo);
+    const videoEl = remoteVideoRef.current;
+    const elHasVideo = Boolean(videoEl && videoEl.videoWidth > 0 && videoEl.videoHeight > 0);
+    setHasRemoteVideo(hasVideo || elHasVideo);
     setHasRemoteAudio(hasAudio);
   }, []);
+
+  useEffect(() => {
+    const el = remoteVideoRef.current;
+    if (!el) return undefined;
+    const markVideoActive = () => {
+      if (el.videoWidth > 0 && el.videoHeight > 0) {
+        setHasRemoteVideo(true);
+      }
+    };
+    const markVideoInactive = () => {
+      setHasRemoteVideo(false);
+    };
+    el.addEventListener("loadeddata", markVideoActive);
+    el.addEventListener("playing", markVideoActive);
+    el.addEventListener("resize", markVideoActive);
+    el.addEventListener("emptied", markVideoInactive);
+    return () => {
+      el.removeEventListener("loadeddata", markVideoActive);
+      el.removeEventListener("playing", markVideoActive);
+      el.removeEventListener("resize", markVideoActive);
+      el.removeEventListener("emptied", markVideoInactive);
+    };
+  }, []);
+
+  const livekitEnabled = Boolean(LIVEKIT_URL);
+
+  const buildLivekitRoomId = useCallback(
+    (peerId) => {
+      const left = String(myUserId || "");
+      const right = String(peerId || "");
+      const pair = [left, right].filter(Boolean).sort().join("_");
+      return pair ? `call_${pair}` : `call_${Date.now()}`;
+    },
+    [myUserId]
+  );
+
+  const disconnectLivekit = useCallback(() => {
+    try {
+      livekitRoomRef.current?.disconnect();
+    } catch {
+      // ignore disconnect issues
+    }
+    livekitRoomRef.current = null;
+    livekitRoomIdRef.current = "";
+    livekitConnectingRef.current = false;
+  }, []);
+
+  const connectLivekit = useCallback(
+    async (roomId, mode) => {
+      if (!livekitEnabled || !LIVEKIT_URL || !roomId) return false;
+      if (livekitConnectingRef.current) return true;
+      livekitConnectingRef.current = true;
+      livekitRoomIdRef.current = roomId;
+
+      try {
+        const tokenRes = await api.post("/api/livekit/token", { room: roomId, mode });
+        const token = tokenRes?.data?.token;
+        if (!token) throw new Error("missing-token");
+
+        const room = new Room({
+          adaptiveStream: true,
+          dynacast: true
+        });
+
+        room.on(RoomEvent.Disconnected, () => {
+          const phase = callStateRef.current.phase;
+          if (phase === "idle" || phase === "dialing") return;
+          setCallPhaseNote("Reconnecting...");
+          setCallState((prev) => (prev.phase === "idle" ? prev : { ...prev, phase: "connecting" }));
+          clearDisconnectGuardTimer();
+          disconnectGuardTimerRef.current = setTimeout(() => {
+            const currentPhase = callStateRef.current.phase;
+            if (currentPhase !== "in-call") {
+              finishCall(false, "Call ended");
+            }
+          }, 30000);
+        });
+
+        room.on(RoomEvent.TrackSubscribed, (track) => {
+          if (!track) return;
+          let stream = remoteStreamRef.current;
+          if (!stream) {
+            stream = new MediaStream();
+            remoteStreamRef.current = stream;
+          }
+          try {
+            stream.addTrack(track.mediaStreamTrack);
+          } catch {
+            // ignore duplicate tracks
+          }
+          if (track.kind === "video" && remoteVideoRef.current) {
+            remoteVideoRef.current.srcObject = stream;
+            remoteVideoRef.current.play?.().catch(() => {});
+          }
+          if (track.kind === "audio" && remoteAudioRef.current) {
+            remoteAudioRef.current.srcObject = stream;
+            remoteAudioRef.current.play?.().catch(() => {});
+          }
+          updateRemoteMediaFlags(stream);
+          setupRemoteAudioPipeline(stream);
+        });
+
+        room.on(RoomEvent.TrackUnsubscribed, (track) => {
+          if (!track || !remoteStreamRef.current) return;
+          try {
+            remoteStreamRef.current.removeTrack(track.mediaStreamTrack);
+          } catch {
+            // ignore remove failures
+          }
+          updateRemoteMediaFlags(remoteStreamRef.current);
+        });
+
+        await room.connect(LIVEKIT_URL, token);
+        livekitRoomRef.current = room;
+
+        const localTracks = await createLocalTracks({
+          audio: true,
+          video: mode === "video"
+            ? { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: 30 }
+            : false
+        });
+
+        const localStream = new MediaStream();
+        localTracks.forEach((track) => {
+          localStream.addTrack(track.mediaStreamTrack);
+          room.localParticipant.publishTrack(track).catch(() => {});
+        });
+        localStreamRef.current = localStream;
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = localStream;
+          localVideoRef.current.play?.().catch(() => {});
+        }
+        updateRemoteMediaFlags(remoteStreamRef.current);
+        clearDisconnectGuardTimer();
+        setCallState((prev) => (prev.phase === "idle" ? prev : { ...prev, phase: "in-call", provider: "livekit" }));
+        setCallPhaseNote("Connected");
+        if (callStateRef.current.peerId && callStateRef.current.peerId !== "group") {
+          sendSignal(callStateRef.current.peerId, { type: "connected", mode, provider: "livekit" });
+        }
+        livekitConnectingRef.current = false;
+        return true;
+      } catch {
+        livekitConnectingRef.current = false;
+        disconnectLivekit();
+        return false;
+      }
+    },
+    [LIVEKIT_URL, livekitEnabled, updateRemoteMediaFlags, setupRemoteAudioPipeline, disconnectLivekit]
+  );
 
   const stopStream = (stream) => {
     if (!stream) return;
@@ -1605,6 +1875,7 @@ export default function Chat() {
 
   const resetMedia = () => {
     clearDisconnectGuardTimer();
+    disconnectLivekit();
     stopStream(localStreamRef.current);
     stopStream(remoteStreamRef.current);
     localStreamRef.current = null;
@@ -1654,6 +1925,9 @@ export default function Chat() {
 
   const finishCall = (notifyPeer = false, reason = "") => {
     const current = callStateRef.current;
+    clearRejoinRetryTimer();
+    rejoinRetryCountRef.current = 0;
+    rejoinPayloadRef.current = null;
     if (groupActiveRef.current) {
       const members = Array.isArray(groupMembers) ? groupMembers : [];
       if (notifyPeer) {
@@ -1682,7 +1956,7 @@ export default function Chat() {
       resetGroupCall();
       callConnectedLoggedRef.current = false;
       setIncomingCall(null);
-      setCallState({ phase: "idle", mode: "audio", peerId: "", peerName: "", initiatedByMe: false });
+      setCallState({ phase: "idle", mode: "audio", peerId: "", peerName: "", initiatedByMe: false, provider: "webrtc" });
       clearCallRejoin();
       if (reason) {
         setCallError(reason);
@@ -1717,7 +1991,7 @@ export default function Chat() {
     resetMedia();
     callConnectedLoggedRef.current = false;
         setIncomingCall(null);
-    setCallState({ phase: "idle", mode: "audio", peerId: "", peerName: "", initiatedByMe: false });
+    setCallState({ phase: "idle", mode: "audio", peerId: "", peerName: "", initiatedByMe: false, provider: "webrtc" });
     clearCallRejoin();
     if (reason) {
       setCallError(reason);
@@ -1796,8 +2070,20 @@ export default function Chat() {
     return stream;
   };
 
+
   const createPeerConnection = (targetUserId, mode) => {
     const pc = new RTCPeerConnection(RTC_CONFIG);
+    try {
+      pc.setConfiguration({
+        ...RTC_CONFIG,
+        iceTransportPolicy: RTC_CONFIG?.iceTransportPolicy || "all"
+      });
+      pc.addEventListener?.("negotiationneeded", () => {
+        // keep default behavior
+      });
+    } catch {
+      // ignore configuration errors
+    }
     peerRef.current = pc;
     try {
       pc.addTransceiver("audio", { direction: "sendrecv" });
@@ -1837,6 +2123,13 @@ export default function Chat() {
         return { ...prev, phase: "in-call" };
       });
       setCallPhaseNote("Connected");
+      if (callStateRef.current.peerId && callStateRef.current.peerId !== "group") {
+        sendSignal(callStateRef.current.peerId, {
+          type: "connected",
+          mode: callStateRef.current.mode || mode,
+          provider: callStateRef.current.provider || "webrtc"
+        });
+      }
       if (callStateRef.current.peerId && callStateRef.current.peerId !== "group") {
         persistCallRejoin({
           peerId: String(callStateRef.current.peerId),
@@ -2072,8 +2365,8 @@ export default function Chat() {
       /a=fmtp:111 ([^\r\n]*)/g,
       (all, cfg) => `a=fmtp:111 ${cfg};stereo=1;sprop-stereo=1;maxaveragebitrate=192000;cbr=1;usedtx=0`
     );
-    if (mode === "video" && /m=video/.test(next) && !/b=AS:2500/.test(next)) {
-      next = next.replace(/m=video[^\r\n]*\r?\n/, (line) => `${line}b=AS:2500\r\n`);
+    if (mode === "video" && /m=video/.test(next) && !/b=AS:6000/.test(next)) {
+      next = next.replace(/m=video[^\r\n]*\r?\n/, (line) => `${line}b=AS:6000\r\n`);
     }
     return next;
   };
@@ -2090,9 +2383,10 @@ export default function Chat() {
           enc.dtx = false;
         }
         if (mode === "video" && sender.track.kind === "video") {
-          enc.maxBitrate = 2500000;
+          enc.maxBitrate = 6000000;
           enc.maxFramerate = 60;
           enc.scaleResolutionDownBy = 1.0;
+          enc.priority = "high";
         }
         void sender.setParameters(params).catch(() => {});
       });
@@ -2100,6 +2394,40 @@ export default function Chat() {
       // ignore unsupported sender parameter tuning
     }
   };
+
+  const attemptRejoin = useCallback(async () => {
+    const payload = rejoinPayloadRef.current;
+    if (!payload) return false;
+    const { peerId, mode, provider, roomId } = payload;
+    try {
+      if (provider === "livekit" && roomId) {
+        const joined = await connectLivekit(roomId, mode);
+        if (!joined) throw new Error("livekit-rejoin-failed");
+        return true;
+      }
+      const stream = localStreamRef.current || await ensureLocalStream(mode);
+      closePeer();
+      const pc = createPeerConnection(peerId, mode);
+      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+      tuneSendersForQuality(pc, mode);
+      kickstartRemotePlayback();
+      const offer = await pc.createOffer();
+      offer.sdp = applySdpQualityHints(offer.sdp, mode);
+      await pc.setLocalDescription(offer);
+      sendSignal(peerId, { type: "offer", mode, sdp: offer.sdp, rejoin: true });
+      return true;
+    } catch {
+      setCallPhaseNote("Reconnecting...");
+      return false;
+    }
+  }, [
+    connectLivekit,
+    ensureLocalStream,
+    createPeerConnection,
+    tuneSendersForQuality,
+    kickstartRemotePlayback,
+    sendSignal
+  ]);
 
   const ensureSignalContact = (signal) => {
     const fromId = String(signal?.fromUserId || "");
@@ -2230,6 +2558,59 @@ export default function Chat() {
       setRingtoneMuted(false);
     }
 
+    if (type === "refreshing") {
+      rejoinGraceUntilRef.current = Date.now() + CALL_REFRESH_GRACE_MS;
+      if (callStateRef.current.phase !== "idle") {
+        setCallState((prev) => (prev.phase === "idle" ? prev : { ...prev, phase: "connecting" }));
+        setCallPhaseNote("Reconnecting...");
+      }
+      return;
+    }
+
+    if (type === "livekit-invite") {
+      if (Number.isFinite(signalMs) && signalMs > 0 && Date.now() - signalMs > CALL_SIGNAL_MAX_AGE_MS) {
+        return;
+      }
+      const nextMode = signal?.mode === "video" ? "video" : "audio";
+      if (callStateRef.current.phase !== "idle") {
+        sendSignal(fromId, { type: "busy", mode: nextMode });
+        return;
+      }
+      pushCallHistory(fromId, {
+        direction: "incoming",
+        mode: nextMode,
+        status: "ringing",
+        peerName: normalizeDisplayName(signal?.fromName || signal?.fromEmail || "User")
+      });
+      setIncomingCall({
+        fromUserId: fromId,
+        fromName: normalizeDisplayName(signal?.fromName || signal?.fromEmail || "User"),
+        mode: nextMode,
+        roomId: roomId || buildLivekitRoomId(fromId),
+        provider: "livekit"
+      });
+      setRingtoneMuted(false);
+      setActiveContactId(fromId);
+      navigate(`/chat/${fromId}`);
+      startRingtone(true);
+      playNotificationBeep();
+      maybeShowBrowserNotification(
+        "Incoming call",
+        `${nextMode === "video" ? "Video" : "Audio"} call from ${normalizeDisplayName(signal?.fromName || signal?.fromEmail || "User")}`
+      );
+      return;
+    }
+
+    if (type === "livekit-accept") {
+      if (current.peerId === fromId && current.provider === "livekit") {
+        clearCallTimer();
+        stopOutgoingRing();
+        setCallState((prev) => (prev.phase === "in-call" ? prev : { ...prev, phase: "connecting" }));
+        setCallPhaseNote("Connecting media...");
+      }
+      return;
+    }
+
     if (type === "offer") {
       if (Number.isFinite(signalMs) && signalMs > 0 && Date.now() - signalMs > CALL_SIGNAL_MAX_AGE_MS) {
         return;
@@ -2299,6 +2680,23 @@ export default function Chat() {
       return;
     }
 
+    if (type === "connected") {
+      const activePeer = String(current.peerId || incomingCall?.fromUserId || "");
+      if (!activePeer || activePeer === fromId) {
+        setCallState((prev) => {
+          if (prev.phase === "idle") return prev;
+          return {
+            ...prev,
+            phase: "in-call",
+            peerId: prev.peerId || fromId,
+            peerName: prev.peerName || normalizeDisplayName(resolveContactName(fromId) || `User ${fromId}`)
+          };
+        });
+        setCallPhaseNote("Connected");
+      }
+      return;
+    }
+
     if (!current.peerId || current.peerId !== fromId) return;
 
     if (type === "answer" && signal?.sdp && peerRef.current) {
@@ -2345,6 +2743,10 @@ export default function Chat() {
     }
 
     if (type === "hangup" || type === "ended") {
+      const grace = rejoinGraceUntilRef.current;
+      if (grace && Date.now() < grace) {
+        return;
+      }
       finishCall(false, "Call ended");
     }
   };
@@ -2606,6 +3008,37 @@ export default function Chat() {
       setCallError("");
       setIsMuted(false);
       setIsSpeakerOn(true);
+    let dialStarted = false;
+    if (livekitEnabled) {
+      const roomId = buildLivekitRoomId(targetId);
+      setCallState({
+        phase: "dialing",
+        mode,
+        peerId: targetId,
+        peerName: targetName,
+        initiatedByMe: true,
+        provider: "livekit"
+      });
+      persistCallRejoin({ peerId: targetId, peerName: targetName, mode, provider: "livekit", roomId });
+      startOutgoingRing();
+      pushCallHistory(targetId, {
+        direction: "outgoing",
+        mode,
+        status: "calling",
+        peerName: targetName
+      });
+      dialStarted = true;
+      clearCallTimer();
+      const joined = await connectLivekit(roomId, mode);
+      if (joined) {
+        sendSignal(targetId, { type: "livekit-invite", mode, roomId });
+        return;
+      }
+      disconnectLivekit();
+      clearCallRejoin();
+      setCallPhaseNote("");
+    }
+
       const stream = await ensureLocalStream(mode);
       const pc = createPeerConnection(targetId, mode);
       stream.getTracks().forEach((track) => pc.addTrack(track, stream));
@@ -2616,21 +3049,34 @@ export default function Chat() {
       offer.sdp = applySdpQualityHints(offer.sdp, mode);
       await pc.setLocalDescription(offer);
 
-      setCallState({
-        phase: "dialing",
-        mode,
-        peerId: targetId,
-        peerName: targetName,
-        initiatedByMe: true
-      });
-      persistCallRejoin({ peerId: targetId, peerName: targetName, mode });
-      startOutgoingRing();
-      pushCallHistory(targetId, {
-        direction: "outgoing",
-        mode,
-        status: "calling",
-        peerName: targetName
-      });
+      if (dialStarted) {
+        setCallState((prev) => ({
+          ...prev,
+          phase: "dialing",
+          mode,
+          peerId: targetId,
+          peerName: targetName,
+          initiatedByMe: true,
+          provider: "webrtc"
+        }));
+      } else {
+        setCallState({
+          phase: "dialing",
+          mode,
+          peerId: targetId,
+          peerName: targetName,
+          initiatedByMe: true,
+          provider: "webrtc"
+        });
+        startOutgoingRing();
+        pushCallHistory(targetId, {
+          direction: "outgoing",
+          mode,
+          status: "calling",
+          peerName: targetName
+        });
+      }
+      persistCallRejoin({ peerId: targetId, peerName: targetName, mode, provider: "webrtc" });
 
       sendSignal(targetId, {
         type: "offer",
@@ -2646,8 +3092,8 @@ export default function Chat() {
 
   const acceptIncomingCall = async () => {
     const call = incomingCall;
-    if (!call?.fromUserId || !call?.sdp) {
-      setCallError("Could not answer: missing call offer details");
+    if (!call?.fromUserId) {
+      setCallError("Could not answer: missing caller details");
       return;
     }
     try {
@@ -2661,6 +3107,33 @@ export default function Chat() {
       setCallError("");
       setIsMuted(false);
       setIsSpeakerOn(true);
+      if (call.provider === "livekit" || call.roomId) {
+        const roomId = String(call.roomId || buildLivekitRoomId(call.fromUserId));
+        const joined = await connectLivekit(roomId, call.mode);
+        if (!joined) {
+          finishCall(false, "Could not join LiveKit call");
+          return;
+        }
+        sendSignal(call.fromUserId, { type: "livekit-accept", mode: call.mode, roomId });
+        setCallState({
+          phase: "connecting",
+          mode: call.mode,
+          peerId: call.fromUserId,
+          peerName: call.fromName,
+          initiatedByMe: false,
+          provider: "livekit"
+        });
+        persistCallRejoin({
+          peerId: call.fromUserId,
+          peerName: call.fromName,
+          mode: call.mode,
+          provider: "livekit",
+          roomId
+        });
+        setIncomingCall(null);
+        setRingtoneMuted(false);
+        return;
+      }
       const stream = await ensureLocalStream(call.mode);
       const pc = createPeerConnection(call.fromUserId, call.mode);
       stream.getTracks().forEach((track) => pc.addTrack(track, stream));
@@ -2683,9 +3156,10 @@ export default function Chat() {
         mode: call.mode,
         peerId: call.fromUserId,
         peerName: call.fromName,
-        initiatedByMe: false
+        initiatedByMe: false,
+        provider: "webrtc"
       });
-      persistCallRejoin({ peerId: call.fromUserId, peerName: call.fromName, mode: call.mode });
+      persistCallRejoin({ peerId: call.fromUserId, peerName: call.fromName, mode: call.mode, provider: "webrtc" });
       setIncomingCall(null);
       setRingtoneMuted(false);
     } catch {
@@ -2773,6 +3247,41 @@ export default function Chat() {
   const upgradeCallToVideo = async () => {
     const current = callStateRef.current;
     if (!current?.peerId || current.phase === "idle" || current.mode === "video") return;
+    if (current.provider === "livekit") {
+      try {
+        const room = livekitRoomRef.current;
+        if (!room) {
+          setCallError("Call is not ready for video switch");
+          return;
+        }
+        const alreadyPublishing = Array.from(room.localParticipant.videoTrackPublications.values()).some(
+          (pub) => pub.track && !pub.isMuted
+        );
+        if (!alreadyPublishing) {
+          const tracks = await createLocalTracks({ video: true, audio: false });
+          tracks.forEach((track) => {
+            room.localParticipant.publishTrack(track).catch(() => {});
+            if (!localStreamRef.current) {
+              localStreamRef.current = new MediaStream();
+            }
+            try {
+              localStreamRef.current.addTrack(track.mediaStreamTrack);
+            } catch {
+              // ignore duplicate track errors
+            }
+          });
+          if (localVideoRef.current) {
+            localVideoRef.current.srcObject = localStreamRef.current;
+            localVideoRef.current.play?.().catch(() => {});
+          }
+        }
+        setCallState((prev) => ({ ...prev, mode: "video" }));
+        return;
+      } catch {
+        setCallError("Failed to enable video");
+        return;
+      }
+    }
     const pc = peerRef.current;
     const localStream = localStreamRef.current;
     if (!pc || !localStream) {
@@ -2974,6 +3483,18 @@ export default function Chat() {
   }, [myUserId]);
 
   useEffect(() => {
+    try {
+      const raw = localStorage.getItem(CALL_REFRESH_GRACE_KEY);
+      const ts = Number(raw || 0);
+      if (Number.isFinite(ts) && Date.now() - ts < CALL_REFRESH_GRACE_MS) {
+        rejoinGraceUntilRef.current = Date.now() + CALL_REFRESH_GRACE_MS;
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
     if (!myUserId || typeof BroadcastChannel === "undefined") return undefined;
     const channel = new BroadcastChannel("socialsea-call-signal");
     callChannelRef.current = channel;
@@ -3011,6 +3532,30 @@ export default function Chat() {
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
   }, [myUserId, myEmail]);
+
+  useEffect(() => {
+    const onBeforeUnload = () => {
+      const current = callStateRef.current;
+      if (!current?.peerId || current.peerId === "group") return;
+      if (current.phase === "idle") return;
+      writeRefreshGrace();
+      const payload = { type: "refreshing", mode: current.mode, provider: current.provider };
+      try {
+        const url = toApiUrl(`/api/calls/signal/${current.peerId}`);
+        const blob = new Blob([JSON.stringify(payload)], { type: "application/json" });
+        navigator.sendBeacon?.(url, blob);
+      } catch {
+        // ignore beacon failures
+      }
+      try {
+        sendSignal(current.peerId, payload);
+      } catch {
+        // ignore sync signaling failures
+      }
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [sendSignal]);
 
   useEffect(() => {
     if (!myUserId) return undefined;
@@ -3115,35 +3660,46 @@ export default function Chat() {
     }
 
     rejoinAttemptedRef.current = true;
+    rejoinRetryCountRef.current = 0;
+    clearRejoinRetryTimer();
     const peerId = String(stored.peerId);
     const peerName = String(stored.peerName || "User");
     const mode = stored.mode === "video" ? "video" : "audio";
+    const provider = String(stored.provider || "webrtc");
+    const roomId = String(stored.roomId || "");
 
+    rejoinPayloadRef.current = { peerId, peerName, mode, provider, roomId };
+    rejoinGraceUntilRef.current = Date.now() + 15000;
     setActiveContactId(peerId);
     setCallState({
       phase: "connecting",
       mode,
       peerId,
       peerName,
-      initiatedByMe: true
+      initiatedByMe: true,
+      provider
     });
     setCallPhaseNote("Reconnecting...");
 
+    const scheduleRetry = () => {
+      clearRejoinRetryTimer();
+      rejoinRetryTimerRef.current = setTimeout(async () => {
+        const phase = callStateRef.current.phase;
+        if (phase === "in-call" || phase === "idle") return;
+        if (rejoinRetryCountRef.current >= CALL_REJOIN_MAX_RETRIES) {
+          clearCallRejoin();
+          setCallPhaseNote("Reconnecting...");
+          return;
+        }
+        rejoinRetryCountRef.current += 1;
+        await attemptRejoin();
+        scheduleRetry();
+      }, CALL_REJOIN_RETRY_MS);
+    };
+
     (async () => {
-      try {
-        const stream = await ensureLocalStream(mode);
-        const pc = createPeerConnection(peerId, mode);
-        stream.getTracks().forEach((track) => pc.addTrack(track, stream));
-        tuneSendersForQuality(pc, mode);
-        kickstartRemotePlayback();
-        const offer = await pc.createOffer();
-        offer.sdp = applySdpQualityHints(offer.sdp, mode);
-        await pc.setLocalDescription(offer);
-        sendSignal(peerId, { type: "offer", mode, sdp: offer.sdp, rejoin: true });
-      } catch {
-        clearCallRejoin();
-        finishCall(false, "Could not rejoin call");
-      }
+      await attemptRejoin();
+      scheduleRetry();
     })();
   }, [myUserId]);
 
@@ -3557,6 +4113,109 @@ export default function Chat() {
       return `lastseen yesterday at ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }).toLowerCase()}`;
     }
     return `lastseen ${d.toLocaleDateString([], { month: "short", day: "numeric" })} at ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }).toLowerCase()}`;
+  };
+
+  const getContactActivityTs = (contact) => {
+    if (!contact?.id) return 0;
+    const msgList = messagesByContact[contact.id] || [];
+    const callList = Array.isArray(callHistoryByContact[contact.id]) ? callHistoryByContact[contact.id] : [];
+    const msgTs = msgList.reduce((max, m) => {
+      const t = new Date(m?.createdAt || 0).getTime();
+      return Number.isFinite(t) && t > max ? t : max;
+    }, 0);
+    const callTs = callList.reduce((max, c) => {
+      const t = new Date(c?.at || 0).getTime();
+      return Number.isFinite(t) && t > max ? t : max;
+    }, 0);
+    const profileTs = new Date(contact?.lastActiveAt || 0).getTime();
+    return Math.max(
+      msgTs,
+      callTs,
+      Number.isFinite(profileTs) ? profileTs : 0
+    );
+  };
+
+  const getContactPresence = (contact) => {
+    if (!contact) return { online: false, text: "lastseen at --" };
+    const latest = getContactActivityTs(contact);
+    const hasExplicitOnline = Boolean(contact?.online);
+    const isOnline = hasExplicitOnline || (latest > 0 && nowTick - latest <= CHAT_ONLINE_WINDOW_MS);
+    if (isOnline) return { online: true, text: "online" };
+    return {
+      online: false,
+      text: latest > 0 ? formatLastSeen(latest) : "lastseen at --"
+    };
+  };
+
+  const resolveStoryMediaUrl = (raw) => {
+    if (!raw) return "";
+    return String(raw).startsWith("http") ? String(raw) : toApiUrl(String(raw));
+  };
+
+  const isStoryVideo = (url) =>
+    /\.(mp4|mov|webm|mkv|m4v|avi|mpg|mpeg|3gp|ogv)(\?|#|$)/i.test(String(url || ""));
+
+  const activeStory = storyViewerIndex != null ? storyItems[storyViewerIndex] : null;
+  const openStory = (idx) => setStoryViewerIndex(idx);
+  const closeStory = () => setStoryViewerIndex(null);
+  const openStoryOptions = () => setStoryOptionsOpen(true);
+  const closeStoryOptions = () => setStoryOptionsOpen(false);
+  const deleteStoryAt = (index) => {
+    setStoryItems((prev) => {
+      if (!Array.isArray(prev) || prev.length === 0) return prev;
+      const next = prev.filter((_, i) => i !== index);
+      writeStoryCache(next);
+      return normalizeStoryList(next);
+    });
+    setStoryViewerIndex((prev) => {
+      if (prev == null) return prev;
+      if (prev === index) return null;
+      if (prev > index) return prev - 1;
+      return prev;
+    });
+  };
+  const clearStories = () => {
+    writeStoryCache([]);
+    setStoryItems([]);
+    setStoryViewerIndex(null);
+  };
+  const startStoryLongPress = () => {
+    if (storyItems.length === 0) return;
+    if (storyLongPressTimeoutRef.current) {
+      clearTimeout(storyLongPressTimeoutRef.current);
+    }
+    storyLongPressTriggeredRef.current = false;
+    storyLongPressTimeoutRef.current = setTimeout(() => {
+      storyLongPressTriggeredRef.current = true;
+      openStoryOptions();
+    }, 550);
+  };
+  const cancelStoryLongPress = () => {
+    if (storyLongPressTimeoutRef.current) {
+      clearTimeout(storyLongPressTimeoutRef.current);
+      storyLongPressTimeoutRef.current = null;
+    }
+  };
+  const handleStoryTileClick = () => {
+    if (storyLongPressTriggeredRef.current) {
+      storyLongPressTriggeredRef.current = false;
+      return;
+    }
+    openStory(0);
+  };
+  const goNextStory = () => {
+    setStoryViewerIndex((prev) => {
+      if (prev == null) return null;
+      const next = prev + 1;
+      return next < storyItems.length ? next : null;
+    });
+  };
+  const goPrevStory = () => {
+    setStoryViewerIndex((prev) => {
+      if (prev == null) return null;
+      const next = prev - 1;
+      return next >= 0 ? next : prev;
+    });
   };
 
   const peerLatestMessageTs = activeMessages
@@ -4500,6 +5159,24 @@ export default function Chat() {
   };
 
   const callActive = callState.phase !== "idle" || groupCallActive;
+
+  useEffect(() => {
+    if (callActive || incomingCall) setShowCallMenu(false);
+  }, [callActive, incomingCall]);
+
+  useEffect(() => {
+    if (!pipEnabled) return;
+    if (pipDismissedRef.current) return;
+    const shouldShow = callActive && (callState.mode === "video" || groupCallActive);
+    if (!shouldShow) {
+      pipDismissedRef.current = false;
+      return;
+    }
+    const el = remoteVideoRef.current;
+    if (!el || typeof el.requestPictureInPicture !== "function") return;
+    if (document.pictureInPictureElement) return;
+    el.requestPictureInPicture?.().catch(() => {});
+  }, [pipEnabled, callActive, callState.mode, groupCallActive, hasRemoteVideo]);
   const showVideoCallScreen = callActive && (callState.mode === "video" || groupCallActive);
   const activeVideoFilter = useMemo(
     () => VIDEO_FILTER_PRESETS.find((preset) => preset.id === videoFilterId) || VIDEO_FILTER_PRESETS[0],
@@ -4867,6 +5544,8 @@ export default function Chat() {
 
   useEffect(() => {
     setShowHeaderMenu(false);
+    setShowCallMenu(false);
+    setShowWallpaperPanel(false);
     setReplyDraft(null);
   }, [activeContactId]);
 
@@ -4874,9 +5553,15 @@ export default function Chat() {
     const onDocClick = (event) => {
       const wrap = headerMenuWrapRef.current;
       const panel = headerMenuRef.current;
+      const callMenu = callMenuRef.current;
+      const wallpaperPanel = wallpaperPanelRef.current;
       if (wrap?.contains(event.target)) return;
       if (panel?.contains(event.target)) return;
+      if (callMenu?.contains(event.target)) return;
+      if (wallpaperPanel?.contains(event.target)) return;
       setShowHeaderMenu(false);
+      setShowCallMenu(false);
+      setShowWallpaperPanel(false);
     };
     document.addEventListener("mousedown", onDocClick);
     return () => document.removeEventListener("mousedown", onDocClick);
@@ -5248,6 +5933,20 @@ export default function Chat() {
 
   return (
     <div className={`chat-page ${isConversationRoute ? "chat-single-pane" : "chat-list-only"}`}>
+      {!isConversationRoute && callActive && (callState.mode === "video" || groupCallActive) && (
+        <button
+          type="button"
+          className="call-return-banner"
+          onClick={() => {
+            const targetId = callState.peerId && callState.peerId !== "group" ? callState.peerId : activeContactId;
+            if (targetId) {
+              navigate(`/chat/${targetId}`);
+            }
+          }}
+        >
+          Return to call {pipActive ? "(PiP closed)" : ""}
+        </button>
+      )}
       {!isConversationRoute && (
         <aside className="chat-sidebar">
         <div className="chat-sidebar-head">
@@ -5255,6 +5954,60 @@ export default function Chat() {
           <button type="button" className="new-chat-btn" onClick={() => setNewChatOpen(true)}>
             + New Chat
           </button>
+        </div>
+        <div className="chat-stories">
+          <div className="chat-stories-head">
+            <h3>Stories</h3>
+            <button type="button" className="chat-story-add" onClick={() => navigate("/story/create")}>
+              + Add
+            </button>
+          </div>
+          <div className="chat-stories-row">
+            <button type="button" className="chat-story-tile add" onClick={() => navigate("/story/create")}>
+              <span className="chat-story-thumb">+</span>
+              <small>Your story</small>
+            </button>
+            {storyItems.length > 0 &&
+              (() => {
+                const story = storyItems[0];
+                const mediaUrl = resolveStoryMediaUrl(story?.mediaUrl || story?.url || "");
+                const isVideo = isStoryVideo(mediaUrl);
+                const baseLabel = String(story?.storyText || story?.caption || "Story").trim();
+                const label = storyItems.length > 1 ? `Stories (${storyItems.length})` : baseLabel;
+                return (
+                  <button
+                    type="button"
+                    className="chat-story-tile"
+                    onClick={handleStoryTileClick}
+                    onPointerDown={startStoryLongPress}
+                    onPointerUp={cancelStoryLongPress}
+                    onPointerLeave={cancelStoryLongPress}
+                    onPointerCancel={cancelStoryLongPress}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      if (storyItems.length > 0) openStoryOptions();
+                    }}
+                  >
+                    <span className="chat-story-thumb">
+                      {mediaUrl ? (
+                        isVideo ? (
+                          <video src={mediaUrl} muted playsInline preload="metadata" />
+                        ) : (
+                          <img src={mediaUrl} alt={label} />
+                        )
+                      ) : (
+                        <span className="chat-story-fallback">{label.slice(0, 1).toUpperCase()}</span>
+                      )}
+                      {isVideo && <span className="chat-story-play">▶</span>}
+                    </span>
+                    <small>{label.length > 14 ? `${label.slice(0, 12)}...` : label}</small>
+                  </button>
+                );
+              })()}
+            {storyItems.length === 0 && (
+              <p className="chat-story-empty">No stories yet</p>
+            )}
+          </div>
         </div>
         <input
           type="text"
@@ -5266,22 +6019,31 @@ export default function Chat() {
         {error && <p className="chat-error">{error}</p>}
         {!error && !!shareHint && <p className="chat-empty">{shareHint}</p>}
         <div className="chat-contact-list">
-          {filteredContacts.map((c) => (
-            <button
-              key={c.id}
-              type="button"
-              className={`chat-contact ${activeContactId === c.id ? "active" : ""}`}
-              onClick={() => openContact(c)}
-            >
-              <span className="chat-avatar">
-                {c.profilePic ? <img src={c.profilePic} alt={c.name} className="chat-avatar-img" /> : c.avatar}
-              </span>
-              <span className="chat-meta">
-                <strong>{c.name}</strong>
-                <small>{c.lastMessage || "Tap to start chatting"}</small>
-              </span>
-            </button>
-          ))}
+          {filteredContacts.map((c) => {
+            const presence = getContactPresence(c);
+            return (
+              <button
+                key={c.id}
+                type="button"
+                className={`chat-contact ${activeContactId === c.id ? "active" : ""}`}
+                onClick={() => openContact(c)}
+              >
+                <span className="chat-avatar">
+                  {c.profilePic ? <img src={c.profilePic} alt={c.name} className="chat-avatar-img" /> : c.avatar}
+                  <span className={`chat-presence-dot ${presence.online ? "is-online" : ""}`} />
+                </span>
+                <span className="chat-meta">
+                  <span className="chat-meta-row">
+                    <strong>{c.name}</strong>
+                    <span className={`chat-status-pill ${presence.online ? "is-online" : ""}`}>
+                      {presence.text}
+                    </span>
+                  </span>
+                  <small>{c.lastMessage || "Tap to start chatting"}</small>
+                </span>
+              </button>
+            );
+          })}
           {!error && filteredContacts.length === 0 && <p className="chat-empty">No users found</p>}
         </div>
 
@@ -5352,18 +6114,15 @@ export default function Chat() {
             <p className="active-call-popup-subtitle">
               {callStatusText} ? Total {formatCallDuration(callDurationSec)}
             </p>
-            <div className="active-call-popup-actions">
-              <button type="button" className="call-ring-toggle" onClick={toggleMute}>
-                {isMuted ? "Unmute mic" : "Mute mic"}
-              </button>
-              <button type="button" className="call-ring-toggle" onClick={toggleSpeaker}>
-                {isSpeakerOn ? "Speaker on" : "Speaker off"}
-              </button>
-              <button type="button" className="call-ring-toggle" onClick={upgradeCallToVideo}>
-                Switch to video
-              </button>
-              <button type="button" className="call-decline" onClick={() => finishCall(true)}>
-                <FiPhoneOff /> End Call
+              <div className="active-call-popup-actions">
+                <button type="button" className="call-ring-toggle" onClick={toggleMute}>
+                  {isMuted ? "Unmute mic" : "Mute mic"}
+                </button>
+                <button type="button" className="call-ring-toggle" onClick={upgradeCallToVideo}>
+                  Switch to video
+                </button>
+                <button type="button" className="call-decline" onClick={() => finishCall(true)}>
+                  <FiPhoneOff /> End Call
               </button>
             </div>
           </div>
@@ -5459,32 +6218,47 @@ export default function Chat() {
               </div>
             ) : (
               <>
-                <video
-                  ref={remoteVideoRef}
-                  autoPlay
-                  playsInline
-                  className="wa-video-remote"
-                  style={{ filter: activeVideoFilter.css }}
-                  data-allow-simultaneous="true"
-                />
+                  <video
+                    ref={remoteVideoRef}
+                    autoPlay
+                    playsInline
+                    className="wa-video-remote"
+                    style={{ filter: activeVideoFilter.css }}
+                    data-allow-simultaneous="true"
+                  />
                 {!hasRemoteVideo && !hasRemoteAudio && (
-                  <div className="wa-video-remote-fallback" aria-live="polite">
-                    <div className="wa-video-avatar">{(callState.peerName || "U").charAt(0).toUpperCase()}</div>
-                    <p>{callState.peerName || "User"} camera is off or still connecting</p>
+                  <div className="wa-video-remote-indicator" aria-live="polite">
+                    <span className="wa-video-remote-indicator-icon">◎</span>
+                    <span className="wa-video-remote-indicator-text">Camera off</span>
                   </div>
                 )}
-                <video
-                  ref={localVideoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  className="wa-video-local"
-                  style={{ filter: activeVideoFilter.css }}
-                  data-allow-simultaneous="true"
-                />
+                  <video
+                    ref={localVideoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="wa-video-local"
+                    style={{ filter: activeVideoFilter.css, transform: "scaleX(-1)" }}
+                    data-allow-simultaneous="true"
+                  />
               </>
             )}
             <div className="wa-video-top">
+              <button
+                type="button"
+                className="wa-video-exit"
+                onClick={() => {
+                  const el = remoteVideoRef.current;
+                  pipDismissedRef.current = false;
+                  if (pipEnabled && el && typeof el.requestPictureInPicture === "function") {
+                    el.requestPictureInPicture?.().catch(() => {});
+                  }
+                  navigate(-1);
+                }}
+                title="Exit call"
+              >
+                Exit
+              </button>
               <p className="wa-video-peer">{callState.peerName || "User"}</p>
               <p className="wa-video-state">
                 {callStatusText} ? {formatCallDuration(callDurationSec)}
@@ -5575,6 +6349,9 @@ export default function Chat() {
                   <FiUserPlus />
                 </button>
               )}
+              <button type="button" className="call-control" onClick={toggleMute} title="Mute mic">
+                {isMuted ? <FiMicOff /> : <FiMic />}
+              </button>
               <button type="button" className="call-control" onClick={toggleSpeaker} title="Speaker on/off">
                 {isSpeakerOn ? <FiVolume2 /> : <FiVolumeX />}
               </button>
@@ -5608,7 +6385,7 @@ export default function Chat() {
           <>
             <header className="chat-header wa-header">
               <div className="chat-header-main-wrap">
-                {isConversationRoute && (
+                {isConversationRoute && showBackButton && (
                   <button type="button" className="chat-back-btn" onClick={() => navigate("/chat")} title="Back to inbox">
                     <FiArrowLeft />
                   </button>
@@ -5629,46 +6406,60 @@ export default function Chat() {
               </div>
 
               <div className="chat-header-actions" ref={headerMenuWrapRef}>
-                <button
-                  type="button"
-                  className="call-action"
-                  title="Audio call"
-                  onClick={() => startOutgoingCall("audio")}
-                  disabled={callActive || !!incomingCall}
-                >
-                  <FiPhone />
-                </button>
-                <button
-                  type="button"
-                  className="call-action"
-                  title="Video call"
-                  onClick={() => startOutgoingCall("video")}
-                  disabled={callActive || !!incomingCall}
-                >
-                  <FiVideo />
-                </button>
-                <button
-                  type="button"
-                  className="call-action"
-                  title="Group video call"
-                  onClick={openGroupInvite}
-                  disabled={callActive || !!incomingCall}
-                >
-                  <FiUsers />
-                </button>
-                <button
-                  type="button"
-                  className="call-action"
-                  title={signAssistAutoSpeak ? "Auto-speak on" : "Auto-speak off"}
-                  onClick={() => setAutoSpeakEnabled(!signAssistAutoSpeak)}
-                >
-                  {signAssistAutoSpeak ? <FiVolume2 /> : <FiVolumeX />}
-                </button>
+                <div className="chat-call-menu-wrap">
+                  <button
+                    type="button"
+                    className={`call-action call-action-menu ${showCallMenu ? "is-active" : ""}`}
+                    title="Call options"
+                    onClick={() => {
+                      if (callActive || !!incomingCall) return;
+                      setShowCallMenu((prev) => !prev);
+                      setShowHeaderMenu(false);
+                      setShowWallpaperPanel(false);
+                    }}
+                    disabled={callActive || !!incomingCall}
+                    aria-haspopup="menu"
+                    aria-expanded={showCallMenu}
+                  >
+                    <FiPhone className="call-action-icon" />
+                    <FiChevronDown className="call-action-caret" />
+                  </button>
+                  {showCallMenu && (
+                    <div className="chat-call-menu" ref={callMenuRef} role="menu">
+                      <button
+                        type="button"
+                        className="chat-call-menu-item"
+                        onClick={() => {
+                          startOutgoingCall("audio");
+                          setShowCallMenu(false);
+                        }}
+                        role="menuitem"
+                      >
+                        <FiPhone /> Voice call
+                      </button>
+                      <button
+                        type="button"
+                        className="chat-call-menu-item"
+                        onClick={() => {
+                          startOutgoingCall("video");
+                          setShowCallMenu(false);
+                        }}
+                        role="menuitem"
+                      >
+                        <FiVideo /> Video call
+                      </button>
+                    </div>
+                  )}
+                </div>
                 <button
                   type="button"
                   className="call-action"
                   title="More options"
-                  onClick={() => setShowHeaderMenu((prev) => !prev)}
+                  onClick={() => {
+                    setShowHeaderMenu((prev) => !prev);
+                    setShowCallMenu(false);
+                    setShowWallpaperPanel(false);
+                  }}
                 >
                   <FiMoreVertical />
                 </button>
@@ -5677,6 +6468,19 @@ export default function Chat() {
 
             {showHeaderMenu && (
               <aside className="chat-header-menu" ref={headerMenuRef}>
+                {callActive && (
+                  <button
+                    type="button"
+                    className="chat-header-menu-row"
+                    onClick={() => {
+                      toggleSpeaker();
+                      setShowHeaderMenu(false);
+                    }}
+                    title="Speaker on/off"
+                  >
+                    {isSpeakerOn ? <FiVolume2 /> : <FiVolumeX />} {isSpeakerOn ? "Speaker on" : "Speaker off"}
+                  </button>
+                )}
                 <div className="chat-translate-card">
                   <label className="chat-header-menu-row chat-switch-row">
                     <span className="chat-menu-label-group">
@@ -5688,6 +6492,22 @@ export default function Chat() {
                         type="checkbox"
                         checked={translatorEnabled}
                         onChange={(e) => setTranslatorEnabled(e.target.checked)}
+                      />
+                      <span className="chat-switch-track" />
+                    </span>
+                  </label>
+                </div>
+                <div className="chat-translate-card">
+                  <label className="chat-header-menu-row chat-switch-row">
+                    <span className="chat-menu-label-group">
+                      <strong>Auto-speak</strong>
+                      <small>Read incoming messages aloud</small>
+                    </span>
+                    <span className="chat-switch">
+                      <input
+                        type="checkbox"
+                        checked={signAssistAutoSpeak}
+                        onChange={(e) => setAutoSpeakEnabled(e.target.checked)}
                       />
                       <span className="chat-switch-track" />
                     </span>
@@ -5743,10 +6563,51 @@ export default function Chat() {
                     <option value="male">Male voice</option>
                   </select>
                 </label>
-                <div className="chat-translate-card chat-wallpaper-card">
-                  <div className="chat-menu-label-group">
+                <button
+                  type="button"
+                  className="chat-header-menu-row chat-header-menu-link"
+                  onClick={() => {
+                    setShowWallpaperPanel(true);
+                    setShowHeaderMenu(false);
+                    setShowCallMenu(false);
+                  }}
+                >
+                  <span className="chat-menu-label-group">
                     <strong>Chat wallpaper</strong>
                     <small>Choose background picture for this chat page</small>
+                  </span>
+                  <FiChevronDown />
+                </button>
+                {translatorError && <p className="chat-translate-error">{translatorError}</p>}
+                <button
+                  type="button"
+                  className="chat-header-menu-row chat-header-danger-btn"
+                  onClick={blockActiveContact}
+                  disabled={activeContactBlocked}
+                >
+                  {activeContactBlocked ? "User blocked" : "Block user"}
+                </button>
+              </aside>
+            )}
+            {showWallpaperPanel && (
+              <div className="chat-wallpaper-panel-backdrop" onClick={() => setShowWallpaperPanel(false)}>
+                <div
+                  className="chat-wallpaper-panel"
+                  ref={wallpaperPanelRef}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="chat-wallpaper-panel-head">
+                    <div className="chat-wallpaper-panel-title">
+                      <strong>Chat wallpaper</strong>
+                      <small>Choose background picture for this chat page</small>
+                    </div>
+                    <button
+                      type="button"
+                      className="chat-wallpaper-close"
+                      onClick={() => setShowWallpaperPanel(false)}
+                    >
+                      Close
+                    </button>
                   </div>
                   <div className="chat-wallpaper-grid">
                     {CHAT_WALLPAPER_PRESETS.map((preset) => (
@@ -5793,16 +6654,7 @@ export default function Chat() {
                     />
                   </div>
                 </div>
-                {translatorError && <p className="chat-translate-error">{translatorError}</p>}
-                <button
-                  type="button"
-                  className="chat-header-menu-row chat-header-danger-btn"
-                  onClick={blockActiveContact}
-                  disabled={activeContactBlocked}
-                >
-                  {activeContactBlocked ? "User blocked" : "Block user"}
-                </button>
-              </aside>
+              </div>
             )}
 
             {(incomingCall || (callActive && callState.mode === "audio") || callError) && (
@@ -5830,13 +6682,27 @@ export default function Chat() {
                     )}
 
                     <div className="in-call-controls">
+                      <button type="button" className="call-control" onClick={toggleMute} title="Mute mic">
+                        {isMuted ? <FiMicOff /> : <FiMic />}
+                      </button>
                       <button type="button" className="call-control" onClick={toggleSpeaker} title="Speaker on/off">
                         {isSpeakerOn ? <FiVolume2 /> : <FiVolumeX />}
                       </button>
                       {callState.mode === "audio" && (
-                        <button type="button" className="call-control" onClick={upgradeCallToVideo} title="Switch to video">
-                          <FiVideo />
-                        </button>
+                        <>
+                          <button type="button" className="call-control" onClick={upgradeCallToVideo} title="Switch to video">
+                            <FiVideo />
+                          </button>
+                          <button
+                            type="button"
+                            className="call-control"
+                            onClick={openGroupInvite}
+                            title="Group video call"
+                            disabled={!!incomingCall}
+                          >
+                            <FiUsers />
+                          </button>
+                        </>
                       )}
                       <button type="button" className="call-hangup" onClick={() => finishCall(true)}>
                         <FiPhoneOff />
@@ -6336,6 +7202,77 @@ export default function Chat() {
           </>
         )}
       </section>
+      )}
+      {storyViewerIndex != null && activeStory && (
+        <div className="chat-story-viewer-backdrop" onClick={closeStory}>
+          <div className="chat-story-viewer" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="chat-story-viewer-close" onClick={closeStory}>
+              ×
+            </button>
+            {(() => {
+              const mediaUrl = resolveStoryMediaUrl(activeStory?.mediaUrl || activeStory?.url || "");
+              const isVideo = isStoryVideo(mediaUrl);
+              const label = String(activeStory?.storyText || activeStory?.caption || "Story").trim();
+              return (
+                <>
+                  <div className="chat-story-viewer-media">
+                    {mediaUrl ? (
+                      isVideo ? (
+                        <video src={mediaUrl} autoPlay playsInline controls />
+                      ) : (
+                        <img src={mediaUrl} alt={label} />
+                      )
+                    ) : (
+                      <div className="chat-story-viewer-empty">Story media not available</div>
+                    )}
+                  </div>
+                  {label && <p className="chat-story-viewer-caption">{label}</p>}
+                </>
+              );
+            })()}
+            {storyItems.length > 1 && (
+              <div className="chat-story-viewer-nav">
+                <button type="button" onClick={goPrevStory} disabled={storyViewerIndex <= 0}>
+                  Prev
+                </button>
+                <button type="button" onClick={goNextStory} disabled={storyViewerIndex >= storyItems.length - 1}>
+                  Next
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      {storyOptionsOpen && storyItems.length > 0 && (
+        <div className="chat-story-options-backdrop" onClick={closeStoryOptions}>
+          <div className="chat-story-options" onClick={(e) => e.stopPropagation()}>
+            <h4>Story options</h4>
+            <button
+              type="button"
+              onClick={() => {
+                deleteStoryAt(0);
+                closeStoryOptions();
+              }}
+            >
+              {storyItems.length > 1 ? "Delete latest story" : "Delete story"}
+            </button>
+            {storyItems.length > 1 && (
+              <button
+                type="button"
+                className="danger"
+                onClick={() => {
+                  clearStories();
+                  closeStoryOptions();
+                }}
+              >
+                Delete all stories
+              </button>
+            )}
+            <button type="button" className="ghost" onClick={closeStoryOptions}>
+              Cancel
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

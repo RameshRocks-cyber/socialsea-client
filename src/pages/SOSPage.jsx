@@ -186,6 +186,7 @@ export default function SOSPage() {
   const [backendStatus, setBackendStatus] = useState("Not sent yet");
   const [liveFrameUrl, setLiveFrameUrl] = useState("");
   const [liveStreamAvailable, setLiveStreamAvailable] = useState(false);
+  const [cameraFacing, setCameraFacing] = useState("user");
   const lastFrameAtRef = useRef(0);
   const hasMatchedLiveFrameRef = useRef(false);
   const latestPreviewFrameRef = useRef("");
@@ -224,7 +225,6 @@ export default function SOSPage() {
       id: `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
       at: nowIso(),
       senderUserId: String(localStorage.getItem("userId") || sessionStorage.getItem("userId") || "").trim(),
-      senderEmail: String(localStorage.getItem("email") || sessionStorage.getItem("email") || "").trim(),
       ...extras
     };
     try {
@@ -359,6 +359,9 @@ export default function SOSPage() {
         longitude: forcedLocation?.longitude ?? lastLocation?.longitude ?? null,
         audioActive: recordingInfo.audio,
         videoActive: recordingInfo.video,
+        frontCameraEnabled: recordingInfo.video && cameraFacing === "user",
+        backCameraEnabled: recordingInfo.video && cameraFacing === "environment",
+        cameraFacing,
         // Backend fallback channel for cross-browser/profile live preview.
         previewFrame: latestFrame || null,
         previewFrameAt: latestFrameAt || null
@@ -414,13 +417,35 @@ export default function SOSPage() {
     }
   };
 
+  const toggleCameraFacing = () => {
+    if (status === "arming" || status === "active") {
+      setMessage("Stop SOS to switch camera.");
+      return;
+    }
+    setCameraFacing((prev) => (prev === "user" ? "environment" : "user"));
+  };
+
+  const getCameraStream = async (facingMode) => {
+    const preferred = String(facingMode || "user");
+    const baseConstraints = { audio: true, video: { facingMode: { exact: preferred } } };
+    try {
+      return await navigator.mediaDevices.getUserMedia(baseConstraints);
+    } catch {
+      try {
+        return await navigator.mediaDevices.getUserMedia({ audio: true, video: { facingMode: preferred } });
+      } catch {
+        return await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+      }
+    }
+  };
+
   const startRecorder = async () => {
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
       setMessage("Recording is not supported in this browser");
       return { audio: false, video: false };
     }
 
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+    const stream = await getCameraStream(cameraFacing);
     mediaStreamRef.current = stream;
     const recorder = new MediaRecorder(stream);
     mediaRecorderRef.current = recorder;
@@ -494,7 +519,6 @@ export default function SOSPage() {
       setLocationCount(1);
       setElapsedSec(0);
       const reporterUserId = String(localStorage.getItem("userId") || sessionStorage.getItem("userId") || "").trim() || undefined;
-      const reporterEmail = String(localStorage.getItem("email") || sessionStorage.getItem("email") || "").trim() || undefined;
       persistSession({
         active: true,
         triggeredByCurrentBrowser: true,
@@ -505,14 +529,12 @@ export default function SOSPage() {
         alertId: null,
         alertDisplayId: null,
         reporterUserId,
-        reporterEmail,
         backendStatus: "Sending trigger...",
         updatedAt: startIso
       });
       setSosActiveOwner(true);
       broadcastSosSignal("triggering", {
         reporterUserId,
-        reporterEmail,
         latitude: initialLocation.latitude,
         longitude: initialLocation.longitude,
         radiusMeters: RADIUS_METERS
@@ -529,9 +551,8 @@ export default function SOSPage() {
           accuracyMeters: initialLocation.accuracy,
           radiusMeters: RADIUS_METERS,
           reporterUserId,
-          reporterEmail,
-          frontCameraEnabled: media.video,
-          backCameraEnabled: false,
+          frontCameraEnabled: media.video && cameraFacing === "user",
+          backCameraEnabled: media.video && cameraFacing === "environment",
           audioActive: media.audio,
           videoActive: media.video
         };
@@ -546,14 +567,12 @@ export default function SOSPage() {
           alertId: id,
           alertDisplayId: id ? String(id) : null,
           reporterUserId,
-          reporterEmail,
           backendStatus: "SOS sent to backend (5km)",
           updatedAt: nowIso()
         });
         broadcastSosSignal("triggered", {
           alertId: id,
           reporterUserId,
-          reporterEmail,
           latitude: initialLocation.latitude,
           longitude: initialLocation.longitude,
           radiusMeters: RADIUS_METERS
@@ -570,14 +589,12 @@ export default function SOSPage() {
           alertId: null,
           alertDisplayId: localId,
           reporterUserId,
-          reporterEmail,
           backendStatus: backendMessage,
           updatedAt: nowIso()
         });
         broadcastSosSignal("triggered-local", {
           localAlertId: localId,
           reporterUserId,
-          reporterEmail,
           latitude: initialLocation.latitude,
           longitude: initialLocation.longitude,
           radiusMeters: RADIUS_METERS,
@@ -677,7 +694,6 @@ export default function SOSPage() {
         alertId,
         alertDisplayId: alertDisplayId || (alertId ? String(alertId) : null),
         reporterUserId: String(localStorage.getItem("userId") || sessionStorage.getItem("userId") || "").trim() || undefined,
-        reporterEmail: String(localStorage.getItem("email") || sessionStorage.getItem("email") || "").trim() || undefined,
         lastLocation,
         locationCount,
         recordingInfo: stoppedRecordingInfo,
@@ -723,8 +739,7 @@ export default function SOSPage() {
       }
       broadcastSosSignal("stopped", {
         alertId,
-        reporterUserId: String(localStorage.getItem("userId") || sessionStorage.getItem("userId") || "").trim() || undefined,
-        reporterEmail: String(localStorage.getItem("email") || sessionStorage.getItem("email") || "").trim() || undefined
+        reporterUserId: String(localStorage.getItem("userId") || sessionStorage.getItem("userId") || "").trim() || undefined
       });
     } finally {
       cleanupMedia();
@@ -765,7 +780,6 @@ export default function SOSPage() {
       broadcastSosSignal("active", {
         alertId,
         reporterUserId: String(localStorage.getItem("userId") || sessionStorage.getItem("userId") || "").trim() || undefined,
-        reporterEmail: String(localStorage.getItem("email") || sessionStorage.getItem("email") || "").trim() || undefined,
         latitude: lastLocation?.latitude ?? null,
         longitude: lastLocation?.longitude ?? null,
         radiusMeters: RADIUS_METERS
@@ -1412,6 +1426,7 @@ export default function SOSPage() {
             <h3>Live Audio/Video</h3>
             <p>Audio: {recordingInfo.audio ? "Live" : "Off"}</p>
             <p>Video: {recordingInfo.video ? "Live" : "Off"}</p>
+            <p>Camera: {cameraFacing === "user" ? "Front" : "Back"}</p>
             <p>Chunks: {recordingInfo.chunks}</p>
             <p>Bytes: {recordingInfo.bytes}</p>
           </div>
@@ -1464,6 +1479,14 @@ export default function SOSPage() {
 
         {!isLiveView && (
           <div className="sos-actions">
+            <button
+              type="button"
+              className="sos-camera-toggle"
+              onClick={toggleCameraFacing}
+              disabled={status === "arming" || status === "active"}
+            >
+              {cameraFacing === "user" ? "Switch to Back Camera" : "Switch to Front Camera"}
+            </button>
             <button type="button" className="sos-start" onClick={onStartTap} disabled={status === "arming" || status === "active"}>
               Start SOS
             </button>

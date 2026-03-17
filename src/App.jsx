@@ -7,6 +7,7 @@ import Register from "./pages/Register";
 import ForgotPassword from "./pages/ForgotPassword";
 import Upload from "./pages/Upload";
 import Reels from "./pages/Reels";
+import HighlightsCreate from "./pages/HighlightsCreate";
 import Notifications from "./pages/Notifications";
 import Chat from "./pages/Chat";
 import Profile from "./pages/Profile";
@@ -34,6 +35,8 @@ import FollowRequests from "./pages/FollowRequests";
 import LongVideos from "./pages/LongVideos";
 import FollowConnections from "./pages/FollowConnections";
 import LiveRecordings from "./pages/LiveRecordings";
+import LiveStart from "./pages/LiveStart";
+import StoryCreate from "./pages/StoryCreate";
 import { getUserRole, isAuthenticated } from "./auth";
 import api from "./api/axios";
 import PageErrorBoundary from "./components/PageErrorBoundary";
@@ -210,6 +213,10 @@ function AppRoutes() {
               <Route path="/profile/:username" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
               <Route path="/profile/live-recordings" element={<ProtectedRoute><LiveRecordings /></ProtectedRoute>} />
               <Route path="/live-recordings" element={<ProtectedRoute><LiveRecordings /></ProtectedRoute>} />
+              <Route path="/live" element={<Navigate to="/live/start" replace />} />
+              <Route path="/live/start" element={<ProtectedRoute><LiveStart /></ProtectedRoute>} />
+              <Route path="/story/create" element={<ProtectedRoute><StoryCreate /></ProtectedRoute>} />
+              <Route path="/highlights/create" element={<ProtectedRoute><HighlightsCreate /></ProtectedRoute>} />
               <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
               <Route path="/settings/sounds" element={<ProtectedRoute><SettingsSounds /></ProtectedRoute>} />
               <Route path="/settings/location" element={<ProtectedRoute><SettingsLocation /></ProtectedRoute>} />

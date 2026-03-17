@@ -11,6 +11,54 @@
   -webkit-tap-highlight-color: transparent;
 }
 
+.reels-live-banner {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 80px;
+  z-index: 19;
+  padding: 10px 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(196, 149, 91, 0.45);
+  background: linear-gradient(135deg, rgba(25, 20, 16, 0.92), rgba(10, 8, 6, 0.96));
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+}
+
+.reels-live-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ff6a3d;
+  box-shadow: 0 0 10px rgba(255, 106, 61, 0.7);
+}
+
+.reels-live-text {
+  display: grid;
+  gap: 2px;
+  flex: 1;
+}
+
+.reels-live-text strong {
+  font-size: 0.92rem;
+}
+
+.reels-live-text small {
+  font-size: 0.78rem;
+  color: rgba(242, 231, 218, 0.72);
+}
+
+.reels-live-btn {
+  border: none;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-weight: 700;
+  background: linear-gradient(135deg, #c4955b, #9f6f4a);
+  color: #1b1108;
+}
+
 .reels-gesture-toggle {
   position: absolute;
   top: 12px;

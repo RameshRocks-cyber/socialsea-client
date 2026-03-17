@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useLocation } from "react-router-dom";
 import api from "../api/axios";
 import "./Upload.css";
 
@@ -75,6 +76,7 @@ const sanitizeCreatorSettings = (settings) => {
 };
 
 export default function Upload() {
+  const location = useLocation();
   const videoRef = useRef(null);
   const [file, setFile] = useState(null);
   const [selectedFiles, setSelectedFiles] = useState([]);
@@ -119,6 +121,11 @@ export default function Upload() {
     category: "general",
     scheduleAt: ""
   });
+  const uploadType = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    return String(params.get("type") || "").toLowerCase();
+  }, [location.search]);
+  const isReelUpload = uploadType === "reel";
 
   useEffect(() => {
     if (!file) {
@@ -311,6 +318,16 @@ export default function Upload() {
       setMsg("File required");
       return;
     }
+    if (isReelUpload) {
+      if (filesToUpload.length !== 1) {
+        setMsg("Please choose a single video for a reel.");
+        return;
+      }
+      if (!filesToUpload[0]?.type?.startsWith("video/")) {
+        setMsg("Reels must be a video file.");
+        return;
+      }
+    }
 
     try {
       setLoading(true);
@@ -332,6 +349,12 @@ export default function Upload() {
         const uploadFile = shouldApplyImageEdit ? await processImage(currentFile) : currentFile;
         form.append("file", uploadFile);
         if (caption?.trim()) form.append("caption", caption.trim());
+        if (isReelUpload) {
+          form.append("isReel", "true");
+          form.append("reel", "true");
+          form.append("isShortVideo", "true");
+          form.append("type", "reel");
+        }
         if (currentIsVideo) {
           const safeCreatorSettings = sanitizeCreatorSettings(creatorSettings);
           form.append(
@@ -353,6 +376,7 @@ export default function Upload() {
             const status = Number(firstErr?.response?.status || 0);
             // Some backend variants fail on extra multipart fields; retry with strict file-only payload.
             if (status >= 500) {
+              if (isReelUpload) throw firstErr;
               const fallbackForm = new FormData();
               fallbackForm.append("file", uploadFile);
               res = await api.post("/api/posts/upload", fallbackForm, {
@@ -408,15 +432,17 @@ export default function Upload() {
   return (
     <div className="upload-page">
       <section className="upload-panel">
-        <h2>Create Post</h2>
-        <p className="upload-subtitle">Edit before posting like Instagram.</p>
+        <h2>{isReelUpload ? "Create Reel" : "Create Post"}</h2>
+        <p className="upload-subtitle">
+          {isReelUpload ? "Upload a short video for reels." : "Edit before posting like Instagram."}
+        </p>
 
         <label className="upload-file-pick">
-          Choose photo/video
+          {isReelUpload ? "Choose video" : "Choose photo/video"}
           <input
             type="file"
-            accept="image/*,video/*"
-            multiple
+            accept={isReelUpload ? "video/*" : "image/*,video/*"}
+            multiple={!isReelUpload}
             onChange={(e) => {
               const nextFiles = Array.from(e.target.files || []);
               setSelectedFiles(nextFiles);
