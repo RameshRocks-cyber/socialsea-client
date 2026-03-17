@@ -889,10 +889,16 @@ export default function Navbar() {
     const normalizeAlerts = (data) => {
       if (Array.isArray(data)) return data;
       if (Array.isArray(data?.alerts)) return data.alerts;
+      if (Array.isArray(data?.activeAlerts)) return data.activeAlerts;
+      if (Array.isArray(data?.nearbyAlerts)) return data.nearbyAlerts;
+      if (Array.isArray(data?.nearby)) return data.nearby;
+      if (Array.isArray(data?.sosAlerts)) return data.sosAlerts;
       if (Array.isArray(data?.items)) return data.items;
       if (Array.isArray(data?.data)) return data.data;
       if (Array.isArray(data?.result)) return data.result;
       if (Array.isArray(data?.payload)) return data.payload;
+      if (data?.alert && typeof data.alert === "object") return [data.alert];
+      if (data?.activeAlert && typeof data.activeAlert === "object") return [data.activeAlert];
       if (data && typeof data === "object" && (data.active || data.alertId || data.alertDisplayId || data.latitude || data.longitude || data.reporterEmail)) {
         return [data];
       }
@@ -905,6 +911,7 @@ export default function Navbar() {
       const urls = buildEmergencyUrls(suffix);
       const suffixText = String(suffix || "").toLowerCase();
       const isPublicEmergencyEndpoint = suffixText === "active";
+      const params = buildEmergencyQueryParams();
       for (const url of urls) {
         const baseURL = /^https?:\/\//i.test(url) ? undefined : api.defaults.baseURL;
         const path = /^https?:\/\//i.test(url) ? url : url;
@@ -912,7 +919,8 @@ export default function Navbar() {
           res = await api.get(path, {
             baseURL,
             suppressAuthRedirect: true,
-            skipAuth: false
+            skipAuth: false,
+            params: params || undefined
           });
           break;
         } catch (err) {
@@ -924,7 +932,8 @@ export default function Navbar() {
                 baseURL,
                 suppressAuthRedirect: true,
                 skipAuth: true,
-                skipRefresh: true
+                skipRefresh: true,
+                params: params || undefined
               });
               break;
             } catch (retryErr) {
@@ -1164,6 +1173,23 @@ export default function Navbar() {
     const rawKm = toFiniteNumber(alertLike?.radiusKm ?? alertLike?.radius_km);
     if (rawKm != null) return rawKm * 1000;
     return 5000;
+  };
+
+  const buildEmergencyQueryParams = () => {
+    const user = sosUserLocationRef.current;
+    const lat = toFiniteNumber(user?.latitude);
+    const lon = toFiniteNumber(user?.longitude);
+    if (lat == null || lon == null) return null;
+    const radiusMeters = 5000;
+    const radiusKm = radiusMeters / 1000;
+    return {
+      lat,
+      lon,
+      latitude: lat,
+      longitude: lon,
+      radiusMeters,
+      radiusKm
+    };
   };
 
   const isWithinSosRadius = (alertLike = {}) => {
