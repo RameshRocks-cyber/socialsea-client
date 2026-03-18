@@ -15,7 +15,7 @@ const SOS_LIVE_RTC_SIGNAL_KEY = "socialsea_sos_live_rtc_signal_v1";
 const SOS_LIVE_RTC_OFFER_KEY_PREFIX = "socialsea_sos_live_rtc_offer_v1_";
 const SOS_LIVE_RTC_ANSWER_KEY_PREFIX = "socialsea_sos_live_rtc_answer_v1_";
 const SOS_ACTIVE_OWNER_KEY = "socialsea_sos_active_owner_v1";
-const HEARTBEAT_MS = 5000;
+const HEARTBEAT_MS = 2000;
 const RADIUS_METERS = 5000;
 const LOCAL_SIGNAL_REBROADCAST_MS = 4000;
 
@@ -25,6 +25,23 @@ const uniqueNonEmpty = (arr) =>
     return arr.indexOf(v) === i;
   });
 
+const isLoopbackHost = (host) => {
+  const value = String(host || "").trim().toLowerCase();
+  return value === "localhost" || value === "127.0.0.1";
+};
+
+const isPrivateIpHost = (host) => {
+  const value = String(host || "").trim();
+  if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(value)) return false;
+  const parts = value.split(".").map((n) => Number(n));
+  if (parts.some((n) => !Number.isFinite(n) || n < 0 || n > 255)) return false;
+  const [a, b] = parts;
+  if (a === 10) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  return false;
+};
+
 const BAD_EMERGENCY_HOSTS = new Set([
   "localhost",
   "127.0.0.1",
@@ -32,6 +49,10 @@ const BAD_EMERGENCY_HOSTS = new Set([
   "socialsea.co.in",
   "www.socialsea.co.in"
 ]);
+
+const allowLocalEmergencyHosts =
+  typeof window !== "undefined" &&
+  ["localhost", "127.0.0.1"].includes(String(window.location.hostname || "").toLowerCase());
 
 const normalizeEmergencyBase = (rawBase) => {
   const value = String(rawBase || "").trim().replace(/\/+$/, "");
@@ -41,7 +62,7 @@ const normalizeEmergencyBase = (rawBase) => {
   if (!/^https?:\/\//i.test(value)) return "";
   try {
     const host = new URL(value).hostname.toLowerCase();
-    if (BAD_EMERGENCY_HOSTS.has(host)) return "";
+    if (BAD_EMERGENCY_HOSTS.has(host) && !allowLocalEmergencyHosts) return "";
   } catch {
     return "";
   }
@@ -55,6 +76,12 @@ const emergencyBaseCandidates = () => {
   const isHttpsPage =
     typeof window !== "undefined" &&
     String(window.location.protocol || "").toLowerCase() === "https:";
+  const runtimeHost =
+    typeof window !== "undefined" ? String(window.location.hostname || "").trim() : "";
+  const runtimeHostBase =
+    runtimeHost && (isLoopbackHost(runtimeHost) || isPrivateIpHost(runtimeHost))
+      ? `http://${runtimeHost}:8080`
+      : "";
   const storedBase =
     typeof window !== "undefined"
       ? localStorage.getItem("socialsea_auth_base_url") || sessionStorage.getItem("socialsea_auth_base_url")
@@ -70,6 +97,7 @@ const emergencyBaseCandidates = () => {
           api.defaults.baseURL,
           storedBase,
           import.meta.env.VITE_API_URL,
+          runtimeHostBase,
           "https://api.socialsea.co.in"
         ]
   );
@@ -205,6 +233,11 @@ export default function SOSPage() {
   const livePreviewChannelRef = useRef(null);
   const senderRtcPeerRef = useRef(null);
   const viewerRtcPeerRef = useRef(null);
+  const sosStompRef = useRef(null);
+  const sosStompSubRef = useRef(null);
+  const sosStompHandlerRef = useRef(null);
+  const sosStompAlertRef = useRef("");
+  const sosStompQueueRef = useRef([]);
 
   const session = useMemo(() => readJson(SOS_SESSION_KEY, null), []);
 
@@ -218,6 +251,121 @@ export default function SOSPage() {
     const next = [entry, ...prev].slice(0, 30);
     writeJson(SOS_HISTORY_KEY, next);
   };
+
+  useEffect(() => {
+    const token = String(
+      sessionStorage.getItem("accessToken") ||
+        sessionStorage.getItem("token") ||
+        localStorage.getItem("accessToken") ||
+        localStorage.getItem("token") ||
+        localStorage.getItem("authToken") ||
+        sessionStorage.getItem("authToken") ||
+        ""
+    ).trim();
+    if (!token) return undefined;
+    let disposed = false;
+    let client = null;
+
+    const init = async () => {
+      try {
+        const [{ Client }, sockjsModule] = await Promise.all([
+          import("@stomp/stompjs"),
+          import("sockjs-client/dist/sockjs")
+        ]);
+        if (disposed) return;
+        const SockJS = sockjsModule?.default || sockjsModule;
+        const base = getApiBaseUrl().replace(/\/+$/, "");
+
+        client = new Client({
+          webSocketFactory: () => new SockJS(`${base}/ws?token=${encodeURIComponent(token)}`),
+          reconnectDelay: 2000,
+          debug: () => {}
+        });
+
+        client.onConnect = () => {
+          if (disposed) return;
+          sosStompRef.current = client;
+          const alertId = String(sosStompAlertRef.current || "").trim();
+          if (alertId) {
+            try {
+              sosStompSubRef.current?.unsubscribe();
+            } catch {
+              // ignore
+            }
+            sosStompSubRef.current = client.subscribe(`/topic/sos/${encodeURIComponent(alertId)}`, (frame) => {
+              try {
+                const payload = JSON.parse(frame.body || "{}");
+                const handler = sosStompHandlerRef.current;
+                if (handler) {
+                  handler(payload);
+                } else {
+                  const queue = sosStompQueueRef.current;
+                  queue.push(payload);
+                  if (queue.length > 50) queue.shift();
+                }
+              } catch {
+                // ignore
+              }
+            });
+          }
+        };
+        client.onStompError = () => {};
+        client.onWebSocketError = () => {};
+        client.onWebSocketClose = () => {};
+
+        client.activate();
+      } catch {
+        // ignore stomp init errors
+      }
+    };
+
+    init();
+
+    return () => {
+      disposed = true;
+      try {
+        sosStompSubRef.current?.unsubscribe();
+      } catch {
+        // ignore
+      }
+      sosStompSubRef.current = null;
+      sosStompRef.current = null;
+      if (client) {
+        try {
+          client.deactivate();
+        } catch {
+          // ignore
+        }
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const activeAlertId = normalizeAlertId(routeAlertId || alertId || alertDisplayId);
+    sosStompAlertRef.current = activeAlertId;
+    const client = sosStompRef.current;
+    if (!client || !client.connected || !activeAlertId) return;
+    try {
+      sosStompSubRef.current?.unsubscribe();
+    } catch {
+      // ignore
+    }
+    sosStompSubRef.current = client.subscribe(`/topic/sos/${encodeURIComponent(activeAlertId)}`, (frame) => {
+      try {
+        const payload = JSON.parse(frame.body || "{}");
+        const handler = sosStompHandlerRef.current;
+        if (handler) {
+          handler(payload);
+        } else {
+          const queue = sosStompQueueRef.current;
+          queue.push(payload);
+          if (queue.length > 50) queue.shift();
+        }
+      } catch {
+        // ignore
+      }
+    });
+  }, [routeAlertId, alertId, alertDisplayId]);
 
   const broadcastSosSignal = (type, extras = {}) => {
     const payload = {
@@ -270,6 +418,20 @@ export default function SOSPage() {
     }
   };
 
+  const publishSosSignal = (packet) => {
+    const client = sosStompRef.current;
+    const alertLikeId = normalizeAlertId(packet?.alertId);
+    if (!client || !client.connected || !alertLikeId) return;
+    try {
+      client.publish({
+        destination: `/app/sos.signal/${encodeURIComponent(alertLikeId)}`,
+        body: JSON.stringify(packet)
+      });
+    } catch {
+      // ignore publish errors
+    }
+  };
+
   const postLiveRtcSignal = (packet) => {
     try {
       if (!livePreviewChannelRef.current && typeof BroadcastChannel !== "undefined") {
@@ -284,6 +446,7 @@ export default function SOSPage() {
     } catch {
       // ignore storage issues
     }
+    publishSosSignal(packet);
   };
 
   const getLocationOnce = () =>
@@ -349,11 +512,71 @@ export default function SOSPage() {
     throw lastErr || new Error("Emergency request failed");
   };
 
+  const capturePreviewFrame = async () => {
+    const stream = mediaStreamRef.current;
+    const previewNode = previewVideoRef.current;
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d", { alpha: false });
+    if (!ctx) return "";
+
+    let source = null;
+    let sourceWidth = 0;
+    let sourceHeight = 0;
+    let bitmap = null;
+
+    if (previewNode && (previewNode.videoWidth || 0) > 0 && (previewNode.videoHeight || 0) > 0) {
+      source = previewNode;
+      sourceWidth = previewNode.videoWidth || 0;
+      sourceHeight = previewNode.videoHeight || 0;
+    } else if (stream) {
+      const videoTrack = stream.getVideoTracks?.()?.[0] || null;
+      if (videoTrack && typeof ImageCapture !== "undefined") {
+        try {
+          const imageCapture = new ImageCapture(videoTrack);
+          bitmap = await imageCapture.grabFrame();
+          source = bitmap;
+          sourceWidth = bitmap?.width || 0;
+          sourceHeight = bitmap?.height || 0;
+        } catch {
+          bitmap = null;
+        }
+      }
+    }
+
+    if (!sourceWidth || !sourceHeight || !source) return "";
+    const targetW = Math.min(320, sourceWidth);
+    const targetH = Math.max(1, Math.round((targetW * sourceHeight) / sourceWidth));
+    canvas.width = targetW;
+    canvas.height = targetH;
+    try {
+      ctx.drawImage(source, 0, 0, targetW, targetH);
+    } catch {
+      if (bitmap?.close) bitmap.close();
+      return "";
+    }
+    if (bitmap?.close) bitmap.close();
+
+    try {
+      return canvas.toDataURL("image/jpeg", 0.5);
+    } catch {
+      return "";
+    }
+  };
+
   const sendHeartbeat = async (forcedLocation) => {
     if (!alertId) return;
     try {
-      const latestFrame = String(latestPreviewFrameRef.current || "");
-      const latestFrameAt = String(latestPreviewFrameAtRef.current || "");
+      let latestFrame = String(latestPreviewFrameRef.current || "");
+      let latestFrameAt = String(latestPreviewFrameAtRef.current || "");
+      if (!latestFrame && recordingInfo.video && mediaStreamRef.current) {
+        const frame = await capturePreviewFrame();
+        if (frame) {
+          latestFrame = frame;
+          latestFrameAt = nowIso();
+          latestPreviewFrameRef.current = frame;
+          latestPreviewFrameAtRef.current = latestFrameAt;
+        }
+      }
       const payload = {
         latitude: forcedLocation?.latitude ?? lastLocation?.latitude ?? null,
         longitude: forcedLocation?.longitude ?? lastLocation?.longitude ?? null,
@@ -372,6 +595,31 @@ export default function SOSPage() {
     } catch (err) {
       setBackendStatus(`Heartbeat issue: ${err?.response?.status || ""} ${err?.message || ""}`.trim());
     }
+  };
+
+  const fetchPreviewFrame = async (alertLikeId) => {
+    const id = String(alertLikeId || "").trim();
+    if (!id) return false;
+    const urls = buildEmergencyUrls(`${encodeURIComponent(id)}/preview-frame`);
+    for (const url of urls) {
+      try {
+        const res = await fetch(url, { method: "GET", credentials: "include" });
+        if (!res.ok) continue;
+        const data = await res.json();
+        const frame = String(data?.frame || "").trim();
+        if (frame) {
+          lastFrameAtRef.current = Date.now();
+          setLiveFrameUrl(frame);
+          if (isLiveView) {
+            setBackendStatus("Live preview connected");
+          }
+          return true;
+        }
+      } catch {
+        // ignore preview fetch errors
+      }
+    }
+    return false;
   };
 
   const startHeartbeat = () => {
@@ -505,18 +753,32 @@ export default function SOSPage() {
     setStatus("arming");
     setMessage("");
     try {
-      const pos = await getLocationOnce();
       const startIso = nowIso();
-      const initialLocation = {
-        latitude: pos.coords.latitude,
-        longitude: pos.coords.longitude,
-        accuracy: pos.coords.accuracy,
+      let locationError = null;
+      let mediaError = null;
+      let locationCount = 0;
+      let initialLocation = {
+        latitude: null,
+        longitude: null,
+        accuracy: null,
         at: startIso
       };
+      try {
+        const pos = await getLocationOnce();
+        initialLocation = {
+          latitude: pos.coords.latitude,
+          longitude: pos.coords.longitude,
+          accuracy: pos.coords.accuracy,
+          at: startIso
+        };
+        locationCount = 1;
+      } catch (err) {
+        locationError = err;
+      }
 
       setStartedAt(startIso);
       setLastLocation(initialLocation);
-      setLocationCount(1);
+      setLocationCount(locationCount);
       setElapsedSec(0);
       const reporterUserId = String(localStorage.getItem("userId") || sessionStorage.getItem("userId") || "").trim() || undefined;
       persistSession({
@@ -525,7 +787,7 @@ export default function SOSPage() {
         startedAt: startIso,
         elapsedSec: 0,
         lastLocation: initialLocation,
-        locationCount: 1,
+        locationCount,
         alertId: null,
         alertDisplayId: null,
         reporterUserId,
@@ -542,48 +804,24 @@ export default function SOSPage() {
 
       startTicker(startIso);
       startLocationWatch();
-      const media = await startRecorder();
-
+      let media = { audio: false, video: false };
       try {
-        const payload = {
-          latitude: initialLocation.latitude,
-          longitude: initialLocation.longitude,
-          accuracyMeters: initialLocation.accuracy,
-          radiusMeters: RADIUS_METERS,
-          reporterUserId,
-          frontCameraEnabled: media.video && cameraFacing === "user",
-          backCameraEnabled: media.video && cameraFacing === "environment",
-          audioActive: media.audio,
-          videoActive: media.video
-        };
-
-        const res = await callEmergency("post", "trigger", payload);
-
-        const id = res?.data?.alertId || null;
-        setAlertId(id);
-        setAlertDisplayId(id ? String(id) : null);
-        setBackendStatus("SOS sent to backend (5km)");
-        persistSession({
-          alertId: id,
-          alertDisplayId: id ? String(id) : null,
-          reporterUserId,
-          backendStatus: "SOS sent to backend (5km)",
-          updatedAt: nowIso()
-        });
-        broadcastSosSignal("triggered", {
-          alertId: id,
-          reporterUserId,
-          latitude: initialLocation.latitude,
-          longitude: initialLocation.longitude,
-          radiusMeters: RADIUS_METERS
-        });
+        media = await startRecorder();
       } catch (err) {
-        const status = Number(err?.response?.status || 0);
+        mediaError = err;
+        const fallbackRecording = { audio: false, video: false, chunks: 0, bytes: 0 };
+        setRecordingInfo(fallbackRecording);
+        persistSession({ recordingInfo: fallbackRecording, updatedAt: nowIso() });
+      }
+      if (!mediaError && !media.audio && !media.video) {
+        mediaError = new Error("Media unavailable");
+      }
+
+      const hasLocation = initialLocation.latitude != null && initialLocation.longitude != null;
+      if (!hasLocation) {
         const localId = `LOCAL-${Date.now()}`;
         setAlertDisplayId(localId);
-        const backendMessage = status === 404
-          ? "Backend emergency endpoint not found (404). Local SOS is still active."
-          : `Backend error: ${status || ""} ${err?.message || ""}`.trim();
+        const backendMessage = "Location unavailable. Local SOS is active.";
         setBackendStatus(backendMessage);
         persistSession({
           alertId: null,
@@ -600,10 +838,79 @@ export default function SOSPage() {
           radiusMeters: RADIUS_METERS,
           backendMessage
         });
+      } else {
+        try {
+          const payload = {
+            latitude: initialLocation.latitude,
+            longitude: initialLocation.longitude,
+            accuracyMeters: initialLocation.accuracy,
+            radiusMeters: RADIUS_METERS,
+            reporterUserId,
+            frontCameraEnabled: media.video && cameraFacing === "user",
+            backCameraEnabled: media.video && cameraFacing === "environment",
+            audioActive: media.audio,
+            videoActive: media.video
+          };
+
+          const res = await callEmergency("post", "trigger", payload);
+
+          const id = res?.data?.alertId || null;
+          setAlertId(id);
+          setAlertDisplayId(id ? String(id) : null);
+          setBackendStatus("SOS sent to backend (5km)");
+          persistSession({
+            alertId: id,
+            alertDisplayId: id ? String(id) : null,
+            reporterUserId,
+            backendStatus: "SOS sent to backend (5km)",
+            updatedAt: nowIso()
+          });
+          broadcastSosSignal("triggered", {
+            alertId: id,
+            reporterUserId,
+            latitude: initialLocation.latitude,
+            longitude: initialLocation.longitude,
+            radiusMeters: RADIUS_METERS
+          });
+        } catch (err) {
+          const status = Number(err?.response?.status || 0);
+          const localId = `LOCAL-${Date.now()}`;
+          setAlertDisplayId(localId);
+          const backendMessage = status === 404
+            ? "Backend emergency endpoint not found (404). Local SOS is still active."
+            : `Backend error: ${status || ""} ${err?.message || ""}`.trim();
+          setBackendStatus(backendMessage);
+          persistSession({
+            alertId: null,
+            alertDisplayId: localId,
+            reporterUserId,
+            backendStatus: backendMessage,
+            updatedAt: nowIso()
+          });
+          broadcastSosSignal("triggered-local", {
+            localAlertId: localId,
+            reporterUserId,
+            latitude: initialLocation.latitude,
+            longitude: initialLocation.longitude,
+            radiusMeters: RADIUS_METERS,
+            backendMessage
+          });
+        }
       }
 
       setStatus("active");
-      setMessage("ok bee Brave Help is on the way");
+      const insecureContext = typeof window !== "undefined" && window.isSecureContext === false;
+      const secureHint = insecureContext
+        ? " Open with https:// or http://localhost to enable full access."
+        : "";
+      const warnings = [];
+      if (locationError) warnings.push("location");
+      if (mediaError) warnings.push("camera/mic");
+      if (warnings.length) {
+        setMessage(`SOS started, but ${warnings.join(" and ")} access is blocked.${secureHint}`);
+      } else {
+        setMessage("ok bee Brave Help is on the way");
+      }
     } catch (err) {
       setStatus("idle");
       setMessage(err?.message || "Failed to start SOS");
@@ -850,7 +1157,7 @@ export default function SOSPage() {
 
         if (!sourceWidth || !sourceHeight) return;
 
-        const targetW = Math.min(480, sourceWidth);
+        const targetW = Math.min(320, sourceWidth);
         const targetH = Math.max(1, Math.round((targetW * sourceHeight) / sourceWidth));
         canvas.width = targetW;
         canvas.height = targetH;
@@ -864,7 +1171,7 @@ export default function SOSPage() {
 
         let frame = "";
         try {
-          frame = canvas.toDataURL("image/jpeg", 0.62);
+          frame = canvas.toDataURL("image/jpeg", 0.5);
         } catch {
           frame = "";
         }
@@ -897,7 +1204,7 @@ export default function SOSPage() {
 
     const timer = setInterval(() => {
       void sendFrame();
-    }, 160);
+    }, 400);
     return () => {
       clearInterval(timer);
       try {
@@ -974,6 +1281,20 @@ export default function SOSPage() {
           }
         };
         channel.addEventListener("message", onMessage);
+        const handler = (payload) => {
+          void onMessage({ data: payload });
+        };
+        sosStompHandlerRef.current = handler;
+        if (sosStompQueueRef.current.length) {
+          const pending = sosStompQueueRef.current.splice(0);
+          pending.forEach((item) => {
+            try {
+              handler(item);
+            } catch {
+              // ignore
+            }
+          });
+        }
         onStorage = (event) => {
           if (event?.key !== SOS_LIVE_RTC_SIGNAL_KEY || !event?.newValue) return;
           try {
@@ -1009,6 +1330,7 @@ export default function SOSPage() {
       if (livePreviewChannelRef.current && onMessage) {
         livePreviewChannelRef.current.removeEventListener("message", onMessage);
       }
+      sosStompHandlerRef.current = null;
       if (onStorage) {
         window.removeEventListener("storage", onStorage);
       }
@@ -1217,6 +1539,20 @@ export default function SOSPage() {
       onMessage = (event) => {
         void handleRtcPacket(event?.data || {});
       };
+      const handler = (payload) => {
+        void handleRtcPacket(payload);
+      };
+      sosStompHandlerRef.current = handler;
+      if (sosStompQueueRef.current.length) {
+        const pending = sosStompQueueRef.current.splice(0);
+        pending.forEach((item) => {
+          try {
+            handler(item);
+          } catch {
+            // ignore
+          }
+        });
+      }
       if (channel) channel.addEventListener("message", onMessage);
       const readStoredSignal = () => {
         try {
@@ -1242,6 +1578,7 @@ export default function SOSPage() {
       readStoredSignal();
       return () => {
         if (channel && onMessage) channel.removeEventListener("message", onMessage);
+        sosStompHandlerRef.current = null;
         window.removeEventListener("storage", onStorage);
         clearInterval(timer);
       };
@@ -1330,6 +1667,9 @@ export default function SOSPage() {
             setBackendStatus("Live preview connected");
           }
         }
+        if (!backendFrame && Date.now() - lastFrameAtRef.current > 2000) {
+          await fetchPreviewFrame(routeAlertId);
+        }
         setBackendStatus(
           data.active
             ? usedAssist
@@ -1338,11 +1678,16 @@ export default function SOSPage() {
             : "Session stopped"
         );
       } catch (err) {
-        if (!cancelled) setBackendStatus(`Live status failed: ${err?.response?.status || ""}`);
+        if (!cancelled) {
+          setBackendStatus(`Live status failed: ${err?.response?.status || ""}`);
+          if (Date.now() - lastFrameAtRef.current > 2000) {
+            await fetchPreviewFrame(routeAlertId);
+          }
+        }
       }
     };
     poll();
-    const timer = setInterval(poll, isLiveView ? 1200 : HEARTBEAT_MS);
+    const timer = setInterval(poll, isLiveView ? 800 : HEARTBEAT_MS);
     return () => {
       cancelled = true;
       clearInterval(timer);

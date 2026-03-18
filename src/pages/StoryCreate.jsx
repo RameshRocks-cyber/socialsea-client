@@ -52,6 +52,11 @@ export default function StoryCreate() {
   const [styleKey, setStyleKey] = useState(TEXT_STYLES[0].key);
   const [textColor, setTextColor] = useState(TEXT_STYLES[0].color);
   const [textSize, setTextSize] = useState(28);
+  const [textBold, setTextBold] = useState(false);
+  const [textItalic, setTextItalic] = useState(false);
+  const [textUnderline, setTextUnderline] = useState(false);
+  const [textBg, setTextBg] = useState(false);
+  const [textAlign, setTextAlign] = useState("center");
   const [msg, setMsg] = useState("");
   const [loading, setLoading] = useState(false);
   const [previewMuted, setPreviewMuted] = useState(true);
@@ -107,6 +112,18 @@ export default function StoryCreate() {
       if (caption.trim()) form.append("caption", caption.trim());
       if (storyText.trim()) form.append("storyText", storyText.trim());
       form.append("storyStyle", styleKey);
+      form.append(
+        "storyTextStyle",
+        JSON.stringify({
+          bold: textBold,
+          italic: textItalic,
+          underline: textUnderline,
+          background: textBg,
+          align: textAlign,
+          size: textSize,
+          color: textColor || activeStyle.color
+        })
+      );
 
       const res = await api.post("/api/posts/upload", form, {
         headers: { "Content-Type": "multipart/form-data" }
@@ -145,8 +162,14 @@ export default function StoryCreate() {
     <div className="story-create-page">
       <div className="story-shell">
         <header className="story-create-header">
-          <button className="story-back" type="button" onClick={() => navigate(-1)}>
-            Back
+          <button
+            className="story-back"
+            type="button"
+            onClick={() => navigate(-1)}
+            aria-label="Go back"
+            title="Back"
+          >
+            ←
           </button>
           <div className="story-title-wrap">
             <p className="story-title">Create Story</p>
@@ -206,7 +229,16 @@ export default function StoryCreate() {
                     style={{
                       color: textColor || activeStyle.color,
                       textShadow: activeStyle.shadow,
-                      fontSize: `${textSize}px`
+                      fontSize: `${textSize}px`,
+                      fontWeight: textBold ? 700 : 500,
+                      fontStyle: textItalic ? "italic" : "normal",
+                      textDecoration: textUnderline ? "underline" : "none",
+                      textAlign,
+                      background: textBg ? "rgba(0, 0, 0, 0.45)" : "transparent",
+                      padding: textBg ? "6px 10px" : "0",
+                      borderRadius: textBg ? "10px" : "0",
+                      boxDecorationBreak: "clone",
+                      WebkitBoxDecorationBreak: "clone"
                     }}
                   >
                     {storyText}
@@ -286,6 +318,59 @@ export default function StoryCreate() {
                 />
                 <strong>{textSize}px</strong>
               </label>
+            </div>
+            <div className="story-text-style-row">
+              <button
+                type="button"
+                className={`story-text-style-btn ${textBold ? "active" : ""}`}
+                onClick={() => setTextBold((prev) => !prev)}
+              >
+                Bold
+              </button>
+              <button
+                type="button"
+                className={`story-text-style-btn ${textItalic ? "active" : ""}`}
+                onClick={() => setTextItalic((prev) => !prev)}
+              >
+                Italic
+              </button>
+              <button
+                type="button"
+                className={`story-text-style-btn ${textUnderline ? "active" : ""}`}
+                onClick={() => setTextUnderline((prev) => !prev)}
+              >
+                Underline
+              </button>
+              <button
+                type="button"
+                className={`story-text-style-btn ${textBg ? "active" : ""}`}
+                onClick={() => setTextBg((prev) => !prev)}
+              >
+                Background
+              </button>
+            </div>
+            <div className="story-text-style-row">
+              <button
+                type="button"
+                className={`story-text-style-btn ${textAlign === "left" ? "active" : ""}`}
+                onClick={() => setTextAlign("left")}
+              >
+                Left
+              </button>
+              <button
+                type="button"
+                className={`story-text-style-btn ${textAlign === "center" ? "active" : ""}`}
+                onClick={() => setTextAlign("center")}
+              >
+                Center
+              </button>
+              <button
+                type="button"
+                className={`story-text-style-btn ${textAlign === "right" ? "active" : ""}`}
+                onClick={() => setTextAlign("right")}
+              >
+                Right
+              </button>
             </div>
           </div>
 

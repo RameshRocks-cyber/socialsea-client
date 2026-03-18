@@ -395,7 +395,7 @@ export default function AdminLiveRecordings() {
     if (!key) return;
     setExpandedNearbyByAlert((prev) => ({
       ...prev,
-      [key]: !prev[key]
+      [key]: !(prev[key] !== false)
     }));
   };
 
@@ -481,39 +481,47 @@ export default function AdminLiveRecordings() {
                   <td>
                     <div className="admin-entity-cell">
                       <strong>{item.nearbyCount || 0} user(s)</strong>
-                      <button
-                        type="button"
-                        className="admin-link-btn"
-                        onClick={() => toggleNearby(item.alertId || item.id)}
-                        style={{ width: "fit-content", padding: "5px 10px" }}
-                      >
-                        {expandedNearbyByAlert[String(item.alertId || item.id)] ? "Hide nearby users" : "Show nearby users"}
-                      </button>
-                      {expandedNearbyByAlert[String(item.alertId || item.id)] && (
-                        <div style={{ marginTop: 8, display: "grid", gap: 6 }}>
-                          {Array.isArray(item.nearbyUsers) && item.nearbyUsers.length > 0 ? (
-                            item.nearbyUsers.map((u) => (
-                              <div
-                                key={`${item.alertId || item.id}-${u?.id || u?.email || Math.random()}`}
-                                style={{
-                                  border: "1px solid rgba(86, 182, 255, 0.3)",
-                                  borderRadius: 8,
-                                  padding: "6px 8px",
-                                  background: "rgba(8, 18, 38, 0.8)"
-                                }}
-                              >
-                                <strong>{u?.name || "User"}</strong>
-                                <div className="admin-inline-note">{u?.email || "-"}</div>
-                                <div className="admin-inline-note">
-                                  Distance: {typeof u?.distanceMeters === "number" ? `${u.distanceMeters}m` : "-"}
-                                </div>
+                      {(() => {
+                        const key = String(item.alertId || item.id);
+                        const isExpanded = expandedNearbyByAlert[key] !== false;
+                        return (
+                          <>
+                            <button
+                              type="button"
+                              className="admin-link-btn"
+                              onClick={() => toggleNearby(item.alertId || item.id)}
+                              style={{ width: "fit-content", padding: "5px 10px" }}
+                            >
+                              {isExpanded ? "Hide nearby users" : "Show nearby users"}
+                            </button>
+                            {isExpanded && (
+                              <div style={{ marginTop: 8, display: "grid", gap: 6 }}>
+                                {Array.isArray(item.nearbyUsers) && item.nearbyUsers.length > 0 ? (
+                                  item.nearbyUsers.map((u) => (
+                                    <div
+                                      key={`${item.alertId || item.id}-${u?.id || u?.email || Math.random()}`}
+                                      style={{
+                                        border: "1px solid rgba(86, 182, 255, 0.3)",
+                                        borderRadius: 8,
+                                        padding: "6px 8px",
+                                        background: "rgba(8, 18, 38, 0.8)"
+                                      }}
+                                    >
+                                      <strong>{u?.name || "User"}</strong>
+                                      <div className="admin-inline-note">{u?.email || "-"}</div>
+                                      <div className="admin-inline-note">
+                                        Distance: {typeof u?.distanceMeters === "number" ? `${u.distanceMeters}m` : "-"}
+                                      </div>
+                                    </div>
+                                  ))
+                                ) : (
+                                  <span className="admin-inline-note">No users found within 5km.</span>
+                                )}
                               </div>
-                            ))
-                          ) : (
-                            <span className="admin-inline-note">No users found within 5km.</span>
-                          )}
-                        </div>
-                      )}
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
                   </td>
                   <td>{formatDateTime(item.startedAt)}</td>

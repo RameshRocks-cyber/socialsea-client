@@ -38,9 +38,27 @@ import LiveRecordings from "./pages/LiveRecordings";
 import LiveStart from "./pages/LiveStart";
 import StoryCreate from "./pages/StoryCreate";
 import { getUserRole, isAuthenticated } from "./auth";
+import { getApiBaseUrl } from "./api/baseUrl";
 import api from "./api/axios";
 import PageErrorBoundary from "./components/PageErrorBoundary";
 import "./App.css";
+
+const isLoopbackHost = (host) => {
+  const value = String(host || "").trim().toLowerCase();
+  return value === "localhost" || value === "127.0.0.1";
+};
+
+const isPrivateIpHost = (host) => {
+  const value = String(host || "").trim();
+  if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(value)) return false;
+  const parts = value.split(".").map((n) => Number(n));
+  if (parts.some((n) => !Number.isFinite(n) || n < 0 || n > 255)) return false;
+  const [a, b] = parts;
+  if (a === 10) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  return false;
+};
 
 function PublicOnlyRoute({ children }) {
   if (!isAuthenticated()) return children;
@@ -77,24 +95,40 @@ function AppRoutes() {
   }, []);
 
   useEffect(() => {
-    if (!authed || isAuthScreen || !navigator.geolocation) return undefined;
+    if (isAuthScreen || !navigator.geolocation) return undefined;
     let active = true;
     let watchId = null;
     let lastSentAt = 0;
-    const minSendGapMs = 30000;
+    const minSendGapMs = 8000;
     let intervalId = null;
 
     const sendPresence = (latitude, longitude) => {
       if (!active) return;
       if (typeof latitude !== "number" || typeof longitude !== "number") return;
+      const reporterEmail =
+        String(localStorage.getItem("email") || sessionStorage.getItem("email") || "").trim() || undefined;
+      if (!authed && !reporterEmail) return;
       const now = Date.now();
       if (now - lastSentAt < minSendGapMs) return;
       lastSentAt = now;
-      const payload = { latitude, longitude };
+      const payload = { latitude, longitude, reporterEmail };
+      const storedBase =
+        localStorage.getItem("socialsea_auth_base_url") || sessionStorage.getItem("socialsea_auth_base_url");
+      const runtimeHost =
+        typeof window !== "undefined" ? String(window.location.hostname || "").trim() : "";
+      const runtimeHostBase =
+        runtimeHost && (isLoopbackHost(runtimeHost) || isPrivateIpHost(runtimeHost))
+          ? `http://${runtimeHost}:8080`
+          : "";
       const bases = [
+        getApiBaseUrl(),
+        api.defaults.baseURL,
+        storedBase,
+        runtimeHostBase,
         "http://localhost:8080",
-        "http://127.0.0.1:8080"
-      ].filter(Boolean);
+        "http://127.0.0.1:8080",
+        "https://api.socialsea.co.in"
+      ].filter((value, index, arr) => value && arr.indexOf(value) === index);
       bases.forEach((baseURL, index) => {
         api
           .request({
@@ -152,7 +186,7 @@ function AppRoutes() {
       if (document.visibilityState === "visible") requestOnce();
     };
     document.addEventListener("visibilitychange", onVisibility);
-    intervalId = setInterval(requestOnce, 30000);
+    intervalId = setInterval(requestOnce, 10000);
 
     return () => {
       active = false;

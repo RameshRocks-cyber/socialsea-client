@@ -2454,6 +2454,7 @@ export default function Chat() {
     const signalMs = Number.isFinite(parsedTs)
       ? (parsedTs > 1000000000000 ? parsedTs : parsedTs * 1000)
       : new Date(String(rawTs || "")).getTime();
+    const signalTime = Number.isFinite(signalMs) && signalMs > 0 ? signalMs : 0;
     const signature = `${type}|${fromId}|${signal?.timestamp || ""}|${signal?.sdp || ""}|${signal?.candidate || ""}`;
     if (seenSignalsRef.current.has(signature)) return;
     seenSignalsRef.current.add(signature);
@@ -2464,6 +2465,7 @@ export default function Chat() {
 
     ensureSignalContact(signal);
     const current = callStateRef.current;
+    const incomingCallAt = Number(incomingCall?.at || 0);
     const terminalTypes = new Set(["hangup", "reject", "busy", "answer", "accepted", "ended"]);
     const roomId = String(signal?.roomId || "").trim();
     const membersRaw = Array.isArray(signal?.groupMembers) ? signal.groupMembers : [];
@@ -2553,6 +2555,16 @@ export default function Chat() {
     }
 
     if (incomingCall?.fromUserId && fromId === String(incomingCall.fromUserId) && terminalTypes.has(type)) {
+      const isIncomingTerminal = type === "hangup" || type === "reject" || type === "busy" || type === "ended";
+      if (!isIncomingTerminal && callStateRef.current.phase === "idle") {
+        return;
+      }
+      if (signalTime && incomingCallAt && signalTime + 1000 < incomingCallAt) {
+        return;
+      }
+      if (signalTime && Date.now() - signalTime > CALL_SIGNAL_MAX_AGE_MS) {
+        return;
+      }
       stopRingtone();
       setIncomingCall(null);
       setRingtoneMuted(false);
@@ -2587,7 +2599,8 @@ export default function Chat() {
         fromName: normalizeDisplayName(signal?.fromName || signal?.fromEmail || "User"),
         mode: nextMode,
         roomId: roomId || buildLivekitRoomId(fromId),
-        provider: "livekit"
+        provider: "livekit",
+        at: signalTime || Date.now()
       });
       setRingtoneMuted(false);
       setActiveContactId(fromId);
@@ -2666,7 +2679,8 @@ export default function Chat() {
         fromUserId: fromId,
         fromName: normalizeDisplayName(signal?.fromName || signal?.fromEmail || "User"),
         mode: signal?.mode === "video" ? "video" : "audio",
-        sdp: signal?.sdp || ""
+        sdp: signal?.sdp || "",
+        at: signalTime || Date.now()
       });
       setRingtoneMuted(false);
       setActiveContactId(fromId);
@@ -3208,7 +3222,8 @@ export default function Chat() {
         fromUserId: String(target.fromUserId),
         fromName: String(target.fromName || "User"),
         mode: target.mode === "video" ? "video" : "audio",
-        sdp: String(target.sdp || "")
+        sdp: String(target.sdp || ""),
+        at: Number(target.at || 0) || Date.now()
       });
       return;
     }
@@ -4103,16 +4118,17 @@ export default function Chat() {
     const d = new Date(value);
     if (!Number.isFinite(d.getTime())) return "lastseen at --";
     const now = new Date(nowTick);
+    const timeLabel = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", hour12: true }).toLowerCase();
     const sameDay = d.toDateString() === now.toDateString();
     if (sameDay) {
-      return `lastseen today at ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }).toLowerCase()}`;
+      return `lastseen today at ${timeLabel}`;
     }
     const yesterday = new Date(now);
     yesterday.setDate(now.getDate() - 1);
     if (d.toDateString() === yesterday.toDateString()) {
-      return `lastseen yesterday at ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }).toLowerCase()}`;
+      return `lastseen yesterday at ${timeLabel}`;
     }
-    return `lastseen ${d.toLocaleDateString([], { month: "short", day: "numeric" })} at ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }).toLowerCase()}`;
+    return `lastseen ${d.toLocaleDateString([], { month: "short", day: "numeric" })} at ${timeLabel}`;
   };
 
   const getContactActivityTs = (contact) => {

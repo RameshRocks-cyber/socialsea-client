@@ -26,6 +26,11 @@ function hostFromUrl(url) {
   }
 }
 
+function isLoopbackHost(host) {
+  const value = String(host || "").trim().toLowerCase();
+  return value === "localhost" || value === "127.0.0.1";
+}
+
 function isFrontendLikeHost(host) {
   const value = String(host || "").toLowerCase();
   return (
@@ -35,14 +40,37 @@ function isFrontendLikeHost(host) {
   );
 }
 
+function isPrivateIpHost(host) {
+  const value = String(host || "").trim();
+  if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(value)) return false;
+  const parts = value.split(".").map((n) => Number(n));
+  if (parts.some((n) => !Number.isFinite(n) || n < 0 || n > 255)) return false;
+  const [a, b] = parts;
+  if (a === 10) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  return false;
+}
+
 export function getApiBaseUrl() {
   const forcedUrl = normalizeApiUrl(import.meta.env.VITE_API_BASE_URL);
-  // Explicit override should always win, including localhost dev.
-  if (forcedUrl) return forcedUrl;
 
   if (typeof window !== "undefined") {
     const host = String(window.location.hostname || "").toLowerCase();
     const isLocalHost = host === "localhost" || host === "127.0.0.1";
+    const isLanHost = isPrivateIpHost(host);
+    const forcedHost = hostFromUrl(forcedUrl);
+
+    if (forcedUrl) {
+      // In local/LAN development, prefer local/private backends to avoid accidentally
+      // routing SOS live traffic to a public server with stale state.
+      const canUseForcedInDev =
+        forcedUrl.startsWith("/") || isLoopbackHost(forcedHost) || isPrivateIpHost(forcedHost);
+      if (!(isLocalHost || isLanHost) || canUseForcedInDev) {
+        return forcedUrl;
+      }
+    }
+
     if (isFrontendLikeHost(host)) {
       // Deployed frontend should target the API host directly.
       const envUrl = normalizeApiUrl(import.meta.env.VITE_API_URL);
@@ -61,7 +89,17 @@ export function getApiBaseUrl() {
       }
       return envUrl;
     }
+    if (isLanHost) {
+      const envUrl = normalizeApiUrl(import.meta.env.VITE_API_URL);
+      const envHost = hostFromUrl(envUrl);
+      if (envUrl && !isFrontendLikeHost(envHost) && !isLoopbackHost(envHost)) {
+        return envUrl;
+      }
+      return `http://${host}:8080`;
+    }
   }
+
+  if (forcedUrl) return forcedUrl;
 
   const envUrl = normalizeApiUrl(import.meta.env.VITE_API_URL);
   if (envUrl) return envUrl;
