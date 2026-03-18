@@ -134,7 +134,7 @@ const emergencyBaseCandidates = () => {
 
 const buildEmergencyUrls = (suffix) => {
   const path = String(suffix || "").replace(/^\/+/, "");
-  const urls = [];
+  const urls = [`/api/emergency/${path}`];
   for (const rawBase of emergencyBaseCandidates()) {
     const base = String(rawBase || "").trim().replace(/\/+$/, "");
     if (!base) continue;
@@ -154,7 +154,6 @@ const buildEmergencyUrls = (suffix) => {
     urls.push(`${base}/api/emergency/${path}`);
     urls.push(`${base}/emergency/${path}`);
   }
-  urls.push(`/api/emergency/${path}`);
   return uniqueNonEmpty(urls);
 };
 
@@ -189,8 +188,13 @@ const normalizeLiveUrl = (rawUrl, fallbackAlertId = "") => {
 const extractAlertIdFromUrl = (rawUrl) => {
   const value = String(rawUrl || "").trim();
   if (!value) return "";
-  const match = value.match(/\/sos\/(?:live|navigate)\/(\d+)/i);
-  return match?.[1] ? String(match[1]).trim() : "";
+  const match = value.match(/\/sos\/(?:live|navigate)\/([^/?#]+)/i);
+  if (!match?.[1]) return "";
+  try {
+    return decodeURIComponent(String(match[1]).trim());
+  } catch {
+    return String(match[1]).trim();
+  }
 };
 
 const readShowSosInNavbar = () => {
@@ -1015,7 +1019,8 @@ export default function Navbar() {
             suppressAuthRedirect: true,
             skipAuth: isPublicEmergencyEndpoint,
             skipRefresh: isPublicEmergencyEndpoint,
-            params: mergedParams
+            params: mergedParams,
+            timeout: 4500
           });
           break;
         } catch (err) {
@@ -1028,7 +1033,8 @@ export default function Navbar() {
                 suppressAuthRedirect: true,
                 skipAuth: true,
                 skipRefresh: true,
-                params: mergedParams
+                params: mergedParams,
+                timeout: 4500
               });
               break;
             } catch (retryErr) {
@@ -1158,11 +1164,19 @@ export default function Navbar() {
         if (isTriggeredByCurrentBrowser()) return;
         const res = await api.get("/api/notifications", {
           suppressAuthRedirect: true,
-          skipAuth: false
+          skipAuth: false,
+          timeout: 4500
         });
         if (disposed) return;
         const list = Array.isArray(res?.data) ? res.data : [];
-        const emergency = list.find((item) => isEmergencyNotification(item));
+        const emergencyCandidates = list
+          .filter((item) => isEmergencyNotification(item))
+          .sort((a, b) => {
+            const aTime = new Date(a?.createdAt || 0).getTime();
+            const bTime = new Date(b?.createdAt || 0).getTime();
+            return bTime - aTime;
+          });
+        const emergency = emergencyCandidates.find((item) => !Boolean(item?.read)) || emergencyCandidates[0];
         if (!emergency) return;
         if (myEmail) {
           if (
@@ -1393,7 +1407,7 @@ export default function Navbar() {
       if (user?.latitude != null && user?.longitude != null) {
         return isWithinSosRadius(alertLike);
       }
-      return false;
+      return true;
     }
     return isWithinSosRadius(alertLike);
   };

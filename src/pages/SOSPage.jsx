@@ -107,7 +107,7 @@ const emergencyBaseCandidates = () => {
 
 const buildEmergencyUrls = (suffix) => {
   const path = String(suffix || "").replace(/^\/+/, "");
-  const urls = [];
+  const urls = [`/api/emergency/${path}`];
   for (const rawBase of emergencyBaseCandidates()) {
     const base = String(rawBase || "").trim().replace(/\/+$/, "");
     if (!base) continue;
@@ -127,7 +127,6 @@ const buildEmergencyUrls = (suffix) => {
     urls.push(`${base}/api/emergency/${path}`);
     urls.push(`${base}/emergency/${path}`);
   }
-  urls.push(`/api/emergency/${path}`);
   return uniqueNonEmpty(urls);
 };
 
