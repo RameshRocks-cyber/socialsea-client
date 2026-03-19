@@ -1,12 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import api from "../api/axios";
+import { getApiBaseUrl } from "../api/baseUrl";
 import { readLiveBroadcast, subscribeLiveBroadcast } from "../utils/liveBroadcast";
 import "./LongVideos.css";
 
 const LONG_VIDEO_SECONDS = 90;
 const QUALITY_OPTIONS = ["auto", "1080", "720", "480", "360"];
 const MIN_LONG_VIDEO_FALLBACK_SECONDS = 45;
+const LONG_WATCH_CACHE_KEY = "socialsea_long_watch_cache_v1";
+const FEED_CACHE_KEY = "socialsea_feed_cache_v1";
+const FAST_REQUEST_TIMEOUT_MS = 4200;
+const BACKGROUND_REQUEST_TIMEOUT_MS = 7000;
 const WATCH_CATEGORIES = [
   "All",
   "Music",
@@ -20,6 +25,23 @@ const WATCH_CATEGORIES = [
 ];
 
 const WATCH_RAIL_ITEMS = ["Home", "Trending", "Subscriptions", "History", "Playlists", "Watch Later", "Liked Videos"];
+
+const readCachedWatchPosts = () => {
+  try {
+    if (typeof window === "undefined") return [];
+    const longRaw = localStorage.getItem(LONG_WATCH_CACHE_KEY);
+    const longParsed = longRaw ? JSON.parse(longRaw) : null;
+    const longList = Array.isArray(longParsed?.posts) ? longParsed.posts : Array.isArray(longParsed) ? longParsed : [];
+    if (longList.length) return longList.filter(Boolean);
+
+    const feedRaw = localStorage.getItem(FEED_CACHE_KEY);
+    const feedParsed = feedRaw ? JSON.parse(feedRaw) : null;
+    const feedList = Array.isArray(feedParsed?.posts) ? feedParsed.posts : Array.isArray(feedParsed) ? feedParsed : [];
+    return feedList.filter(Boolean);
+  } catch {
+    return [];
+  }
+};
 
 export default function LongVideos() {
   const { postId } = useParams();
@@ -55,9 +77,9 @@ export default function LongVideos() {
   const seekHudRef = useRef({ direction: "", totalSeconds: 0, lastAt: 0 });
   const gestureHudTimerRef = useRef(0);
   const controlsHideTimerRef = useRef(0);
-  const [allPosts, setAllPosts] = useState([]);
+  const [allPosts, setAllPosts] = useState(() => readCachedWatchPosts());
   const [videoDurationByPost, setVideoDurationByPost] = useState({});
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(() => readCachedWatchPosts().length === 0);
   const [selectedQuality, setSelectedQuality] = useState("auto");
   const [showQualityMenu, setShowQualityMenu] = useState(false);
   const [showQualityOptions, setShowQualityOptions] = useState(false);
@@ -77,19 +99,65 @@ export default function LongVideos() {
   const [isPlayerPaused, setIsPlayerPaused] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(true);
   const [isPlayerFullscreen, setIsPlayerFullscreen] = useState(false);
+  const [isPlayerMinimized, setIsPlayerMinimized] = useState(false);
+  const [isPlayerInPip, setIsPlayerInPip] = useState(false);
+  const [isPipSupported, setIsPipSupported] = useState(false);
   const [playerCurrentTime, setPlayerCurrentTime] = useState(0);
   const [playerDuration, setPlayerDuration] = useState(0);
   const [playerBufferedUntil, setPlayerBufferedUntil] = useState(0);
   const [isSeeking, setIsSeeking] = useState(false);
   const [playerZoom, setPlayerZoom] = useState({ scale: 1, x: 0, y: 0 });
+  const [playerZoomMode, setPlayerZoomMode] = useState("fit");
   const [playerVolume, setPlayerVolume] = useState(1);
+  const swipeRef = useRef({
+    tracking: false,
+    active: false,
+    startX: 0,
+    startY: 0,
+    lastX: 0,
+    lastY: 0
+  });
 
   useEffect(() => {
     const unsubscribe = subscribeLiveBroadcast((next) => setLiveBroadcast(next));
     return () => unsubscribe();
   }, []);
 
-  const toList = (payload) => {    if (Array.isArray(payload)) return payload;    if (Array.isArray(payload?.content)) return payload.content;    if (Array.isArray(payload?.items)) return payload.items;    if (Array.isArray(payload?.data)) return payload.data;
+  const toList = (payload) => {
+    if (Array.isArray(payload)) return payload;
+    if (!payload || typeof payload !== "object") return [];
+
+    const arrayKeys = ["content", "items", "data", "posts", "results", "rows", "list", "reels", "videos"];
+    for (const key of arrayKeys) {
+      if (Array.isArray(payload?.[key])) return payload[key];
+    }
+
+    if (payload?.post && typeof payload.post === "object" && !Array.isArray(payload.post)) return [payload.post];
+    if (payload?.item && typeof payload.item === "object" && !Array.isArray(payload.item)) return [payload.item];
+
+    if (payload?.data && typeof payload.data === "object" && !Array.isArray(payload.data)) {
+      const nested = toList(payload.data);
+      if (nested.length) return nested;
+    }
+
+    if (payload?.id && (payload?.contentUrl || payload?.mediaUrl || payload?.videoUrl || payload?.url)) return [payload];
+
+    const arrayValues = Object.values(payload).filter((value) => Array.isArray(value));
+    if (arrayValues.length === 1) return arrayValues[0];
+    if (arrayValues.length > 1) return arrayValues.flat();
+
+    const objectValues = Object.values(payload).filter(
+      (value) => value && typeof value === "object" && !Array.isArray(value)
+    );
+    if (
+      objectValues.length &&
+      objectValues.every(
+        (value) => value?.id != null || value?.contentUrl || value?.mediaUrl || value?.videoUrl || value?.url
+      )
+    ) {
+      return objectValues;
+    }
+
     return [];
   };
 
@@ -110,21 +178,53 @@ export default function LongVideos() {
     return candidates.some((v) => v === true);
   };
 
-  const fetchEndpointItems = async (url) => {
-    const first = await api.get(url, {
+  const buildBaseCandidates = () => {
+    const host = typeof window !== "undefined" ? String(window.location.hostname || "").toLowerCase() : "";
+    const isLocalDev = host === "localhost" || host === "127.0.0.1";
+    const storedBase =
+      typeof window !== "undefined"
+        ? localStorage.getItem("socialsea_auth_base_url") || sessionStorage.getItem("socialsea_auth_base_url")
+        : "";
+    const candidates = [
+      isLocalDev ? "/api" : "",
+      String(api.defaults.baseURL || "").trim(),
+      String(getApiBaseUrl() || "").trim(),
+      String(storedBase || "").trim(),
+      String(import.meta.env.VITE_API_URL || "").trim()
+    ].filter(Boolean);
+
+    if (!candidates.length) return [undefined];
+    return [...new Set(candidates)];
+  };
+
+  const fetchEndpointItems = async (url, baseURL, opts = {}) => {
+    const timeoutMs = Number(opts.timeoutMs) > 0 ? Number(opts.timeoutMs) : BACKGROUND_REQUEST_TIMEOUT_MS;
+    const maxPages = Math.max(1, Number(opts.maxPages) || 1);
+    const first = await api.request({
+      method: "GET",
+      url,
+      baseURL: baseURL || undefined,
+      timeout: timeoutMs,
       suppressAuthRedirect: true,
-      params: { page: 0, size: 500 }
+      params: { page: 0, size: 180 }
     });
     const firstPayload = first?.data;
+    const looksLikeHtml =
+      typeof firstPayload === "string" && (/^\s*<!doctype html/i.test(firstPayload) || /<html[\s>]/i.test(firstPayload));
+    if (looksLikeHtml) throw new Error("Received HTML instead of API JSON");
     let merged = toList(firstPayload);
 
-    const totalPages = getTotalPages(firstPayload);    if (totalPages > 1) {
+    const totalPages = getTotalPages(firstPayload);    if (totalPages > 1 && maxPages > 1) {
       const pageRequests = [];
-      for (let page = 1; page < totalPages; page += 1) {
+      for (let page = 1; page < totalPages && page < maxPages; page += 1) {
         pageRequests.push(
-          api.get(url, {
+          api.request({
+            method: "GET",
+            url,
+            baseURL: baseURL || undefined,
+            timeout: timeoutMs,
             suppressAuthRedirect: true,
-            params: { page, size: 100 }
+            params: { page, size: 120 }
           })
         );
       }
@@ -137,13 +237,17 @@ export default function LongVideos() {
     }
 
     // Some APIs expose hasNext without totalPages.
-    if (hasNextPage(firstPayload)) {
+    if (hasNextPage(firstPayload) && maxPages > 1) {
       let page = 1;
       let safety = 0;
-      while (safety < 20) {
-        const next = await api.get(url, {
+      while (safety < Math.max(1, maxPages - 1)) {
+        const next = await api.request({
+          method: "GET",
+          url,
+          baseURL: baseURL || undefined,
+          timeout: timeoutMs,
           suppressAuthRedirect: true,
-          params: { page, size: 100 }
+          params: { page, size: 120 }
         });
         const nextItems = toList(next?.data);    if (!nextItems.length) break;
         merged = merged.concat(nextItems);    if (!hasNextPage(next?.data)) break;
@@ -190,11 +294,24 @@ export default function LongVideos() {
     localStorage.setItem(key, JSON.stringify(ids));
   };
 
-  const mediaUrlFor = (post) => String(post?.contentUrl || post?.mediaUrl || "").trim();
+  const mediaUrlFor = (post) =>
+    String(
+      post?.contentUrl ||
+        post?.mediaUrl ||
+        post?.videoUrl ||
+        post?.url ||
+        post?.fileUrl ||
+        post?.media?.url ||
+        post?.media?.contentUrl ||
+        ""
+    ).trim();
   const isVideoPost = (post) => {
-    const rawType = String(post?.type || post?.mediaType || post?.contentType || "")
+    const rawType = String(post?.type || post?.mediaType || post?.contentType || post?.mimeType || "")
       .trim()
-      .toLowerCase();    if (rawType.includes("video")) return true;    if (rawType.includes("image")) return false;
+      .toLowerCase();    if (rawType.includes("video")) return true;    if (rawType.includes("reel") || rawType.includes("short")) return true;    if (rawType.includes("image")) return false;
+    if (post?.reel === true || post?.reel === "true") return true;
+    if (post?.isReel === true || post?.isReel === "true") return true;
+    if (post?.isShort === true || post?.isShortVideo === true || post?.shortVideo === true) return true;
     const url = mediaUrlFor(post).toLowerCase();
     return /\.(mp4|mov|webm|mkv|m4v|avi|mpg|mpeg|3gp|ogv)(\?|#|$)/.test(url);
   };
@@ -266,44 +383,179 @@ export default function LongVideos() {
   useEffect(() => {
     let cancelled = false;
 
+    const fetchAny = async (endpoints) => {
+      const bases = buildBaseCandidates();
+      let fallbackList = [];
+
+       // Fast path: try primary base in parallel across endpoints, first page only.
+      const primaryBase = bases[0];
+      if (primaryBase !== undefined) {
+        const quick = await Promise.allSettled(
+          endpoints.map((url) =>
+            fetchEndpointItems(url, primaryBase, {
+              timeoutMs: FAST_REQUEST_TIMEOUT_MS,
+              maxPages: 1
+            })
+          )
+        );
+        const quickLists = quick
+          .filter((r) => r.status === "fulfilled")
+          .map((r) => (Array.isArray(r.value) ? r.value : []));
+        const quickNonEmpty = quickLists.find((list) => list.length > 0);
+        if (quickNonEmpty) return quickNonEmpty;
+        if (quickLists.length) fallbackList = quickLists[0] || [];
+      }
+
+      for (const baseURL of bases) {
+        for (const url of endpoints) {
+          try {
+            const list = await fetchEndpointItems(url, baseURL, {
+              timeoutMs: BACKGROUND_REQUEST_TIMEOUT_MS,
+              maxPages: 2
+            });
+            if (!fallbackList.length && Array.isArray(list)) fallbackList = list;
+            if (Array.isArray(list) && list.length) return list;
+          } catch {
+            // try next base/endpoint
+          }
+        }
+      }
+      return Array.isArray(fallbackList) ? fallbackList : [];
+    };
+
+    const fetchOne = async (endpoints) => {
+      const bases = buildBaseCandidates();
+      const primaryBase = bases[0];
+
+      if (primaryBase !== undefined) {
+        const quick = await Promise.allSettled(
+          endpoints.map((url) =>
+            api.request({
+              method: "GET",
+              url,
+              baseURL: primaryBase || undefined,
+              timeout: FAST_REQUEST_TIMEOUT_MS,
+              suppressAuthRedirect: true
+            })
+          )
+        );
+        for (const result of quick) {
+          if (result.status !== "fulfilled") continue;
+          const body = result.value?.data;
+          const looksLikeHtml =
+            typeof body === "string" && (/^\s*<!doctype html/i.test(body) || /<html[\s>]/i.test(body));
+          if (looksLikeHtml) continue;
+          const list = toList(body);
+          if (Array.isArray(list) && list.length) return list[0];
+          const single = body?.post || body?.item || body?.data || body;
+          if (single && typeof single === "object" && !Array.isArray(single)) return single;
+        }
+      }
+
+      for (const baseURL of bases) {
+        for (const url of endpoints) {
+          try {
+            const res = await api.request({
+              method: "GET",
+              url,
+              baseURL: baseURL || undefined,
+              timeout: BACKGROUND_REQUEST_TIMEOUT_MS,
+              suppressAuthRedirect: true
+            });
+            const body = res?.data;
+            const looksLikeHtml =
+              typeof body === "string" && (/^\s*<!doctype html/i.test(body) || /<html[\s>]/i.test(body));
+            if (looksLikeHtml) continue;
+            const list = toList(body);
+            if (Array.isArray(list) && list.length) return list[0];
+            const single = body?.post || body?.item || body?.data || body;
+            if (single && typeof single === "object" && !Array.isArray(single)) return single;
+          } catch {
+            // try next base/endpoint
+          }
+        }
+      }
+      return null;
+    };
+
     const load = async () => {
       setIsLoading(true);
       try {
-        const endpoints = ["/api/feed", "/api/reels", "/api/profile/me/posts", "/api/profile/posts"];
-        const responses = await Promise.allSettled(endpoints.map((url) => fetchEndpointItems(url)));
-        const posts = responses
-          .filter((r) => r.status === "fulfilled")
-          .flatMap((r) => (Array.isArray(r.value) ? r.value : []))
-          .filter(Boolean);    if (cancelled) return;
-        setAllPosts(uniqueByPostKey(posts));
+        const [fromFeed, fromReels, fromMe, fromProfile] = await Promise.all([
+          fetchAny(["/api/feed", "/feed", "/api/posts", "/posts"]),
+          fetchAny(["/api/reels", "/reels"]),
+          fetchAny(["/api/profile/me/posts", "/profile/me/posts", "/api/me/posts", "/me/posts"]),
+          fetchAny(["/api/profile/posts", "/profile/posts"])
+        ]);
+        let posts = [...fromFeed, ...fromReels, ...fromMe, ...fromProfile].filter(Boolean);
 
-        const candidates = uniqueByPostKey(posts.filter((post) => !!mediaUrlFor(post)));
-        const durations = {};
+        if (postId) {
+          const direct = await fetchOne([
+            `/api/posts/${encodeURIComponent(postId)}`,
+            `/posts/${encodeURIComponent(postId)}`,
+            `/api/feed/${encodeURIComponent(postId)}`,
+            `/feed/${encodeURIComponent(postId)}`
+          ]);
+          if (direct) posts = [direct, ...posts];
+        }
+
+        if (!posts.length) {
+          console.warn("[LongVideos] No posts returned from API candidates");
+        }
+
+        if (cancelled) return;
+        const normalizedPosts = uniqueByPostKey(posts);
+        setAllPosts(normalizedPosts);
+        try {
+          localStorage.setItem(
+            LONG_WATCH_CACHE_KEY,
+            JSON.stringify({ updatedAt: Date.now(), posts: normalizedPosts.slice(0, 320) })
+          );
+        } catch {
+          // ignore cache write issues
+        }
+
+        const candidates = uniqueByPostKey(normalizedPosts.filter((post) => !!mediaUrlFor(post)));
+        const knownDurations = {};
 
         const unresolved = [];
         candidates.forEach((post) => {
           const known = durationFromPost(post);    if (known > 0) {
-            durations[post.id] = known;
+            knownDurations[post.id] = known;
           } else {
             unresolved.push(post);
           }
         });
 
+        setVideoDurationByPost(knownDurations);
+        setIsLoading(false);
+
+        const MAX_METADATA_PROBES = 24;
+        const unresolvedSlice = unresolved.slice(0, MAX_METADATA_PROBES);
+        if (!unresolvedSlice.length) return;
+
+        const measuredDurations = {};
         const BATCH_SIZE = 4;
-        for (let i = 0; i < unresolved.length; i += BATCH_SIZE) {
-          const batch = unresolved.slice(i, i + BATCH_SIZE);
+        for (let i = 0; i < unresolvedSlice.length; i += BATCH_SIZE) {
+          const batch = unresolvedSlice.slice(i, i + BATCH_SIZE);
           await Promise.all(
             batch.map(async (post) => {
               const mediaUrl = resolveUrl(mediaUrlFor(post));    if (!mediaUrl) return;
-              const d = await readVideoDuration(mediaUrl);    if (d > 0) durations[post.id] = d;
+              const d = await readVideoDuration(mediaUrl);    if (d > 0) measuredDurations[post.id] = d;
             })
           );    if (cancelled) return;
-        }    if (!cancelled) setVideoDurationByPost(durations);
-      } catch {    if (!cancelled) {
-          setAllPosts([]);
-          setVideoDurationByPost({});
         }
-      } finally {    if (!cancelled) setIsLoading(false);
+        if (!cancelled && Object.keys(measuredDurations).length) {
+          setVideoDurationByPost((prev) => ({ ...prev, ...measuredDurations }));
+        }
+      } catch {    if (!cancelled) {
+          const cached = readCachedWatchPosts();
+          setAllPosts(cached);
+          setVideoDurationByPost({});
+          setIsLoading(false);    if (!cached.length) {
+            console.warn("[LongVideos] load failed and no local cache available");
+          }
+        }
       }
     };
 
@@ -311,7 +563,7 @@ export default function LongVideos() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [postId]);
 
   useEffect(() => {
     const liked = readIdMap("likedPostIds");
@@ -367,8 +619,29 @@ export default function LongVideos() {
     );
   }, [videoPosts, videoDurationByPost]);
 
-  useEffect(() => {    if (!longVideos.length) return;
-    longVideos.forEach((post) => {
+  const watchableVideos = useMemo(() => {
+    const fallbackNonImage = uniqueByPostKey(
+      allPosts.filter((post) => {
+        const mediaUrl = mediaUrlFor(post).toLowerCase();
+        if (!mediaUrl) return false;
+        const rawType = String(post?.type || post?.mediaType || post?.contentType || post?.mimeType || "")
+          .trim()
+          .toLowerCase();
+        if (rawType.includes("image")) return false;
+        if (/\.(png|jpe?g|gif|webp|bmp|avif|svg|heic|heif)(\?|#|$)/.test(mediaUrl)) return false;
+        return true;
+      })
+    );
+    const baseList = longVideos.length ? longVideos : videoPosts.length ? videoPosts : fallbackNonImage;
+    const routePostCandidate = allPosts.find(
+      (post) => String(post?.id ?? "") === String(postId ?? "") && !!mediaUrlFor(post)
+    );
+    if (routePostCandidate) return uniqueByPostKey([routePostCandidate, ...baseList]);
+    return baseList;
+  }, [longVideos, videoPosts, allPosts, postId]);
+
+  useEffect(() => {    if (!watchableVideos.length) return;
+    watchableVideos.forEach((post) => {
       api.get(`/api/likes/${post.id}/count`)
         .then((res) => {
           const count = Number(res?.data) || 0;
@@ -376,11 +649,11 @@ export default function LongVideos() {
         })
         .catch(() => {});
     });
-  }, [longVideos]);
+  }, [watchableVideos]);
 
   const filteredLongVideos = useMemo(() => {
     const q = String(searchText || "").trim().toLowerCase();
-    return longVideos.filter((post) => {
+    return watchableVideos.filter((post) => {
       const owner = usernameFor(post).toLowerCase();
       const title = captionFor(post).toLowerCase();
       const categoryMatch =
@@ -389,11 +662,11 @@ export default function LongVideos() {
         owner.includes(activeCategory.toLowerCase());    if (!categoryMatch) return false;    if (!q) return true;
       return owner.includes(q) || title.includes(q);
     });
-  }, [longVideos, searchText, activeCategory]);
+  }, [watchableVideos, searchText, activeCategory]);
 
   const activeVideo =
-    longVideos.find((p) => String(p.id) === String(postId)) || filteredLongVideos[0] || longVideos[0] || null;
-  const watchSequence = filteredLongVideos.length ? filteredLongVideos : longVideos;
+    watchableVideos.find((p) => String(p.id) === String(postId)) || filteredLongVideos[0] || watchableVideos[0] || null;
+  const watchSequence = filteredLongVideos.length ? filteredLongVideos : watchableVideos;
   const activeVideoIndex = watchSequence.findIndex((p) => String(p.id) === String(activeVideo?.id));
 
   const withCloudinaryQuality = (url, quality) => {    if (!url || quality === "auto") return url;    if (!url.includes("res.cloudinary.com") || !url.includes("/upload/")) return url;
@@ -409,8 +682,7 @@ export default function LongVideos() {
   };
 
   const activeVideoUrl = useMemo(() => {
-    const raw = activeVideo?.contentUrl || activeVideo?.mediaUrl || "";
-    const url = resolveUrl(String(raw).trim());
+    const url = resolveUrl(mediaUrlFor(activeVideo));
     return withCloudinaryQuality(url, selectedQuality);
   }, [activeVideo, selectedQuality]);
 
@@ -587,8 +859,36 @@ export default function LongVideos() {
     gestureHudTimerRef.current = window.setTimeout(() => setGestureHud({ text: "", position: "bottom" }), timeoutMs);
   };
 
+  const applyPlayerZoomMode = (mode) => {
+    if (mode === "fit") {
+      setPlayerZoom({ scale: 1, x: 0, y: 0 });
+      setPlayerZoomMode("fit");
+      showGestureHud("Fit");
+      return;
+    }
+    if (mode === "fill") {
+      setPlayerZoom({ scale: 1, x: 0, y: 0 });
+      setPlayerZoomMode("fill");
+      showGestureHud("Fill");
+      return;
+    }
+    setPlayerZoom({ scale: 1.35, x: 0, y: 0 });
+    setPlayerZoomMode("zoom");
+    showGestureHud("Zoom");
+  };
+
+  const cyclePlayerZoomMode = () => {
+    if (playerZoomMode === "fit") {
+      applyPlayerZoomMode("fill");
+    } else if (playerZoomMode === "fill") {
+      applyPlayerZoomMode("zoom");
+    } else {
+      applyPlayerZoomMode("fit");
+    }
+  };
+
   const changeVideoByOffset = (offset) => {
-    const primary = watchSequence.length > 1 ? watchSequence : longVideos;    if (!primary.length) return;
+    const primary = watchSequence.length > 1 ? watchSequence : watchableVideos;    if (!primary.length) return;
     const currentId = String(activeVideo?.id || "");
     const idx = primary.findIndex((p) => String(p?.id) === currentId);
     const currentIndex = idx >= 0 ? idx : 0;
@@ -699,6 +999,25 @@ export default function LongVideos() {
       await exitPlayerFullscreen();
     } else {
       await enterPlayerFullscreen();
+    }
+  };
+
+  const requestPlayerPictureInPicture = async () => {
+    const video = playerRef.current;
+    if (!video) return false;
+    if (!("pictureInPictureEnabled" in document) || !document.pictureInPictureEnabled) return false;
+    if (typeof video.requestPictureInPicture !== "function") return false;
+    try {
+      if (document.pictureInPictureElement && document.pictureInPictureElement !== video) {
+        await document.exitPictureInPicture();
+      }
+      if (document.pictureInPictureElement === video) return true;
+      await video.requestPictureInPicture();
+      setIsPlayerInPip(true);
+      setIsPlayerMinimized(false);
+      return true;
+    } catch {
+      return false;
     }
   };
 
@@ -837,6 +1156,9 @@ export default function LongVideos() {
     const touches = event.touches;
     if (!touches) return;
 
+    swipeRef.current.tracking = false;
+    swipeRef.current.active = false;
+
     if (touches.length >= 2) {
       const a = touches[0];
       const b = touches[1];
@@ -861,6 +1183,17 @@ export default function LongVideos() {
       pinchRef.current.panStartOffsetX = Number(playerZoom.x || 0);
       pinchRef.current.panStartOffsetY = Number(playerZoom.y || 0);
       if (event.cancelable) event.preventDefault();
+      return;
+    }
+
+    if (touches.length === 1) {
+      const touch = touches[0];
+      swipeRef.current.tracking = true;
+      swipeRef.current.active = false;
+      swipeRef.current.startX = Number(touch.clientX || 0);
+      swipeRef.current.startY = Number(touch.clientY || 0);
+      swipeRef.current.lastX = Number(touch.clientX || 0);
+      swipeRef.current.lastY = Number(touch.clientY || 0);
     }
   };
 
@@ -882,6 +1215,9 @@ export default function LongVideos() {
         (pinchRef.current.startOffsetY || 0) + deltaY
       );
       setPlayerZoom(clamped);
+      if (clamped.scale > 1.02) {
+        setPlayerZoomMode((prev) => (prev === "zoom" ? prev : "zoom"));
+      }
       if (event.cancelable) event.preventDefault();
       return;
     }
@@ -897,18 +1233,104 @@ export default function LongVideos() {
       );
       setPlayerZoom(clamped);
       if (event.cancelable) event.preventDefault();
+      return;
+    }
+
+    if (swipeRef.current.tracking && touches.length === 1 && Number(playerZoom.scale || 1) <= 1.0001) {
+      const touch = touches[0];
+      const x = Number(touch.clientX || 0);
+      const y = Number(touch.clientY || 0);
+      const dx = x - Number(swipeRef.current.startX || 0);
+      const dy = y - Number(swipeRef.current.startY || 0);
+      swipeRef.current.lastX = x;
+      swipeRef.current.lastY = y;
+
+      if (!swipeRef.current.active) {
+        const absX = Math.abs(dx);
+        const absY = Math.abs(dy);
+        if (absY > 24 && absY > absX * 1.2) {
+          swipeRef.current.active = true;
+        }
+      }
+
+      if (swipeRef.current.active && event.cancelable) {
+        event.preventDefault();
+      }
     }
   };
 
-  const handlePlayerTouchEnd = () => {
+  const handlePlayerTouchEnd = (event) => {
+    const swipe = swipeRef.current;
+    const wasSwipe = swipe.tracking && swipe.active;
+    if (wasSwipe) {
+      const dx = Number(swipe.lastX || 0) - Number(swipe.startX || 0);
+      const dy = Number(swipe.lastY || 0) - Number(swipe.startY || 0);
+      const absX = Math.abs(dx);
+      const absY = Math.abs(dy);
+      const isVertical = absY > 92 && absY > absX * 1.1;
+
+      if (isVertical) {
+        if (dy < 0) {
+          if ("pictureInPictureElement" in document && document.pictureInPictureElement === playerRef.current) {
+            void document.exitPictureInPicture().catch(() => {
+              // no-op
+            });
+          }
+          setIsPlayerInPip(false);
+          setIsPlayerMinimized(false);
+          if (!isPlayerFullscreen) {
+            void enterPlayerFullscreen();
+            showGestureHud("Fullscreen");
+          }
+        } else if (isPlayerFullscreen) {
+          void exitPlayerFullscreen();
+          setIsPlayerMinimized(false);
+          setIsPlayerInPip(false);
+          showGestureHud("Normal");
+        } else if (!isPipSupported) {
+          setIsPlayerMinimized(true);
+          showGestureHud("Minimized");
+        } else if (!isPlayerInPip) {
+          void requestPlayerPictureInPicture().then((ok) => {
+            if (ok) {
+              showGestureHud("Picture in picture");
+            } else {
+              showGestureHud("PiP not supported");
+            }
+          });
+        }
+      }
+    }
+    swipeRef.current.tracking = false;
+    swipeRef.current.active = false;
+
+    if (!wasSwipe && event?.changedTouches?.length && !pinchRef.current.active && !pinchRef.current.panActive) {
+      const touch = event.changedTouches[0];
+      const now = Date.now();
+      const prev = lastTapRef.current;
+      if (
+        prev.at > 0 &&
+        now - prev.at < 300 &&
+        Math.abs(touch.clientX - prev.x) < 28 &&
+        Math.abs(touch.clientY - prev.y) < 28
+      ) {
+        cyclePlayerZoomMode();
+        lastTapRef.current = { at: 0, x: 0, y: 0 };
+      } else {
+        lastTapRef.current = { at: now, x: touch.clientX, y: touch.clientY };
+      }
+    }
+
     if (pinchRef.current.active && Number(playerZoom.scale || 1) <= 1.0001) {
       setPlayerZoom({ scale: 1, x: 0, y: 0 });
+      setPlayerZoomMode("fit");
     }
     pinchRef.current.active = false;
     if (!pinchRef.current.panActive) return;
     pinchRef.current.panActive = false;
     if (Number(playerZoom.scale || 1) <= 1.0001) {
       setPlayerZoom({ scale: 1, x: 0, y: 0 });
+      setPlayerZoomMode("fit");
     }
   };
   useEffect(() => {
@@ -917,14 +1339,47 @@ export default function LongVideos() {
       const fsEl = document.fullscreenElement;
 
       const isWrapFs = !!wrap && fsEl === wrap;
-      setIsPlayerFullscreen(isWrapFs);    if (!isWrapFs) showPlayerControls(true);
+      setIsPlayerFullscreen(isWrapFs);
+      if (isWrapFs) setIsPlayerMinimized(false);
+      if (!isWrapFs) showPlayerControls(true);
     };
 
     document.addEventListener("fullscreenchange", onFullscreenChange);
     return () => {
-      document.removeEventListener("fullscreenchange", onFullscreenChange);    if (gestureHudTimerRef.current) clearTimeout(gestureHudTimerRef.current);    if (controlsHideTimerRef.current) clearTimeout(controlsHideTimerRef.current);
+      document.removeEventListener("fullscreenchange", onFullscreenChange);
+      if (gestureHudTimerRef.current) clearTimeout(gestureHudTimerRef.current);
+      if (controlsHideTimerRef.current) clearTimeout(controlsHideTimerRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    const video = playerRef.current;
+    const supportsPip =
+      !!video &&
+      "pictureInPictureEnabled" in document &&
+      document.pictureInPictureEnabled &&
+      typeof video.requestPictureInPicture === "function";
+    setIsPipSupported(Boolean(supportsPip));
+
+    if (!video) return;
+
+    const onEnterPictureInPicture = () => {
+      setIsPlayerInPip(true);
+      setIsPlayerMinimized(false);
+    };
+
+    const onLeavePictureInPicture = () => {
+      setIsPlayerInPip(false);
+    };
+
+    video.addEventListener("enterpictureinpicture", onEnterPictureInPicture);
+    video.addEventListener("leavepictureinpicture", onLeavePictureInPicture);
+
+    return () => {
+      video.removeEventListener("enterpictureinpicture", onEnterPictureInPicture);
+      video.removeEventListener("leavepictureinpicture", onLeavePictureInPicture);
+    };
+  }, [activeVideo?.id]);
 
   useEffect(() => {    if (!isWatchMode) return;
     showPlayerControls(true);
@@ -940,6 +1395,8 @@ export default function LongVideos() {
     setPlayerBufferedUntil(0);
     setIsSeeking(false);
     setPlayerVolume(1);
+    setIsPlayerMinimized(false);
+    setIsPlayerInPip(false);
     setPlayerZoom({ scale: 1, x: 0, y: 0 });
     pinchRef.current.active = false;
     pinchRef.current.panActive = false;
@@ -972,7 +1429,7 @@ export default function LongVideos() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [isWatchMode, activeVideoIndex, watchSequence]);
 
-  const relatedVideos = longVideos.filter((item) => String(item.id) !== String(activeVideo?.id));
+  const relatedVideos = watchableVideos.filter((item) => String(item.id) !== String(activeVideo?.id));
 
   return (
     <div className={`yt-watch-page ${isWatchMode ? "is-watch-mode" : ""}`}>
@@ -1089,7 +1546,7 @@ export default function LongVideos() {
             {activeVideo && (
               <>
                 <div
-                  className="watch-player-wrap"
+                  className={`watch-player-wrap${isPlayerMinimized ? " is-minimized" : ""}${isPlayerInPip ? " is-pip" : ""}`}
                   ref={playerWrapRef}
                   onMouseMove={() => showPlayerControls(true)}
                   onTouchStart={handlePlayerTouchStart}
@@ -1102,11 +1559,16 @@ export default function LongVideos() {
                     ref={playerRef}
                     src={activeVideoUrl}
                     controls={false}
-                    disablePictureInPicture
                     disableRemotePlayback
                     autoPlay
+                    playsInline
                     className="watch-player"
-                    style={{ filter: `brightness(${playerBrightness})`, transform: `translate3d(${playerZoom.x}px, ${playerZoom.y}px, 0) scale(${playerZoom.scale})`, transformOrigin: "center center" }}
+                    style={{
+                      filter: `brightness(${playerBrightness})`,
+                      transform: `translate3d(${playerZoom.x}px, ${playerZoom.y}px, 0) scale(${playerZoom.scale})`,
+                      transformOrigin: "center center",
+                      objectFit: playerZoomMode === "fit" ? "contain" : "cover"
+                    }}
                     onPlay={() => {
                       setIsPlayerPaused(false);
                       showPlayerControls(true);
@@ -1140,7 +1602,9 @@ export default function LongVideos() {
                       title="Previous video"
                       aria-label="Previous video"
                     >
-                      <span className="watch-nav-icon">{"\u23EE"}</span>
+                      <svg className="watch-nav-icon" viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M6 5h3v14H6zM19 5L9 12l10 7z" fill="currentColor" />
+                      </svg>
                     </button>
                     <button
                       type="button"
@@ -1150,7 +1614,15 @@ export default function LongVideos() {
                       title={isPlayerPaused ? "Play" : "Pause"}
                       aria-label={isPlayerPaused ? "Play" : "Pause"}
                     >
-                      <span className="watch-nav-icon">{isPlayerPaused ? "\u25B6" : "\u23F8"}</span>
+                      {isPlayerPaused ? (
+                        <svg className="watch-nav-icon" viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="M8 5v14l11-7z" fill="currentColor" />
+                        </svg>
+                      ) : (
+                        <svg className="watch-nav-icon" viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="M6 5h4v14H6zM14 5h4v14h-4z" fill="currentColor" />
+                        </svg>
+                      )}
                     </button>
                     <button
                       type="button"
@@ -1160,7 +1632,9 @@ export default function LongVideos() {
                       title="Next video"
                       aria-label="Next video"
                     >
-                      <span className="watch-nav-icon">{"\u23ED"}</span>
+                      <svg className="watch-nav-icon" viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M15 5h3v14h-3zM5 5l10 7-10 7z" fill="currentColor" />
+                      </svg>
                     </button>
                   </div>
                   <button
@@ -1372,8 +1846,7 @@ export default function LongVideos() {
             <h3>Up next</h3>
             <div className="watch-list">
               {relatedVideos.map((v) => {
-                const raw = v.contentUrl || v.mediaUrl || "";
-                const url = resolveUrl(String(raw).trim());
+                const url = resolveUrl(mediaUrlFor(v));
                 const duration = videoDurationByPost[v.id] || 0;
                 return (
                   <article

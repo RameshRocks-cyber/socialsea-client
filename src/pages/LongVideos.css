@@ -344,6 +344,44 @@
   background: #000;
 }
 
+.watch-player-wrap.is-minimized {
+  position: fixed;
+  right: 12px;
+  bottom: calc(78px + env(safe-area-inset-bottom));
+  width: min(42vw, 340px);
+  max-width: 340px;
+  aspect-ratio: 16 / 9;
+  max-height: none;
+  margin: 0;
+  border-radius: 14px;
+  z-index: 120;
+  box-shadow:
+    0 18px 42px rgba(0, 0, 0, 0.66),
+    0 0 0 1px rgba(255, 255, 255, 0.1);
+}
+
+.watch-player-wrap.is-pip {
+  position: fixed;
+  width: 1px;
+  height: 1px;
+  left: -9999px;
+  top: -9999px;
+  opacity: 0;
+  pointer-events: none;
+  box-shadow: none;
+}
+
+.watch-player-wrap.is-minimized .watch-progress-wrap {
+  left: 12px;
+  right: 10px;
+  bottom: 8px;
+  gap: 8px;
+}
+
+.watch-player-wrap.is-minimized .watch-time-inline {
+  font-size: 0.72rem;
+}
+
 .watch-player {
   width: 100%;
   height: 100%;
@@ -422,12 +460,16 @@
 }
 
 .watch-nav-icon {
-  font-size: 1.36rem;
+  width: 22px;
+  height: 22px;
+  display: block;
   line-height: 1;
+  fill: currentColor;
 }
 
 .watch-nav-play .watch-nav-icon {
-  font-size: 1.48rem;
+  width: 26px;
+  height: 26px;
 }
 
 .watch-nav-btn:active {
@@ -493,7 +535,7 @@
 .watch-corner-fullscreen {
   position: absolute;
   right: 12px;
-  bottom: 48px;
+  bottom: 54px;
   width: 22px;
   height: 22px;
   border: none;
@@ -501,7 +543,7 @@
   color: #ffffff;
   line-height: 1;
   cursor: pointer;
-  z-index: 8;
+  z-index: 12;
   text-shadow: 0 1px 6px rgba(0, 0, 0, 0.85);
   opacity: 1;
   transition: opacity 0.22s ease, transform 0.15s ease, visibility 0.22s ease;
@@ -660,10 +702,15 @@
   width: 100%;
   -webkit-appearance: none;
   appearance: none;
+  accent-color: #ffffff !important;
   height: 4px;
   background: transparent;
   border-radius: 999px;
   cursor: pointer;
+}
+
+.watch-progress-range:focus {
+  outline: none;
 }
 
 .watch-progress-range::-webkit-slider-runnable-track {
@@ -679,6 +726,7 @@
       rgba(255, 255, 255, 0.30) 100%
     );
   border-radius: 999px;
+  border: none;
 }
 
 .watch-progress-range::-webkit-slider-thumb {
@@ -687,8 +735,8 @@
   width: 11px;
   height: 11px;
   border-radius: 50%;
-  border: 0;
-  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.34);
+  background: #ffffff !important;
   margin-top: -3px;
 }
 
@@ -707,10 +755,16 @@
   border-radius: 999px;
 }
 
+.watch-progress-range::-moz-range-progress {
+  height: 4px;
+  border-radius: 999px;
+  background: #ffffff;
+}
+
 .watch-progress-range::-moz-range-thumb {
   width: 11px;
   height: 11px;
-  border: 0;
+  border: 1px solid rgba(0, 0, 0, 0.34);
   border-radius: 50%;
   background: #ffffff;
 }
@@ -970,6 +1024,22 @@
     height: auto;
     max-height: min(46vh, 340px);
     background: #000;
+  }
+
+  .watch-player-wrap.is-minimized {
+    right: 8px;
+    bottom: calc(70px + env(safe-area-inset-bottom));
+    width: min(58vw, 300px);
+    border-radius: 12px;
+  }
+
+  .watch-player-wrap.is-minimized .watch-progress-wrap {
+    display: none;
+  }
+
+  .watch-player-wrap.is-minimized .watch-corner-fullscreen {
+    bottom: 10px;
+    right: 10px;
   }
 
   .yt-watch-page.is-watch-mode .watch-player {

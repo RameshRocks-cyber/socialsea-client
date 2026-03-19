@@ -24,6 +24,7 @@ const LANGUAGE_OPTIONS = [
 export default function LiveStart() {
   const navigate = useNavigate();
   const [liveState, setLiveState] = useState(() => readLiveBroadcast());
+  const [liveSyncError, setLiveSyncError] = useState("");
   const [title, setTitle] = useState("");
   const [previewReady, setPreviewReady] = useState(false);
   const [audioEnabled, setAudioEnabled] = useState(true);
@@ -171,9 +172,10 @@ export default function LiveStart() {
     [filterKey]
   );
 
-  const startLive = () => {
+  const startLive = async () => {
     const now = Date.now();
-    writeLiveBroadcast({
+    setLiveSyncError("");
+    const ok = await writeLiveBroadcast({
       id: now,
       title: title.trim() || `Live with ${hostName}`,
       hostName,
@@ -184,6 +186,9 @@ export default function LiveStart() {
       expiresAt: now + 2 * 60 * 60 * 1000,
       active: true
     });
+    if (!ok) {
+      setLiveSyncError("Live started locally, but server sync failed. Restart backend or deploy live API.");
+    }
   };
 
   const endLive = () => clearLiveBroadcast();
@@ -214,10 +219,14 @@ export default function LiveStart() {
         <h1>Live Studio</h1>
         {previewReady && (
           <div className="live-start-preview">
+            {liveState && <span className="live-start-live-dot" aria-label="Live" />}
             <video
               ref={videoRef}
-              className="live-start-video"
-              style={{ filter: activeFilter.css }}
+              className={`live-start-video ${screenSharing ? "" : "is-mirrored"}`}
+              style={{
+                filter: activeFilter.css,
+                transform: screenSharing ? "none" : "scaleX(-1)"
+              }}
               muted
               playsInline
             />
@@ -230,6 +239,7 @@ export default function LiveStart() {
         )}
 
         {mediaError && <p className="live-start-error">{mediaError}</p>}
+        {liveSyncError && <p className="live-start-error">{liveSyncError}</p>}
 
         <div className="live-start-controls">
           <button type="button" onClick={ensureCameraPreview}>
@@ -239,7 +249,10 @@ export default function LiveStart() {
             {audioEnabled ? "Mute Mic" : "Unmute Mic"}
           </button>
           <button type="button" onClick={toggleVideo} disabled={!previewReady}>
-            {videoEnabled ? "Camera Off" : "Camera On"}
+            <span className="live-start-btn-label">
+              {videoEnabled ? "Camera Off" : "Camera On"}
+            </span>
+            {liveState && <span className="live-start-live-dot inline" aria-hidden="true" />}
           </button>
           <button type="button" onClick={startScreenShare}>
             Share Screen

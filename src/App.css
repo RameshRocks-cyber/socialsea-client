@@ -98,6 +98,10 @@
     padding-bottom: calc(82px + env(safe-area-inset-bottom));
   }
 
+  .app-main.chat-main-route.chat-conversation-route.with-user-nav {
+    padding-bottom: 0;
+  }
+
   .app-main.reels-main-route.with-user-nav {
     padding-top: 0;
     padding-bottom: 0;
@@ -142,6 +146,10 @@
   .app-main.chat-main-route.with-user-nav {
     padding-top: 4px;
     padding-bottom: 90px;
+  }
+
+  .app-main.chat-main-route.chat-conversation-route.with-user-nav {
+    padding-bottom: 0;
   }
 
   .app-main.reels-main-route.with-user-nav {

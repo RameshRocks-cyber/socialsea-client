@@ -39,7 +39,9 @@ const SOS_LAST_SESSION_SIG_KEY = "socialsea_sos_last_session_sig_v1";
 const SOS_LAST_NOTIFICATION_ID_KEY = "socialsea_sos_last_notification_id_v1";
 const SOS_NAV_CACHE_KEY = "socialsea_sos_nav_cache_v1";
 const SOS_SUPPRESSED_ALERTS_KEY = "socialsea_sos_suppressed_alerts_v1";
+const SOS_SUPPRESSED_ALERTS_AT_KEY = "socialsea_sos_suppressed_alerts_at_v1";
 const SOS_SEEN_ALERTS_KEY = "socialsea_sos_seen_alerts_v1";
+const SOS_ALERT_SUPPRESS_TTL_MS = 5 * 60 * 1000;
 const allowSelfEmergencyPopup = (() => {
   if (typeof window === "undefined") return false;
   const host = String(window.location.hostname || "").toLowerCase().trim();
@@ -228,6 +230,24 @@ const readSuppressedAlertIds = () => {
   }
 };
 
+const readSuppressedAlertTimestamps = () => {
+  try {
+    const raw = sessionStorage.getItem(SOS_SUPPRESSED_ALERTS_AT_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const next = {};
+    Object.entries(parsed).forEach(([key, value]) => {
+      const id = String(key || "").trim();
+      const ts = Number(value);
+      if (!id || !Number.isFinite(ts) || ts <= 0) return;
+      next[id] = ts;
+    });
+    return next;
+  } catch {
+    return {};
+  }
+};
+
 const readSeenAlertIds = () => {
   try {
     const raw = sessionStorage.getItem(SOS_SEEN_ALERTS_KEY);
@@ -251,12 +271,12 @@ const readIsSosActive = () => {
 };
 
 const SNAP_LENSES = [
-  { id: "off", label: "Off", badge: "O", thumb: "linear-gradient(135deg, #131313, #282828)", filter: "none", mask: "" },
-  { id: "natural", label: "Natural", badge: "N", thumb: "linear-gradient(135deg, #50755f, #9ed8a0)", filter: "none", mask: "" },
+  { id: "off", label: "Off", badge: "⦿", thumb: "linear-gradient(135deg, #131313, #282828)", filter: "none", mask: "" },
+  { id: "natural", label: "Natural", badge: "🍃", thumb: "linear-gradient(135deg, #50755f, #9ed8a0)", filter: "none", mask: "" },
   {
     id: "colorful",
     label: "Colorful",
-    badge: "C",
+    badge: "🎨",
     thumb: "linear-gradient(135deg, #19a6ff, #7ce2ff 55%, #5adb88)",
     filter: "saturate(1.62) contrast(1.18) brightness(1.06)",
     mask: ""
@@ -264,7 +284,7 @@ const SNAP_LENSES = [
   {
     id: "cartoon",
     label: "Cartoon",
-    badge: "T",
+    badge: "🧩",
     thumb: "linear-gradient(135deg, #6f5eff, #f08dff)",
     filter: "contrast(1.34) saturate(1.34) brightness(1.08)",
     mask: ""
@@ -272,15 +292,145 @@ const SNAP_LENSES = [
   {
     id: "girl",
     label: "Girl",
-    badge: "G",
+    badge: "💖",
     thumb: "linear-gradient(135deg, #ff94ca, #ffa3a3)",
     filter: "brightness(1.1) saturate(1.16) sepia(0.08) hue-rotate(-10deg)",
     mask: ""
   },
   {
+    id: "kawaii",
+    label: "Kawaii",
+    badge: "🎀",
+    thumb: "linear-gradient(135deg, #ffd6ea, #ffeabf)",
+    filter: "brightness(1.12) saturate(1.2) hue-rotate(-8deg)",
+    maskType: "emoji-float",
+    emojiPackIds: ["kawaii", "hearts", "sparkle"]
+  },
+  {
+    id: "angel",
+    label: "Angel",
+    badge: "😇",
+    thumb: "linear-gradient(135deg, #e6f5ff, #fff3d8)",
+    filter: "brightness(1.1) contrast(1.04) saturate(1.05)",
+    maskType: "emoji-float",
+    emojiPackIds: ["angel", "sparkle"]
+  },
+  {
+    id: "party",
+    label: "Party",
+    badge: "🥳",
+    thumb: "linear-gradient(135deg, #ffcf7a, #ff7adf)",
+    filter: "brightness(1.08) saturate(1.24) contrast(1.06)",
+    maskType: "emoji-float",
+    emojiPackIds: ["party", "sparkle"]
+  },
+  {
+    id: "mood",
+    label: "Mood",
+    badge: "😌",
+    thumb: "linear-gradient(135deg, #c7d2ff, #ffd1f2)",
+    filter: "brightness(1.06) saturate(1.12) hue-rotate(-4deg)",
+    maskType: "emoji-float",
+    emojiPackIds: ["mood", "hearts", "sparkle"]
+  },
+  {
+    id: "glow",
+    label: "Glow",
+    badge: "✨",
+    thumb: "linear-gradient(135deg, #ffe3f2, #ffd7a8)",
+    filter: "brightness(1.12) contrast(1.05) saturate(1.18) hue-rotate(-6deg)",
+    mask: "✨"
+  },
+  {
+    id: "blush",
+    label: "Blush",
+    badge: "💗",
+    thumb: "linear-gradient(135deg, #ffb6d5, #ffd1e8)",
+    filter: "brightness(1.08) saturate(1.22) hue-rotate(-12deg)",
+    mask: "💗"
+  },
+  {
+    id: "sparkle",
+    label: "Sparkle",
+    badge: "✦",
+    thumb: "linear-gradient(135deg, #e9f4ff, #fbe6ff)",
+    filter: "brightness(1.1) contrast(1.04) saturate(1.1)",
+    mask: "✨✨"
+  },
+  {
+    id: "crown",
+    label: "Crown",
+    badge: "👑",
+    thumb: "linear-gradient(135deg, #ffe29a, #f7c15a)",
+    filter: "contrast(1.08) saturate(1.12) brightness(1.06)",
+    mask: "👑"
+  },
+  {
+    id: "butterfly",
+    label: "Butterfly",
+    badge: "🦋",
+    thumb: "linear-gradient(135deg, #9ad0ff, #e1b3ff)",
+    filter: "saturate(1.2) brightness(1.05)",
+    mask: "🦋"
+  },
+  {
+    id: "bunny",
+    label: "Bunny",
+    badge: "🐰",
+    thumb: "linear-gradient(135deg, #ffe5f0, #ffc7dd)",
+    filter: "brightness(1.08) saturate(1.16) hue-rotate(-6deg)",
+    mask: "🐰"
+  },
+  {
+    id: "pastel",
+    label: "Pastel",
+    badge: "☁",
+    thumb: "linear-gradient(135deg, #d6f4ff, #ffe4f6)",
+    filter: "brightness(1.05) saturate(1.05) contrast(0.98) hue-rotate(8deg)",
+    mask: "☁"
+  },
+  {
+    id: "dream",
+    label: "Dream",
+    badge: "🌙",
+    thumb: "linear-gradient(135deg, #9fa7ff, #f5b3ff)",
+    filter: "brightness(1.1) contrast(1.06) saturate(1.1) hue-rotate(-8deg)",
+    mask: "🌙"
+  },
+  {
+    id: "cartoon-dog",
+    label: "Cartoon Dog",
+    badge: "🐶",
+    thumb: "linear-gradient(135deg, #f7c896, #f2a35f)",
+    filter: "contrast(1.35) saturate(1.45) brightness(1.08)",
+    mask: "🐶",
+    maskAnchor: "center",
+    maskScale: 2.25
+  },
+  {
+    id: "dog-face",
+    label: "Dog Face",
+    badge: "🐾",
+    thumb: "linear-gradient(135deg, #f3c08b, #eaa763)",
+    filter: "contrast(1.2) saturate(1.25) brightness(1.05)",
+    mask: "🐶",
+    maskAnchor: "center",
+    maskScale: 2.9
+  },
+  {
+    id: "cartoon-cat",
+    label: "Cartoon Cat",
+    badge: "🐱",
+    thumb: "linear-gradient(135deg, #f7d49a, #f5b65d)",
+    filter: "contrast(1.32) saturate(1.42) brightness(1.07)",
+    mask: "🐱",
+    maskAnchor: "center",
+    maskScale: 2.2
+  },
+  {
     id: "boy",
     label: "Boy",
-    badge: "B",
+    badge: "♂",
     thumb: "linear-gradient(135deg, #59a4ff, #7ed0ff)",
     filter: "contrast(1.12) saturate(0.92) hue-rotate(8deg)",
     mask: ""
@@ -288,7 +438,7 @@ const SNAP_LENSES = [
   {
     id: "aging",
     label: "Aging",
-    badge: "A",
+    badge: "⏳",
     thumb: "linear-gradient(135deg, #ae8f75, #d0bda3)",
     filter: "sepia(0.28) contrast(1.16) grayscale(0.18)",
     mask: ""
@@ -297,7 +447,21 @@ const SNAP_LENSES = [
   { id: "dog", label: "Dog", badge: "DOG", thumb: "linear-gradient(135deg, #c48f63, #e5cb9f)", filter: "none", mask: "🐶" }
 ];
 
-const SNAP_TOOLS = ["Aa", "∞", "✧", "⌄"];
+const SNAP_TOOLS = [
+  { id: "text", label: "Aa", title: "Add text" },
+  { id: "loop", label: "∞", title: "Auto emoji" },
+  { id: "sparkle", label: "✧", title: "Sparkle" },
+  { id: "flip", label: "⌄", title: "Flip camera" }
+];
+
+const EMOJI_PACKS = [
+  { id: "kawaii", label: "Kawaii", emojis: ["🎀", "🌸", "💗", "✨", "🫧", "💖"] },
+  { id: "hearts", label: "Hearts", emojis: ["💗", "💖", "💞", "💕", "💘", "❤️"] },
+  { id: "sparkle", label: "Sparkle", emojis: ["✨", "✦", "✧", "🌟", "💫", "🫧"] },
+  { id: "angel", label: "Angel", emojis: ["😇", "👼", "✨", "☁", "🕊️", "💗"] },
+  { id: "party", label: "Party", emojis: ["🥳", "🎉", "🎊", "✨", "💃", "🪩"] },
+  { id: "mood", label: "Mood", emojis: ["😌", "😊", "🫶", "💫", "🌙", "✨"] }
+];
 
 export default function Navbar() {
   const location = useLocation();
@@ -318,6 +482,30 @@ export default function Navbar() {
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraError, setCameraError] = useState("");
   const [cameraBusy, setCameraBusy] = useState(false);
+  const [cameraReady, setCameraReady] = useState(false);
+  const [cameraLoading, setCameraLoading] = useState(false);
+  const [faceBox, setFaceBox] = useState(null);
+  const [emojiPackId, setEmojiPackId] = useState("kawaii");
+  const [snapTextOpen, setSnapTextOpen] = useState(false);
+  const [snapText, setSnapText] = useState("");
+  const [snapTextColor, setSnapTextColor] = useState("#ffffff");
+  const [snapTextSize, setSnapTextSize] = useState(28);
+  const [autoEmojiRotate, setAutoEmojiRotate] = useState(true);
+  const [sparkleOn, setSparkleOn] = useState(false);
+  const [cameraFacing, setCameraFacing] = useState("user");
+  const faceDetectorRef = useRef(null);
+  const faceDetectTimerRef = useRef(0);
+  const faceMotionRef = useRef({ x: 0, y: 0, size: 0 });
+  const snapTextInputRef = useRef(null);
+  const [sparkleSeeds] = useState(() =>
+    Array.from({ length: 12 }, (_, idx) => ({
+      id: `sparkle-${idx}`,
+      left: Math.round(Math.random() * 1000) / 10,
+      top: Math.round(Math.random() * 1000) / 10,
+      size: Math.round(10 + Math.random() * 16),
+      delay: Math.round(Math.random() * 20) / 10
+    }))
+  );
   const [activeLensId, setActiveLensId] = useState("colorful");
   const seenSignalRef = useRef(new Set());
   const incomingCallRef = useRef(null);
@@ -328,6 +516,7 @@ export default function Navbar() {
   const seenNotificationIdsRef = useRef(new Set());
   const seenAlertIdsRef = useRef(readSeenAlertIds());
   const suppressedAlertIdsRef = useRef(readSuppressedAlertIds());
+  const suppressedAlertAtRef = useRef(readSuppressedAlertTimestamps());
   const activeAlertIdsRef = useRef(new Set());
   const ownSosStopUntilRef = useRef(0);
   const sosEmergencyMissesRef = useRef(0);
@@ -339,6 +528,7 @@ export default function Navbar() {
   const sosSignalChannelRef = useRef(null);
   const sosUserLocationRef = useRef(null);
   const sosLocationWatchRef = useRef(null);
+  const sosLocationPromptRef = useRef(false);
   const lastHandledSignalIdRef = useRef(readSessionValue(SOS_LAST_SIGNAL_ID_KEY));
   const lastHandledSessionSigRef = useRef(readSessionValue(SOS_LAST_SESSION_SIG_KEY));
   const lastEmergencyNotificationIdRef = useRef(readSessionValue(SOS_LAST_NOTIFICATION_ID_KEY));
@@ -648,10 +838,58 @@ export default function Navbar() {
     setIncomingCall(null);
   };
 
-  const onSosTap = (event) => {
+  const requestLocationForSos = () =>
+    new Promise((resolve, reject) => {
+      if (!navigator.geolocation) {
+        reject(new Error("Geolocation not supported"));
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const next = {
+            latitude: pos.coords.latitude,
+            longitude: pos.coords.longitude,
+            accuracy: pos.coords.accuracy,
+            at: Date.now()
+          };
+          resolve(next);
+        },
+        (err) => reject(err),
+        {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 1500
+        }
+      );
+    });
+
+  const hasSosLocation = () => {
+    const lat = Number(sosUserLocationRef.current?.latitude);
+    const lon = Number(sosUserLocationRef.current?.longitude);
+    return Number.isFinite(lat) && Number.isFinite(lon);
+  };
+
+  const onSosTap = async (event) => {
     if (event) {
       event.preventDefault();
       event.stopPropagation();
+    }
+    if (!hasSosLocation()) {
+      if (sosLocationPromptRef.current) return;
+      sosLocationPromptRef.current = true;
+      showSosPopup("Allow location access to enable SOS.");
+      try {
+        const point = await requestLocationForSos();
+        sosUserLocationRef.current = point;
+        setSosUserLocation(point);
+        sosTapRef.current = { count: 0, lastAt: 0 };
+        showSosPopup("Location captured. Tap SOS again to start emergency flow.");
+      } catch {
+        showSosPopup("Location is required for SOS. Please allow location permission.");
+      } finally {
+        sosLocationPromptRef.current = false;
+      }
+      return;
     }
     const now = Date.now();
     const prev = sosTapRef.current;
@@ -826,6 +1064,7 @@ export default function Navbar() {
         isEmergency: true,
         alertId: resolvedAlertId || undefined,
         reporterEmail: signalReporterEmail,
+        reporterUserId: signalReporterUserId,
         liveUrl: payload.liveUrl || payload.streamUrl || payload.liveStreamUrl || payload.stream,
         navigateUrl: payload.navigateUrl,
         mapsUrl: payload.mapsUrl,
@@ -884,6 +1123,8 @@ export default function Navbar() {
           showSosPopup("[EMERGENCY] SocialSea Emergengy SOS is asking for help", {
             isEmergency: true,
             alertId: session?.alertId || session?.alertDisplayId,
+            reporterEmail: session?.reporterEmail,
+            reporterUserId: session?.reporterUserId,
             latitude: session?.lastLocation?.latitude,
             longitude: session?.lastLocation?.longitude
           });
@@ -948,6 +1189,8 @@ export default function Navbar() {
         showSosPopup("[EMERGENCY] SocialSea Emergengy SOS is asking for help", {
           isEmergency: true,
           alertId: session?.alertId || session?.alertDisplayId,
+          reporterEmail: session?.reporterEmail,
+          reporterUserId: session?.reporterUserId,
           latitude: session?.lastLocation?.latitude,
           longitude: session?.lastLocation?.longitude
         });
@@ -1133,6 +1376,7 @@ export default function Navbar() {
             alertId: id,
             dedupeKey,
             reporterEmail: reporter,
+            reporterUserId: a?.reporterUserId,
             liveUrl: a?.liveUrl || a?.streamUrl || a?.liveStreamUrl || a?.stream,
             navigateUrl: a?.navigateUrl || a?.locationUrl,
             mapsUrl: a?.mapsUrl,
@@ -1221,6 +1465,7 @@ export default function Navbar() {
           alertId: notifAlertId || undefined,
           dedupeKey: notifAlertId || notifId || emergency?.alertId,
           reporterEmail: emergency?.actorEmail,
+          reporterUserId: emergency?.actorUserId,
           liveUrl: emergency?.liveUrl,
           navigateUrl: emergency?.navigateUrl,
           mapsUrl: emergency?.mapsUrl
@@ -1272,6 +1517,8 @@ export default function Navbar() {
           isEmergency: true,
           alertId: fallbackAlertId || undefined,
           dedupeKey: fallbackAlertId || "session_active",
+          reporterEmail: session?.reporterEmail,
+          reporterUserId: session?.reporterUserId,
           latitude: session?.lastLocation?.latitude,
           longitude: session?.lastLocation?.longitude
         });
@@ -1290,6 +1537,11 @@ export default function Navbar() {
 
   const closeCameraStudio = () => {
     setCameraOpen(false);
+    setCameraReady(false);
+    setCameraLoading(false);
+    setFaceBox(null);
+    setCameraError("");
+    setSnapTextOpen(false);
     const stream = cameraStreamRef.current;
     if (stream) {
       try {
@@ -1304,33 +1556,108 @@ export default function Navbar() {
     }
   };
 
-  const openCameraStudio = async () => {
+  const openCameraStudio = async (forcedFacing, options = {}) => {
+    const { forceOpen = false } = options;
     if (cameraOpen) {
-      closeCameraStudio();
+      if (!forceOpen) closeCameraStudio();
       return;
     }
     setCameraError("");
+    setCameraReady(false);
+    setCameraLoading(true);
     setCameraBusy(true);
+    setCameraOpen(true);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user", width: { ideal: 960 }, height: { ideal: 720 } },
-        audio: false
-      });
-      cameraStreamRef.current = stream;
-      setCameraOpen(true);
-      requestAnimationFrame(() => {
-        if (cameraVideoRef.current) {
-          cameraVideoRef.current.srcObject = stream;
-          cameraVideoRef.current.play?.().catch(() => {});
+      const isSecure =
+        window.isSecureContext ||
+        window.location.hostname === "localhost" ||
+        window.location.hostname === "127.0.0.1";
+      if (!isSecure) {
+        throw new Error("Camera needs HTTPS. Open this site with https:// or localhost.");
+      }
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error("Camera is not supported in this browser.");
+      }
+      const stopActiveStream = () => {
+        const stream = cameraStreamRef.current;
+        if (!stream) return;
+        try {
+          stream.getTracks().forEach((track) => track.stop());
+        } catch {
+          // ignore
         }
+      };
+      const getCameraStream = async (facingMode) => {
+        const preferred = String(facingMode || "user");
+        const exactConstraints = {
+          audio: false,
+          video: { facingMode: { exact: preferred }, width: { ideal: 960 }, height: { ideal: 720 } }
+        };
+        const idealConstraints = {
+          audio: false,
+          video: { facingMode: preferred, width: { ideal: 960 }, height: { ideal: 720 } }
+        };
+        try {
+          return await navigator.mediaDevices.getUserMedia(exactConstraints);
+        } catch {
+          try {
+            return await navigator.mediaDevices.getUserMedia(idealConstraints);
+          } catch {
+            return await navigator.mediaDevices.getUserMedia({ audio: false, video: true });
+          }
+        }
+      };
+      stopActiveStream();
+      const facing = forcedFacing || cameraFacing;
+      const stream = await getCameraStream(facing);
+      cameraStreamRef.current = stream;
+      requestAnimationFrame(() => {
+        const video = cameraVideoRef.current;
+        if (!video) return;
+        video.srcObject = stream;
+        video.muted = true;
+        video.autoplay = true;
+        video.playsInline = true;
+        video.setAttribute("playsinline", "");
+        video.setAttribute("webkit-playsinline", "");
+        video.onloadedmetadata = () => {
+          setCameraReady(true);
+        };
+        video.onloadeddata = () => {
+          setCameraReady(true);
+        };
+        video.play?.()
+          .then(() => setCameraReady(true))
+          .catch(() => {
+            setCameraError("Tap the video area once to start the camera.");
+          });
       });
-    } catch {
-      setCameraError("Camera access denied or unavailable.");
-      setCameraOpen(false);
+    } catch (err) {
+      const msg = String(err?.message || "");
+      if (/notallowed|denied|permission/i.test(msg)) {
+        setCameraError("Camera permission blocked. Allow camera access and try again.");
+      } else if (/notfound|no device/i.test(msg)) {
+        setCameraError("No camera device found.");
+      } else if (msg) {
+        setCameraError(msg);
+      } else {
+        setCameraError("Camera access denied or unavailable.");
+      }
+      setCameraReady(false);
     } finally {
       setCameraBusy(false);
+      setCameraLoading(false);
     }
   };
+
+  useEffect(() => {
+    window.__ssOpenCameraStudio = (payload = {}) => {
+      openCameraStudio(payload?.facing, { forceOpen: true });
+    };
+    return () => {
+      if (window.__ssOpenCameraStudio) delete window.__ssOpenCameraStudio;
+    };
+  }, [openCameraStudio]);
 
   useEffect(() => () => {
     const stream = cameraStreamRef.current;
@@ -1346,11 +1673,150 @@ export default function Navbar() {
 
   const activeLens = SNAP_LENSES.find((x) => x.id === activeLensId) || SNAP_LENSES[0];
   const cameraFilterCss = activeLens?.filter || "none";
+  const activeEmojiPack =
+    EMOJI_PACKS.find((pack) => pack.id === emojiPackId) || EMOJI_PACKS[0];
+
+  const getEmojiOverlayItems = () => {
+    const pack = activeEmojiPack || EMOJI_PACKS[0];
+    const emojis = pack?.emojis || ["✨"];
+    const baseOffsets = [
+      { x: -0.18, y: -0.2 },
+      { x: 0, y: -0.26 },
+      { x: 0.18, y: -0.2 },
+      { x: -0.22, y: -0.05 },
+      { x: 0.22, y: -0.05 },
+      { x: -0.12, y: 0.1 },
+      { x: 0.12, y: 0.1 }
+    ];
+    return baseOffsets.map((offset, idx) => ({
+      key: `${pack.id}-${idx}`,
+      emoji: emojis[idx % emojis.length],
+      offset
+    }));
+  };
+
+  const normalizeFaceBox = (faceLike, video) => {
+    const box = faceLike?.boundingBox || faceLike;
+    if (!box || !video) return null;
+    const videoWidth = Number(video.videoWidth || 0);
+    const videoHeight = Number(video.videoHeight || 0);
+    if (!videoWidth || !videoHeight) return null;
+    const x = Number(box.x ?? box.left ?? 0);
+    const y = Number(box.y ?? box.top ?? 0);
+    const width = Number(box.width ?? 0);
+    const height = Number(box.height ?? 0);
+    if (!width || !height) return null;
+    return { x, y, width, height, videoWidth, videoHeight };
+  };
+
+  useEffect(() => {
+    if (!cameraOpen || !cameraReady) return undefined;
+    if (typeof window === "undefined" || !("FaceDetector" in window)) return undefined;
+
+    let cancelled = false;
+    const detector =
+      faceDetectorRef.current || new window.FaceDetector({ fastMode: true, maxDetectedFaces: 1 });
+    faceDetectorRef.current = detector;
+
+    const detectLoop = async () => {
+      if (cancelled) return;
+      const video = cameraVideoRef.current;
+      if (!video || video.readyState < 2) {
+        faceDetectTimerRef.current = window.setTimeout(detectLoop, 300);
+        return;
+      }
+      try {
+        const faces = await detector.detect(video);
+        const face = faces && faces.length ? faces[0] : null;
+        const normalized = normalizeFaceBox(face, video);
+        setFaceBox(normalized || null);
+        if (normalized && autoEmojiRotate) {
+          const cx = normalized.x + normalized.width / 2;
+          const cy = normalized.y + normalized.height / 2;
+          const size = normalized.width * normalized.height;
+          const last = faceMotionRef.current;
+          const dx = Math.abs(cx - last.x);
+          const dy = Math.abs(cy - last.y);
+          const ds = Math.abs(size - last.size);
+          faceMotionRef.current = { x: cx, y: cy, size };
+          if (dx + dy + ds * 0.00002 > 10) {
+            const packChoices = activeLens?.emojiPackIds || EMOJI_PACKS.map((p) => p.id);
+            const nextId = packChoices[Math.floor(Math.random() * packChoices.length)] || "kawaii";
+            setEmojiPackId(nextId);
+          }
+        }
+      } catch {
+        setFaceBox(null);
+      }
+      faceDetectTimerRef.current = window.setTimeout(detectLoop, 260);
+    };
+
+    detectLoop();
+    return () => {
+      cancelled = true;
+      if (faceDetectTimerRef.current) {
+        clearTimeout(faceDetectTimerRef.current);
+        faceDetectTimerRef.current = 0;
+      }
+    };
+  }, [cameraOpen, cameraReady, autoEmojiRotate, activeLens?.id]);
+
+  useEffect(() => {
+    if (!cameraOpen || !autoEmojiRotate || activeLens?.maskType !== "emoji-float") return undefined;
+    const packChoices = activeLens?.emojiPackIds || EMOJI_PACKS.map((p) => p.id);
+    if (!packChoices.length) return undefined;
+    const timer = setInterval(() => {
+      const nextId = packChoices[Math.floor(Math.random() * packChoices.length)] || "kawaii";
+      setEmojiPackId(nextId);
+    }, 2600);
+    return () => clearInterval(timer);
+  }, [cameraOpen, activeLens?.id, autoEmojiRotate]);
+
+  useEffect(() => {
+    if (!snapTextOpen) return undefined;
+    const timer = setTimeout(() => {
+      snapTextInputRef.current?.focus();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [snapTextOpen]);
+
+  const handleSnapTool = (toolId) => {
+    if (toolId === "text") {
+      setSnapTextOpen((prev) => !prev);
+      return;
+    }
+    if (toolId === "loop") {
+      setAutoEmojiRotate((prev) => !prev);
+      return;
+    }
+    if (toolId === "sparkle") {
+      setSparkleOn((prev) => !prev);
+      return;
+    }
+    if (toolId === "flip") {
+      const next = cameraFacing === "user" ? "environment" : "user";
+      setCameraFacing(next);
+      if (cameraOpen) {
+        closeCameraStudio();
+        setTimeout(() => {
+          void openCameraStudio(next);
+        }, 150);
+      }
+    }
+  };
 
   const toFiniteNumber = (value) => {
     const n = Number(value);
     return Number.isFinite(n) ? n : null;
   };
+
+  useEffect(() => {
+    const handler = () => {
+      void openCameraStudio();
+    };
+    window.addEventListener("ss:open-camera", handler);
+    return () => window.removeEventListener("ss:open-camera", handler);
+  }, [openCameraStudio]);
 
   const haversineDistanceMeters = (lat1, lon1, lat2, lon2) => {
     const toRad = (deg) => (deg * Math.PI) / 180;
@@ -1463,20 +1929,21 @@ export default function Navbar() {
   const readOwnStoppedSessionState = () => {
     try {
       const raw = localStorage.getItem(SOS_SESSION_KEY);
-      if (!raw) return { isRecentOwnStop: false, alertId: "" };
+      if (!raw) return { isOwnStopped: false, isRecentOwnStop: false, alertId: "" };
       const session = JSON.parse(raw);
       const isOwn =
         isOwnBrowserSession(session) ||
         isOwnEmergency({ reporterEmail: session?.reporterEmail, reporterUserId: session?.reporterUserId });
-      if (!isOwn || session?.active) return { isRecentOwnStop: false, alertId: "" };
+      if (!isOwn || session?.active) return { isOwnStopped: false, isRecentOwnStop: false, alertId: "" };
       const updatedMs = new Date(session?.updatedAt || session?.stoppedAt || "").getTime();
       const isRecent = Number.isFinite(updatedMs) && Date.now() - updatedMs < 120000;
       return {
+        isOwnStopped: true,
         isRecentOwnStop: Boolean(isRecent),
         alertId: normalizeAlertId(session?.alertId || session?.alertDisplayId)
       };
     } catch {
-      return { isRecentOwnStop: false, alertId: "" };
+      return { isOwnStopped: false, isRecentOwnStop: false, alertId: "" };
     }
   };
 
@@ -1494,9 +1961,49 @@ export default function Navbar() {
     }
   };
 
+  const persistSuppressedAlerts = () => {
+    try {
+      sessionStorage.setItem(
+        SOS_SUPPRESSED_ALERTS_KEY,
+        JSON.stringify(Array.from(suppressedAlertIdsRef.current).slice(-500))
+      );
+      const entries = Object.entries(suppressedAlertAtRef.current || {})
+        .slice(-500)
+        .reduce((acc, [key, value]) => {
+          const id = String(key || "").trim();
+          const ts = Number(value);
+          if (!id || !Number.isFinite(ts) || ts <= 0) return acc;
+          acc[id] = ts;
+          return acc;
+        }, {});
+      sessionStorage.setItem(SOS_SUPPRESSED_ALERTS_AT_KEY, JSON.stringify(entries));
+    } catch {
+      // ignore storage issues
+    }
+  };
+
+  const unsuppressAlert = (alertId) => {
+    const id = normalizeAlertId(alertId);
+    if (!id) return;
+    suppressedAlertIdsRef.current.delete(id);
+    delete suppressedAlertAtRef.current[id];
+    persistSuppressedAlerts();
+  };
+
   const isAlertSuppressed = (alertId) => {
     const id = normalizeAlertId(alertId);
-    return Boolean(id) && suppressedAlertIdsRef.current.has(id);
+    if (!id || !suppressedAlertIdsRef.current.has(id)) return false;
+    const suppressedAt = Number(suppressedAlertAtRef.current?.[id] || 0);
+    if (!Number.isFinite(suppressedAt) || suppressedAt <= 0) {
+      // Legacy suppressed entries without timestamps should not block new SOS forever.
+      unsuppressAlert(id);
+      return false;
+    }
+    if (Date.now() - suppressedAt > SOS_ALERT_SUPPRESS_TTL_MS) {
+      unsuppressAlert(id);
+      return false;
+    }
+    return true;
   };
 
   const isAlertSeen = (alertId) => {
@@ -1523,14 +2030,8 @@ export default function Navbar() {
     if (!id) return;
     markAlertSeen(id);
     suppressedAlertIdsRef.current.add(id);
-    try {
-      sessionStorage.setItem(
-        SOS_SUPPRESSED_ALERTS_KEY,
-        JSON.stringify(Array.from(suppressedAlertIdsRef.current).slice(-500))
-      );
-    } catch {
-      // ignore storage issues
-    }
+    suppressedAlertAtRef.current[id] = Date.now();
+    persistSuppressedAlerts();
   };
 
   const buildSosPopupPayload = (message, options = {}) => {
@@ -1585,6 +2086,9 @@ export default function Navbar() {
         extractAlertIdFromUrl(nextPopup?.liveUrl) ||
         extractAlertIdFromUrl(nextPopup?.locationUrl)
     );
+    const reporterEmail = String(options?.reporterEmail || "").trim().toLowerCase();
+    const reporterUserId = String(options?.reporterUserId || "").trim();
+    const popupAlertKey = normalizeAlertId(nextPopup?.alertId || nextPopup?.dedupeKey || popupAlertId);
     if (
       nextPopup?.isEmergency &&
       routeAlertId &&
@@ -1603,10 +2107,25 @@ export default function Navbar() {
       return;
     }
     const ownStopped = readOwnStoppedSessionState();
+    const ownAlertKey = normalizeAlertId(ownStopped.alertId);
+    const matchesOwnReporter =
+      (reporterEmail && myEmail && reporterEmail === myEmail.toLowerCase()) ||
+      (reporterUserId && myUserId && reporterUserId === myUserId);
+    const matchesOwnAlert = ownAlertKey && popupAlertKey && ownAlertKey === popupAlertKey;
+    if (
+      nextPopup?.isEmergency &&
+      !allowSelfEmergencyPopup &&
+      ownStopped.isOwnStopped &&
+      (matchesOwnAlert || matchesOwnReporter)
+    ) {
+      if (popupAlertKey) suppressAlert(popupAlertKey);
+      setSosPopup(null);
+      return;
+    }
     if (
       nextPopup?.isEmergency &&
       ownStopped.isRecentOwnStop &&
-      (!nextPopup?.alertId || !ownStopped.alertId || nextPopup.alertId === ownStopped.alertId)
+      (!popupAlertKey || !ownAlertKey || popupAlertKey === ownAlertKey)
     ) {
       setSosPopup(null);
       return;
@@ -1619,7 +2138,6 @@ export default function Navbar() {
       return;
     }
     if (nextPopup?.isEmergency && !allowSelfEmergencyPopup) {
-      const reporterEmail = String(options?.reporterEmail || "").trim().toLowerCase();
       if (reporterEmail && myEmail && reporterEmail === myEmail.toLowerCase() && isTriggeredByCurrentBrowser()) {
         setSosPopup(null);
         return;
@@ -1832,26 +2350,180 @@ export default function Navbar() {
               </header>
 
               <div className="ss-snap-tools">
-                {SNAP_TOOLS.map((tool) => (
-                  <button key={tool} type="button" className="ss-snap-tool-btn">
-                    {tool}
-                  </button>
-                ))}
+                {SNAP_TOOLS.map((tool) => {
+                  const isActive =
+                    (tool.id === "text" && snapTextOpen) ||
+                    (tool.id === "loop" && autoEmojiRotate) ||
+                    (tool.id === "sparkle" && sparkleOn);
+                  return (
+                    <button
+                      key={tool.id}
+                      type="button"
+                      className={`ss-snap-tool-btn ${isActive ? "is-active" : ""}`}
+                      title={tool.title}
+                      onClick={() => handleSnapTool(tool.id)}
+                    >
+                      {tool.label}
+                    </button>
+                  );
+                })}
               </div>
 
               <div className="ss-camera-preview">
                 <video
                   ref={cameraVideoRef}
-                  className="ss-camera-video"
+                  className={`ss-camera-video ${cameraFacing === "user" ? "is-mirrored" : ""}`}
                   style={{ filter: cameraFilterCss }}
                   autoPlay
                   playsInline
                   muted
+                  onLoadedMetadata={() => setCameraReady(true)}
+                  onClick={() => {
+                    if (!cameraReady) {
+                      const video = cameraVideoRef.current;
+                      if (video) {
+                        video.play?.().then(() => setCameraReady(true)).catch(() => {});
+                      }
+                    }
+                  }}
                 />
-                {!!activeLens.mask && (
-                  <div className="ss-camera-animal-mask" aria-hidden="true">
-                    {activeLens.mask}
+                {!cameraReady && (
+                  <div className="ss-camera-overlay" aria-live="polite">
+                    <div className="ss-camera-overlay-card">
+                      <p>{cameraLoading ? "Starting camera..." : "Camera not ready yet."}</p>
+                      <button type="button" onClick={() => void openCameraStudio()}>
+                        Retry
+                      </button>
+                    </div>
                   </div>
+                )}
+                {cameraError && (
+                  <div className="ss-camera-overlay ss-camera-overlay-error" aria-live="polite">
+                    <div className="ss-camera-overlay-card">
+                      <p>{cameraError}</p>
+                      <button type="button" onClick={() => void openCameraStudio()}>
+                        Retry
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {!!snapText && (
+                  <div
+                    className="ss-camera-text"
+                    style={{ color: snapTextColor, fontSize: `${snapTextSize}px` }}
+                  >
+                    {snapText}
+                  </div>
+                )}
+                {snapTextOpen && (
+                  <div className="ss-camera-text-panel">
+                    <input
+                      ref={snapTextInputRef}
+                      type="text"
+                      value={snapText}
+                      placeholder="Type something..."
+                      onChange={(e) => setSnapText(e.target.value)}
+                    />
+                    <div className="ss-camera-text-row">
+                      {["#ffffff", "#ffd1e8", "#a6ddff", "#ffe7a3", "#b9ffcf"].map((color) => (
+                        <button
+                          key={color}
+                          type="button"
+                          className={`ss-camera-text-color ${snapTextColor === color ? "is-active" : ""}`}
+                          style={{ backgroundColor: color }}
+                          onClick={() => setSnapTextColor(color)}
+                        />
+                      ))}
+                      <input
+                        type="range"
+                        min="18"
+                        max="46"
+                        value={snapTextSize}
+                        onChange={(e) => setSnapTextSize(Number(e.target.value))}
+                      />
+                    </div>
+                  </div>
+                )}
+                {sparkleOn && (
+                  <div className="ss-camera-sparkles" aria-hidden="true">
+                    {sparkleSeeds.map((sparkle) => (
+                      <span
+                        key={sparkle.id}
+                        className="ss-camera-sparkle"
+                        style={{
+                          left: `${sparkle.left}%`,
+                          top: `${sparkle.top}%`,
+                          fontSize: `${sparkle.size}px`,
+                          animationDelay: `${sparkle.delay}s`
+                        }}
+                      >
+                        ✨
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {activeLens?.maskType === "emoji-float" ? (
+                  <div
+                    className="ss-camera-emoji-cloud"
+                    aria-hidden="true"
+                    style={(() => {
+                      if (!faceBox) return undefined;
+                      const { x, y, width, height, videoWidth, videoHeight } = faceBox;
+                      const mirrorX = cameraFacing === "user";
+                      const rawLeft = mirrorX ? videoWidth - (x + width) : x;
+                      const centerX = (rawLeft + width / 2) / videoWidth;
+                      const anchorY = Math.max(0, (y - height * 0.26) / videoHeight);
+                      const scale = Math.min(1.6, Math.max(0.7, (width / videoWidth) * 2.2));
+                      return {
+                        left: `${Math.round(centerX * 1000) / 10}%`,
+                        top: `${Math.round(anchorY * 1000) / 10}%`,
+                        transform: `translate(-50%, -10%) scale(${scale})`
+                      };
+                    })()}
+                  >
+                    {getEmojiOverlayItems().map((item, idx) => (
+                      <span
+                        key={item.key}
+                        className="ss-camera-emoji"
+                        style={{
+                          "--float-delay": `${idx * 0.18}s`,
+                          left: `${50 + item.offset.x * 100}%`,
+                          top: `${50 + item.offset.y * 100}%`
+                        }}
+                      >
+                        {item.emoji}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  !!activeLens.mask && (
+                    <div
+                      className="ss-camera-animal-mask"
+                      aria-hidden="true"
+                      style={(() => {
+                        if (!faceBox) return undefined;
+                        const { x, y, width, height, videoWidth, videoHeight } = faceBox;
+                        const mirrorX = cameraFacing === "user";
+                        const rawLeft = mirrorX ? videoWidth - (x + width) : x;
+                        const centerX = (rawLeft + width / 2) / videoWidth;
+                        const anchorMode = activeLens?.maskAnchor || "above";
+                        const anchorY =
+                          anchorMode === "center"
+                            ? Math.max(0, (y + height * 0.5) / videoHeight)
+                            : Math.max(0, (y - height * 0.22) / videoHeight);
+                        const baseScale = (width / videoWidth) * 2.1;
+                        const scale = Math.min(2.6, Math.max(0.7, baseScale * (activeLens?.maskScale || 1)));
+                        const translateY = anchorMode === "center" ? "-50%" : "-10%";
+                        return {
+                          left: `${Math.round(centerX * 1000) / 10}%`,
+                          top: `${Math.round(anchorY * 1000) / 10}%`,
+                          transform: `translate(-50%, ${translateY}) scale(${scale})`
+                        };
+                      })()}
+                    >
+                      {activeLens.mask}
+                    </div>
+                  )
                 )}
               </div>
 

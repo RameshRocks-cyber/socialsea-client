@@ -39,6 +39,28 @@
   display: none;
 }
 
+.upload-pick-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.upload-camera-pick {
+  border: 1px solid #4d4d4d;
+  background: #202020;
+  color: #fff;
+  border-radius: 12px;
+  width: 40px;
+  height: 40px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .upload-caption {
   width: 100%;
   margin-top: 10px;

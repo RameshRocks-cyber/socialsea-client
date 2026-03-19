@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { FiCamera } from "react-icons/fi";
 import api from "../api/axios";
 import "./StoryCreate.css";
 
@@ -78,6 +79,18 @@ export default function StoryCreate() {
     () => TEXT_STYLES.find((item) => item.key === styleKey) || TEXT_STYLES[0],
     [styleKey]
   );
+
+  const toggleExclusiveTextStyle = (style) => {
+    const isActive =
+      (style === "bold" && textBold) ||
+      (style === "italic" && textItalic) ||
+      (style === "underline" && textUnderline) ||
+      (style === "background" && textBg);
+    setTextBold(style === "bold" ? !isActive : false);
+    setTextItalic(style === "italic" ? !isActive : false);
+    setTextUnderline(style === "underline" ? !isActive : false);
+    setTextBg(style === "background" ? !isActive : false);
+  };
 
   const addStoryToLocalCache = (entry) => {
     try {
@@ -259,18 +272,30 @@ export default function StoryCreate() {
           <div className="story-controls">
           <div className="story-card">
             <h3>Media</h3>
-            <label className="story-upload-btn">
-              Choose photo/video
-              <input
-                type="file"
-                accept="image/*,video/*"
-                onChange={(e) => {
-                  const nextFile = e.target.files?.[0] || null;
-                  setFile(nextFile);
-                  setMsg("");
-                }}
-              />
-            </label>
+            <div className="story-media-row">
+              <label className="story-upload-btn">
+                Choose photo/video
+                <input
+                  type="file"
+                  accept="image/*,video/*"
+                  onChange={(e) => {
+                    const nextFile = e.target.files?.[0] || null;
+                    setFile(nextFile);
+                    setMsg("");
+                    if (e.target) e.target.value = "";
+                  }}
+                />
+              </label>
+              <button
+                type="button"
+                className="story-camera-pick"
+                onClick={() => window.__ssOpenCameraStudio?.({ forceOpen: true })}
+                title="Open Camera"
+                aria-label="Open Camera"
+              >
+                <FiCamera />
+              </button>
+            </div>
             <p className="story-note">Vertical photos/videos work best.</p>
           </div>
 
@@ -323,28 +348,28 @@ export default function StoryCreate() {
               <button
                 type="button"
                 className={`story-text-style-btn ${textBold ? "active" : ""}`}
-                onClick={() => setTextBold((prev) => !prev)}
+                onClick={() => toggleExclusiveTextStyle("bold")}
               >
                 Bold
               </button>
               <button
                 type="button"
                 className={`story-text-style-btn ${textItalic ? "active" : ""}`}
-                onClick={() => setTextItalic((prev) => !prev)}
+                onClick={() => toggleExclusiveTextStyle("italic")}
               >
                 Italic
               </button>
               <button
                 type="button"
                 className={`story-text-style-btn ${textUnderline ? "active" : ""}`}
-                onClick={() => setTextUnderline((prev) => !prev)}
+                onClick={() => toggleExclusiveTextStyle("underline")}
               >
                 Underline
               </button>
               <button
                 type="button"
                 className={`story-text-style-btn ${textBg ? "active" : ""}`}
-                onClick={() => setTextBg((prev) => !prev)}
+                onClick={() => toggleExclusiveTextStyle("background")}
               >
                 Background
               </button>

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { FiCamera } from "react-icons/fi";
 import { useLocation } from "react-router-dom";
 import api from "../api/axios";
 import "./Upload.css";
@@ -312,6 +313,26 @@ export default function Upload() {
     });
   };
 
+  const applyPickedFiles = (fileList) => {
+    const nextFiles = Array.from(fileList || []);
+    setSelectedFiles(nextFiles);
+    setActiveFileIndex(0);
+    setFile(nextFiles[0] || null);
+    setMsg("");
+    setEdits(defaultEdits);
+    setActiveVideoTool("edit");
+    setExtraClips([]);
+    setVideoMeta({ duration: 0, width: 0, height: 0 });
+  };
+
+  const openCameraStudio = () => {
+    if (typeof window.__ssOpenCameraStudio === "function") {
+      window.__ssOpenCameraStudio({ forceOpen: true });
+      return;
+    }
+    window.dispatchEvent(new Event("ss:open-camera"));
+  };
+
   const upload = async () => {
     const filesToUpload = selectedFiles.length ? selectedFiles : file ? [file] : [];
     if (!filesToUpload.length) {
@@ -434,28 +455,27 @@ export default function Upload() {
       <section className="upload-panel">
         <h2>{isReelUpload ? "Create Reel" : "Create Post"}</h2>
         <p className="upload-subtitle">
-          {isReelUpload ? "Upload a short video for reels." : "Edit before posting like Instagram."}
+          {isReelUpload ? "Upload a short video for reels." : "Create your post."}
         </p>
 
-        <label className="upload-file-pick">
-          {isReelUpload ? "Choose video" : "Choose photo/video"}
-          <input
-            type="file"
-            accept={isReelUpload ? "video/*" : "image/*,video/*"}
-            multiple={!isReelUpload}
-            onChange={(e) => {
-              const nextFiles = Array.from(e.target.files || []);
-              setSelectedFiles(nextFiles);
-              setActiveFileIndex(0);
-              setFile(nextFiles[0] || null);
-              setMsg("");
-              setEdits(defaultEdits);
-              setActiveVideoTool("edit");
-              setExtraClips([]);
-              setVideoMeta({ duration: 0, width: 0, height: 0 });
-            }}
-          />
-        </label>
+        <div className="upload-pick-row">
+          <label className="upload-file-pick">
+            {isReelUpload ? "Choose video" : "Choose photo/video"}
+            <input
+              type="file"
+              accept={isReelUpload ? "video/*" : "image/*,video/*"}
+              multiple={!isReelUpload}
+              onChange={(e) => {
+                applyPickedFiles(e.target.files);
+                e.target.value = "";
+              }}
+            />
+          </label>
+
+          <button type="button" className="upload-camera-pick" onClick={openCameraStudio} title="Open Camera">
+            <FiCamera />
+          </button>
+        </div>
         {selectedFiles.length > 1 && (
           <>
             <p className="video-note">

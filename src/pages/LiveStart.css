@@ -55,6 +55,36 @@
   background: #05070c;
 }
 
+.live-start-video.is-mirrored {
+  transform: scaleX(-1);
+  transform-origin: center;
+}
+
+.live-start-live-dot {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #2ad66f;
+  box-shadow: 0 0 0 3px rgba(42, 214, 111, 0.2), 0 0 10px rgba(42, 214, 111, 0.6);
+  z-index: 3;
+}
+
+.live-start-live-dot.inline {
+  position: static;
+  margin-left: 8px;
+  width: 8px;
+  height: 8px;
+  box-shadow: 0 0 0 2px rgba(42, 214, 111, 0.25), 0 0 8px rgba(42, 214, 111, 0.6);
+}
+
+.live-start-btn-label {
+  display: inline-flex;
+  align-items: center;
+}
+
 .live-start-preview-empty {
   position: absolute;
   inset: 0;

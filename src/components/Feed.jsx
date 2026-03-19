@@ -691,14 +691,47 @@ export default function Feed() {
     }, 240);
   };
 
-  const handleViewerMediaDoubleClick = (post) => {
+  const toggleViewerFullscreen = async (postId, mediaNode) => {
+    const node = mediaNode || viewerVideoRefs.current[String(postId || "")];
+    if (!node) return;
+    const currentFullscreenEl = document.fullscreenElement;
+    if (currentFullscreenEl === node) {
+      if (document.exitFullscreen) {
+        await document.exitFullscreen().catch(() => {});
+      } else if (document.webkitExitFullscreen) {
+        document.webkitExitFullscreen();
+      }
+      return;
+    }
+
+    if (node.requestFullscreen) {
+      await node.requestFullscreen().catch(() => {});
+      return;
+    }
+    if (node.webkitRequestFullscreen) {
+      node.webkitRequestFullscreen();
+      return;
+    }
+    if (typeof node.webkitEnterFullscreen === "function") {
+      try {
+        node.webkitEnterFullscreen();
+      } catch {
+        // ignore unsupported platform behavior
+      }
+    }
+  };
+
+  const handleViewerMediaDoubleClick = async (post, event) => {
     if (!post) return;
+    if (event?.preventDefault) event.preventDefault();
+    if (event?.stopPropagation) event.stopPropagation();
+
     const existing = mediaClickTimerByPostRef.current[post.id];
     if (existing) {
       clearTimeout(existing);
       mediaClickTimerByPostRef.current[post.id] = null;
     }
-    void likePost(post.id);
+    await toggleViewerFullscreen(post.id, event?.currentTarget || null);
   };
 
   const setViewerVideoRef = (postId, node) => {
@@ -1332,7 +1365,9 @@ export default function Feed() {
                         muted={mutedByPost[post.id] ?? true}
                         className="feed-media-view"
                         onClick={() => handleViewerMediaClick(post)}
-                        onDoubleClick={() => handleViewerMediaDoubleClick(post)}
+                        onDoubleClick={(event) => {
+                          void handleViewerMediaDoubleClick(post, event);
+                        }}
                       />
                     ) : (
                       <img src={mediaUrl} alt="post" className="feed-media-view" />

@@ -1,15 +1,25 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import api from "../api/axios";
-import { toApiUrl } from "../api/baseUrl";
+import { getApiBaseUrl, toApiUrl } from "../api/baseUrl";
+
+const ANON_FEED_CACHE_KEY = "socialsea_anonymous_feed_cache_v1";
 
 const toList = (payload) => {
   if (Array.isArray(payload)) return payload;
   if (Array.isArray(payload?.content)) return payload.content;
   if (Array.isArray(payload?.items)) return payload.items;
   if (Array.isArray(payload?.data)) return payload.data;
+  if (payload && typeof payload === "object") {
+    const objectValues = Object.values(payload);
+    const nested = objectValues.find((entry) => Array.isArray(entry));
+    if (Array.isArray(nested)) return nested;
+  }
   return [];
 };
+
+const looksLikeHtml = (value) =>
+  typeof value === "string" && (/^\s*<!doctype html/i.test(value) || /<html[\s>]/i.test(value));
 
 const isVideoItem = (item) => {
   const type = String(item?.type || "").toUpperCase();
@@ -32,23 +42,132 @@ const normalizeItem = (item) => ({
   viewCount: readCount(item, ["viewCount", "viewsCount", "views"]),
 });
 
+const isAnonymousItem = (item) => {
+  if (!item || typeof item !== "object") return false;
+  if (item.anonymous === true || item.isAnonymous === true) return true;
+  const marker = String(item?.visibility || item?.privacy || item?.postType || "").trim().toLowerCase();
+  if (marker.includes("anonymous")) return true;
+  const name = String(item?.username || item?.name || "").trim().toLowerCase();
+  if (name === "anonymous" || name === "anonymous user") return true;
+  return false;
+};
+
+const readCachedItems = () => {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(ANON_FEED_CACHE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.map(normalizeItem) : [];
+  } catch {
+    return [];
+  }
+};
+
+const writeCachedItems = (items) => {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(ANON_FEED_CACHE_KEY, JSON.stringify(Array.isArray(items) ? items : []));
+  } catch {
+    // Ignore cache failures
+  }
+};
+
+const parseLoadError = (err, hasCache) => {
+  const status = Number(err?.response?.status || 0);
+  if (status >= 500) {
+    return hasCache
+      ? "Server is busy. Showing your last loaded anonymous posts."
+      : "Server is busy. Please try again in a moment.";
+  }
+  if (status === 404) return "Anonymous feed endpoint is not available.";
+  if (status === 401 || status === 403) return "Please login again to view anonymous posts.";
+  return hasCache
+    ? "Could not refresh feed. Showing your last loaded anonymous posts."
+    : "Failed to load anonymous feed.";
+};
+
+const buildBaseCandidates = () => {
+  const isLocalDev =
+    typeof window !== "undefined" &&
+    ["localhost", "127.0.0.1"].includes(String(window.location.hostname || "").toLowerCase());
+
+  const storedBase =
+    typeof window !== "undefined"
+      ? localStorage.getItem("socialsea_auth_base_url") || sessionStorage.getItem("socialsea_auth_base_url")
+      : "";
+
+  const originBase = typeof window !== "undefined" ? window.location.origin : "";
+
+  return [
+    originBase,
+    api?.defaults?.baseURL || "",
+    storedBase,
+    getApiBaseUrl(),
+    import.meta.env.VITE_API_URL,
+    ...(isLocalDev ? ["http://localhost:8080", "http://127.0.0.1:8080"] : []),
+  ].filter((value, index, arr) => value && arr.indexOf(value) === index);
+};
+
 export default function AnonymousFeed() {
-  const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [items, setItems] = useState(() => readCachedItems());
+  const [loading, setLoading] = useState(() => readCachedItems().length === 0);
   const [error, setError] = useState("");
   const [viewedById, setViewedById] = useState({});
   const [likeBusyById, setLikeBusyById] = useState({});
 
-  const load = async () => {
+  const load = async ({ keepExisting = true } = {}) => {
     try {
       setLoading(true);
       setError("");
-      const res = await api.get("/api/feed/anonymous");
-      setItems(toList(res.data).map(normalizeItem));
+
+      const plans = [
+        { url: "/api/feed/anonymous", filter: (list) => list },
+        { url: "/api/anonymous/feed", filter: (list) => list },
+        { url: "/api/feed", filter: (list) => list.filter(isAnonymousItem) },
+      ];
+      const baseCandidates = buildBaseCandidates();
+
+      let loaded = false;
+      let lastErr = null;
+
+      for (const plan of plans) {
+        for (const baseURL of baseCandidates) {
+          try {
+            const res = await api.request({
+              method: "GET",
+              url: plan.url,
+              baseURL,
+              timeout: 9000,
+              suppressAuthRedirect: true,
+            });
+            if (looksLikeHtml(res?.data)) continue;
+            const list = toList(res?.data).map(normalizeItem);
+            const nextItems = plan.filter(list);
+            setItems(nextItems);
+            writeCachedItems(nextItems);
+            setError("");
+            loaded = true;
+            break;
+          } catch (err) {
+            lastErr = err;
+          }
+        }
+        if (loaded) break;
+      }
+
+      if (!loaded) {
+        throw lastErr || new Error("Failed to load anonymous feed");
+      }
     } catch (err) {
-      const message = err?.response?.data?.message || err?.message || "Failed to load anonymous feed";
+      const cached = readCachedItems();
+      const hasCache = cached.length > 0;
+      const message = parseLoadError(err, hasCache);
       setError(String(message));
-      setItems([]);
+      if (hasCache && keepExisting) {
+        setItems(cached);
+      } else {
+        setItems([]);
+      }
     } finally {
       setLoading(false);
     }
@@ -111,7 +230,14 @@ export default function AnonymousFeed() {
 
       <div style={styles.grid}>
         {loading && <p style={styles.info}>Loading...</p>}
-        {!loading && error && <p style={styles.info}>{error}</p>}
+        {!loading && error && (
+          <div style={styles.errorWrap}>
+            <p style={styles.info}>{error}</p>
+            <button type="button" style={styles.retryBtn} onClick={() => load({ keepExisting: true })}>
+              Retry
+            </button>
+          </div>
+        )}
         {!loading && !error && items.length === 0 && <p style={styles.info}>No anonymous posts yet</p>}
 
         {items.map((item) => {
@@ -158,8 +284,7 @@ export default function AnonymousFeed() {
 
 const styles = {
   container: {
-    background:
-      "radial-gradient(75% 55% at 12% -15%, rgba(65,122,255,0.14), transparent 65%), #090f1b",
+    background: "radial-gradient(80% 55% at 12% -12%, rgba(255,255,255,0.06), transparent 65%), #050505",
     minBlockSize: "100vh",
     color: "white",
     fontFamily: "Sora, Segoe UI, sans-serif"
@@ -170,25 +295,25 @@ const styles = {
     alignItems: "center",
     padding: "0 14px",
     blockSize: "54px",
-    backgroundColor: "rgba(7, 14, 28, 0.86)",
+    backgroundColor: "rgba(3, 3, 3, 0.92)",
     position: "sticky",
     insetBlockStart: 0,
     zIndex: 100,
-    borderBlockEnd: "1px solid rgba(96, 154, 247, 0.24)",
+    borderBlockEnd: "1px solid rgba(255, 255, 255, 0.12)",
     backdropFilter: "blur(10px)"
   },
   navStart: { display: "flex", alignItems: "center" },
   logo: { color: "white", margin: 0, fontSize: "24px", letterSpacing: "-0.4px", fontWeight: 800 },
   navEnd: { display: "flex", gap: "14px" },
   navLink: {
-    color: "#d9e9ff",
+    color: "#f1f1f1",
     textDecoration: "none",
     fontSize: "13px",
     fontWeight: "700",
     padding: "6px 10px",
-    border: "1px solid rgba(108, 171, 255, 0.2)",
+    border: "1px solid rgba(255, 255, 255, 0.14)",
     borderRadius: "999px",
-    background: "rgba(14, 32, 66, 0.48)"
+    background: "rgba(0, 0, 0, 0.58)"
   },
   grid: {
     display: "grid",
@@ -198,16 +323,36 @@ const styles = {
     maxInlineSize: "1180px",
     margin: "0 auto"
   },
-  info: { color: "#aaa", gridColumn: "1 / -1", textAlign: "center" },
+  info: { color: "#b8b8b8", gridColumn: "1 / -1", textAlign: "center", margin: 0 },
+  errorWrap: {
+    gridColumn: "1 / -1",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: "10px",
+    padding: "14px",
+    borderRadius: "12px",
+    border: "1px solid rgba(255, 255, 255, 0.12)",
+    background: "rgba(0, 0, 0, 0.42)"
+  },
+  retryBtn: {
+    border: "1px solid rgba(255, 255, 255, 0.2)",
+    color: "#f4f4f4",
+    background: "#111111",
+    padding: "6px 12px",
+    borderRadius: "10px",
+    cursor: "pointer",
+    fontSize: "12px",
+    fontWeight: "700"
+  },
   card: {
-    background:
-      "linear-gradient(155deg, rgba(10, 23, 48, 0.88), rgba(5, 13, 28, 0.95))",
-    border: "1px solid rgba(93, 149, 238, 0.26)",
+    background: "linear-gradient(155deg, rgba(12, 12, 12, 0.95), rgba(3, 3, 3, 0.96))",
+    border: "1px solid rgba(255, 255, 255, 0.13)",
     borderRadius: "14px",
     padding: "10px",
     display: "flex",
     flexDirection: "column",
-    boxShadow: "0 10px 24px rgba(3, 9, 22, 0.42)"
+    boxShadow: "0 10px 24px rgba(0, 0, 0, 0.48)"
   },
   cardHead: {
     display: "flex",
@@ -215,7 +360,7 @@ const styles = {
     justifyContent: "space-between",
     marginBlockEnd: "8px"
   },
-  author: { color: "#9cc2ff", fontSize: "13px", letterSpacing: "0.2px" },
+  author: { color: "#dbdbdb", fontSize: "13px", letterSpacing: "0.2px" },
   mediaWrap: {
     position: "relative",
     inlineSize: "100%",
@@ -248,15 +393,15 @@ const styles = {
     marginBlockEnd: "6px"
   },
   likeBtn: {
-    border: "1px solid rgba(105, 168, 255, 0.42)",
-    color: "#d7e9ff",
-    background: "linear-gradient(135deg, #133d79, #0f2d5f)",
+    border: "1px solid rgba(255, 255, 255, 0.18)",
+    color: "#f6f6f6",
+    background: "linear-gradient(135deg, #1b1b1b, #0a0a0a)",
     padding: "5px 9px",
     borderRadius: "9px",
     cursor: "pointer",
     fontSize: "12px",
     fontWeight: "700"
   },
-  desc: { margin: "0 0 7px", color: "#e9f2ff", fontSize: "0.95rem" },
-  meta: { color: "#96a7c7", fontSize: "0.82rem" }
+  desc: { margin: "0 0 7px", color: "#f1f1f1", fontSize: "0.95rem" },
+  meta: { color: "#a4a4a4", fontSize: "0.82rem" }
 };

@@ -29,6 +29,7 @@ import "./Chat.css";
 
 const POLL_MS = 1200;
 const LOCAL_CHAT_KEY = "socialsea_chat_fallback_v1";
+const CHAT_SERVER_BASE_KEY = "socialsea_chat_server_base_v1";
 const HIDDEN_CHAT_MSG_IDS_KEY = "socialsea_hidden_msg_ids_v1";
 const CALL_HISTORY_KEY = "socialsea_call_history_v1";
 const CALL_SIGNAL_LOCAL_KEY = "socialsea_call_signal_local_v1";
@@ -63,6 +64,7 @@ const CHAT_TRANSLATOR_KEY = "socialsea_chat_translator_v1";
 const CHAT_WALLPAPER_KEY = "socialsea_chat_wallpaper_v1";
 const BLOCKED_USERS_KEY = "socialsea_blocked_users_v1";
 const CHAT_SHARE_DRAFT_KEY = "socialsea_chat_share_draft_v1";
+const CHAT_DISCOVERY_CACHE_KEY = "socialsea_discovery_contacts_v1";
 const DELETE_FOR_EVERYONE_TOKEN = "__SS_DELETE_EVERYONE__:";
 const MESSAGE_REPLY_TOKEN = "__SS_REPLY__:";
 const SIGN_ASSIST_TOKEN = "__SS_SIGN_ASSIST__:";
@@ -407,6 +409,43 @@ export default function Chat() {
     safeSetItem(STORY_STORAGE_KEY, JSON.stringify(list));
   };
 
+  const readDiscoveryCache = () => {
+    try {
+      const raw = safeGetItem(CHAT_DISCOVERY_CACHE_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      if (!parsed || !Array.isArray(parsed.list)) return [];
+      const ts = Number(parsed.at || 0);
+      if (ts && Date.now() - ts > 10 * 60 * 1000) return [];
+      return parsed.list;
+    } catch {
+      return [];
+    }
+  };
+
+  const writeDiscoveryCache = (list) => {
+    try {
+      localStorage.setItem(CHAT_DISCOVERY_CACHE_KEY, JSON.stringify({ at: Date.now(), list }));
+    } catch {
+      // ignore
+    }
+  };
+
+  const fetchStoryFeed = async () => {
+    try {
+      const res = await api.get("/api/stories/feed");
+      const list = normalizeStoryList(Array.isArray(res?.data) ? res.data : []);
+      if (list.length) {
+        setStoryItems(list);
+        writeStoryCache(list);
+        return;
+      }
+    } catch {
+      // keep fallback below
+    }
+    setStoryItems(normalizeStoryList(readStoryCache()));
+  };
+
   const persistCallRejoin = (payload) => {
     try {
       sessionStorage.setItem(CALL_REJOIN_KEY, JSON.stringify({ ...payload, at: Date.now() }));
@@ -536,6 +575,10 @@ export default function Chat() {
   const [nowTick, setNowTick] = useState(Date.now());
   const [storyItems, setStoryItems] = useState(() => normalizeStoryList(readStoryCache()));
   const [storyViewerIndex, setStoryViewerIndex] = useState(null);
+  const [storyViewerSrc, setStoryViewerSrc] = useState("");
+  const [storyViewerMuted, setStoryViewerMuted] = useState(true);
+  const [storyViewerLoading, setStoryViewerLoading] = useState(false);
+  const [storyViewerLoadError, setStoryViewerLoadError] = useState("");
   const [storyOptionsOpen, setStoryOptionsOpen] = useState(false);
   const [soundPrefs, setSoundPrefs] = useState(readSoundPrefs);
   const [hasRemoteVideo, setHasRemoteVideo] = useState(false);
@@ -647,6 +690,10 @@ export default function Chat() {
   const historyRef = useRef({});
   const storyLongPressTimeoutRef = useRef(null);
   const storyLongPressTriggeredRef = useRef(false);
+  const storyViewerVideoRef = useRef(null);
+  const storyViewerCandidatesRef = useRef([]);
+  const storyViewerCandidateIndexRef = useRef(0);
+  const storyViewerBlobUrlRef = useRef("");
   const seenSignalsRef = useRef(new Set());
   const longPressTimerRef = useRef(null);
   const touchStartPointRef = useRef({ x: 0, y: 0 });
@@ -687,6 +734,8 @@ export default function Chat() {
   const signLocalModelLoadingRef = useRef(null);
   const signLivePollTimerRef = useRef(null);
   const signLastDetectedTextRef = useRef("");
+  const chatServerBaseRef = useRef(String(safeGetItem(CHAT_SERVER_BASE_KEY) || "").trim());
+  const resolvingContactProfilesRef = useRef(new Set());
 
   const TRANSLATE_LANG_OPTIONS = [
     { value: "en", label: "English" },
@@ -1285,7 +1334,7 @@ export default function Chat() {
 
   useEffect(() => {
     const refreshStories = () => {
-      setStoryItems(normalizeStoryList(readStoryCache()));
+      fetchStoryFeed().catch(() => {});
     };
     refreshStories();
     const onStorage = (event) => {
@@ -1413,6 +1462,33 @@ export default function Chat() {
       .join(" ");
   };
 
+  const isGenericUserLabel = (value, idHint = "") => {
+    const text = String(value || "").trim().toLowerCase();
+    const compact = text.replace(/\s+/g, "");
+    const id = String(idHint || "").trim().toLowerCase();
+    if (!compact) return true;
+    if (compact === "user" || compact === "unknown") return true;
+    if (/^user\d+$/.test(compact)) return true;
+    if (id && (compact === id || compact === `user${id}`)) return true;
+    return false;
+  };
+
+  const getContactDisplayName = (contactLike) => {
+    const id = String(contactLike?.id || "").trim();
+    const usernameRaw = String(contactLike?.username || contactLike?.handle || "").trim();
+    const username = usernameRaw ? normalizeDisplayName(usernameRaw) : "";
+    const nameRaw = String(contactLike?.name || "").trim();
+    const normalizedName = nameRaw ? normalizeDisplayName(nameRaw) : "";
+    const email = String(contactLike?.email || "").trim();
+
+    if (normalizedName && !isGenericUserLabel(normalizedName, id)) return normalizedName;
+    if (username && !isGenericUserLabel(username, id)) return username;
+    if (email) return normalizeDisplayName(email);
+    if (normalizedName) return normalizedName;
+    if (username) return username;
+    return normalizeDisplayName(`User ${id || ""}`);
+  };
+
   const normalizeTimestamp = (value) => {
     if (!value && value !== 0) return new Date().toISOString();
     if (value instanceof Date) return value.toISOString();
@@ -1430,6 +1506,23 @@ export default function Chat() {
     const parsed = new Date(value);
     if (Number.isFinite(parsed.getTime())) return parsed.toISOString();
     return new Date().toISOString();
+  };
+
+  const toEpochMs = (value) => {
+    if (value == null || value === "") return 0;
+    if (value instanceof Date) {
+      const t = value.getTime();
+      return Number.isFinite(t) ? t : 0;
+    }
+    const numeric = Number(value);
+    if (Number.isFinite(numeric) && numeric > 0) {
+      return numeric < 1000000000000 ? numeric * 1000 : numeric;
+    }
+    const raw = String(value || "").trim();
+    if (!raw) return 0;
+    const noZoneIso = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(raw);
+    const parsed = new Date(noZoneIso ? `${raw}Z` : raw).getTime();
+    return Number.isFinite(parsed) ? parsed : 0;
   };
 
   const normalizeMessage = (message, otherId = "") => {
@@ -1514,64 +1607,611 @@ export default function Chat() {
     return visible;
   };
 
+  const normalizeBaseCandidate = (rawValue) => {
+    const value = String(rawValue || "").trim().replace(/\/+$/, "");
+    if (!value || value === "/") return "";
+    if (value.startsWith("/")) return value;
+    if (!/^https?:\/\//i.test(value)) return "";
+    return value;
+  };
+
+  const looksLikeHtmlPayload = (value) =>
+    typeof value === "string" &&
+    (/^\s*<!doctype html/i.test(value) || /<html[\s>]/i.test(value));
+
+  const isRetryableChatRouteStatus = (statusCode) => {
+    const status = Number(statusCode || 0);
+    return status === 404 || status === 405 || status === 0 || (status >= 500 && status <= 599) || !status;
+  };
+
+  const persistChatServerBase = (rawBase) => {
+    const normalized = normalizeBaseCandidate(rawBase);
+    if (!normalized || normalized === chatServerBaseRef.current) return;
+    chatServerBaseRef.current = normalized;
+    try {
+      sessionStorage.setItem(CHAT_SERVER_BASE_KEY, normalized);
+    } catch {
+      // ignore storage failures
+    }
+    safeSetItem(CHAT_SERVER_BASE_KEY, normalized);
+  };
+
+  const buildChatBaseCandidates = () => {
+    const isLocalDev =
+      typeof window !== "undefined" &&
+      ["localhost", "127.0.0.1"].includes(String(window.location.hostname || "").toLowerCase());
+    const storedAuthBase = safeGetItem("socialsea_auth_base_url");
+    const storedOtpBase = safeGetItem("socialsea_otp_base_url");
+    const localDefaults = ["/api", "http://localhost:8080", "http://127.0.0.1:8080", "https://api.socialsea.co.in", "https://socialsea.co.in"];
+    const deployedDefaults = ["/api", "https://api.socialsea.co.in", "https://socialsea.co.in"];
+    return [
+      chatServerBaseRef.current,
+      "/api",
+      storedAuthBase,
+      storedOtpBase,
+      api.defaults.baseURL,
+      getApiBaseUrl(),
+      import.meta.env.VITE_API_BASE_URL,
+      import.meta.env.VITE_API_URL,
+      ...(isLocalDev ? [...localDefaults, ...deployedDefaults] : deployedDefaults),
+    ]
+      .map(normalizeBaseCandidate)
+      .filter((value, index, arr) => value && arr.indexOf(value) === index);
+  };
+
+  const toArrayPayload = (payload, depth = 0) => {
+    if (Array.isArray(payload)) return payload;
+    if (!payload || typeof payload !== "object" || depth > 4) return [];
+    const keys = ["content", "items", "users", "conversations", "messages", "results", "data", "result", "payload"];
+    for (const key of keys) {
+      const value = payload?.[key];
+      if (Array.isArray(value)) return value;
+      if (value && typeof value === "object") {
+        const nested = toArrayPayload(value, depth + 1);
+        if (nested.length > 0) return nested;
+      }
+    }
+    const values = Object.values(payload);
+    for (const value of values) {
+      if (Array.isArray(value)) return value;
+    }
+    for (const value of values) {
+      if (value && typeof value === "object") {
+        const nested = toArrayPayload(value, depth + 1);
+        if (nested.length > 0) return nested;
+      }
+    }
+    const objectValues = values.filter((value) => value && typeof value === "object" && !Array.isArray(value));
+    if (objectValues.length > 0) return objectValues;
+    return [];
+  };
+
+  const requestChatArray = async ({ endpoints, params = {}, mapList = null }) => {
+    const endpointList = Array.isArray(endpoints) ? endpoints : [endpoints];
+    const baseCandidates = buildChatBaseCandidates();
+    let firstSuccess = null;
+    let lastError = null;
+    let authError = null;
+
+    for (const baseURL of baseCandidates) {
+      for (const url of endpointList) {
+        try {
+          const res = await api.request({
+            method: "GET",
+            url,
+            params,
+            baseURL,
+            timeout: 9000,
+            suppressAuthRedirect: true,
+          });
+          if (looksLikeHtmlPayload(res?.data)) {
+            const htmlErr = new Error("Received HTML instead of API JSON");
+            htmlErr.response = { status: 404, data: res?.data };
+            throw htmlErr;
+          }
+
+          const raw = toArrayPayload(res?.data);
+          const mapped = typeof mapList === "function" ? mapList(raw) : raw;
+          const list = Array.isArray(mapped) ? mapped : [];
+          const payload = { list, baseURL, url };
+          if (!firstSuccess) firstSuccess = payload;
+          if (list.length > 0) {
+            persistChatServerBase(baseURL);
+            return payload;
+          }
+        } catch (err) {
+          lastError = err;
+          const status = Number(err?.response?.status || 0);
+          if (status === 401 || status === 403) {
+            if (!authError) authError = err;
+            continue;
+          }
+          if (!isRetryableChatRouteStatus(status)) {
+            throw err;
+          }
+        }
+      }
+    }
+
+    if (firstSuccess) {
+      persistChatServerBase(firstSuccess.baseURL);
+      return firstSuccess;
+    }
+    if (authError) throw authError;
+    throw lastError || new Error("Failed to load chat data");
+  };
+
+  const requestChatMutation = async ({ method = "POST", endpoints, data, params, headers }) => {
+    const endpointList = Array.isArray(endpoints) ? endpoints : [endpoints];
+    const baseCandidates = buildChatBaseCandidates();
+    let lastError = null;
+    let authError = null;
+
+    for (const baseURL of baseCandidates) {
+      for (const url of endpointList) {
+        try {
+          const res = await api.request({
+            method,
+            url,
+            data,
+            params,
+            headers,
+            baseURL,
+            timeout: 10000,
+            suppressAuthRedirect: true,
+          });
+          if (looksLikeHtmlPayload(res?.data)) {
+            const htmlErr = new Error("Received HTML instead of API JSON");
+            htmlErr.response = { status: 404, data: res?.data };
+            throw htmlErr;
+          }
+          persistChatServerBase(baseURL);
+          return res;
+        } catch (err) {
+          lastError = err;
+          const status = Number(err?.response?.status || 0);
+          if (status === 401 || status === 403) {
+            if (!authError) authError = err;
+            continue;
+          }
+          if (!isRetryableChatRouteStatus(status)) {
+            throw err;
+          }
+        }
+      }
+    }
+
+    if (authError) throw authError;
+    throw lastError || new Error("Chat request failed");
+  };
+
+  const requestChatObject = async ({ endpoints, params = {} }) => {
+    const endpointList = Array.isArray(endpoints) ? endpoints : [endpoints];
+    const baseCandidates = buildChatBaseCandidates();
+    let lastError = null;
+    let authError = null;
+
+    for (const baseURL of baseCandidates) {
+      for (const url of endpointList) {
+        try {
+          const res = await api.request({
+            method: "GET",
+            url,
+            params,
+            baseURL,
+            timeout: 9000,
+            suppressAuthRedirect: true,
+          });
+          if (looksLikeHtmlPayload(res?.data)) {
+            const htmlErr = new Error("Received HTML instead of API JSON");
+            htmlErr.response = { status: 404, data: res?.data };
+            throw htmlErr;
+          }
+          const body = res?.data;
+          let objectLike = null;
+          if (body && typeof body === "object") {
+            if (Array.isArray(body)) {
+              objectLike = body.find((item) => item && typeof item === "object") || null;
+            } else if (body.user && typeof body.user === "object") {
+              objectLike = body.user;
+            } else if (body.profile && typeof body.profile === "object") {
+              objectLike = body.profile;
+            } else if (body.data && typeof body.data === "object" && !Array.isArray(body.data)) {
+              objectLike = body.data.user || body.data.profile || body.data;
+            } else {
+              objectLike = body;
+            }
+          }
+          if (objectLike && typeof objectLike === "object") {
+            persistChatServerBase(baseURL);
+            return { data: objectLike, baseURL, url };
+          }
+        } catch (err) {
+          lastError = err;
+          const status = Number(err?.response?.status || 0);
+          if (status === 401 || status === 403) {
+            if (!authError) authError = err;
+            continue;
+          }
+          if (!isRetryableChatRouteStatus(status)) {
+            throw err;
+          }
+        }
+      }
+    }
+
+    if (authError) throw authError;
+    throw lastError || new Error("Chat object request failed");
+  };
+
   const mapUserToContact = (u) => {
+    const userLike =
+      u?.user ||
+      u?.contact ||
+      u?.peer ||
+      u?.otherUser ||
+      u?.participant ||
+      u?.follower ||
+      u?.following ||
+      u?.fromUser ||
+      u?.toUser ||
+      u?.actor ||
+      u?.target ||
+      u?.receiver ||
+      u?.sender ||
+      u;
     const toBool = (value) => {
       if (typeof value === "boolean") return value;
       const raw = String(value || "").trim().toLowerCase();
       return raw === "true" || raw === "1" || raw === "online" || raw === "active" || raw === "yes";
     };
-    const id = String(u?.userId || u?.id || "");
-    const rawName = u?.name || u?.email || `User ${id}`;
-    const name = normalizeDisplayName(rawName);
-    const profilePicRaw = u?.profilePicUrl || u?.profilePic || u?.avatar || u?.user?.profilePicUrl || u?.user?.profilePic || "";
+    const me = String(myUserId || "").trim();
+    const senderId = String(u?.senderId || userLike?.senderId || "").trim();
+    const receiverId = String(u?.receiverId || userLike?.receiverId || "").trim();
+    const meSafe = me || "0";
+    const userOneId = String(u?.userOneId || userLike?.userOneId || "").trim();
+    const userTwoId = String(u?.userTwoId || userLike?.userTwoId || "").trim();
+    const participantIds = Array.isArray(u?.participantIds)
+      ? u.participantIds
+      : Array.isArray(userLike?.participantIds)
+        ? userLike.participantIds
+        : [];
+    const otherParticipantId = participantIds
+      .map((value) => String(value || "").trim())
+      .find((value) => value && value !== meSafe);
+    let pairOtherId = "";
+    if (userOneId || userTwoId) {
+      if (meSafe && userOneId === meSafe && userTwoId) pairOtherId = userTwoId;
+      else if (meSafe && userTwoId === meSafe && userOneId) pairOtherId = userOneId;
+      else pairOtherId = userTwoId || userOneId;
+    }
+    let id = String(
+      u?.otherUserId ||
+      userLike?.otherUserId ||
+      u?.peerId ||
+      userLike?.peerId ||
+      u?.contactId ||
+      userLike?.contactId ||
+      u?.participantId ||
+      userLike?.participantId ||
+      u?.followerId ||
+      userLike?.followerId ||
+      u?.followingId ||
+      userLike?.followingId ||
+      u?.sourceUserId ||
+      userLike?.sourceUserId ||
+      u?.targetUserId ||
+      userLike?.targetUserId ||
+      u?.fromUserId ||
+      userLike?.fromUserId ||
+      u?.toUserId ||
+      userLike?.toUserId ||
+      u?.memberId ||
+      userLike?.memberId ||
+      pairOtherId ||
+      otherParticipantId ||
+      userLike?.userId ||
+      u?.userId ||
+      ""
+    ).trim();
+    if (!id) {
+      id = String(userLike?.id || u?.id || "").trim();
+    }
+    if ((meSafe && id === meSafe) && pairOtherId) id = pairOtherId;
+    if ((meSafe && id === meSafe) && otherParticipantId) id = otherParticipantId;
+    if (!id && (userOneId || userTwoId)) {
+      if (userOneId && userOneId !== meSafe) id = userOneId;
+      else if (userTwoId && userTwoId !== meSafe) id = userTwoId;
+    }
+    if (!id) {
+      if (senderId && senderId !== meSafe) id = senderId;
+      else if (receiverId && receiverId !== meSafe) id = receiverId;
+    }
+    const selectedPair =
+      id && userOneId && id === userOneId
+        ? "one"
+        : id && userTwoId && id === userTwoId
+          ? "two"
+          : "";
+    const pairName =
+      selectedPair === "one"
+        ? (u?.userOneName || userLike?.userOneName || "")
+        : selectedPair === "two"
+          ? (u?.userTwoName || userLike?.userTwoName || "")
+          : "";
+    const pairUsername =
+      selectedPair === "one"
+        ? (u?.userOneUsername || userLike?.userOneUsername || "")
+        : selectedPair === "two"
+          ? (u?.userTwoUsername || userLike?.userTwoUsername || "")
+          : "";
+    const pairEmail =
+      selectedPair === "one"
+        ? (u?.userOneEmail || userLike?.userOneEmail || "")
+        : selectedPair === "two"
+          ? (u?.userTwoEmail || userLike?.userTwoEmail || "")
+          : "";
+    const pairProfilePic =
+      selectedPair === "one"
+        ? (u?.userOneProfilePic || userLike?.userOneProfilePic || u?.userOneAvatar || userLike?.userOneAvatar || "")
+        : selectedPair === "two"
+          ? (u?.userTwoProfilePic || userLike?.userTwoProfilePic || u?.userTwoAvatar || userLike?.userTwoAvatar || "")
+          : "";
+    const usernameRaw = String(
+      pairUsername ||
+      userLike?.username ||
+      userLike?.handle ||
+      u?.username ||
+      u?.handle ||
+      ""
+    ).trim();
+    const rawName = String(
+      pairName ||
+      userLike?.name ||
+      userLike?.displayName ||
+      u?.name ||
+      u?.displayName ||
+      userLike?.email ||
+      u?.email ||
+      `User ${id}`
+    ).trim();
+    const emailRaw = String(pairEmail || userLike?.email || u?.email || "").trim();
+    const name = getContactDisplayName({
+      id,
+      name: rawName,
+      username: usernameRaw,
+      email: emailRaw
+    });
+    const profilePicRaw =
+      pairProfilePic ||
+      userLike?.profilePicUrl ||
+      userLike?.profilePic ||
+      userLike?.avatarUrl ||
+      userLike?.avatar ||
+      u?.profilePicUrl ||
+      u?.profilePic ||
+      u?.avatarUrl ||
+      u?.avatar ||
+      "";
     const lastActiveAt =
+      userLike?.lastActiveAt ||
+      userLike?.lastSeenAt ||
+      userLike?.lastSeen ||
+      userLike?.locationUpdatedAt ||
+      userLike?.presenceUpdatedAt ||
+      userLike?.lastLoginAt ||
+      userLike?.lastOnlineAt ||
+      userLike?.lastAt ||
+      userLike?.updatedAt ||
+      userLike?.timestamp ||
       u?.lastActiveAt ||
       u?.lastSeenAt ||
       u?.lastSeen ||
       u?.locationUpdatedAt ||
+      u?.presenceUpdatedAt ||
+      u?.lastLoginAt ||
+      u?.lastOnlineAt ||
       u?.lastAt ||
       u?.updatedAt ||
       u?.timestamp ||
-      u?.user?.locationUpdatedAt ||
-      u?.user?.lastSeenAt ||
-      u?.user?.lastSeen ||
       "";
-    const online =
-      toBool(u?.online) ||
-      toBool(u?.isOnline) ||
-      toBool(u?.active) ||
-      toBool(u?.presence) ||
-      toBool(u?.status) ||
-      toBool(u?.user?.online) ||
-      toBool(u?.user?.isOnline) ||
-      toBool(u?.user?.active);
-    return {
+    const presenceValues = [
+      userLike?.online,
+      userLike?.isOnline,
+      userLike?.active,
+      userLike?.presence,
+      userLike?.status,
+      u?.online,
+      u?.isOnline,
+      u?.active,
+      u?.presence,
+      u?.status
+    ];
+    const hasPresenceSignal = presenceValues.some((value) => {
+      if (typeof value === "boolean") return true;
+      if (value == null) return false;
+      return String(value).trim() !== "";
+    });
+    const online = hasPresenceSignal ? presenceValues.some((value) => toBool(value)) : undefined;
+    const lastMessage =
+      userLike?.lastMessage ||
+      userLike?.lastMessageText ||
+      userLike?.latestMessage?.text ||
+      userLike?.message ||
+      u?.lastMessage ||
+      u?.lastMessageText ||
+      u?.latestMessage?.text ||
+      u?.message ||
+      "";
+    const normalizedLastActiveAt = String(lastActiveAt || "").trim();
+    const contact = {
       id,
       name,
-      email: u?.email || "",
+      username: usernameRaw,
+      email: emailRaw,
       avatar: (name[0] || "U").toUpperCase(),
       profilePic: profilePicRaw ? toApiUrl(profilePicRaw) : "",
-      lastMessage: u?.lastMessage || "",
-      lastActiveAt,
-      online
+      lastMessage,
+      ...(normalizedLastActiveAt ? { lastActiveAt: normalizedLastActiveAt } : {}),
+      ...(hasPresenceSignal ? { online: Boolean(online) } : {})
     };
+    return contact;
   };
 
   const mergeContacts = (base, extra) => {
     const byId = new Map();
     [...base, ...extra].forEach((c) => {
-      if (!c?.id) return;
-      if (!byId.has(c.id)) byId.set(c.id, c);
-      else byId.set(c.id, { ...byId.get(c.id), ...c });
+      const id = String(c?.id || "").trim();
+      if (!id) return;
+      if (!byId.has(id)) {
+        byId.set(id, { ...c, id });
+        return;
+      }
+      const prev = byId.get(id) || {};
+      const prevName = getContactDisplayName(prev);
+      const nextName = getContactDisplayName(c);
+      const prevTs = toEpochMs(prev?.lastActiveAt);
+      const nextTs = toEpochMs(c?.lastActiveAt);
+      const mergedName = !isGenericUserLabel(nextName, id) ? nextName : prevName;
+      const merged = {
+        ...prev,
+        ...c,
+        id,
+        name: mergedName || prevName || nextName || normalizeDisplayName(`User ${id}`),
+        avatar: ((mergedName || prevName || nextName || "U")[0] || "U").toUpperCase(),
+        username: String(c?.username || "").trim() || String(prev?.username || "").trim(),
+        email: String(c?.email || "").trim() || String(prev?.email || "").trim(),
+        profilePic: String(c?.profilePic || "").trim() || String(prev?.profilePic || "").trim(),
+        lastMessage: String(c?.lastMessage || "").trim() || String(prev?.lastMessage || "").trim(),
+      };
+      if (prevTs || nextTs) {
+        merged.lastActiveAt = nextTs >= prevTs ? (c?.lastActiveAt || prev?.lastActiveAt || "") : (prev?.lastActiveAt || c?.lastActiveAt || "");
+      } else {
+        const fallbackLast = String(c?.lastActiveAt || "").trim() || String(prev?.lastActiveAt || "").trim();
+        if (fallbackLast) merged.lastActiveAt = fallbackLast;
+      }
+      if (Object.prototype.hasOwnProperty.call(c || {}, "online")) {
+        merged.online = Boolean(c?.online);
+      } else if (Object.prototype.hasOwnProperty.call(prev || {}, "online")) {
+        merged.online = Boolean(prev?.online);
+      } else {
+        delete merged.online;
+      }
+      byId.set(id, merged);
     });
     return Array.from(byId.values());
+  };
+
+  const extractContactsFromLocalHistory = () => {
+    const all = readLocalChat();
+    const meId = String(myUserId || safeGetItem("userId") || "").trim();
+    const meEmail = String(myEmail || safeGetItem("email") || "").trim().toLowerCase();
+    const contactsFromLocal = [];
+
+    Object.entries(all || {}).forEach(([threadKey, rawItems]) => {
+      const threadItems = Array.isArray(rawItems) ? rawItems : [];
+      if (!threadItems.length) return;
+
+      const normalized = threadItems
+        .map((item) => normalizeMessage(item))
+        .sort((a, b) => new Date(normalizeTimestamp(a?.createdAt || 0)).getTime() - new Date(normalizeTimestamp(b?.createdAt || 0)).getTime());
+
+      const last = normalized[normalized.length - 1];
+      const keyIds = String(threadKey || "")
+        .split(":")
+        .map((value) => String(value || "").trim())
+        .filter(Boolean);
+      const threadIds = normalized
+        .flatMap((item) => [String(item?.senderId || "").trim(), String(item?.receiverId || "").trim()])
+        .filter(Boolean);
+
+      let otherId = "";
+      if (meId) {
+        otherId =
+          keyIds.find((value) => value && value !== meId) ||
+          threadIds.find((value) => value && value !== meId) ||
+          "";
+      }
+      if (!otherId) {
+        const lastDirectional = [...normalized]
+          .reverse()
+          .find((item) => String(item?.senderId || "").trim() || String(item?.receiverId || "").trim());
+        const lastSenderId = String(lastDirectional?.senderId || "").trim();
+        const lastReceiverId = String(lastDirectional?.receiverId || "").trim();
+        if (meId) {
+          if (lastSenderId === meId && lastReceiverId) otherId = lastReceiverId;
+          else if (lastReceiverId === meId && lastSenderId) otherId = lastSenderId;
+        } else if (typeof lastDirectional?.mine === "boolean") {
+          if (lastDirectional.mine && lastReceiverId) otherId = lastReceiverId;
+          else if (!lastDirectional.mine && lastSenderId) otherId = lastSenderId;
+        }
+        if (!otherId && lastSenderId && lastReceiverId && lastSenderId !== lastReceiverId) {
+          otherId = lastSenderId;
+        }
+      }
+      if (!otherId) {
+        otherId =
+          threadIds.find((value) => value && value !== "0") ||
+          keyIds.find((value) => value && value !== "0") ||
+          "";
+      }
+      if (meId && otherId === meId) {
+        otherId =
+          keyIds.find((value) => value && value !== meId) ||
+          threadIds.find((value) => value && value !== meId) ||
+          "";
+      }
+      if (!otherId) return;
+
+      const senderEmail = String(last?.senderEmail || last?.fromEmail || "").trim().toLowerCase();
+      const receiverEmail = String(last?.receiverEmail || last?.toEmail || "").trim().toLowerCase();
+      const candidateEmail =
+        senderEmail && senderEmail !== meEmail
+          ? senderEmail
+          : receiverEmail && receiverEmail !== meEmail
+            ? receiverEmail
+            : "";
+      const usernameRaw = String(
+        last?.senderUsername ||
+        last?.fromUsername ||
+        last?.username ||
+        ""
+      ).trim();
+      const rawName = String(
+        last?.senderName ||
+        last?.fromName ||
+        last?.displayName ||
+        candidateEmail ||
+        `User ${otherId}`
+      ).trim();
+      const name = getContactDisplayName({
+        id: otherId,
+        name: rawName,
+        username: usernameRaw,
+        email: candidateEmail
+      });
+
+      contactsFromLocal.push({
+        id: String(otherId),
+        name,
+        username: usernameRaw,
+        email: candidateEmail,
+        avatar: (name[0] || "U").toUpperCase(),
+        profilePic: "",
+        lastMessage: String(last?.text || last?.message || ""),
+        lastActiveAt: String(last?.createdAt || ""),
+        online: false
+      });
+    });
+
+    return mergeContacts([], contactsFromLocal);
   };
 
   const buildGroupRoomId = () => `grp_${Date.now()}_${myUserId || "guest"}`;
 
   const resolveContactName = (id) => {
     const match = contacts.find((c) => String(c?.id || "") === String(id));
-    if (match?.name) return match.name;
+    if (match) return getContactDisplayName(match);
     return normalizeDisplayName(`User ${id}`);
   };
 
@@ -3352,23 +3992,71 @@ export default function Chat() {
   const loadConversations = async () => {
     let list = [];
     try {
-      const res = await api.get("/api/chat/conversations", {
-        params: { _: Date.now() }
+      const res = await requestChatArray({
+        endpoints: [
+          "/api/chat/conversations",
+          "/chat/conversations",
+          "/api/messages/conversations",
+          "/messages/conversations"
+        ],
+        params: { _: Date.now() },
+        mapList: (items) => items
+          .map(mapUserToContact)
+          .filter((contact) => String(contact?.id || "").trim())
       });
-      list = Array.isArray(res.data) ? res.data.map(mapUserToContact) : [];
-      setContacts((prev) => mergeContacts(list, prev));
-      setChatFallbackMode(false);
+      list = res.list;
+      const fromLocal = extractContactsFromLocalHistory();
+      const mergedList = mergeContacts(list, fromLocal);
+      setContacts((prev) => mergeContacts(prev, mergedList));
+      if (!list.length && fromLocal.length) {
+        setChatFallbackMode(true);
+      } else {
+        setChatFallbackMode(false);
+      }
+      list = mergedList;
+      if (!list.length) {
+        const discovered = await loadDiscoveryContacts();
+        if (Array.isArray(discovered) && discovered.length) {
+          list = mergeContacts(list, discovered);
+        }
+      }
     } catch (err) {
       const status = err?.response?.status;
       if (status === 404) {
+        const fromLocal = extractContactsFromLocalHistory();
+        if (fromLocal.length) {
+          list = fromLocal;
+          setContacts((prev) => mergeContacts(prev, fromLocal));
+        }
         setChatFallbackMode(true);
+        if (!list.length) {
+          const discovered = await loadDiscoveryContacts();
+          if (Array.isArray(discovered) && discovered.length) {
+            list = mergeContacts(list, discovered);
+          }
+        }
       } else if (status === 401 || status === 403) {
         setChatFallbackMode(false);
         setError("Session expired for this server. Please login again.");
         clearAuthStorage();
         navigate("/login", { replace: true });
       } else {
-        throw err;
+        const fromLocal = extractContactsFromLocalHistory();
+        if (fromLocal.length) {
+          list = fromLocal;
+          setContacts((prev) => mergeContacts(prev, fromLocal));
+          setChatFallbackMode(true);
+          setError("");
+        } else {
+          setChatFallbackMode(true);
+          setError("Chat server unavailable. Please try again.");
+        }
+        if (!list.length) {
+          const discovered = await loadDiscoveryContacts();
+          if (Array.isArray(discovered) && discovered.length) {
+            list = mergeContacts(list, discovered);
+          }
+        }
       }
     }
 
@@ -3380,34 +4068,164 @@ export default function Chat() {
   };
 
   const loadDiscoveryContacts = async () => {
-    const [feedRes, reelsRes] = await Promise.allSettled([api.get("/api/feed"), api.get("/api/reels")]);
-    const me = Number(safeGetItem("userId"));
+    const meId = String(safeGetItem("userId") || myUserId || "").trim();
+    const meEmail = String(safeGetItem("email") || myEmail || "").trim().toLowerCase();
 
-    const toContacts = (items) =>
-      (Array.isArray(items) ? items : [])
-        .map((p) => p?.user)
-        .filter((u) => u?.id && Number(u.id) !== me)
-        .map((u) => mapUserToContact(u));
+    const isSameAsMeContact = (contact) => {
+      const id = String(contact?.id || "").trim();
+      const email = String(contact?.email || "").trim().toLowerCase();
+      if (id && meId && id === meId) return true;
+      if (email && meEmail && email === meEmail) return true;
+      return false;
+    };
 
-    const fromFeed = feedRes.status === "fulfilled" ? toContacts(feedRes.value?.data) : [];
-    const fromReels = reelsRes.status === "fulfilled" ? toContacts(reelsRes.value?.data) : [];
-    let fromSearch = [];
-    if (fromFeed.length === 0 && fromReels.length === 0) {
+    const normalizeContacts = (items, pickUser = null) =>
+      toArrayPayload(items)
+        .map((entry) => (typeof pickUser === "function" ? pickUser(entry) : entry))
+        .map(mapUserToContact)
+        .filter((contact) => String(contact?.id || "").trim())
+        .filter((contact) => !isSameAsMeContact(contact));
+
+    const fromEndpoints = async ({ endpoints, params = {}, pickUser = null }) => {
       try {
-        const res = await api.get("/api/profile/search", { params: { q: "a" } });
-        const data = Array.isArray(res.data)
-          ? res.data
-          : Array.isArray(res.data?.content)
-            ? res.data.content
-            : Array.isArray(res.data?.users)
-              ? res.data.users
-              : [];
-        fromSearch = data.map(mapUserToContact);
+        const res = await requestChatArray({
+          endpoints,
+          params: { ...params, _: Date.now() },
+          mapList: (items) => normalizeContacts(items, pickUser),
+        });
+        return res.list;
       } catch {
-        // ignore search fallback failures
+        return [];
+      }
+    };
+
+    const cached = readDiscoveryCache();
+    if (cached.length) {
+      setContacts((prev) => mergeContacts(prev, cached));
+    }
+
+    const feedPromise = fromEndpoints({
+      endpoints: ["/api/feed", "/feed", "/api/posts", "/posts"],
+      pickUser: (entry) => entry?.user || entry?.owner || entry?.author || entry
+    });
+    const reelsPromise = fromEndpoints({
+      endpoints: ["/api/reels", "/reels"],
+      pickUser: (entry) => entry?.user || entry?.owner || entry?.author || entry
+    });
+    const searchPromise = fromEndpoints({
+      endpoints: ["/api/profile/search", "/profile/search", "/api/users/search", "/users/search"],
+      params: { q: "a", query: "a", keyword: "a" },
+      pickUser: (entry) => entry?.user || entry?.contact || entry?.profile || entry
+    });
+
+    const identityHints = [
+      meId,
+      String(safeGetItem("username") || "").trim(),
+      String(safeGetItem("email") || "").trim(),
+      "me"
+    ].filter((value, index, arr) => value && arr.indexOf(value) === index);
+
+    const followPromises = identityHints.map((identity) => {
+      const safeIdentity = encodeURIComponent(identity);
+      return fromEndpoints({
+        endpoints: [
+          `/api/follow/list?type=following&user=${safeIdentity}`,
+          `/api/follow/list?type=followers&user=${safeIdentity}`,
+          `/api/profile/${safeIdentity}/following`,
+          `/api/profile/${safeIdentity}/followers`,
+          `/api/follow/${safeIdentity}/following/users`,
+          `/api/follow/${safeIdentity}/followers/users`,
+          `/api/follow/${safeIdentity}/following`,
+          `/api/follow/${safeIdentity}/followers`
+        ],
+        pickUser: (entry) =>
+          entry?.user ||
+          entry?.following ||
+          entry?.follower ||
+          entry?.fromUser ||
+          entry?.toUser ||
+          entry
+      });
+    });
+
+    const results = await Promise.allSettled([
+      feedPromise,
+      reelsPromise,
+      searchPromise,
+      ...followPromises
+    ]);
+
+    const resolvedLists = results
+      .filter((r) => r.status === "fulfilled")
+      .map((r) => r.value)
+      .filter((list) => Array.isArray(list));
+
+    const fromFeed = resolvedLists[0] || [];
+    const fromReels = resolvedLists[1] || [];
+    const fromSearch = resolvedLists[2] || [];
+    const fromFollow = resolvedLists.slice(3).flat();
+
+    let fromCache = [];
+    if (fromFeed.length + fromReels.length + fromSearch.length + fromFollow.length === 0) {
+      try {
+        const raw = localStorage.getItem("socialsea_following_cache_v1");
+        const parsed = raw ? JSON.parse(raw) : {};
+        const cacheKeys =
+          parsed && typeof parsed === "object"
+            ? Object.entries(parsed)
+                .filter(([, value]) => value === true)
+                .map(([key]) => String(key || "").trim())
+                .filter(Boolean)
+            : [];
+        fromCache = cacheKeys
+          .map((key) => {
+            const looksEmail = key.includes("@");
+            return mapUserToContact({
+              id: key,
+              userId: key,
+              name: looksEmail ? key.split("@")[0] : key,
+              username: looksEmail ? "" : key,
+              email: looksEmail ? key : ""
+            });
+          })
+          .filter((contact) => String(contact?.id || "").trim())
+          .filter((contact) => !isSameAsMeContact(contact));
+      } catch {
+        fromCache = [];
       }
     }
-    setContacts((prev) => mergeContacts(prev, [...fromFeed, ...fromReels, ...fromSearch]));
+
+    const fromLocalHistory = extractContactsFromLocalHistory();
+    const discovered = [...fromFeed, ...fromReels, ...fromSearch, ...fromFollow, ...fromCache, ...fromLocalHistory];
+    if (fromLocalHistory.length > 0 && fromFeed.length + fromReels.length + fromSearch.length + fromFollow.length === 0) {
+      setChatFallbackMode(true);
+    }
+    setContacts((prev) => mergeContacts(prev, discovered));
+    if (discovered.length) writeDiscoveryCache(discovered);
+    return discovered;
+  };
+
+  const searchContacts = async (term) => {
+    const q = String(term || "").trim();
+    if (!q) return [];
+    const meId = String(myUserId || safeGetItem("userId") || "").trim();
+    const meEmail = String(myEmail || safeGetItem("email") || "").trim().toLowerCase();
+    try {
+      const res = await requestChatArray({
+        endpoints: ["/api/profile/search", "/profile/search", "/api/users/search", "/users/search"],
+        params: { q, query: q, keyword: q, _: Date.now() },
+        mapList: (items) =>
+          toArrayPayload(items)
+            .map((entry) => entry?.user || entry?.contact || entry?.profile || entry)
+            .map(mapUserToContact)
+            .filter((contact) => String(contact?.id || "").trim())
+            .filter((contact) => String(contact?.id || "").trim() !== meId)
+            .filter((contact) => String(contact?.email || "").trim().toLowerCase() !== meEmail),
+      });
+      return res.list;
+    } catch {
+      return [];
+    }
   };
 
   const loadThread = async (otherId) => {
@@ -3423,38 +4241,78 @@ export default function Chat() {
       setMessagesByContact((prev) => ({ ...prev, [String(otherId)]: list }));
       return;
     }
-    const res = await api.get(`/api/chat/${otherId}/messages`, {
-      params: { _: Date.now() }
-    });
-    const normalized = (Array.isArray(res.data) ? res.data : []).map((m) => normalizeMessage(m, otherId));
-    const deleteTargets = new Set(normalized.map((m) => parseDeleteTargetId(m?.text)).filter(Boolean).map(String));
-    const visible = normalized.filter((m) => !parseDeleteTargetId(m?.text));
-    const list = applyDeleteTargetsToList(visible, deleteTargets).filter((m) => !hiddenIds.has(String(m?.id || "")));
-    setMessagesByContact((prev) => {
-      const key = String(otherId);
-      const oldList = Array.isArray(prev[key]) ? prev[key] : [];
-      const pendingLocalMedia = oldList.filter((m) => String(m?.id || "").startsWith("local_media_"));
-      const oldSignatureSet = new Set(
-        oldList.map((m) => `${m?.id || ""}_${m?.createdAt || ""}_${m?.text || ""}`)
-      );
-      const newIncoming = list.filter((m) => {
-        if (m?.mine) return false;
-        const sig = `${m?.id || ""}_${m?.createdAt || ""}_${m?.text || ""}`;
-        return !oldSignatureSet.has(sig);
+    try {
+      const res = await requestChatArray({
+        endpoints: [
+          `/api/chat/${otherId}/messages`,
+          `/chat/${otherId}/messages`,
+          `/api/messages/${otherId}`,
+          `/messages/${otherId}`
+        ],
+        params: { _: Date.now() },
+        mapList: (items) => items.map((m) => normalizeMessage(m, otherId))
       });
-      if (oldList.length > 0 && newIncoming.length > 0) {
-        playMessageAlert();
-        const latest = newIncoming[newIncoming.length - 1];
-        const senderName = contacts.find((c) => c.id === key)?.name || "New message";
-        maybeShowBrowserNotification(senderName, String(latest?.text || "You have a new message"));
+      let normalized = Array.isArray(res.list) ? res.list : [];
+      let usedLocalHistory = false;
+      if (normalized.length === 0) {
+        const all = readLocalChat();
+        const key = localThreadKey(myUserId, otherId);
+        const localNormalized = (Array.isArray(all[key]) ? all[key] : []).map((m) => normalizeMessage(m, otherId));
+        if (localNormalized.length > 0) {
+          normalized = localNormalized;
+          usedLocalHistory = true;
+        }
       }
-      const merged = [...list, ...pendingLocalMedia].sort((a, b) => {
-        const at = new Date(normalizeTimestamp(a?.createdAt || 0)).getTime();
-        const bt = new Date(normalizeTimestamp(b?.createdAt || 0)).getTime();
-        return at - bt;
+      const deleteTargets = new Set(normalized.map((m) => parseDeleteTargetId(m?.text)).filter(Boolean).map(String));
+      const visible = normalized.filter((m) => !parseDeleteTargetId(m?.text));
+      const list = applyDeleteTargetsToList(visible, deleteTargets).filter((m) => !hiddenIds.has(String(m?.id || "")));
+      setMessagesByContact((prev) => {
+        const key = String(otherId);
+        const oldList = Array.isArray(prev[key]) ? prev[key] : [];
+        const pendingLocalMedia = oldList.filter((m) => String(m?.id || "").startsWith("local_media_"));
+        const oldSignatureSet = new Set(
+          oldList.map((m) => `${m?.id || ""}_${m?.createdAt || ""}_${m?.text || ""}`)
+        );
+        const newIncoming = list.filter((m) => {
+          if (m?.mine) return false;
+          const sig = `${m?.id || ""}_${m?.createdAt || ""}_${m?.text || ""}`;
+          return !oldSignatureSet.has(sig);
+        });
+        if (oldList.length > 0 && newIncoming.length > 0) {
+          playMessageAlert();
+          const latest = newIncoming[newIncoming.length - 1];
+          const senderName = contacts.find((c) => c.id === key)?.name || "New message";
+          maybeShowBrowserNotification(senderName, String(latest?.text || "You have a new message"));
+        }
+        const merged = [...list, ...pendingLocalMedia].sort((a, b) => {
+          const at = new Date(normalizeTimestamp(a?.createdAt || 0)).getTime();
+          const bt = new Date(normalizeTimestamp(b?.createdAt || 0)).getTime();
+          return at - bt;
+        });
+        return { ...prev, [key]: merged };
       });
-      return { ...prev, [key]: merged };
-    });
+      setChatFallbackMode(usedLocalHistory);
+    } catch (err) {
+      const status = Number(err?.response?.status || 0);
+      if (status === 404) {
+        setChatFallbackMode(true);
+        const all = readLocalChat();
+        const key = localThreadKey(myUserId, otherId);
+        const normalized = (Array.isArray(all[key]) ? all[key] : []).map((m) => normalizeMessage(m, otherId));
+        const deleteTargets = new Set(normalized.map((m) => parseDeleteTargetId(m?.text)).filter(Boolean).map(String));
+        const visible = normalized.filter((m) => !parseDeleteTargetId(m?.text));
+        const list = applyDeleteTargetsToList(visible, deleteTargets).filter((m) => !hiddenIds.has(String(m?.id || "")));
+        setMessagesByContact((prev) => ({ ...prev, [String(otherId)]: list }));
+        return;
+      }
+      if (status === 401 || status === 403) {
+        setChatFallbackMode(false);
+        setError("Session expired for this server. Please login again.");
+        clearAuthStorage();
+        navigate("/login", { replace: true });
+      }
+      throw err;
+    }
   };
 
   useEffect(() => {
@@ -3791,15 +4649,9 @@ export default function Chat() {
           console.error(err);
           return false;
         });
-      const discovery = await Promise.resolve(loadDiscoveryContacts())
-        .then(() => true)
-        .catch((err) => {
-          console.error(err);
-          return false;
-        });
 
       if (!active) return;
-      if (!convo && !discovery) setError("Failed to load chat contacts");
+      if (!convo) setError("Failed to load chat contacts");
       else setError("");
     };
 
@@ -3807,7 +4659,7 @@ export default function Chat() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [myUserId, myEmail, contactId]);
 
   useEffect(() => {
     if (!contactId) return;
@@ -3851,7 +4703,7 @@ export default function Chat() {
     if (!activeContactId) return;
     shouldStickToBottomRef.current = true;
     loadThread(activeContactId).catch(() => {});
-  }, [activeContactId]);
+  }, [activeContactId, myUserId, chatFallbackMode]);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -3859,7 +4711,7 @@ export default function Chat() {
       if (activeContactId) loadThread(activeContactId).catch(() => {});
     }, POLL_MS);
     return () => clearInterval(timer);
-  }, [activeContactId, contactId]);
+  }, [activeContactId, contactId, myUserId, myEmail, chatFallbackMode]);
 
   useEffect(() => {
     const token = getStoredToken();
@@ -3984,26 +4836,71 @@ export default function Chat() {
   }, [myUserId]);
 
   useEffect(() => {
-    if (!query.trim()) {
-      setSidebarSearchUsers([]);
-      return undefined;
-    }
+    setSidebarSearchUsers([]);
+    return undefined;
+  }, [query]);
+
+  useEffect(() => {
     let cancelled = false;
-    const timer = setTimeout(async () => {
-      try {
-        const res = await api.get("/api/profile/search", { params: { q: query.trim() } });
-        if (cancelled) return;
-        const data = Array.isArray(res.data) ? res.data : [];
-        setSidebarSearchUsers(data.map(mapUserToContact));
-      } catch {
-        if (!cancelled) setSidebarSearchUsers([]);
+    const pending = contacts.filter((contact) => {
+      const id = String(contact?.id || "").trim();
+      if (!id) return false;
+      const displayName = getContactDisplayName(contact);
+      return isGenericUserLabel(displayName, id);
+    });
+    if (!pending.length) return undefined;
+
+    const run = async () => {
+      for (const contact of pending) {
+        const id = String(contact?.id || "").trim();
+        if (!id || resolvingContactProfilesRef.current.has(id)) continue;
+        resolvingContactProfilesRef.current.add(id);
+        try {
+          const res = await requestChatObject({
+            endpoints: [
+              `/api/profile/${encodeURIComponent(id)}`,
+              `/profile/${encodeURIComponent(id)}`,
+              `/api/users/${encodeURIComponent(id)}`,
+              `/users/${encodeURIComponent(id)}`
+            ],
+            params: { _: Date.now() }
+          });
+          if (cancelled) return;
+          const resolved = mapUserToContact(res?.data || {});
+          const resolvedName = getContactDisplayName(resolved);
+          if (isGenericUserLabel(resolvedName, id)) continue;
+
+          setContacts((prev) => {
+            let changed = false;
+            const next = prev.map((item) => {
+              if (String(item?.id || "") !== id) return item;
+              const merged = {
+                ...item,
+                ...resolved,
+                id,
+                name: resolvedName,
+                avatar: (resolvedName[0] || item?.avatar || "U").toUpperCase()
+              };
+              const before = `${String(item?.name || "")}|${String(item?.username || "")}|${String(item?.email || "")}|${String(item?.profilePic || "")}`;
+              const after = `${String(merged?.name || "")}|${String(merged?.username || "")}|${String(merged?.email || "")}|${String(merged?.profilePic || "")}`;
+              if (before !== after) changed = true;
+              return merged;
+            });
+            return changed ? next : prev;
+          });
+        } catch {
+          // ignore profile enrichment failures
+        } finally {
+          resolvingContactProfilesRef.current.delete(id);
+        }
       }
-    }, 250);
+    };
+
+    run();
     return () => {
       cancelled = true;
-      clearTimeout(timer);
     };
-  }, [query]);
+  }, [contacts]);
 
   useEffect(() => {
     let cancelled = false;
@@ -4018,10 +4915,9 @@ export default function Chat() {
     const timer = setTimeout(async () => {
       try {
         setSearchingUsers(true);
-        const res = await api.get("/api/profile/search", { params: { q } });
+        const data = await searchContacts(q);
         if (cancelled) return;
-        const data = Array.isArray(res.data) ? res.data : [];
-        setSearchUsers(data.map(mapUserToContact));
+        setSearchUsers(data);
       } catch {
         if (!cancelled) setSearchUsers([]);
       } finally {
@@ -4041,7 +4937,9 @@ export default function Chat() {
     return blockedUsers.some((user) => {
       const blockedId = String(user?.id || "").trim();
       const blockedEmail = String(user?.email || "").trim().toLowerCase();
-      return (contactIdValue && blockedId && contactIdValue === blockedId) || (emailValue && blockedEmail && emailValue === blockedEmail);
+      if (contactIdValue && blockedId) return contactIdValue === blockedId;
+      if (contactIdValue || blockedId) return false;
+      return emailValue && blockedEmail && emailValue === blockedEmail;
     });
   };
 
@@ -4052,18 +4950,16 @@ export default function Chat() {
       : contacts.filter((c) => c.name.toLowerCase().includes(q) || (c.email || "").toLowerCase().includes(q));
 
     const merged = new Map();
-    [...local, ...sidebarSearchUsers].forEach((c) => {
+    local.forEach((c) => {
       if (!c?.id) return;
       if (!merged.has(c.id)) merged.set(c.id, c);
     });
-    const lowerEmail = String(myEmail || "").toLowerCase();
     return Array.from(merged.values()).filter((c) => {
       if (c.id === myUserId) return false;
-      if (lowerEmail && String(c.email || "").toLowerCase() === lowerEmail) return false;
       if (isBlockedContact(c)) return false;
       return true;
     });
-  }, [contacts, query, sidebarSearchUsers, myUserId, myEmail, blockedUsers]);
+  }, [contacts, query, myUserId, blockedUsers]);
 
   const newChatCandidates = useMemo(() => {
     const q = newChatQuery.trim().toLowerCase();
@@ -4076,28 +4972,32 @@ export default function Chat() {
       if (!c?.id) return;
       if (!merged.has(c.id)) merged.set(c.id, c);
     });
-    const lowerEmail = String(myEmail || "").toLowerCase();
     return Array.from(merged.values()).filter((c) => {
       if (c.id === myUserId) return false;
-      if (lowerEmail && String(c.email || "").toLowerCase() === lowerEmail) return false;
       if (isBlockedContact(c)) return false;
       return true;
     });
-  }, [contacts, newChatQuery, searchUsers, myUserId, myEmail, blockedUsers]);
+  }, [contacts, newChatQuery, searchUsers, myUserId, blockedUsers]);
 
   const openContact = (contact) => {
     const c = mapUserToContact(contact);
-    if (!c.id || c.id === myUserId || (myEmail && c.email && c.email.toLowerCase() === myEmail.toLowerCase())) {
+    const displayName = getContactDisplayName(c);
+    const normalized = {
+      ...c,
+      name: displayName,
+      avatar: (displayName[0] || c?.avatar || "U").toUpperCase()
+    };
+    if (!normalized.id || normalized.id === myUserId) {
       setError("Cannot chat/call with your own account.");
       return;
     }
-    if (isBlockedContact(c)) {
+    if (isBlockedContact(normalized)) {
       setError("This user is blocked.");
       return;
     }
-    setContacts((prev) => mergeContacts(prev, [c]));
-    setActiveContactId(c.id);
-    navigate(`/chat/${c.id}`);
+    setContacts((prev) => mergeContacts(prev, [normalized]));
+    setActiveContactId(normalized.id);
+    navigate(`/chat/${normalized.id}`);
   };
 
   const startNewChat = (contact) => {
@@ -4115,8 +5015,9 @@ export default function Chat() {
     : [];
 
   const formatLastSeen = (value) => {
-    const d = new Date(value);
-    if (!Number.isFinite(d.getTime())) return "lastseen at --";
+    const ts = toEpochMs(value);
+    if (!ts) return "lastseen at --";
+    const d = new Date(ts);
     const now = new Date(nowTick);
     const timeLabel = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", hour12: true }).toLowerCase();
     const sameDay = d.toDateString() === now.toDateString();
@@ -4136,14 +5037,14 @@ export default function Chat() {
     const msgList = messagesByContact[contact.id] || [];
     const callList = Array.isArray(callHistoryByContact[contact.id]) ? callHistoryByContact[contact.id] : [];
     const msgTs = msgList.reduce((max, m) => {
-      const t = new Date(m?.createdAt || 0).getTime();
+      const t = toEpochMs(m?.createdAt || 0);
       return Number.isFinite(t) && t > max ? t : max;
     }, 0);
     const callTs = callList.reduce((max, c) => {
-      const t = new Date(c?.at || 0).getTime();
+      const t = toEpochMs(c?.at || 0);
       return Number.isFinite(t) && t > max ? t : max;
     }, 0);
-    const profileTs = new Date(contact?.lastActiveAt || 0).getTime();
+    const profileTs = toEpochMs(contact?.lastActiveAt || 0);
     return Math.max(
       msgTs,
       callTs,
@@ -4154,7 +5055,7 @@ export default function Chat() {
   const getContactPresence = (contact) => {
     if (!contact) return { online: false, text: "lastseen at --" };
     const latest = getContactActivityTs(contact);
-    const hasExplicitOnline = Boolean(contact?.online);
+    const hasExplicitOnline = contact?.online === true;
     const isOnline = hasExplicitOnline || (latest > 0 && nowTick - latest <= CHAT_ONLINE_WINDOW_MS);
     if (isOnline) return { online: true, text: "online" };
     return {
@@ -4168,14 +5069,142 @@ export default function Chat() {
     return String(raw).startsWith("http") ? String(raw) : toApiUrl(String(raw));
   };
 
+  const revokeStoryViewerBlobUrl = useCallback(() => {
+    if (!storyViewerBlobUrlRef.current) return;
+    try {
+      URL.revokeObjectURL(storyViewerBlobUrlRef.current);
+    } catch {
+      // ignore URL revoke failures
+    }
+    storyViewerBlobUrlRef.current = "";
+  }, []);
+
+  const buildStoryMediaCandidates = useCallback((raw) => {
+    const value = String(raw || "").trim();
+    if (!value) return [];
+    const collected = [];
+    const add = (candidate) => {
+      const normalized = String(candidate || "").trim();
+      if (!normalized) return;
+      if (collected.includes(normalized)) return;
+      collected.push(normalized);
+    };
+
+    add(value);
+    const relPath = value.startsWith("/") ? value : `/${value.replace(/^\/+/, "")}`;
+    if (!/^https?:\/\//i.test(value)) {
+      add(toApiUrl(relPath));
+      if (typeof window !== "undefined") {
+        add(`${window.location.origin}${relPath}`);
+      }
+      const apiBase = String(getApiBaseUrl() || "").trim().replace(/\/+$/, "");
+      if (apiBase) add(`${apiBase}${relPath}`);
+      return collected;
+    }
+
+    try {
+      const parsed = new URL(value);
+      const pathWithQuery = `${parsed.pathname || ""}${parsed.search || ""}${parsed.hash || ""}`;
+      if (pathWithQuery) {
+        if (typeof window !== "undefined") add(`${window.location.origin}${pathWithQuery}`);
+        const apiBase = String(getApiBaseUrl() || "").trim().replace(/\/+$/, "");
+        if (apiBase) add(`${apiBase}${pathWithQuery}`);
+      }
+    } catch {
+      // ignore URL parse errors
+    }
+    return collected;
+  }, []);
+
+  const loadStoryViewerBlobFallback = useCallback(async () => {
+    const candidates = Array.isArray(storyViewerCandidatesRef.current) ? storyViewerCandidatesRef.current : [];
+    for (const candidate of candidates) {
+      if (!candidate || /^blob:/i.test(candidate) || /^data:/i.test(candidate)) continue;
+      try {
+        const res = await api.request({
+          method: "GET",
+          url: candidate,
+          responseType: "blob",
+          timeout: 20000,
+          suppressAuthRedirect: true,
+        });
+        const blob = res?.data;
+        if (!(blob instanceof Blob) || blob.size <= 0) continue;
+        const blobType = String(blob.type || "").toLowerCase();
+        if (blobType.includes("text/html") || blobType.includes("application/json")) continue;
+        revokeStoryViewerBlobUrl();
+        const blobUrl = URL.createObjectURL(blob);
+        storyViewerBlobUrlRef.current = blobUrl;
+        setStoryViewerSrc(blobUrl);
+        setStoryViewerLoadError("");
+        return true;
+      } catch {
+        // try next candidate
+      }
+    }
+    return false;
+  }, [revokeStoryViewerBlobUrl]);
+
+  const handleStoryViewerMediaError = useCallback(() => {
+    const candidates = Array.isArray(storyViewerCandidatesRef.current) ? storyViewerCandidatesRef.current : [];
+    const nextIndex = Number(storyViewerCandidateIndexRef.current || 0) + 1;
+    if (nextIndex < candidates.length) {
+      storyViewerCandidateIndexRef.current = nextIndex;
+      setStoryViewerSrc(String(candidates[nextIndex] || ""));
+      return;
+    }
+    setStoryViewerLoading(true);
+    void loadStoryViewerBlobFallback().then((ok) => {
+      if (!ok) {
+        setStoryViewerLoadError("Could not load this story media.");
+      }
+      setStoryViewerLoading(false);
+    });
+  }, [loadStoryViewerBlobFallback]);
+
   const isStoryVideo = (url) =>
     /\.(mp4|mov|webm|mkv|m4v|avi|mpg|mpeg|3gp|ogv)(\?|#|$)/i.test(String(url || ""));
 
   const activeStory = storyViewerIndex != null ? storyItems[storyViewerIndex] : null;
   const openStory = (idx) => setStoryViewerIndex(idx);
-  const closeStory = () => setStoryViewerIndex(null);
+  const closeStory = () => {
+    setStoryViewerIndex(null);
+    setStoryViewerMuted(true);
+    setStoryViewerLoading(false);
+    setStoryViewerLoadError("");
+    setStoryViewerSrc("");
+    revokeStoryViewerBlobUrl();
+  };
   const openStoryOptions = () => setStoryOptionsOpen(true);
   const closeStoryOptions = () => setStoryOptionsOpen(false);
+
+  useEffect(() => {
+    if (storyViewerIndex == null || !activeStory) {
+      setStoryViewerSrc("");
+      setStoryViewerMuted(true);
+      setStoryViewerLoading(false);
+      setStoryViewerLoadError("");
+      storyViewerCandidatesRef.current = [];
+      storyViewerCandidateIndexRef.current = 0;
+      revokeStoryViewerBlobUrl();
+      return;
+    }
+    const rawUrl = String(activeStory?.mediaUrl || activeStory?.url || "").trim();
+    const candidates = buildStoryMediaCandidates(rawUrl);
+    storyViewerCandidatesRef.current = candidates;
+    storyViewerCandidateIndexRef.current = 0;
+    setStoryViewerMuted(true);
+    setStoryViewerLoading(false);
+    setStoryViewerLoadError(candidates.length ? "" : "Story media not available");
+    revokeStoryViewerBlobUrl();
+    setStoryViewerSrc(String(candidates[0] || ""));
+  }, [activeStory, buildStoryMediaCandidates, revokeStoryViewerBlobUrl, storyViewerIndex]);
+
+  useEffect(() => {
+    return () => {
+      revokeStoryViewerBlobUrl();
+    };
+  }, [revokeStoryViewerBlobUrl]);
   const deleteStoryAt = (index) => {
     setStoryItems((prev) => {
       if (!Array.isArray(prev) || prev.length === 0) return prev;
@@ -4237,25 +5266,25 @@ export default function Chat() {
   const peerLatestMessageTs = activeMessages
     .filter((m) => !m?.mine)
     .reduce((max, m) => {
-      const t = new Date(m?.createdAt || 0).getTime();
+      const t = toEpochMs(m?.createdAt || 0);
       return Number.isFinite(t) && t > max ? t : max;
     }, 0);
   const peerLatestCallTs = activeCallHistory.reduce((max, c) => {
-    const t = new Date(c?.at || 0).getTime();
+    const t = toEpochMs(c?.at || 0);
     return Number.isFinite(t) && t > max ? t : max;
   }, 0);
   const threadLatestTs = activeMessages.reduce((max, m) => {
-    const t = new Date(m?.createdAt || 0).getTime();
+    const t = toEpochMs(m?.createdAt || 0);
     return Number.isFinite(t) && t > max ? t : max;
   }, 0);
-  const peerLatestProfileTs = new Date(activeContact?.lastActiveAt || 0).getTime();
+  const peerLatestProfileTs = toEpochMs(activeContact?.lastActiveAt || 0);
   const peerLatestActivityTs = Math.max(
     peerLatestMessageTs,
     peerLatestCallTs,
     Number.isFinite(peerLatestProfileTs) ? peerLatestProfileTs : 0,
     threadLatestTs
   );
-  const hasExplicitOnline = Boolean(activeContact?.online);
+  const hasExplicitOnline = activeContact?.online === true;
   const isPeerOnline = hasExplicitOnline || (peerLatestActivityTs > 0 && nowTick - peerLatestActivityTs <= CHAT_ONLINE_WINDOW_MS);
   const headerPresenceText = isPeerOnline
     ? "online"
@@ -4337,7 +5366,14 @@ export default function Chat() {
         return true;
       }
 
-      const res = await api.post(`/api/chat/${activeContactId}/send`, { text: cleanText });
+      const res = await requestChatMutation({
+        method: "POST",
+        endpoints: [
+          `/api/chat/${activeContactId}/send`,
+          `/chat/${activeContactId}/send`
+        ],
+        data: { text: cleanText }
+      });
       const sent = normalizeMessage(
         {
           ...(res?.data || {}),
@@ -4902,7 +5938,17 @@ export default function Chat() {
     try {
       const form = new FormData();
       form.append("file", file);
-      const res = await api.post(`/api/chat/${activeContactId}/send-media`, form);
+      const res = await requestChatMutation({
+        method: "POST",
+        endpoints: [
+          `/api/chat/${activeContactId}/send-media`,
+          `/chat/${activeContactId}/send-media`,
+          `/api/chat/${activeContactId}/sendMedia`,
+          `/chat/${activeContactId}/sendMedia`
+        ],
+        data: form,
+        headers: { "Content-Type": "multipart/form-data" }
+      });
       const sent = normalizeMessage({ ...(res?.data || {}), mine: true }, activeContactId);
       setMessagesByContact((prev) => ({
         ...prev,
@@ -6037,6 +7083,7 @@ export default function Chat() {
         <div className="chat-contact-list">
           {filteredContacts.map((c) => {
             const presence = getContactPresence(c);
+            const displayName = getContactDisplayName(c);
             return (
               <button
                 key={c.id}
@@ -6045,12 +7092,12 @@ export default function Chat() {
                 onClick={() => openContact(c)}
               >
                 <span className="chat-avatar">
-                  {c.profilePic ? <img src={c.profilePic} alt={c.name} className="chat-avatar-img" /> : c.avatar}
+                  {c.profilePic ? <img src={c.profilePic} alt={displayName} className="chat-avatar-img" /> : c.avatar}
                   <span className={`chat-presence-dot ${presence.online ? "is-online" : ""}`} />
                 </span>
                 <span className="chat-meta">
                   <span className="chat-meta-row">
-                    <strong>{c.name}</strong>
+                    <strong>{displayName}</strong>
                     <span className={`chat-status-pill ${presence.online ? "is-online" : ""}`}>
                       {presence.text}
                     </span>
@@ -6081,17 +7128,20 @@ export default function Chat() {
               />
               <div className="new-chat-list">
                 {searchingUsers && <p className="chat-empty">Searching users...</p>}
-                {newChatCandidates.map((c) => (
-                  <button key={c.id} type="button" className="chat-contact" onClick={() => startNewChat(c)}>
-                    <span className="chat-avatar">
-                      {c.profilePic ? <img src={c.profilePic} alt={c.name} className="chat-avatar-img" /> : c.avatar}
-                    </span>
-                    <span className="chat-meta">
-                      <strong>{c.name}</strong>
-                      <small>{c.email || "Start conversation"}</small>
-                    </span>
-                  </button>
-                ))}
+                {newChatCandidates.map((c) => {
+                  const displayName = getContactDisplayName(c);
+                  return (
+                    <button key={c.id} type="button" className="chat-contact" onClick={() => startNewChat(c)}>
+                      <span className="chat-avatar">
+                        {c.profilePic ? <img src={c.profilePic} alt={displayName} className="chat-avatar-img" /> : c.avatar}
+                      </span>
+                      <span className="chat-meta">
+                        <strong>{displayName}</strong>
+                        <small>{c.email || c.username || "Start conversation"}</small>
+                      </span>
+                    </button>
+                  );
+                })}
                 {!searchingUsers && newChatCandidates.length === 0 && <p className="chat-empty">No users found</p>}
               </div>
             </div>
@@ -6153,6 +7203,7 @@ export default function Chat() {
                   .filter((c) => String(c?.id || "") !== String(myUserId))
                   .map((c) => {
                     const checked = groupInviteIds.includes(String(c.id));
+                    const displayName = getContactDisplayName(c);
                     return (
                       <label key={c.id} className="group-call-item">
                         <input
@@ -6160,7 +7211,7 @@ export default function Chat() {
                           checked={checked}
                           onChange={() => toggleGroupInvite(c.id)}
                         />
-                        <span>{c.name}</span>
+                        <span>{displayName}</span>
                       </label>
                     );
                   })}
@@ -7226,7 +8277,7 @@ export default function Chat() {
               ×
             </button>
             {(() => {
-              const mediaUrl = resolveStoryMediaUrl(activeStory?.mediaUrl || activeStory?.url || "");
+              const mediaUrl = storyViewerSrc || resolveStoryMediaUrl(activeStory?.mediaUrl || activeStory?.url || "");
               const isVideo = isStoryVideo(mediaUrl);
               const label = String(activeStory?.storyText || activeStory?.caption || "Story").trim();
               return (
@@ -7234,14 +8285,52 @@ export default function Chat() {
                   <div className="chat-story-viewer-media">
                     {mediaUrl ? (
                       isVideo ? (
-                        <video src={mediaUrl} autoPlay playsInline controls />
+                        <video
+                          ref={storyViewerVideoRef}
+                          src={mediaUrl}
+                          autoPlay
+                          muted={storyViewerMuted}
+                          playsInline
+                          controls
+                          loop
+                          preload="auto"
+                          onLoadedData={(event) => {
+                            event.currentTarget.play?.().catch(() => {});
+                          }}
+                          onCanPlay={(event) => {
+                            event.currentTarget.play?.().catch(() => {});
+                          }}
+                          onError={handleStoryViewerMediaError}
+                        />
                       ) : (
-                        <img src={mediaUrl} alt={label} />
+                        <img src={mediaUrl} alt={label} onError={handleStoryViewerMediaError} />
                       )
                     ) : (
                       <div className="chat-story-viewer-empty">Story media not available</div>
                     )}
                   </div>
+                  {isVideo && mediaUrl && (
+                    <button
+                      type="button"
+                      className="chat-story-viewer-audio-toggle"
+                      onClick={() => {
+                        setStoryViewerMuted((prev) => {
+                          const next = !prev;
+                          if (storyViewerVideoRef.current) {
+                            storyViewerVideoRef.current.muted = next;
+                            if (!next) {
+                              storyViewerVideoRef.current.play?.().catch(() => {});
+                            }
+                          }
+                          return next;
+                        });
+                      }}
+                    >
+                      {storyViewerMuted ? "Unmute" : "Mute"}
+                    </button>
+                  )}
+                  {storyViewerLoading && <p className="chat-story-viewer-caption">Loading story media...</p>}
+                  {storyViewerLoadError && <p className="chat-story-viewer-caption">{storyViewerLoadError}</p>}
                   {label && <p className="chat-story-viewer-caption">{label}</p>}
                 </>
               );

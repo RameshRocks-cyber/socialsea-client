@@ -343,6 +343,11 @@
   cursor: pointer;
 }
 
+.ss-snap-tool-btn.is-active {
+  background: rgba(255, 255, 255, 0.18);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.4);
+}
+
 .ss-camera-preview {
   position: relative;
   width: 100%;
@@ -355,8 +360,50 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transform: scaleX(-1);
   background: #050505;
+}
+
+.ss-camera-video.is-mirrored {
+  transform: scaleX(-1);
+}
+
+.ss-camera-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  z-index: 6;
+  background: radial-gradient(circle at 50% 50%, rgba(10, 10, 10, 0.35), rgba(0, 0, 0, 0.75));
+  pointer-events: auto;
+}
+
+.ss-camera-overlay-error {
+  background: radial-gradient(circle at 50% 50%, rgba(60, 10, 10, 0.35), rgba(0, 0, 0, 0.82));
+}
+
+.ss-camera-overlay-card {
+  background: rgba(12, 12, 12, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 14px;
+  padding: 16px 18px;
+  min-width: 220px;
+  text-align: center;
+  color: #f5f5f5;
+}
+
+.ss-camera-overlay-card p {
+  margin: 0 0 10px;
+  font-size: 0.95rem;
+}
+
+.ss-camera-overlay-card button {
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: #1b1b1b;
+  color: #fff;
+  border-radius: 999px;
+  padding: 6px 14px;
+  cursor: pointer;
+  font-weight: 600;
 }
 
 .ss-camera-animal-mask {
@@ -368,6 +415,125 @@
   font-size: clamp(3rem, 12vw, 5.3rem);
   filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.54));
   pointer-events: none;
+}
+
+.ss-camera-emoji-cloud {
+  position: absolute;
+  left: 50%;
+  top: 15%;
+  transform: translate(-50%, -10%);
+  z-index: 3;
+  pointer-events: none;
+}
+
+.ss-camera-emoji {
+  position: absolute;
+  font-size: clamp(1.4rem, 5vw, 2.4rem);
+  filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.55));
+  animation: ssEmojiFloat 2.4s ease-in-out infinite;
+  animation-delay: var(--float-delay, 0s);
+}
+
+.ss-camera-text {
+  position: absolute;
+  top: 14%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 5;
+  font-weight: 700;
+  text-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.ss-camera-text-panel {
+  position: absolute;
+  left: 50%;
+  bottom: 20%;
+  transform: translateX(-50%);
+  z-index: 7;
+  background: rgba(12, 12, 12, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 14px;
+  padding: 10px 12px;
+  min-width: 220px;
+  display: grid;
+  gap: 8px;
+}
+
+.ss-camera-text-panel input[type="text"] {
+  background: rgba(20, 20, 20, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #fff;
+  border-radius: 10px;
+  padding: 6px 10px;
+}
+
+.ss-camera-text-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ss-camera-text-row input[type="range"] {
+  flex: 1;
+}
+
+.ss-camera-text-color {
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  cursor: pointer;
+}
+
+.ss-camera-text-color.is-active {
+  border-color: #fff;
+}
+
+.ss-camera-sparkles {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+
+.ss-camera-sparkle {
+  position: absolute;
+  animation: ssSparkleTwinkle 2.6s ease-in-out infinite;
+  filter: drop-shadow(0 5px 12px rgba(255, 255, 255, 0.35));
+}
+
+@keyframes ssSparkleTwinkle {
+  0% {
+    transform: translate(-50%, -50%) scale(0.7);
+    opacity: 0.4;
+  }
+  50% {
+    transform: translate(-50%, -50%) scale(1.1);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(0.8);
+    opacity: 0.6;
+  }
+}
+
+@keyframes ssEmojiFloat {
+  0% {
+    transform: translate(-50%, -50%) scale(0.96);
+    opacity: 0.85;
+  }
+  50% {
+    transform: translate(-50%, -55%) scale(1.04);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(0.98);
+    opacity: 0.9;
+  }
 }
 
 .ss-snap-bottom {
@@ -716,3 +882,4 @@
     min-height: 42px;
   }
 }
+

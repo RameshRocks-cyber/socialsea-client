@@ -852,29 +852,33 @@ export default function Profile() {
       {!error && profile && (
         <>
           <section className="profile-header">
-            <img src={profile.profilePicUrl || "/default-avatar.png"} alt="Profile" className="profile-pic" />
+            <div className="profile-summary">
+              <img src={profile.profilePicUrl || "/default-avatar.png"} alt="Profile" className="profile-pic" />
+              <div className="profile-text">
+                <h2 className="profile-name">{profile.name || profile.email || profile.username}</h2>
+                <p className="bio">{profile.bio || "No bio yet"}</p>
+              </div>
+            </div>
 
-            <div className="profile-info">
-              <h2 className="profile-name">{profile.name || profile.email || profile.username}</h2>
-              <p className="bio">{profile.bio || "No bio yet"}</p>
-
-              <p className="profile-stats">
+            <div className="profile-meta">
+              <div className="profile-stats">
                 <button
                   type="button"
                   className="profile-stat-link"
                   onClick={() => navigate(`/profile/${encodeURIComponent(profileRouteKey)}/followers`)}
                 >
-                  <b>{followers}</b> followers
+                  <b>{followers}</b>
+                  <span>followers</span>
                 </button>
-                <span className="profile-stat-dot">|</span>
                 <button
                   type="button"
                   className="profile-stat-link"
                   onClick={() => navigate(`/profile/${encodeURIComponent(profileRouteKey)}/following`)}
                 >
-                  <b>{followingCount}</b> following
+                  <b>{followingCount}</b>
+                  <span>following</span>
                 </button>
-              </p>
+              </div>
 
               {!isOwnProfile && (
                 <div className="profile-actions">

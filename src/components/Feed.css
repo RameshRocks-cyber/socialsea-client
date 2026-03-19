@@ -582,7 +582,7 @@ body.feed-no-swipe-back {
 }
 
 .feed-media-view::-webkit-media-controls-panel {
-  background: rgba(0, 0, 0, 0.78);
+  background: transparent !important;
 }
 
 .feed-media-view::-webkit-media-controls-play-button,
@@ -592,7 +592,7 @@ body.feed-no-swipe-back {
 .feed-media-view::-webkit-media-controls-time-remaining-display,
 .feed-media-view::-webkit-media-controls-mute-button,
 .feed-media-view::-webkit-media-controls-volume-slider {
-  filter: grayscale(1) brightness(0.6);
+  filter: none;
 }
 
 .feed-actions {

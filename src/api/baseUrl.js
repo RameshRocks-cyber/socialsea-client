@@ -52,6 +52,17 @@ function isPrivateIpHost(host) {
   return false;
 }
 
+function persistAuthBaseUrl(base) {
+  const value = String(base || "").trim();
+  if (typeof window === "undefined" || !value) return;
+  try {
+    localStorage.setItem("socialsea_auth_base_url", value);
+    sessionStorage.setItem("socialsea_auth_base_url", value);
+  } catch {
+    // ignore storage failures
+  }
+}
+
 export function getApiBaseUrl() {
   const forcedUrl = normalizeApiUrl(import.meta.env.VITE_API_BASE_URL);
 
@@ -59,16 +70,12 @@ export function getApiBaseUrl() {
     const host = String(window.location.hostname || "").toLowerCase();
     const isLocalHost = host === "localhost" || host === "127.0.0.1";
     const isLanHost = isPrivateIpHost(host);
-    const forcedHost = hostFromUrl(forcedUrl);
 
+    // Explicit override must win in all environments (including local dev).
+    // This avoids accidental fallback to localhost when a remote backend is intended.
     if (forcedUrl) {
-      // In local/LAN development, prefer local/private backends to avoid accidentally
-      // routing SOS live traffic to a public server with stale state.
-      const canUseForcedInDev =
-        forcedUrl.startsWith("/") || isLoopbackHost(forcedHost) || isPrivateIpHost(forcedHost);
-      if (!(isLocalHost || isLanHost) || canUseForcedInDev) {
-        return forcedUrl;
-      }
+      persistAuthBaseUrl(forcedUrl);
+      return forcedUrl;
     }
 
     if (isFrontendLikeHost(host)) {
@@ -76,8 +83,10 @@ export function getApiBaseUrl() {
       const envUrl = normalizeApiUrl(import.meta.env.VITE_API_URL);
       const envHost = hostFromUrl(envUrl);
       if (envUrl && !isFrontendLikeHost(envHost)) {
+        persistAuthBaseUrl(envUrl);
         return envUrl;
       }
+      persistAuthBaseUrl("https://api.socialsea.co.in");
       return "https://api.socialsea.co.in";
     }
     if (isLocalHost) {
@@ -85,25 +94,36 @@ export function getApiBaseUrl() {
       const envHost = hostFromUrl(envUrl);
       // In local dev, prefer local backend/proxy by default.
       if (!envUrl || envUrl.startsWith("/") || isFrontendLikeHost(envHost)) {
+        persistAuthBaseUrl("http://localhost:8080");
         return "http://localhost:8080";
       }
+      persistAuthBaseUrl(envUrl);
       return envUrl;
     }
     if (isLanHost) {
       const envUrl = normalizeApiUrl(import.meta.env.VITE_API_URL);
       const envHost = hostFromUrl(envUrl);
       if (envUrl && !isFrontendLikeHost(envHost) && !isLoopbackHost(envHost)) {
+        persistAuthBaseUrl(envUrl);
         return envUrl;
       }
+      persistAuthBaseUrl(`http://${host}:8080`);
       return `http://${host}:8080`;
     }
   }
 
-  if (forcedUrl) return forcedUrl;
+  if (forcedUrl) {
+    persistAuthBaseUrl(forcedUrl);
+    return forcedUrl;
+  }
 
   const envUrl = normalizeApiUrl(import.meta.env.VITE_API_URL);
-  if (envUrl) return envUrl;
+  if (envUrl) {
+    persistAuthBaseUrl(envUrl);
+    return envUrl;
+  }
 
+  persistAuthBaseUrl("https://socialsea.co.in");
   return "https://socialsea.co.in";
 }
 

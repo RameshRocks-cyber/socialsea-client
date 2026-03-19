@@ -1,5 +1,5 @@
-﻿import { useEffect } from "react";
-import { BrowserRouter, Routes, Route, useLocation, Navigate } from "react-router-dom";
+﻿import { useEffect, useRef } from "react";
+import { BrowserRouter, Routes, Route, useLocation, Navigate, useNavigate } from "react-router-dom";
 import Navbar from "./components/Navbar";
 import Feed from "./components/Feed";
 import Login from "./pages/Login";
@@ -60,6 +60,45 @@ const isPrivateIpHost = (host) => {
   return false;
 };
 
+const SWIPE_TABS = [
+  { path: "/feed", match: (pathname) => pathname === "/feed" || pathname === "/home" || pathname === "/" },
+  { path: "/reels", match: (pathname) => pathname === "/reels" },
+  { path: "/chat", match: (pathname) => pathname === "/chat" },
+  { path: "/notifications", match: (pathname) => pathname === "/notifications" },
+  { path: "/profile/me", match: (pathname) => pathname.startsWith("/profile") },
+];
+
+const SWIPE_MIN_DISTANCE_PX = 72;
+const SWIPE_MAX_DURATION_MS = 700;
+const SWIPE_DOMINANCE_RATIO = 1.2;
+
+const getSwipeTabIndex = (pathname) => SWIPE_TABS.findIndex((tab) => tab.match(pathname));
+
+const shouldIgnoreSwipeTarget = (target) => {
+  if (!(target instanceof Element)) return false;
+  if (target.closest("[data-no-page-swipe], .no-page-swipe")) return true;
+  if (target.closest("input, textarea, select, option, button, a, [role='button'], [contenteditable='true']")) {
+    return true;
+  }
+  return false;
+};
+
+const canAncestorHandleHorizontalSwipe = (target, deltaX) => {
+  if (!(target instanceof Element) || typeof window === "undefined") return false;
+  let current = target;
+  while (current && current !== document.body) {
+    const style = window.getComputedStyle(current);
+    const overflowX = String(style?.overflowX || "").toLowerCase();
+    const canScrollX = (overflowX === "auto" || overflowX === "scroll") && current.scrollWidth - current.clientWidth > 6;
+    if (canScrollX) {
+      if (deltaX < 0 && current.scrollLeft + current.clientWidth < current.scrollWidth - 4) return true;
+      if (deltaX > 0 && current.scrollLeft > 4) return true;
+    }
+    current = current.parentElement;
+  }
+  return false;
+};
+
 function PublicOnlyRoute({ children }) {
   if (!isAuthenticated()) return children;
   return <Navigate to={getUserRole() === "ADMIN" ? "/admin/dashboard" : "/feed"} replace />;
@@ -67,6 +106,7 @@ function PublicOnlyRoute({ children }) {
 
 function AppRoutes() {
   const location = useLocation();
+  const navigate = useNavigate();
   const authed = isAuthenticated();
   const isAuthScreen =
     location.pathname === "/login" ||
@@ -75,7 +115,16 @@ function AppRoutes() {
   const isReelsRoute = location.pathname === "/reels";
   const isChatRoute = location.pathname === "/chat" || location.pathname.startsWith("/chat/");
   const isChatConversationRoute = location.pathname.startsWith("/chat/");
-  const showUserNavbar = authed && !location.pathname.startsWith("/admin") && !isAuthScreen && !isChatConversationRoute;
+  const shouldMountUserNavbar = authed && !location.pathname.startsWith("/admin") && !isAuthScreen;
+  const showUserNavbar = shouldMountUserNavbar;
+  const appMainRef = useRef(null);
+  const swipeStateRef = useRef({
+    active: false,
+    startX: 0,
+    startY: 0,
+    startAt: 0,
+    target: null
+  });
 
   useEffect(() => {
     const handleVideoPlay = (event) => {
@@ -198,10 +247,87 @@ function AppRoutes() {
     };
   }, [authed, isAuthScreen]);
 
+  useEffect(() => {
+    if (!authed || !showUserNavbar) return undefined;
+    const hasTouchSupport =
+      typeof window !== "undefined" &&
+      ("ontouchstart" in window || Number(navigator.maxTouchPoints || 0) > 0);
+    if (!hasTouchSupport) return undefined;
+
+    const tabIndex = getSwipeTabIndex(location.pathname);
+    if (tabIndex < 0) return undefined;
+
+    const node = appMainRef.current;
+    if (!node) return undefined;
+
+    const onTouchStart = (event) => {
+      if (!event.touches || event.touches.length !== 1) {
+        swipeStateRef.current.active = false;
+        return;
+      }
+      const target = event.target;
+      if (shouldIgnoreSwipeTarget(target)) {
+        swipeStateRef.current.active = false;
+        return;
+      }
+      const touch = event.touches[0];
+      swipeStateRef.current = {
+        active: true,
+        startX: touch.clientX,
+        startY: touch.clientY,
+        startAt: Date.now(),
+        target
+      };
+    };
+
+    const onTouchCancel = () => {
+      swipeStateRef.current.active = false;
+    };
+
+    const onTouchEnd = (event) => {
+      const state = swipeStateRef.current;
+      swipeStateRef.current.active = false;
+      if (!state.active) return;
+      const touch = event.changedTouches?.[0];
+      if (!touch) return;
+
+      const deltaX = touch.clientX - state.startX;
+      const deltaY = touch.clientY - state.startY;
+      const absX = Math.abs(deltaX);
+      const absY = Math.abs(deltaY);
+      const duration = Date.now() - state.startAt;
+
+      if (duration > SWIPE_MAX_DURATION_MS) return;
+      if (absX < SWIPE_MIN_DISTANCE_PX) return;
+      if (absX < absY * SWIPE_DOMINANCE_RATIO) return;
+      if (canAncestorHandleHorizontalSwipe(state.target, deltaX)) return;
+
+      const direction = deltaX < 0 ? 1 : -1;
+      const currentIndex = getSwipeTabIndex(location.pathname);
+      if (currentIndex < 0) return;
+      const nextIndex = currentIndex + direction;
+      if (nextIndex < 0 || nextIndex >= SWIPE_TABS.length) return;
+      const nextPath = SWIPE_TABS[nextIndex]?.path;
+      if (!nextPath || nextPath === location.pathname) return;
+      navigate(nextPath);
+    };
+
+    node.addEventListener("touchstart", onTouchStart, { passive: true });
+    node.addEventListener("touchend", onTouchEnd, { passive: true });
+    node.addEventListener("touchcancel", onTouchCancel, { passive: true });
+
+    return () => {
+      node.removeEventListener("touchstart", onTouchStart);
+      node.removeEventListener("touchend", onTouchEnd);
+      node.removeEventListener("touchcancel", onTouchCancel);
+    };
+  }, [authed, showUserNavbar, location.pathname, navigate]);
+
   return (
     <>
-      {showUserNavbar && <Navbar />}
+      {shouldMountUserNavbar && <Navbar />}
       <main
+        ref={appMainRef}
         className={`app-main ${showUserNavbar ? "with-user-nav" : ""} ${isChatRoute ? "chat-main-route" : ""} ${
           isChatConversationRoute ? "chat-conversation-route" : ""
         } ${isReelsRoute ? "reels-main-route" : ""} ${
@@ -291,3 +417,4 @@ export default function App() {
     </BrowserRouter>
   );
 }
+

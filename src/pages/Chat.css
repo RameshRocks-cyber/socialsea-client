@@ -285,6 +285,18 @@
   font-size: 1rem;
 }
 
+.chat-story-viewer-audio-toggle {
+  justify-self: start;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(20, 20, 20, 0.9);
+  color: #f3f7ff;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
 .chat-story-viewer-media {
   width: 100%;
   aspect-ratio: 9 / 16;
