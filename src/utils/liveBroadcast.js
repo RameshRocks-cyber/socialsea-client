@@ -2,8 +2,10 @@ import api from "../api/axios";
 
 export const LIVE_BROADCAST_KEY = "socialsea_live_broadcast_v1";
 const LIVE_BROADCAST_API = "/api/live-broadcast";
+const LIVE_BROADCAST_DISABLE_MS = 5 * 60 * 1000;
 let pollTimer = 0;
 let pollSubscribers = 0;
+let liveBroadcastDisabledUntil = 0;
 
 const parsePayload = (raw) => {
   if (!raw) return null;
@@ -49,6 +51,7 @@ export const writeLiveBroadcast = (payload) => {
   }
   return api.post(`${LIVE_BROADCAST_API}/start`, payload || {})
     .then((res) => {
+      liveBroadcastDisabledUntil = 0;
       const serverPayload = normalizePayload(res?.data);
       if (serverPayload) writeLocal(serverPayload);
       return true;
@@ -65,12 +68,18 @@ export const clearLiveBroadcast = () => {
 
 export const fetchLiveBroadcast = async () => {
   if (typeof window === "undefined") return null;
+  if (liveBroadcastDisabledUntil && Date.now() < liveBroadcastDisabledUntil) {
+    return readLiveBroadcast();
+  }
   try {
     const res = await api.get(`${LIVE_BROADCAST_API}/active`, { skipAuth: true, suppressAuthRedirect: true });
     const normalized = normalizePayload(res?.data);
     writeLocal(normalized);
     return normalized;
-  } catch {
+  } catch (err) {
+    if (err?.response?.status === 404) {
+      liveBroadcastDisabledUntil = Date.now() + LIVE_BROADCAST_DISABLE_MS;
+    }
     return readLiveBroadcast();
   }
 };

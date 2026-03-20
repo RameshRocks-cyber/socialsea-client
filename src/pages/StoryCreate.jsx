@@ -138,7 +138,7 @@ export default function StoryCreate() {
         })
       );
 
-      const res = await api.post("/api/posts/upload", form, {
+      const res = await api.post("/api/stories/upload", form, {
         headers: { "Content-Type": "multipart/form-data" }
       });
 

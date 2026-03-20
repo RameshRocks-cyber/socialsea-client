@@ -121,9 +121,11 @@ export default function AnonymousFeed() {
       setError("");
 
       const plans = [
-        { url: "/api/feed/anonymous", filter: (list) => list },
-        { url: "/api/anonymous/feed", filter: (list) => list },
-        { url: "/api/feed", filter: (list) => list.filter(isAnonymousItem) },
+        { url: "/api/anonymous/feed", filter: (list) => list, allowEmpty: true },
+        { url: "/api/feed/anonymous", filter: (list) => list, allowEmpty: true },
+        { url: "/anonymous/feed", filter: (list) => list, allowEmpty: true },
+        // Fallback: filter anonymous items from full feed (only accept if non-empty)
+        { url: "/api/feed", filter: (list) => list.filter(isAnonymousItem), allowEmpty: false },
       ];
       const baseCandidates = buildBaseCandidates();
 
@@ -143,11 +145,13 @@ export default function AnonymousFeed() {
             if (looksLikeHtml(res?.data)) continue;
             const list = toList(res?.data).map(normalizeItem);
             const nextItems = plan.filter(list);
-            setItems(nextItems);
-            writeCachedItems(nextItems);
-            setError("");
-            loaded = true;
-            break;
+            if (nextItems.length > 0 || plan.allowEmpty) {
+              setItems(nextItems);
+              writeCachedItems(nextItems);
+              setError("");
+              loaded = true;
+              break;
+            }
           } catch (err) {
             lastErr = err;
           }

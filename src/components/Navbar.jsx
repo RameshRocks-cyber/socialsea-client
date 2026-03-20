@@ -89,6 +89,25 @@ const ALLOWED_EMERGENCY_HOSTS = (() => {
   );
 })();
 
+const ENV_EMERGENCY_HOSTS = (() => {
+  const candidates = [
+    import.meta.env.VITE_DEV_PROXY_TARGET,
+    import.meta.env.VITE_API_URL,
+    import.meta.env.VITE_API_BASE_URL
+  ];
+  const toHost = (value) => {
+    const raw = String(value || "").trim();
+    if (!raw || raw.startsWith("/")) return "";
+    const withScheme = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    try {
+      return new URL(withScheme).hostname.toLowerCase();
+    } catch {
+      return "";
+    }
+  };
+  return new Set(candidates.map(toHost).filter(Boolean));
+})();
+
 const allowLocalEmergencyHosts =
   typeof window !== "undefined" &&
   ["localhost", "127.0.0.1"].includes(String(window.location.hostname || "").toLowerCase());
@@ -107,7 +126,14 @@ const normalizeEmergencyBase = (rawBase) => {
   if (!/^https?:\/\//i.test(value)) return "";
   try {
     const host = new URL(value).hostname.toLowerCase();
-    if (BAD_EMERGENCY_HOSTS.has(host) && !allowLocalEmergencyHosts && !isEmergencyHostAllowed(host)) return "";
+    if (
+      BAD_EMERGENCY_HOSTS.has(host) &&
+      !allowLocalEmergencyHosts &&
+      !isEmergencyHostAllowed(host) &&
+      !ENV_EMERGENCY_HOSTS.has(host)
+    ) {
+      return "";
+    }
   } catch {
     return "";
   }

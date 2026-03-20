@@ -54,6 +54,51 @@
   font-weight: 700;
 }
 
+.sos-debug {
+  margin-bottom: 12px;
+  border: 1px dashed rgba(120, 174, 255, 0.45);
+  background: rgba(9, 20, 44, 0.6);
+  border-radius: 12px;
+  padding: 8px 10px;
+  font-size: 0.85rem;
+}
+
+.sos-debug-title {
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.sos-debug-meta {
+  color: #a9c7f1;
+  margin-bottom: 6px;
+}
+
+.sos-debug-list {
+  display: grid;
+  gap: 4px;
+}
+
+.sos-debug-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(90, 120, 170, 0.2);
+}
+
+.sos-debug-item:last-child {
+  border-bottom: none;
+}
+
+.sos-debug-item.stale .sos-debug-age {
+  color: #f2b26b;
+}
+
+.sos-debug-empty {
+  color: #a9c7f1;
+}
+
 .sos-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

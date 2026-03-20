@@ -53,6 +53,8 @@ const CALL_REFRESH_GRACE_KEY = "socialsea_call_refresh_grace_v1";
 const CHAT_ONLINE_WINDOW_MS = 600000;
 const CHAT_PRESENCE_HOLD_MS = 90000;
 const CHAT_CONVO_POLL_MS = 8000;
+const CHAT_REMOTE_DISABLE_MS = 5 * 60 * 1000;
+const STORY_FEED_DISABLE_MS = 5 * 60 * 1000;
 const LIVEKIT_URL = import.meta.env.VITE_LIVEKIT_URL || "";
 const RTC_CONFIG = {
   iceServers: [
@@ -78,6 +80,10 @@ const SIGN_VOICE_GENDERS = ["female", "male"];
 const SIGN_LOCAL_TF_SCRIPT = "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js";
 const SIGN_LOCAL_HANDPOSE_SCRIPT =
   "https://cdn.jsdelivr.net/npm/@tensorflow-models/handpose@0.0.7/dist/handpose.min.js";
+const SIGN_LIVE_DEBOUNCE_MS = 2200;
+const SIGN_LIVE_MAX_BUFFER_CHARS = 320;
+const SIGN_LIVE_CONTINUOUS_COOLDOWN_MS = 1400;
+const SIGN_SEQUENCE_FRAME_WINDOW = 18;
 const BASE_SPEECH_LANG_OPTIONS = [
   "en-IN", "en-US", "en-GB", "en-AU",
   "te-IN", "hi-IN", "ta-IN", "kn-IN", "ml-IN", "mr-IN", "bn-IN", "gu-IN", "pa-IN", "ur-IN", "or-IN",
@@ -225,6 +231,7 @@ const inferLocalSignText = (landmarks) => {
   const handSize = Math.hypot(middleMcp[0] - wrist[0], middleMcp[1] - wrist[1]) || 1;
   const extMargin = handSize * 0.1;
   const foldMargin = handSize * 0.03;
+  const distance = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
   const isUp = (tip, pip) => tip[1] < pip[1] - extMargin;
   const isFolded = (tip, pip, mcp) => tip[1] >= pip[1] - foldMargin || tip[1] > mcp[1] + foldMargin;
 
@@ -239,6 +246,8 @@ const inferLocalSignText = (landmarks) => {
   const pinkyFolded = isFolded(pinkyTip, pinkyPip, pinkyMcp);
 
   const thumbRaised = thumbTip[1] < thumbIp[1] && thumbTip[1] < wrist[1] - handSize * 0.1;
+  const thumbDown = thumbTip[1] > thumbIp[1] + handSize * 0.05 && thumbTip[1] > wrist[1] + handSize * 0.1;
+  const thumbIndexPinch = distance(thumbTip, indexTip) < handSize * 0.25;
 
   const isolatedIndexUp = indexUp && middleFolded && ringFolded && pinkyFolded;
   const isolatedIndexDown = indexDown && middleFolded && ringFolded && pinkyFolded;
@@ -246,11 +255,21 @@ const inferLocalSignText = (landmarks) => {
   const openPalm = indexUp && middleUp && ringUp && pinkyUp;
   const fist = !indexUp && middleFolded && ringFolded && pinkyFolded;
   const thumbsUp = thumbRaised && !indexUp && middleFolded && ringFolded && pinkyFolded;
+  const thumbsDown = thumbDown && !indexUp && middleFolded && ringFolded && pinkyFolded;
+  const callMe = thumbRaised && pinkyUp && middleFolded && ringFolded && !indexUp;
+  const iLoveYou = thumbRaised && indexUp && pinkyUp && middleFolded && ringFolded;
+  const okSign = thumbIndexPinch && middleUp && ringUp && pinkyUp;
+  const threeUp = indexUp && middleUp && ringUp && !pinkyUp;
 
   if (isolatedIndexUp) return "I need help.";
   if (isolatedIndexDown) return "I am okay.";
+  if (callMe) return "Call me.";
+  if (iLoveYou) return "I love you.";
+  if (okSign) return "Okay.";
   if (thumbsUp) return "Okay, understood.";
+  if (thumbsDown) return "Not okay.";
   if (victory) return "Yes.";
+  if (threeUp) return "I am coming.";
   if (fist) return "No.";
   if (openPalm) return "Please wait.";
   return "";
@@ -415,6 +434,15 @@ export default function Chat() {
     safeSetItem(STORY_STORAGE_KEY, JSON.stringify(list));
   };
 
+  const isStoryFeedDisabled = () => {
+    const until = Number(storyFeedDisabledUntilRef.current || 0);
+    return until && Date.now() < until;
+  };
+
+  const disableStoryFeedTemporarily = () => {
+    storyFeedDisabledUntilRef.current = Date.now() + STORY_FEED_DISABLE_MS;
+  };
+
   const readDiscoveryCache = () => {
     try {
       const raw = safeGetItem(CHAT_DISCOVERY_CACHE_KEY);
@@ -437,17 +465,60 @@ export default function Chat() {
     }
   };
 
+  const isChatApiDisabled = () => {
+    const until = Number(chatApiDisabledUntilRef.current || 0);
+    return until && Date.now() < until;
+  };
+
+  const disableChatApiTemporarily = () => {
+    chatApiDisabledUntilRef.current = Date.now() + CHAT_REMOTE_DISABLE_MS;
+  };
+
   const fetchStoryFeed = async () => {
-    try {
-      const res = await api.get("/api/stories/feed");
-      const list = normalizeStoryList(Array.isArray(res?.data) ? res.data : []);
-      if (list.length) {
-        setStoryItems(list);
-        writeStoryCache(list);
-        return;
+    if (isStoryFeedDisabled()) {
+      setStoryItems(normalizeStoryList(readStoryCache()));
+      return;
+    }
+    const baseCandidates = Array.from(
+      new Set(
+        [
+          String(api?.defaults?.baseURL || "").replace(/\/+$/, ""),
+          getApiBaseUrl(),
+          import.meta.env?.VITE_API_BASE_URL,
+          import.meta.env?.VITE_API_URL,
+          typeof window !== "undefined" ? window.location.origin : "",
+          "https://api.socialsea.co.in",
+          "https://socialsea.co.in"
+        ]
+          .map((value) => String(value || "").trim().replace(/\/+$/, ""))
+          .filter(Boolean)
+      )
+    );
+    const endpoints = ["/api/stories/feed", "/stories/feed"];
+    let sawMissing = false;
+    for (const base of baseCandidates) {
+      for (const endpoint of endpoints) {
+        try {
+          const res = await api.get(endpoint, {
+            baseURL: base,
+            timeout: 9000,
+            suppressAuthRedirect: true
+          });
+          const list = normalizeStoryList(Array.isArray(res?.data) ? res.data : []);
+          if (list.length) {
+            setStoryItems(list);
+            writeStoryCache(list);
+            return;
+          }
+        } catch (err) {
+          const status = err?.response?.status;
+          if (status === 404) sawMissing = true;
+          // try next candidate
+        }
       }
-    } catch {
-      // keep fallback below
+    }
+    if (sawMissing) {
+      disableStoryFeedTemporarily();
     }
     setStoryItems(normalizeStoryList(readStoryCache()));
   };
@@ -592,6 +663,7 @@ export default function Chat() {
   });
   const [storyItems, setStoryItems] = useState(() => normalizeStoryList(readStoryCache()));
   const [storyViewerIndex, setStoryViewerIndex] = useState(null);
+  const activeStory = storyViewerIndex != null ? storyItems[storyViewerIndex] : null;
   const [storyViewerSrc, setStoryViewerSrc] = useState("");
   const [storyViewerMuted, setStoryViewerMuted] = useState(true);
   const [storyViewerLoading, setStoryViewerLoading] = useState(false);
@@ -620,7 +692,8 @@ export default function Chat() {
   const [signAssistEnabled, setSignAssistEnabled] = useState(false);
   const [signAssistText, setSignAssistText] = useState("");
   const [signAssistVoiceGender, setSignAssistVoiceGender] = useState("female");
-  const [signAssistAutoSpeak, setSignAssistAutoSpeak] = useState(false);
+  const [signAssistAutoSpeak, setSignAssistAutoSpeak] = useState(true);
+  const [signAssistContinuousMode, setSignAssistContinuousMode] = useState(false);
   const [signAssistBusy, setSignAssistBusy] = useState(false);
   const [signAssistStatus, setSignAssistStatus] = useState("");
   const [blockedUsers, setBlockedUsers] = useState(() => {
@@ -717,6 +790,8 @@ export default function Chat() {
   const storyViewerCandidateIndexRef = useRef(0);
   const storyViewerBlobUrlRef = useRef("");
   const storyViewerLoadTimeoutRef = useRef(null);
+  const storyFeedDisabledUntilRef = useRef(0);
+  const chatApiDisabledUntilRef = useRef(0);
   const seenSignalsRef = useRef(new Set());
   const longPressTimerRef = useRef(null);
   const touchStartPointRef = useRef({ x: 0, y: 0 });
@@ -757,6 +832,20 @@ export default function Chat() {
   const signLocalModelLoadingRef = useRef(null);
   const signLivePollTimerRef = useRef(null);
   const signLastDetectedTextRef = useRef("");
+  const signLastDetectedAtRef = useRef(0);
+  const signLiveBufferRef = useRef({
+    parts: [],
+    lastDetected: "",
+    lastAt: 0,
+    flushTimer: null,
+    lastSent: "",
+    lastContinuousText: "",
+    lastContinuousAt: 0
+  });
+  const signAssistSendingRef = useRef(false);
+  const signSequenceFramesRef = useRef([]);
+  const signSequenceModelRef = useRef(null);
+  const signSequenceModelLoadingRef = useRef(null);
   const chatServerBaseRef = useRef(String(safeGetItem(CHAT_SERVER_BASE_KEY) || "").trim());
   const resolvingContactProfilesRef = useRef(new Set());
   const convoLoadingRef = useRef(false);
@@ -1651,6 +1740,20 @@ export default function Chat() {
       createdAt: normalizeTimestamp(rawTime),
       mine
     };
+  };
+
+  const messageFingerprint = (message) => {
+    if (!message) return "";
+    const sender = String(message?.senderId || "");
+    const receiver = String(message?.receiverId || "");
+    const text = String(message?.text || "").trim();
+    const mediaUrl = String(message?.mediaUrl || message?.audioUrl || "").trim();
+    const mediaType = String(message?.mediaType || (message?.audioUrl ? "audio" : "")).trim();
+    const createdAt = toEpochMs(message?.createdAt || 0);
+    if (!sender && !receiver && !text && !mediaUrl) return "";
+    const bucketMs = 4000;
+    const bucket = createdAt ? Math.round(createdAt / bucketMs) : 0;
+    return `${sender}|${receiver}|${text}|${mediaType}|${mediaUrl}|${bucket}`;
   };
 
   const scrollThreadToBottom = (behavior = "auto") => {
@@ -3570,7 +3673,12 @@ export default function Chat() {
 
     setMessagesByContact((prev) => {
       const existing = Array.isArray(prev[contactIdForThread]) ? prev[contactIdForThread] : [];
-      const exists = existing.some((m) => String(m?.id || "") === String(nextMessage.id));
+      const nextSig = messageFingerprint(nextMessage);
+      const exists = existing.some((m) => {
+        if (String(m?.id || "") === String(nextMessage.id)) return true;
+        if (nextSig && messageFingerprint(m) === nextSig) return true;
+        return false;
+      });
       if (exists) return prev;
       return { ...prev, [contactIdForThread]: [...existing, nextMessage] };
     });
@@ -4250,6 +4358,15 @@ export default function Chat() {
           discoveryHydratedRef.current = true;
         }
       }
+      if (isChatApiDisabled()) {
+        const fromLocalDisabled = extractContactsFromLocalHistory();
+        if (fromLocalDisabled.length) {
+          setContacts((prev) => mergeContacts(prev, fromLocalDisabled));
+        }
+        setChatFallbackMode(true);
+        finalize();
+        return;
+      }
       const res = await requestChatArray({
         endpoints: [
           "/api/chat/contacts",
@@ -4283,6 +4400,7 @@ export default function Chat() {
     } catch (err) {
       const status = err?.response?.status;
       if (status === 404) {
+        disableChatApiTemporarily();
         const fromLocal = extractContactsFromLocalHistory();
         if (fromLocal.length) {
           list = fromLocal;
@@ -4502,6 +4620,10 @@ export default function Chat() {
       localFallbackList = list;
       setMessagesByContact((prev) => ({ ...prev, [String(otherId)]: list }));
     }
+    if (isChatApiDisabled()) {
+      setChatFallbackMode(true);
+      return;
+    }
     try {
       const res = await requestChatArray({
         endpoints: [
@@ -4548,14 +4670,12 @@ export default function Chat() {
           return { ...m, createdAt: old.createdAt };
         });
         const pendingLocalMedia = oldList.filter((m) => String(m?.id || "").startsWith("local_media_"));
-        const serverSignatureSet = new Set(
-          stableList.map((m) => `${m?.id || ""}_${m?.createdAt || ""}_${m?.text || ""}`)
-        );
+        const serverSignatureSet = new Set(stableList.map((m) => messageFingerprint(m)).filter(Boolean));
         const serverIdSet = new Set(stableList.map((m) => String(m?.id || "")));
         const pendingLocalText = oldList.filter((m) => {
           if (!m?.mine) return false;
-          const sig = `${m?.id || ""}_${m?.createdAt || ""}_${m?.text || ""}`;
-          if (serverSignatureSet.has(sig)) return false;
+          const sig = messageFingerprint(m);
+          if (sig && serverSignatureSet.has(sig)) return false;
           const createdAt = new Date(normalizeTimestamp(m?.createdAt || 0)).getTime();
           if (!Number.isFinite(createdAt)) return false;
           return Date.now() - createdAt < 5 * 60 * 1000;
@@ -4564,6 +4684,8 @@ export default function Chat() {
           const id = String(m?.id || "");
           if (!id || serverIdSet.has(id)) return false;
           if (deleteTargets.has(id)) return false;
+          const sig = messageFingerprint(m);
+          if (sig && serverSignatureSet.has(sig)) return false;
           const createdAt = new Date(normalizeTimestamp(m?.createdAt || 0)).getTime();
           if (!Number.isFinite(createdAt)) return false;
           return Date.now() - createdAt < 10 * 60 * 1000;
@@ -4605,6 +4727,7 @@ export default function Chat() {
     } catch (err) {
       const status = Number(err?.response?.status || 0);
       if (status === 404) {
+        disableChatApiTemporarily();
         setChatFallbackMode(true);
         if (!localFallbackList) {
           const all = readLocalChat();
@@ -5047,9 +5170,10 @@ export default function Chat() {
         const origin = typeof window !== "undefined" ? String(window.location.origin || "") : "";
         const base = rawBase && rawBase.startsWith("/") ? `${origin}${rawBase}` : String(rawBase || "");
         if (!base) return;
+        const wsBase = base.replace(/\/api\/?$/, "") || base;
 
         const client = new Client({
-          webSocketFactory: () => new SockJS(`${base}/ws?token=${encodeURIComponent(token)}`),
+          webSocketFactory: () => new SockJS(`${wsBase}/ws?token=${encodeURIComponent(token)}`),
           reconnectDelay: 3000,
           debug: () => {}
         });
@@ -5505,6 +5629,8 @@ export default function Chat() {
     const relPath = value.startsWith("/") ? value : `/${value.replace(/^\/+/, "")}`;
     const relPathNoApi = relPath.replace(/^\/api(?=\/|$)/i, "") || relPath;
     const devProxyBase = normalizeBase(import.meta.env?.VITE_DEV_PROXY_TARGET);
+    const apiFallbackBase = normalizeBase(import.meta.env?.VITE_API_FALLBACK || "https://api.socialsea.co.in");
+    const uploadApiPath = relPath.startsWith("/uploads/") ? `/api${relPath}` : "";
     const stripApiPath = (base) => {
       const normalized = normalizeBase(base);
       if (!normalized) return "";
@@ -5543,15 +5669,26 @@ export default function Chat() {
       }
       if (apiBase) addBase(apiBase, relPath);
       if (devProxyBase) addBase(devProxyBase, relPath);
+      if (apiFallbackBase) addBase(apiFallbackBase, relPath);
       const apiBaseNoPath = stripApiPath(apiBase);
       if (apiBaseNoPath) addBase(apiBaseNoPath, relPath);
       const apiBaseNoSub = stripApiSubdomain(apiBase);
       if (apiBaseNoSub) addBase(apiBaseNoSub, relPath);
+      if (uploadApiPath) {
+        add(uploadApiPath);
+        if (typeof window !== "undefined") add(`${window.location.origin}${uploadApiPath}`);
+        if (apiBase) addBase(apiBase, uploadApiPath);
+        if (devProxyBase) addBase(devProxyBase, uploadApiPath);
+        if (apiFallbackBase) addBase(apiFallbackBase, uploadApiPath);
+        if (apiBaseNoPath) addBase(apiBaseNoPath, uploadApiPath);
+        if (apiBaseNoSub) addBase(apiBaseNoSub, uploadApiPath);
+      }
       if (relPathNoApi !== relPath) {
         add(relPathNoApi);
         if (typeof window !== "undefined") add(`${window.location.origin}${relPathNoApi}`);
         if (devProxyBase) addBase(devProxyBase, relPathNoApi);
         if (apiBase) addBase(apiBase, relPathNoApi);
+        if (apiFallbackBase) addBase(apiFallbackBase, relPathNoApi);
         if (apiBaseNoPath) addBase(apiBaseNoPath, relPathNoApi);
         if (apiBaseNoSub) addBase(apiBaseNoSub, relPathNoApi);
       }
@@ -5565,6 +5702,7 @@ export default function Chat() {
         if (typeof window !== "undefined") add(`${window.location.origin}${pathWithQuery}`);
         if (apiBase) addBase(apiBase, pathWithQuery);
         if (devProxyBase) addBase(devProxyBase, pathWithQuery);
+        if (apiFallbackBase) addBase(apiFallbackBase, pathWithQuery);
         const apiBaseNoPath = stripApiPath(apiBase);
         if (apiBaseNoPath) addBase(apiBaseNoPath, pathWithQuery);
         const apiBaseNoSub = stripApiSubdomain(apiBase);
@@ -5575,8 +5713,19 @@ export default function Chat() {
           if (typeof window !== "undefined") add(`${window.location.origin}${trimmedPath}`);
           if (devProxyBase) addBase(devProxyBase, trimmedPath);
           if (apiBase) addBase(apiBase, trimmedPath);
+          if (apiFallbackBase) addBase(apiFallbackBase, trimmedPath);
           if (apiBaseNoPath) addBase(apiBaseNoPath, trimmedPath);
           if (apiBaseNoSub) addBase(apiBaseNoSub, trimmedPath);
+        }
+        if (pathWithQuery.startsWith("/uploads/")) {
+          const apiPath = `/api${pathWithQuery}`;
+          add(apiPath);
+          if (typeof window !== "undefined") add(`${window.location.origin}${apiPath}`);
+          if (devProxyBase) addBase(devProxyBase, apiPath);
+          if (apiBase) addBase(apiBase, apiPath);
+          if (apiFallbackBase) addBase(apiFallbackBase, apiPath);
+          if (apiBaseNoPath) addBase(apiBaseNoPath, apiPath);
+          if (apiBaseNoSub) addBase(apiBaseNoSub, apiPath);
         }
       }
     } catch {
@@ -5584,58 +5733,6 @@ export default function Chat() {
     }
     return collected;
   }, []);
-
-  const loadStoryViewerBlobFallback = useCallback(async () => {
-    const candidates = Array.isArray(storyViewerCandidatesRef.current) ? storyViewerCandidatesRef.current : [];
-    for (const candidate of candidates) {
-      if (!candidate || /^blob:/i.test(candidate) || /^data:/i.test(candidate)) continue;
-      try {
-        const res = await api.request({
-          method: "GET",
-          url: candidate,
-          responseType: "blob",
-          timeout: 20000,
-          suppressAuthRedirect: true,
-        });
-        const blob = res?.data;
-        if (!(blob instanceof Blob) || blob.size <= 0) continue;
-        const blobType = String(blob.type || "").toLowerCase();
-        if (blobType.includes("text/html") || blobType.includes("application/json")) continue;
-        revokeStoryViewerBlobUrl();
-        const blobUrl = URL.createObjectURL(blob);
-        storyViewerBlobUrlRef.current = blobUrl;
-        setStoryViewerSrc(blobUrl);
-        setStoryViewerBlobType(blobType);
-        if (blobType.startsWith("video/")) {
-          setStoryViewerMediaKind("video");
-        } else if (blobType.startsWith("image/")) {
-          setStoryViewerMediaKind("image");
-        }
-        setStoryViewerLoadError("");
-        return true;
-      } catch {
-        // try next candidate
-      }
-    }
-    return false;
-  }, [revokeStoryViewerBlobUrl]);
-
-  const handleStoryViewerMediaError = useCallback(() => {
-    const candidates = Array.isArray(storyViewerCandidatesRef.current) ? storyViewerCandidatesRef.current : [];
-    const nextIndex = Number(storyViewerCandidateIndexRef.current || 0) + 1;
-    if (nextIndex < candidates.length) {
-      storyViewerCandidateIndexRef.current = nextIndex;
-      setStoryViewerSrc(String(candidates[nextIndex] || ""));
-      return;
-    }
-    setStoryViewerLoading(true);
-    void loadStoryViewerBlobFallback().then((ok) => {
-      if (!ok) {
-        setStoryViewerLoadError("Could not load this story media.");
-      }
-      setStoryViewerLoading(false);
-    });
-  }, [loadStoryViewerBlobFallback]);
 
   const isStoryVideo = (url) =>
     /\.(mp4|mov|webm|mkv|m4v|avi|mpg|mpeg|3gp|ogv|m3u8|mpd)(\?|#|$)/i.test(String(url || ""));
@@ -5679,7 +5776,97 @@ export default function Chat() {
     return isStoryVideo(url) ? "video" : "";
   };
 
-  const activeStory = storyViewerIndex != null ? storyItems[storyViewerIndex] : null;
+  const fetchStoryBlob = useCallback(async (url, withAuth) => {
+    try {
+      const headers = {};
+      if (withAuth) {
+        const token = getStoredToken();
+        if (token) headers.Authorization = `Bearer ${String(token).trim()}`;
+      }
+      const res = await fetch(url, {
+        method: "GET",
+        headers,
+        credentials: "omit",
+      });
+      if (!res.ok) return { ok: false, status: res.status, threw: false };
+      const blob = await res.blob();
+      if (!(blob instanceof Blob) || blob.size <= 0) return { ok: false, status: res.status, threw: false };
+      return { ok: true, blob, status: res.status, threw: false };
+    } catch (error) {
+      return { ok: false, error, threw: true };
+    }
+  }, []);
+
+  const loadStoryViewerCandidate = useCallback(async (startIndex = 0) => {
+    const candidates = Array.isArray(storyViewerCandidatesRef.current) ? storyViewerCandidatesRef.current : [];
+    if (!candidates.length) {
+      setStoryViewerLoadError("Story media not available");
+      setStoryViewerLoading(false);
+      return false;
+    }
+    const story = storyViewerIndex != null ? storyItems[storyViewerIndex] : null;
+    setStoryViewerLoading(true);
+    setStoryViewerLoadError("");
+    for (let i = startIndex; i < candidates.length; i += 1) {
+      const candidate = String(candidates[i] || "").trim();
+      if (!candidate) continue;
+      storyViewerCandidateIndexRef.current = i;
+      clearStoryViewerLoadTimer();
+      revokeStoryViewerBlobUrl();
+
+      if (/^(blob:|data:)/i.test(candidate)) {
+        setStoryViewerSrc(candidate);
+        setStoryViewerLoading(false);
+        return true;
+      }
+
+      const inferredKind = inferStoryMediaKind(story, candidate, "");
+      if (inferredKind) setStoryViewerMediaKind(inferredKind);
+      setStoryViewerBlobType("");
+
+      // Prefer direct playback (enables range/streaming). Blob fallback happens later if needed.
+      setStoryViewerSrc(candidate);
+      return true;
+    }
+    setStoryViewerLoadError("Could not load this story media.");
+    setStoryViewerLoading(false);
+    return false;
+  }, [clearStoryViewerLoadTimer, fetchStoryBlob, revokeStoryViewerBlobUrl, storyItems, storyViewerIndex]);
+
+  const tryBlobForStoryCandidate = useCallback(async (index) => {
+    const candidates = Array.isArray(storyViewerCandidatesRef.current) ? storyViewerCandidatesRef.current : [];
+    const candidate = String(candidates[index] || "").trim();
+    if (!candidate || /^(blob:|data:)/i.test(candidate)) return false;
+    let result = await fetchStoryBlob(candidate, false);
+    if (!result.ok && (result.status === 401 || result.status === 403)) {
+      result = await fetchStoryBlob(candidate, true);
+    }
+    if (!result.ok) return false;
+    const blobType = String(result.blob?.type || "").toLowerCase();
+    if (blobType.includes("text/html") || blobType.includes("application/json")) return false;
+    const blobUrl = URL.createObjectURL(result.blob);
+    storyViewerBlobUrlRef.current = blobUrl;
+    setStoryViewerSrc(blobUrl);
+    setStoryViewerBlobType(blobType);
+    if (blobType.startsWith("video/")) {
+      setStoryViewerMediaKind("video");
+    } else if (blobType.startsWith("image/")) {
+      setStoryViewerMediaKind("image");
+    }
+    return true;
+  }, [fetchStoryBlob]);
+
+  const handleStoryViewerMediaError = useCallback(() => {
+    const candidates = Array.isArray(storyViewerCandidatesRef.current) ? storyViewerCandidatesRef.current : [];
+    const nextIndex = Number(storyViewerCandidateIndexRef.current || 0) + 1;
+    if (nextIndex < candidates.length) {
+      void loadStoryViewerCandidate(nextIndex);
+      return;
+    }
+    setStoryViewerLoadError("Could not load this story media.");
+    setStoryViewerLoading(false);
+  }, [loadStoryViewerCandidate]);
+
   const openStory = (idx) => {
     setStoryViewerMuted(true);
     setStoryViewerIndex(idx);
@@ -5713,7 +5900,19 @@ export default function Chat() {
       return;
     }
     const rawUrl = String(activeStory?.mediaUrl || activeStory?.url || "").trim();
-    const candidates = buildStoryMediaCandidates(rawUrl);
+    const baseCandidates = buildStoryMediaCandidates(rawUrl);
+    const candidates = Array.isArray(baseCandidates) ? baseCandidates.slice() : [];
+    const addFirst = (url) => {
+      const value = String(url || "").trim();
+      if (!value) return;
+      if (candidates.includes(value)) return;
+      candidates.unshift(value);
+    };
+    if (activeStory?.id) {
+      const proxyPath = `/api/stories/media/${activeStory.id}`;
+      addFirst(toApiUrl(proxyPath));
+      if (typeof window !== "undefined") addFirst(`${window.location.origin}${proxyPath}`);
+    }
     storyViewerCandidatesRef.current = candidates;
     storyViewerCandidateIndexRef.current = 0;
     setStoryViewerMuted(true);
@@ -5724,8 +5923,16 @@ export default function Chat() {
     setStoryViewerBlobType("");
     clearStoryViewerLoadTimer();
     revokeStoryViewerBlobUrl();
-    setStoryViewerSrc(String(candidates[0] || ""));
-  }, [activeStory, buildStoryMediaCandidates, clearStoryViewerLoadTimer, revokeStoryViewerBlobUrl, storyViewerIndex]);
+    setStoryViewerSrc("");
+    void loadStoryViewerCandidate(0);
+  }, [
+    activeStory,
+    buildStoryMediaCandidates,
+    clearStoryViewerLoadTimer,
+    revokeStoryViewerBlobUrl,
+    loadStoryViewerCandidate,
+    storyViewerIndex
+  ]);
 
   useEffect(() => {
     return () => {
@@ -5750,8 +5957,11 @@ export default function Chat() {
         setStoryViewerLoading(false);
         return;
       }
-      handleStoryViewerMediaError();
-    }, 2200);
+      const currentIndex = Number(storyViewerCandidateIndexRef.current || 0);
+      void tryBlobForStoryCandidate(currentIndex).then((ok) => {
+        if (!ok) handleStoryViewerMediaError();
+      });
+    }, 6000);
     return () => clearStoryViewerLoadTimer();
   }, [
     storyViewerSrc,
@@ -5760,7 +5970,8 @@ export default function Chat() {
     storyViewerMediaKind,
     storyViewerBlobType,
     clearStoryViewerLoadTimer,
-    handleStoryViewerMediaError
+    handleStoryViewerMediaError,
+    tryBlobForStoryCandidate
   ]);
   const deleteStoryAt = (index) => {
     setStoryItems((prev) => {
@@ -5866,6 +6077,7 @@ export default function Chat() {
       previewText = cleanText,
       onSent = null
     } = options;
+    const useFallback = chatFallbackMode || isChatApiDisabled();
 
     const emitLocalPacket = (payload) => {
       if (!payload || !myUserId || !activeContactId) return;
@@ -5895,7 +6107,7 @@ export default function Chat() {
     }
 
     try {
-      if (chatFallbackMode) {
+      if (useFallback) {
         const mine = normalizeMessage({
           id: Date.now(),
           senderId: Number(myUserId) || null,
@@ -5968,6 +6180,7 @@ export default function Chat() {
       console.error(err);
       const status = err?.response?.status;
       if (status === 404) {
+        disableChatApiTemporarily();
         setChatFallbackMode(true);
         setError("Server chat unavailable on this backend. Using local chat mode.");
       } else if (status === 401 || status === 403) {
@@ -6000,30 +6213,87 @@ export default function Chat() {
     });
   };
 
-  const sendSignAssistMessage = async () => {
-    const plainText = String(signAssistText || "").trim();
+  const sendSignAssistMessage = async ({ text = null, source = "video-call", clearAfter = true, silent = false } = {}) => {
+    const plainText = String(text ?? signAssistText ?? "").trim();
     if (!plainText) {
-      setSignAssistStatus("Type translated sign text first.");
+      if (!silent) setSignAssistStatus("Type translated sign text first.");
       return;
     }
-    const payloadText = encodeSignAssistText(plainText, signAssistVoiceGender, "video-call");
+    if (signAssistSendingRef.current) return;
+    signAssistSendingRef.current = true;
+    const payloadText = encodeSignAssistText(plainText, signAssistVoiceGender, source);
     if (!payloadText) {
-      setSignAssistStatus("Unable to prepare sign message.");
+      if (!silent) setSignAssistStatus("Unable to prepare sign message.");
+      signAssistSendingRef.current = false;
       return;
     }
 
     const ok = await sendTextPayload(payloadText, {
       previewText: `Sign: ${plainText}`,
       onSent: () => {
-        setSignAssistStatus("Sign message sent.");
-        setSignAssistText("");
+        if (!silent) setSignAssistStatus("Sign message sent.");
+        if (clearAfter) setSignAssistText("");
       }
     });
 
     if (!ok) {
-      setSignAssistStatus("Failed to send sign message.");
+      if (!silent) setSignAssistStatus("Failed to send sign message.");
+    }
+    signAssistSendingRef.current = false;
+  };
+
+  const ensureSequenceModel = useCallback(async () => {
+    const modelUrl = String(import.meta.env.VITE_SIGN_SEQUENCE_MODEL_URL || "").trim();
+    if (!modelUrl) return null;
+    if (signSequenceModelRef.current) return signSequenceModelRef.current;
+    if (!signSequenceModelLoadingRef.current) {
+      signSequenceModelLoadingRef.current = (async () => {
+        await loadExternalScript(modelUrl, "sign-sequence-model");
+        const model =
+          window?.SocialSeaSignSequenceModel ||
+          window?.SignSequenceModel ||
+          window?.signSequenceModel ||
+          null;
+        if (model?.load && !model._loaded) {
+          await model.load();
+          model._loaded = true;
+        }
+        return model;
+      })();
+    }
+    signSequenceModelRef.current = await signSequenceModelLoadingRef.current;
+    return signSequenceModelRef.current;
+  }, []);
+
+  const pushSequenceFrame = (landmarks) => {
+    if (!Array.isArray(landmarks) || !landmarks.length) return;
+    const frames = signSequenceFramesRef.current;
+    frames.push({ landmarks, at: Date.now() });
+    if (frames.length > SIGN_SEQUENCE_FRAME_WINDOW) {
+      frames.splice(0, frames.length - SIGN_SEQUENCE_FRAME_WINDOW);
     }
   };
+
+  const detectSequenceSignText = useCallback(async () => {
+    try {
+      const model = await ensureSequenceModel();
+      if (!model) return "";
+      const frames = signSequenceFramesRef.current;
+      if (frames.length < Math.min(8, SIGN_SEQUENCE_FRAME_WINDOW)) return "";
+      const payload = frames.map((f) => f.landmarks);
+      if (typeof model.predict === "function") {
+        const result = await model.predict(payload);
+        return String(result?.text || result || "").trim();
+      }
+      if (typeof model.infer === "function") {
+        const result = await model.infer(payload);
+        return String(result?.text || result || "").trim();
+      }
+      return "";
+    } catch {
+      return "";
+    }
+  }, [ensureSequenceModel]);
 
   const detectLocalSignText = useCallback(async (videoEl) => {
     if (!videoEl || !videoEl.videoWidth || !videoEl.videoHeight) return "";
@@ -6041,11 +6311,86 @@ export default function Chat() {
 
       const predictions = await signLocalModelRef.current.estimateHands(videoEl, true);
       if (!Array.isArray(predictions) || predictions.length === 0) return "";
-      return inferLocalSignText(predictions[0]?.landmarks || []);
+      const landmarks = predictions[0]?.landmarks || [];
+      pushSequenceFrame(landmarks);
+      const sequenceText = await detectSequenceSignText();
+      if (sequenceText) return sequenceText;
+      return inferLocalSignText(landmarks);
     } catch {
       return "";
     }
-  }, []);
+  }, [detectSequenceSignText]);
+
+  const resetSignLiveBuffer = () => {
+    const buffer = signLiveBufferRef.current;
+    if (buffer.flushTimer) {
+      clearTimeout(buffer.flushTimer);
+      buffer.flushTimer = null;
+    }
+    buffer.parts = [];
+    buffer.lastDetected = "";
+    buffer.lastAt = 0;
+    buffer.lastSent = "";
+    buffer.lastContinuousAt = 0;
+    buffer.lastContinuousText = "";
+    signLastDetectedAtRef.current = 0;
+    signLastDetectedTextRef.current = "";
+    signSequenceFramesRef.current = [];
+  };
+
+  const flushSignLiveBuffer = (reason = "idle") => {
+    const buffer = signLiveBufferRef.current;
+    if (!buffer.parts.length) return;
+    const message = buffer.parts.join(" ").replace(/\s+/g, " ").trim();
+    if (!message) return;
+    if (buffer.lastSent && buffer.lastSent === message) return;
+    buffer.lastSent = message;
+    buffer.parts = [];
+    setSignAssistText("");
+    setSignAssistStatus(
+      reason === "idle" ? "Sending sign message..." : "Sending sign message..."
+    );
+    void sendSignAssistMessage({ text: message, source: "live", clearAfter: true, silent: true });
+  };
+
+  const pushSignLiveBuffer = (detected) => {
+    const clean = String(detected || "").trim();
+    if (!clean) return;
+    const buffer = signLiveBufferRef.current;
+    if (buffer.lastDetected === clean) return;
+    buffer.lastDetected = clean;
+    buffer.lastAt = Date.now();
+    if (!buffer.parts.length || buffer.parts[buffer.parts.length - 1] !== clean) {
+      buffer.parts.push(clean);
+    }
+    let text = buffer.parts.join(" ").replace(/\s+/g, " ").trim();
+    while (text.length > SIGN_LIVE_MAX_BUFFER_CHARS && buffer.parts.length > 1) {
+      buffer.parts.shift();
+      text = buffer.parts.join(" ").replace(/\s+/g, " ").trim();
+    }
+    setSignAssistText(text);
+    setSignAssistStatus("Live sign detected. Auto-sending when you pause.");
+    if (buffer.flushTimer) clearTimeout(buffer.flushTimer);
+    buffer.flushTimer = setTimeout(() => {
+      buffer.flushTimer = null;
+      flushSignLiveBuffer("idle");
+    }, SIGN_LIVE_DEBOUNCE_MS);
+  };
+
+  const handleContinuousSign = (detected) => {
+    const clean = String(detected || "").trim();
+    if (!clean) return;
+    const buffer = signLiveBufferRef.current;
+    const now = Date.now();
+    if (buffer.lastContinuousText === clean && now - buffer.lastContinuousAt < SIGN_LIVE_CONTINUOUS_COOLDOWN_MS) {
+      return;
+    }
+    buffer.lastContinuousText = clean;
+    buffer.lastContinuousAt = now;
+    setSignAssistText(clean);
+    setSignAssistStatus("Sending sign message...");
+    void sendSignAssistMessage({ text: clean, source: "live-continuous", clearAfter: true, silent: true });
+  };
 
   useEffect(() => {
     if (!signAssistEnabled || callState.mode !== "video" || callState.phase === "idle") {
@@ -6053,10 +6398,12 @@ export default function Chat() {
         clearInterval(signLivePollTimerRef.current);
         signLivePollTimerRef.current = null;
       }
+      resetSignLiveBuffer();
       return;
     }
 
     signLastDetectedTextRef.current = "";
+    signLastDetectedAtRef.current = 0;
     setSignAssistStatus((prev) => prev || "Sign Assist is live. Show your hand to camera.");
 
     const tick = async () => {
@@ -6064,10 +6411,21 @@ export default function Chat() {
       const video = localVideoRef.current;
       if (!video || !video.videoWidth || !video.videoHeight) return;
       const detected = String(await detectLocalSignText(video)).trim();
-      if (!detected || detected === signLastDetectedTextRef.current) return;
+      if (!detected) return;
+      const now = Date.now();
+      if (
+        detected === signLastDetectedTextRef.current &&
+        now - signLastDetectedAtRef.current < SIGN_LIVE_CONTINUOUS_COOLDOWN_MS
+      ) {
+        return;
+      }
       signLastDetectedTextRef.current = detected;
-      setSignAssistText(detected);
-      setSignAssistStatus("Live sign detected. Review and send.");
+      signLastDetectedAtRef.current = now;
+      if (signAssistContinuousMode) {
+        handleContinuousSign(detected);
+      } else {
+        pushSignLiveBuffer(detected);
+      }
     };
 
     void tick();
@@ -6080,6 +6438,7 @@ export default function Chat() {
         clearInterval(signLivePollTimerRef.current);
         signLivePollTimerRef.current = null;
       }
+      resetSignLiveBuffer();
     };
   }, [signAssistEnabled, callState.mode, callState.phase, signAssistBusy, detectLocalSignText]);
 
@@ -6269,6 +6628,12 @@ export default function Chat() {
         // ignore speech cancel failures
       }
     }
+  };
+
+  const setContinuousModeEnabled = (nextValue) => {
+    const next = Boolean(nextValue);
+    setSignAssistContinuousMode(next);
+    resetSignLiveBuffer();
   };
 
   useEffect(() => {
@@ -6492,7 +6857,8 @@ export default function Chat() {
     shouldStickToBottomRef.current = true;
     setTimeout(() => scrollThreadToBottom("smooth"), 50);
 
-    if (chatFallbackMode) {
+    if (chatFallbackMode || isChatApiDisabled()) {
+      setChatFallbackMode(true);
       return;
     }
 
@@ -6524,7 +6890,11 @@ export default function Chat() {
       );
       shouldStickToBottomRef.current = true;
       setTimeout(() => scrollThreadToBottom("smooth"), 50);
-    } catch {
+    } catch (err) {
+      if (err?.response?.status === 404) {
+        disableChatApiTemporarily();
+        setChatFallbackMode(true);
+      }
       setError("Media upload failed on server. Preview kept locally. Restart backend with /send-media support.");
     }
   };
@@ -7941,6 +8311,14 @@ export default function Chat() {
                       onChange={(e) => setAutoSpeakEnabled(e.target.checked)}
                     />
                     Auto-speak incoming
+                  </label>
+                  <label className="wa-sign-assist-auto">
+                    <input
+                      type="checkbox"
+                      checked={signAssistContinuousMode}
+                      onChange={(e) => setContinuousModeEnabled(e.target.checked)}
+                    />
+                    Continuous mode
                   </label>
                 </div>
                 <div className="wa-sign-assist-row">

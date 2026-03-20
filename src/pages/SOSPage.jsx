@@ -2,6 +2,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import api from "../api/axios";
 import { getApiBaseUrl } from "../api/baseUrl";
+import {
+  buildIdbMediaRef,
+  deleteRecordingBlob,
+  parseIdbMediaRef,
+  saveRecordingBlob
+} from "../utils/localRecordingStore";
 import "./SOSPage.css";
 
 const SOS_SESSION_KEY = "socialsea_sos_session_v1";
@@ -18,6 +24,8 @@ const SOS_ACTIVE_OWNER_KEY = "socialsea_sos_active_owner_v1";
 const HEARTBEAT_MS = 2000;
 const RADIUS_METERS = 5000;
 const LOCAL_SIGNAL_REBROADCAST_MS = 4000;
+const LOCATION_STALE_MINUTES = Number(import.meta.env.VITE_EMERGENCY_LOCATION_STALE_MINUTES || 180);
+const LOCATION_STALE_MS = Math.max(1, LOCATION_STALE_MINUTES) * 60 * 1000;
 
 const uniqueNonEmpty = (arr) =>
   arr.filter((v, i) => {
@@ -61,6 +69,25 @@ const ALLOWED_EMERGENCY_HOSTS = (() => {
   );
 })();
 
+const ENV_EMERGENCY_HOSTS = (() => {
+  const candidates = [
+    import.meta.env.VITE_DEV_PROXY_TARGET,
+    import.meta.env.VITE_API_URL,
+    import.meta.env.VITE_API_BASE_URL
+  ];
+  const toHost = (value) => {
+    const raw = String(value || "").trim();
+    if (!raw || raw.startsWith("/")) return "";
+    const withScheme = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    try {
+      return new URL(withScheme).hostname.toLowerCase();
+    } catch {
+      return "";
+    }
+  };
+  return new Set(candidates.map(toHost).filter(Boolean));
+})();
+
 const allowLocalEmergencyHosts =
   typeof window !== "undefined" &&
   ["localhost", "127.0.0.1"].includes(String(window.location.hostname || "").toLowerCase());
@@ -79,7 +106,14 @@ const normalizeEmergencyBase = (rawBase) => {
   if (!/^https?:\/\//i.test(value)) return "";
   try {
     const host = new URL(value).hostname.toLowerCase();
-    if (BAD_EMERGENCY_HOSTS.has(host) && !allowLocalEmergencyHosts && !isEmergencyHostAllowed(host)) return "";
+    if (
+      BAD_EMERGENCY_HOSTS.has(host) &&
+      !allowLocalEmergencyHosts &&
+      !isEmergencyHostAllowed(host) &&
+      !ENV_EMERGENCY_HOSTS.has(host)
+    ) {
+      return "";
+    }
   } catch {
     return "";
   }
@@ -184,6 +218,12 @@ const liveOfferKeyFor = (alertLikeId) =>
 const liveAnswerKeyFor = (alertLikeId) =>
   `${SOS_LIVE_RTC_ANSWER_KEY_PREFIX}${String(alertLikeId || "").trim()}`;
 const normalizeAlertId = (value) => String(value || "").trim();
+const parseNumericAlertId = (value) => {
+  const text = String(value || "").trim();
+  if (!text || !/^\d+$/.test(text)) return null;
+  const n = Number(text);
+  return Number.isFinite(n) ? n : null;
+};
 const alertIdsMatch = (a, b) => {
   const left = normalizeAlertId(a);
   const right = normalizeAlertId(b);
@@ -219,6 +259,68 @@ const resolveNearbyCount = (item) => {
   return Number.isFinite(arrayCount) ? arrayCount : null;
 };
 
+const parseTimeValue = (value) => {
+  if (!value) return null;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value.getTime();
+  if (typeof value === "number" && Number.isFinite(value)) {
+    if (value < 1e12 && value > 0) return value * 1000;
+    return value > 0 ? value : null;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const parsed = Date.parse(trimmed);
+    if (!Number.isNaN(parsed)) return parsed;
+    const asNumber = Number(trimmed);
+    if (Number.isFinite(asNumber) && asNumber > 0) {
+      return asNumber < 1e12 ? asNumber * 1000 : asNumber;
+    }
+  }
+  return null;
+};
+
+const resolveLocationTimestamp = (user) =>
+  parseTimeValue(
+    user?.locationUpdatedAt ||
+      user?.lastLocationUpdatedAt ||
+      user?.lastLocationAt ||
+      user?.lastLocationTime ||
+      user?.lastSeenAt ||
+      user?.lastActiveAt ||
+      user?.updatedAt ||
+      user?.timestamp ||
+      user?.lastSeen ||
+      user?.lastAt
+  );
+
+const getLocationFreshness = (user, nowMs = Date.now()) => {
+  const ts = resolveLocationTimestamp(user);
+  if (!ts) return { ageMs: null, stale: true };
+  const ageMs = Math.max(0, nowMs - ts);
+  return { ageMs, stale: ageMs > LOCATION_STALE_MS };
+};
+
+const formatAgeShort = (ageMs) => {
+  if (!Number.isFinite(ageMs)) return "unknown";
+  const mins = Math.max(0, Math.round(ageMs / 60000));
+  if (mins < 1) return "<1m";
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  const rem = mins % 60;
+  return rem ? `${hrs}h ${rem}m` : `${hrs}h`;
+};
+
+const extractNearbyUsers = (item) => {
+  const list = [
+    item?.nearbyUsers,
+    item?.nearby,
+    item?.nearbyPeople,
+    item?.nearbyUserList,
+    item?.nearbyUsersList
+  ].find((value) => Array.isArray(value));
+  return Array.isArray(list) ? list : [];
+};
+
 const blobToDataUrl = (blob) =>
   new Promise((resolve, reject) => {
     try {
@@ -239,13 +341,18 @@ export default function SOSPage() {
 
   const [status, setStatus] = useState("idle");
   const [message, setMessage] = useState("");
-  const [alertId, setAlertId] = useState(routeAlertId ? Number(routeAlertId) : null);
+  const [alertId, setAlertId] = useState(parseNumericAlertId(routeAlertId));
   const [alertDisplayId, setAlertDisplayId] = useState(routeAlertId ? String(routeAlertId) : null);
   const [startedAt, setStartedAt] = useState(null);
   const [elapsedSec, setElapsedSec] = useState(0);
   const [lastLocation, setLastLocation] = useState(null);
   const [locationCount, setLocationCount] = useState(0);
   const [nearbyCount, setNearbyCount] = useState(null);
+  const [nearbyDebug, setNearbyDebug] = useState({
+    computedAt: null,
+    users: [],
+    staleMinutes: LOCATION_STALE_MINUTES
+  });
   const [recordingInfo, setRecordingInfo] = useState({
     audio: false,
     video: false,
@@ -291,6 +398,23 @@ export default function SOSPage() {
     const prev = readJson(SOS_HISTORY_KEY, []);
     const next = [entry, ...prev].slice(0, 30);
     writeJson(SOS_HISTORY_KEY, next);
+    try {
+      const keepIds = new Set(
+        next
+          .map((item) => String(item?.recordingId ?? item?.alertId ?? item?.id ?? "").trim())
+          .filter(Boolean)
+      );
+      prev.forEach((item) => {
+        const id = String(item?.recordingId ?? item?.alertId ?? item?.id ?? "").trim();
+        if (!id || keepIds.has(id)) return;
+        const key = parseIdbMediaRef(item?.mediaUrl);
+        if (key) {
+          deleteRecordingBlob(key).catch(() => {});
+        }
+      });
+    } catch {
+      // ignore cleanup errors
+    }
   };
 
   useEffect(() => {
@@ -683,11 +807,33 @@ export default function SOSPage() {
         const matched = list.find((item) =>
           alertIdsMatch(item?.alertId || item?.alertDisplayId || item?.id, currentAlertId)
         );
+        const rawNearby = matched ? extractNearbyUsers(matched) : [];
+        const nowMs = Date.now();
+        const decoratedNearby = rawNearby.map((u) => {
+          const freshness = getLocationFreshness(u, nowMs);
+          return {
+            ...u,
+            staleLocation: freshness.stale,
+            freshnessMs: freshness.ageMs
+          };
+        });
+        const freshCount = decoratedNearby.filter((u) => !u?.staleLocation).length;
         const resolved = resolveNearbyCount(matched);
-        if (Number.isFinite(resolved)) {
-          setNearbyCount(resolved);
-          persistSession({ nearbyCount: resolved, updatedAt: nowIso() });
+        const computedCount =
+          decoratedNearby.length > 0
+            ? freshCount
+            : Number.isFinite(resolved)
+            ? resolved
+            : null;
+        if (Number.isFinite(computedCount)) {
+          setNearbyCount(computedCount);
+          persistSession({ nearbyCount: computedCount, updatedAt: nowIso() });
         }
+        setNearbyDebug({
+          computedAt: nowIso(),
+          users: decoratedNearby,
+          staleMinutes: LOCATION_STALE_MINUTES
+        });
       } catch {
         // keep last known nearby count
       }
@@ -856,6 +1002,8 @@ export default function SOSPage() {
     if (status === "arming" || status === "active") return;
     setStatus("arming");
     setMessage("");
+    setAlertId(null);
+    setAlertDisplayId(null);
     try {
       const startIso = nowIso();
       let locationError = null;
@@ -924,6 +1072,7 @@ export default function SOSPage() {
       const hasLocation = initialLocation.latitude != null && initialLocation.longitude != null;
       if (!hasLocation) {
         const localId = `LOCAL-${Date.now()}`;
+        setAlertId(null);
         setAlertDisplayId(localId);
         const backendMessage = "Location unavailable. Local SOS is active.";
         setBackendStatus(backendMessage);
@@ -982,6 +1131,7 @@ export default function SOSPage() {
         } catch (err) {
           const status = Number(err?.response?.status || 0);
           const localId = `LOCAL-${Date.now()}`;
+          setAlertId(null);
           setAlertDisplayId(localId);
           const backendMessage = status === 404
             ? "Backend emergency endpoint not found (404). Local SOS is still active."
@@ -1045,14 +1195,13 @@ export default function SOSPage() {
       const durationMs = startedAt ? Math.max(0, Date.now() - new Date(startedAt).getTime()) : 0;
 
       let mediaUrl = null;
+      const recordingId = String(alertId || alertDisplayId || `LOCAL-${Date.now()}`).trim();
       if (alertId) {
         try {
           const form = new FormData();
           if (blob) form.append("media", blob, `sos-${alertId}.webm`);
           form.append("durationMs", String(durationMs));
-          const res = await callEmergency("post", `${alertId}/stop`, form, {
-            headers: { "Content-Type": "multipart/form-data" }
-          });
+          const res = await callEmergency("post", `${alertId}/stop`, form);
           mediaUrl = res?.data?.mediaUrl || null;
           setBackendStatus("SOS stopped and synced");
         } catch (err) {
@@ -1061,15 +1210,19 @@ export default function SOSPage() {
       }
 
       let usedLocalFallbackMedia = false;
+      let usedIdbMedia = false;
       if (!mediaUrl && blob) {
         usedLocalFallbackMedia = true;
         try {
           // Persist locally so Recorded Live keeps working after refresh.
-          // Use data URL when reasonably small; fallback to object URL for very large clips.
+          // Use data URL when reasonably small; fallback to IndexedDB for large clips.
           if (blob.size <= 2.5 * 1024 * 1024) {
             mediaUrl = await blobToDataUrl(blob);
           } else {
-            mediaUrl = URL.createObjectURL(blob);
+            const idbKey = recordingId || `LOCAL-${Date.now()}`;
+            await saveRecordingBlob(idbKey, blob, { mime: blob.type || "video/webm" });
+            mediaUrl = buildIdbMediaRef(idbKey);
+            usedIdbMedia = true;
           }
         } catch {
           try {
@@ -1081,6 +1234,7 @@ export default function SOSPage() {
       }
 
       appendHistory({
+        recordingId: recordingId || alertId || alertDisplayId || undefined,
         alertId,
         startedAt,
         stoppedAt,
@@ -1093,6 +1247,7 @@ export default function SOSPage() {
           !alertId ||
           !String(mediaUrl || "").trim() ||
           usedLocalFallbackMedia ||
+          usedIdbMedia ||
           String(mediaUrl || "").startsWith("blob:") ||
           String(mediaUrl || "").startsWith("data:")
       });
@@ -1748,7 +1903,7 @@ export default function SOSPage() {
         const lat = data.latitude != null ? data.latitude : null;
         const lon = data.longitude != null ? data.longitude : null;
         const coordKey = lat != null && lon != null ? `${lat},${lon}` : "";
-        setAlertId(data.alertId || Number(routeAlertId));
+        setAlertId(data.alertId != null ? data.alertId : parseNumericAlertId(routeAlertId));
         setAlertDisplayId(String(data.alertId || routeAlertId || ""));
         setStatus(data.active ? "active" : "stopped");
         setStartedAt(data.startedAt || null);
@@ -1857,6 +2012,8 @@ export default function SOSPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLiveView]);
 
+  const debugList = Array.isArray(nearbyDebug?.users) ? nearbyDebug.users : [];
+
   return (
     <section className="sos-page">
       <div className="sos-card">
@@ -1870,6 +2027,38 @@ export default function SOSPage() {
         </div>
 
         {message && <div className="sos-msg">{message}</div>}
+
+        <div className="sos-debug">
+          <div className="sos-debug-title">Nearby Debug</div>
+          <div className="sos-debug-meta">
+            Freshness window: {nearbyDebug?.staleMinutes ?? LOCATION_STALE_MINUTES}m · Last compute:{" "}
+            {nearbyDebug?.computedAt || "-"}
+          </div>
+          <div className="sos-debug-list">
+            {debugList.length > 0 ? (
+              debugList.map((u, index) => (
+                <div
+                  key={`${u?.id || u?.email || u?.name || "nearby"}-${index}`}
+                  className={`sos-debug-item ${u?.staleLocation ? "stale" : "fresh"}`}
+                >
+                  <span className="sos-debug-name">{u?.name || u?.username || u?.email || "User"}</span>
+                  <span className="sos-debug-distance">
+                    {typeof u?.distanceMeters === "number" ? `${u.distanceMeters}m` : "-"}
+                  </span>
+                  <span className="sos-debug-age">
+                    {(() => {
+                      const ageLabel = formatAgeShort(u?.freshnessMs);
+                      const tail = ageLabel === "unknown" ? "unknown" : `${ageLabel} ago`;
+                      return `${u?.staleLocation ? "stale" : "fresh"} · ${tail}`;
+                    })()}
+                  </span>
+                </div>
+              ))
+            ) : (
+              <div className="sos-debug-empty">No nearby users payload.</div>
+            )}
+          </div>
+        </div>
 
         <div className="sos-grid">
           <div>

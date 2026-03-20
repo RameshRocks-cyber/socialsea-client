@@ -41,6 +41,12 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           secure: false,
         },
+        '/ws': {
+          target: devProxyTarget,
+          changeOrigin: true,
+          secure: false,
+          ws: true,
+        },
       },
       hmr: {
         protocol: 'ws',

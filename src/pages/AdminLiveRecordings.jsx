@@ -7,26 +7,106 @@ const SOS_SIGNAL_KEY = "socialsea_sos_signal_v1";
 const SOS_SIGNAL_CHANNEL = "socialsea_sos_signal_channel_v1";
 const REQUEST_TIMEOUT_MS = 3500;
 const ADMIN_USERS_CACHE_MS = 30000;
+const LOCATION_STALE_MINUTES = Number(import.meta.env.VITE_EMERGENCY_LOCATION_STALE_MINUTES || 180);
+const LOCATION_STALE_MS = Math.max(1, LOCATION_STALE_MINUTES) * 60 * 1000;
 
-const toRecordingShape = (item) => ({
-  id: item?.id ?? item?.alertId ?? "",
-  alertId: item?.alertId ?? item?.id ?? "",
-  username: item?.username || item?.name || item?.reporterName || "",
-  email: item?.email || item?.reporterEmail || "",
-  reporterName: item?.reporterName || item?.username || item?.name || "",
-  reporterEmail: item?.reporterEmail || item?.email || "",
-  mediaUrl: item?.mediaUrl || item?.recordingUrl || item?.videoUrl || "",
-  startedAt: item?.startedAt || item?.createdAt || null,
-  endedAt: item?.endedAt || null,
-  durationMs: Number(item?.durationMs || 0),
-  active: Boolean(item?.active),
-  latitude: item?.currentLatitude ?? item?.latitude ?? null,
-  longitude: item?.currentLongitude ?? item?.longitude ?? null,
-  accuracyMeters: item?.accuracyMeters ?? null,
-  radiusMeters: Number(item?.radiusMeters || 5000),
-  nearbyCount: Number(item?.nearbyCount || 0),
-  nearbyUsers: Array.isArray(item?.nearbyUsers) ? item.nearbyUsers : []
-});
+const parseTimeValue = (value) => {
+  if (!value) return null;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value.getTime();
+  if (typeof value === "number" && Number.isFinite(value)) {
+    if (value < 1e12 && value > 0) return value * 1000;
+    return value > 0 ? value : null;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const parsed = Date.parse(trimmed);
+    if (!Number.isNaN(parsed)) return parsed;
+    const asNumber = Number(trimmed);
+    if (Number.isFinite(asNumber) && asNumber > 0) {
+      return asNumber < 1e12 ? asNumber * 1000 : asNumber;
+    }
+  }
+  return null;
+};
+
+const resolveLocationTimestamp = (user) =>
+  parseTimeValue(
+    user?.locationUpdatedAt ||
+      user?.lastLocationUpdatedAt ||
+      user?.lastLocationAt ||
+      user?.lastLocationTime ||
+      user?.lastSeenAt ||
+      user?.lastActiveAt ||
+      user?.updatedAt ||
+      user?.timestamp ||
+      user?.lastSeen ||
+      user?.lastAt
+  );
+
+const getLocationFreshness = (user, nowMs = Date.now()) => {
+  const ts = resolveLocationTimestamp(user);
+  if (!ts) return { ageMs: null, stale: true };
+  const ageMs = Math.max(0, nowMs - ts);
+  return { ageMs, stale: ageMs > LOCATION_STALE_MS };
+};
+
+const formatAgeShort = (ageMs) => {
+  if (!Number.isFinite(ageMs)) return "unknown";
+  const mins = Math.max(0, Math.round(ageMs / 60000));
+  if (mins < 1) return "<1m";
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  const rem = mins % 60;
+  return rem ? `${hrs}h ${rem}m` : `${hrs}h`;
+};
+
+const decorateNearbyUsers = (users) => {
+  const nowMs = Date.now();
+  return (Array.isArray(users) ? users : []).map((u) => {
+    const freshness = getLocationFreshness(u, nowMs);
+    return {
+      ...u,
+      staleLocation: freshness.stale,
+      freshnessMs: freshness.ageMs
+    };
+  });
+};
+
+const countFreshNearby = (users) =>
+  (Array.isArray(users) ? users : []).filter((u) => !u?.staleLocation).length;
+
+const countStaleNearby = (users) =>
+  (Array.isArray(users) ? users : []).filter((u) => u?.staleLocation).length;
+
+const toRecordingShape = (item) => {
+  const rawNearby = Array.isArray(item?.nearbyUsers) ? item.nearbyUsers : [];
+  const nearbyUsers = decorateNearbyUsers(rawNearby);
+  const freshCount = countFreshNearby(nearbyUsers);
+  const staleCount = countStaleNearby(nearbyUsers);
+  const rawCount = Number(item?.nearbyCount || 0);
+  const resolvedCount = nearbyUsers.length > 0 ? freshCount : Number.isFinite(rawCount) ? rawCount : 0;
+  return {
+    id: item?.id ?? item?.alertId ?? "",
+    alertId: item?.alertId ?? item?.id ?? "",
+    username: item?.username || item?.name || item?.reporterName || "",
+    email: item?.email || item?.reporterEmail || "",
+    reporterName: item?.reporterName || item?.username || item?.name || "",
+    reporterEmail: item?.reporterEmail || item?.email || "",
+    mediaUrl: item?.mediaUrl || item?.recordingUrl || item?.videoUrl || "",
+    startedAt: item?.startedAt || item?.createdAt || null,
+    endedAt: item?.endedAt || null,
+    durationMs: Number(item?.durationMs || 0),
+    active: Boolean(item?.active),
+    latitude: item?.currentLatitude ?? item?.latitude ?? null,
+    longitude: item?.currentLongitude ?? item?.longitude ?? null,
+    accuracyMeters: item?.accuracyMeters ?? null,
+    radiusMeters: Number(item?.radiusMeters || 5000),
+    nearbyCount: resolvedCount,
+    nearbyStaleCount: staleCount,
+    nearbyUsers
+  };
+};
 
 const normalizeList = (payload) => {
   if (Array.isArray(payload)) return payload;
@@ -82,21 +162,28 @@ const toActiveAlertShape = (alert, users = []) => {
 
   let nearbyUsers = [];
   if (typeof lat === "number" && typeof lon === "number") {
+    const nowMs = Date.now();
     nearbyUsers = users
       .filter((u) => String(u?.email || "").toLowerCase() !== String(reporterEmail).toLowerCase())
       .filter((u) => typeof u?.lastLatitude === "number" && typeof u?.lastLongitude === "number")
       .map((u) => {
         const distance = Math.round(haversineMeters(lat, lon, u.lastLatitude, u.lastLongitude));
+        const freshness = getLocationFreshness(u, nowMs);
         return {
           id: u?.id || "",
           name: u?.name || u?.username || u?.email || "User",
           email: u?.email || "-",
-          distanceMeters: distance
+          distanceMeters: distance,
+          staleLocation: freshness.stale,
+          freshnessMs: freshness.ageMs
         };
       })
       .filter((u) => u.distanceMeters <= 5000)
       .sort((a, b) => a.distanceMeters - b.distanceMeters);
   }
+
+  const freshCount = countFreshNearby(nearbyUsers);
+  const staleCount = countStaleNearby(nearbyUsers);
 
   return {
     id: alert?.alertId ?? alert?.id ?? "",
@@ -114,7 +201,8 @@ const toActiveAlertShape = (alert, users = []) => {
     longitude: lon,
     accuracyMeters: alert?.accuracyMeters ?? null,
     radiusMeters: Number(alert?.radiusMeters || 5000),
-    nearbyCount: nearbyUsers.length,
+    nearbyCount: freshCount,
+    nearbyStaleCount: staleCount,
     nearbyUsers
   };
 };
@@ -140,21 +228,30 @@ const toLocalSosShape = (session, users = []) => {
   const reporter = users.find((u) => String(u?.email || "").toLowerCase() === reporterEmail.toLowerCase());
 
   const nearbyUsers = hasCoords
-    ? users
+    ? (() => {
+        const nowMs = Date.now();
+        return users
         .filter((u) => String(u?.email || "").toLowerCase() !== reporterEmail.toLowerCase())
         .filter((u) => typeof u?.lastLatitude === "number" && typeof u?.lastLongitude === "number")
         .map((u) => {
           const distanceMeters = Math.round(haversineMeters(lat, lon, u.lastLatitude, u.lastLongitude));
+          const freshness = getLocationFreshness(u, nowMs);
           return {
             id: u?.id || "",
             name: u?.name || u?.email || "User",
             email: u?.email || "-",
-            distanceMeters
+            distanceMeters,
+            staleLocation: freshness.stale,
+            freshnessMs: freshness.ageMs
           };
         })
         .filter((u) => u.distanceMeters <= 5000)
         .sort((a, b) => a.distanceMeters - b.distanceMeters)
+      })()
     : [];
+
+  const freshCount = countFreshNearby(nearbyUsers);
+  const staleCount = countStaleNearby(nearbyUsers);
 
   const localId = String(session?.alertDisplayId || session?.alertId || `LOCAL-${Date.now()}`);
   return {
@@ -175,7 +272,8 @@ const toLocalSosShape = (session, users = []) => {
       ? Number(session.lastLocation.accuracy)
       : null,
     radiusMeters: 5000,
-    nearbyCount: nearbyUsers.length,
+    nearbyCount: freshCount,
+    nearbyStaleCount: staleCount,
     nearbyUsers
   };
 };
@@ -208,6 +306,7 @@ const toSignalSosShape = (signal) => {
     accuracyMeters: null,
     radiusMeters: Number(signal?.radiusMeters || 5000),
     nearbyCount: 0,
+    nearbyStaleCount: 0,
     nearbyUsers: []
   };
 };
@@ -520,7 +619,21 @@ export default function AdminLiveRecordings() {
                   </td>
                   <td>
                     <div className="admin-entity-cell">
-                      <strong>{item.nearbyCount || 0} user(s)</strong>
+                      {(() => {
+                        const freshCount = countFreshNearby(item.nearbyUsers);
+                        const staleCount = countStaleNearby(item.nearbyUsers);
+                        const displayCount = Number.isFinite(item?.nearbyCount) ? item.nearbyCount : freshCount;
+                        return (
+                          <>
+                            <strong>{displayCount} user(s)</strong>
+                            {staleCount > 0 && (
+                              <span className="admin-inline-note">
+                                {staleCount} stale location{staleCount > 1 ? "s" : ""} not counted
+                              </span>
+                            )}
+                          </>
+                        );
+                      })()}
                       {(() => {
                         const key = String(item.alertId || item.id);
                         const isExpanded = expandedNearbyByAlert[key] !== false;
@@ -552,6 +665,11 @@ export default function AdminLiveRecordings() {
                                       <div className="admin-inline-note">
                                         Distance: {typeof u?.distanceMeters === "number" ? `${u.distanceMeters}m` : "-"}
                                       </div>
+                                      {u?.staleLocation && (
+                                        <div className="admin-inline-note" style={{ color: "#f0b26b" }}>
+                                          Stale location{u?.freshnessMs != null ? ` · ${formatAgeShort(u.freshnessMs)} ago` : ""}
+                                        </div>
+                                      )}
                                     </div>
                                   ))
                                 ) : (

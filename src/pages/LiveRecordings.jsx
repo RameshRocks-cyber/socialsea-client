@@ -1,7 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../api/axios";
 import { getApiBaseUrl, toApiUrl } from "../api/baseUrl";
+import {
+  deleteRecordingBlob,
+  loadRecordingBlob,
+  parseIdbMediaRef
+} from "../utils/localRecordingStore";
 import "./LiveRecordings.css";
 
 const SOS_HISTORY_KEY = "socialsea_sos_history_v1";
@@ -103,6 +108,8 @@ export default function LiveRecordings() {
   const [pinConfirmInput, setPinConfirmInput] = useState("");
   const [pinError, setPinError] = useState("");
   const [unlocked, setUnlocked] = useState(false);
+  const [localMediaUrls, setLocalMediaUrls] = useState({});
+  const localMediaUrlRef = useRef(new Map());
 
   const buildBaseCandidates = () => {
     const isLocalDev =
@@ -137,6 +144,10 @@ export default function LiveRecordings() {
     if (!url) return "";
     const value = String(url).trim();
     if (!value) return "";
+    const idbKey = parseIdbMediaRef(value);
+    if (idbKey) {
+      return localMediaUrls[idbKey] || "";
+    }
     if (/^(https?:)?\/\//i.test(value) || value.startsWith("blob:") || value.startsWith("data:")) return value;
     const base = String(mediaBaseUrl || api.defaults.baseURL || "").replace(/\/+$/, "");
     if (base && /^https?:\/\//i.test(base)) {
@@ -256,6 +267,77 @@ export default function LiveRecordings() {
     };
   }, [unlocked]);
 
+  useEffect(() => {
+    return () => {
+      for (const url of localMediaUrlRef.current.values()) {
+        try {
+          URL.revokeObjectURL(url);
+        } catch {
+          // ignore revoke errors
+        }
+      }
+      localMediaUrlRef.current.clear();
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const activeKeys = new Set();
+    items.forEach((item) => {
+      const key = parseIdbMediaRef(item?.mediaUrl);
+      if (key) activeKeys.add(key);
+    });
+
+    const staleKeys = [];
+    for (const [key, url] of localMediaUrlRef.current.entries()) {
+      if (activeKeys.has(key)) continue;
+      try {
+        URL.revokeObjectURL(url);
+      } catch {
+        // ignore revoke errors
+      }
+      localMediaUrlRef.current.delete(key);
+      staleKeys.push(key);
+    }
+    if (staleKeys.length) {
+      setLocalMediaUrls((prev) => {
+        const next = { ...prev };
+        staleKeys.forEach((key) => {
+          delete next[key];
+        });
+        return next;
+      });
+    }
+
+    const loadMissing = async () => {
+      const updates = {};
+      for (const key of activeKeys) {
+        if (localMediaUrlRef.current.has(key)) continue;
+        try {
+          const blob = await loadRecordingBlob(key);
+          if (cancelled) return;
+          if (!blob) continue;
+          const url = URL.createObjectURL(blob);
+          localMediaUrlRef.current.set(key, url);
+          updates[key] = url;
+        } catch {
+          // ignore idb load errors
+        }
+      }
+      if (!cancelled && Object.keys(updates).length) {
+        setLocalMediaUrls((prev) => ({ ...prev, ...updates }));
+      }
+    };
+
+    if (activeKeys.size) {
+      loadMissing();
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [items]);
+
   const handlePinSubmit = (event) => {
     event.preventDefault();
     const pin = String(pinInput || "").trim();
@@ -295,6 +377,10 @@ export default function LiveRecordings() {
     setItems((prev) => prev.filter((x) => String(x.id) !== idText));
     setActiveId((prev) => (String(prev) === idText ? null : prev));
     removeFromLocalHistory(idText);
+    const idbKey = parseIdbMediaRef(item?.mediaUrl);
+    if (idbKey) {
+      deleteRecordingBlob(idbKey).catch(() => {});
+    }
 
     const endpoints = [
       { method: "delete", url: `/api/profile/live-recordings/${encodeURIComponent(idText)}` },
@@ -360,11 +446,23 @@ export default function LiveRecordings() {
     return "mp4";
   };
 
+  const getStorageStatus = (item) => {
+    const raw = String(item?.mediaUrl || "").trim();
+    if (!raw) {
+      return item?.localOnly ? "Local (missing file)" : "Server (no file)";
+    }
+    if (parseIdbMediaRef(raw)) return "Local (IndexedDB)";
+    if (raw.startsWith("data:")) return "Local (data URL)";
+    if (raw.startsWith("blob:")) return "Local (temporary, will expire)";
+    return item?.localOnly ? "Local (upload pending)" : "Server";
+  };
+
   const handleShareAsPost = async (item) => {
     const idText = String(item?.id || "").trim();
     if (!idText || sharingId) return;
-    const sourceUrl = resolveUrl(item?.mediaUrl || "");
-    if (!sourceUrl) {
+    const idbKey = parseIdbMediaRef(item?.mediaUrl);
+    const sourceUrl = idbKey ? "" : resolveUrl(item?.mediaUrl || "");
+    if (!idbKey && !sourceUrl) {
       setError("No video available to share.");
       return;
     }
@@ -374,11 +472,19 @@ export default function LiveRecordings() {
     setNote("");
 
     try {
-      const mediaRes = await fetch(sourceUrl);
-      if (!mediaRes.ok) {
-        throw new Error(`Media fetch failed (${mediaRes.status})`);
+      let blob = null;
+      if (idbKey) {
+        blob = await loadRecordingBlob(idbKey);
+        if (!blob) {
+          throw new Error("Local recording not found");
+        }
+      } else {
+        const mediaRes = await fetch(sourceUrl);
+        if (!mediaRes.ok) {
+          throw new Error(`Media fetch failed (${mediaRes.status})`);
+        }
+        blob = await mediaRes.blob();
       }
-      const blob = await mediaRes.blob();
       if (!blob || !blob.size) {
         throw new Error("Empty recording data");
       }
@@ -434,6 +540,10 @@ export default function LiveRecordings() {
   const active = useMemo(() => {
     return items.find((x) => String(x.id) === String(activeId)) || items[0] || null;
   }, [items, activeId]);
+  const activeIdbKey = parseIdbMediaRef(active?.mediaUrl);
+  const activeMediaUrl = active ? resolveUrl(active.mediaUrl) : "";
+  const activeIsIdb = Boolean(activeIdbKey);
+  const activeStorageStatus = active ? getStorageStatus(active) : "";
 
   if (!unlocked) {
     return (
@@ -506,14 +616,18 @@ export default function LiveRecordings() {
           <article className="live-recordings-player-card">
             {active && (
               <>
-                {String(active.mediaUrl || "").trim() ? (
+                {activeMediaUrl ? (
                   <video
                     key={active.id}
-                    src={resolveUrl(active.mediaUrl)}
+                    src={activeMediaUrl}
                     controls
                     autoPlay
                     className="live-recordings-player"
                   />
+                ) : activeIsIdb ? (
+                  <div className="live-recordings-player-empty">
+                    Loading local recording...
+                  </div>
                 ) : (
                   <div className="live-recordings-player-empty">
                     Recording saved, but video upload did not complete.
@@ -523,6 +637,7 @@ export default function LiveRecordings() {
                   <p><strong>Started:</strong> {formatDateTime(active.startedAt)}</p>
                   <p><strong>Ended:</strong> {formatDateTime(active.endedAt)}</p>
                   <p><strong>Duration:</strong> {formatDuration(active.durationMs)}</p>
+                  {activeStorageStatus && <p><strong>Storage:</strong> {activeStorageStatus}</p>}
                   {active.localOnly && <p><strong>Mode:</strong> Local fallback</p>}
                   <div className="live-recordings-actions">
                     <button
@@ -550,6 +665,9 @@ export default function LiveRecordings() {
           <aside className="live-recordings-list">
             {items.map((item) => {
               const isActive = String(item.id) === String(active?.id);
+              const itemIdbKey = parseIdbMediaRef(item?.mediaUrl);
+              const itemMediaUrl = resolveUrl(item?.mediaUrl);
+              const itemIsIdb = Boolean(itemIdbKey);
               return (
                 <article key={item.id} className={`live-recording-item-wrap ${isActive ? "is-active" : ""}`}>
                   <button
@@ -557,8 +675,10 @@ export default function LiveRecordings() {
                     className={`live-recording-item ${isActive ? "is-active" : ""}`}
                     onClick={() => setActiveId(item.id)}
                   >
-                    {String(item.mediaUrl || "").trim() ? (
-                      <video src={resolveUrl(item.mediaUrl)} muted playsInline preload="metadata" />
+                    {itemMediaUrl ? (
+                      <video src={itemMediaUrl} muted playsInline preload="metadata" />
+                    ) : itemIsIdb ? (
+                      <div className="live-recording-item-empty">Loading...</div>
                     ) : (
                       <div className="live-recording-item-empty">No video</div>
                     )}
