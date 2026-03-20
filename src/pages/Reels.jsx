@@ -1015,8 +1015,12 @@ export default function Reels() {
         </button>
         {gestureError && <p className="reels-gesture-error">{gestureError}</p>}
       </div>
-      <div className="reels-container" ref={containerRef} onScroll={onScroll}>
-        {error && <p className="reel-state">{error}</p>}
+      <div
+        className={`reels-container ${error ? "has-error" : ""} ${!error && reels.length === 0 ? "is-empty" : ""}`}
+        ref={containerRef}
+        onScroll={onScroll}
+      >
+        {error && <p className="reel-state is-error">{error}</p>}
         {!error && reels.length === 0 && (
           <p className="reel-state">No reels yet (only videos up to 60 seconds are shown).</p>
         )}

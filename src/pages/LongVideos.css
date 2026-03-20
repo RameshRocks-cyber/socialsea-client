@@ -216,6 +216,12 @@
   gap: 22px 16px;
 }
 
+.yt-home-grid .watch-empty {
+  grid-column: 1 / -1;
+  justify-self: center;
+  width: min(520px, 100%);
+}
+
 .yt-home-card {
   border: none;
   border-radius: 0;
@@ -936,8 +942,13 @@
 }
 
 .watch-empty {
-  color: #aab9d4;
+  color: #c7d4ee;
   margin: 12px 2px;
+  text-align: center;
+  padding: 14px 12px;
+  border-radius: 12px;
+  border: 1px dashed rgba(126, 150, 190, 0.32);
+  background: rgba(13, 17, 24, 0.65);
 }
 
 @media (max-width: 1150px) {

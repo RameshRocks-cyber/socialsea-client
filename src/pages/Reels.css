@@ -130,6 +130,15 @@
   -webkit-tap-highlight-color: transparent;
 }
 
+.reels-container.is-empty,
+.reels-container.has-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 16px;
+  scroll-snap-type: none;
+}
+
 .reels-container::-webkit-scrollbar {
   width: 0;
   height: 0;
@@ -475,8 +484,19 @@
 
 .reel-state {
   color: #d9e7ff;
-  padding: 22px;
+  padding: 18px 16px;
   text-align: center;
+  margin: 0;
+  max-width: min(520px, 100%);
+  border-radius: 14px;
+  border: 1px dashed rgba(130, 160, 215, 0.35);
+  background: rgba(7, 12, 24, 0.7);
+}
+
+.reel-state.is-error {
+  color: #ffd9d9;
+  border-color: rgba(255, 110, 110, 0.4);
+  background: rgba(60, 12, 12, 0.6);
 }
 
 .reels-page * {

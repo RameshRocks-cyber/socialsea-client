@@ -1456,6 +1456,7 @@ export default function LongVideos() {
   }, [isWatchMode, activeVideoIndex, watchSequence]);
 
   const relatedVideos = watchableVideos.filter((item) => String(item.id) !== String(activeVideo?.id));
+  const showSide = Boolean(activeVideo) || relatedVideos.length > 0;
 
   return (
     <div className={`yt-watch-page ${isWatchMode ? "is-watch-mode" : ""}`}>
@@ -1868,51 +1869,54 @@ export default function LongVideos() {
             )}
           </section>
 
-          <aside className="watch-side">
-            <h3>Up next</h3>
-            <div className="watch-list">
-              {relatedVideos.map((v) => {
-                const url = resolveUrl(mediaUrlFor(v));
-                const duration = videoDurationByPost[v.id] || 0;
-                return (
-                  <article
-                    key={v.id}
-                    className="watch-item"
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => selectVideo(v.id)}
-                    onKeyDown={(e) => {    if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        selectVideo(v.id);
-                      }
-                    }}
-                    aria-label={`Select video ${captionFor(v)}`}
-                  >
-                    <div className="watch-item-thumb-wrap">
-                      <video
-                        src={url}
-                        muted
-                        playsInline
-                        preload="metadata"
-                        className="watch-item-thumb"
-                        onPlay={(event) => {
-                          event.currentTarget.pause();
-                          event.currentTarget.currentTime = 0;
-                        }}
-                      />
-                      <span className="yt-duration-badge">{duration > 0 ? formatDuration(duration) : "--:--"}</span>
-                    </div>
-                    <div className="watch-item-text">
-                      <p>{captionFor(v)}</p>
-                      <small>{usernameFor(v)}</small>
-                      <small>{formatCompact(likeCounts[v.id] || 0)} likes â€¢ {relativeFrom(v?.createdAt)}</small>
-                    </div>
-                  </article>
-                );
-              })}
-              {!relatedVideos.length && <p className="watch-empty">No long videos found.</p>}
-            </div>
-          </aside>
+          {showSide && (
+            <aside className="watch-side">
+              <h3>Up next</h3>
+              <div className="watch-list">
+                {relatedVideos.map((v) => {
+                  const url = resolveUrl(mediaUrlFor(v));
+                  const duration = videoDurationByPost[v.id] || 0;
+                  return (
+                    <article
+                      key={v.id}
+                      className="watch-item"
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => selectVideo(v.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          selectVideo(v.id);
+                        }
+                      }}
+                      aria-label={`Select video ${captionFor(v)}`}
+                    >
+                      <div className="watch-item-thumb-wrap">
+                        <video
+                          src={url}
+                          muted
+                          playsInline
+                          preload="metadata"
+                          className="watch-item-thumb"
+                          onPlay={(event) => {
+                            event.currentTarget.pause();
+                            event.currentTarget.currentTime = 0;
+                          }}
+                        />
+                        <span className="yt-duration-badge">{duration > 0 ? formatDuration(duration) : "--:--"}</span>
+                      </div>
+                      <div className="watch-item-text">
+                        <p>{captionFor(v)}</p>
+                        <small>{usernameFor(v)}</small>
+                        <small>{formatCompact(likeCounts[v.id] || 0)} likes â€¢ {relativeFrom(v?.createdAt)}</small>
+                      </div>
+                    </article>
+                  );
+                })}
+                {!relatedVideos.length && activeVideo && <p className="watch-empty">No long videos found.</p>}
+              </div>
+            </aside>
+          )}
         </div>
       )}
     </div>
