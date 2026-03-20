@@ -27,6 +27,7 @@ import ProfileSetup from "./pages/ProfileSetup";
 import Settings from "./pages/Settings";
 import SettingsSounds from "./pages/SettingsSounds";
 import SettingsLocation from "./pages/SettingsLocation";
+import SettingsPrivacy from "./pages/SettingsPrivacy";
 import SOSPage from "./pages/SOSPage";
 import SOSNavigate from "./pages/SOSNavigate";
 import AdminLayout from "./AdminLayout";
@@ -380,6 +381,7 @@ function AppRoutes() {
               <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
               <Route path="/settings/sounds" element={<ProtectedRoute><SettingsSounds /></ProtectedRoute>} />
               <Route path="/settings/location" element={<ProtectedRoute><SettingsLocation /></ProtectedRoute>} />
+              <Route path="/settings/privacy" element={<ProtectedRoute><SettingsPrivacy /></ProtectedRoute>} />
               <Route path="/sos" element={<ProtectedRoute><SOSPage /></ProtectedRoute>} />
               <Route path="/sos/live/:alertId" element={<ProtectedRoute><SOSPage /></ProtectedRoute>} />
               <Route path="/sos/navigate/:alertId" element={<ProtectedRoute><SOSNavigate /></ProtectedRoute>} />

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { FiBookOpen, FiImage, FiRadio, FiStar, FiVideo } from "react-icons/fi";
 import api from "../api/axios";
 import { getApiBaseUrl, toApiUrl } from "../api/baseUrl";
 import { clearAuthStorage } from "../auth";
@@ -241,7 +242,7 @@ export default function Profile() {
   const [followers, setFollowers] = useState(0);
   const [followingCount, setFollowingCount] = useState(0);
   const [loading, setLoading] = useState(false);
-  const [requested] = useState(false);
+  const [requested, setRequested] = useState(false);
   const [followError, setFollowError] = useState("");
   const [postActionError, setPostActionError] = useState("");
   const [deletingPostIds, setDeletingPostIds] = useState({});
@@ -398,6 +399,8 @@ export default function Profile() {
           setIsFollowing(extracted);
           updateFollowCache(followKeys, extracted);
         }
+        const followStatus = String(data?.followStatus || data?.relationship || "").toLowerCase();
+        setRequested(!extracted && followStatus.includes("request"));
 
         const followerCount = Number(
           data?.followers ??
@@ -581,7 +584,13 @@ export default function Profile() {
           setFollowers(Math.max(0, safeFollowers));
           setFollowingCount(Math.max(0, safeFollowing));
         }
-        loadedPosts = await loadPosts(profileResult?.base, profileResult?.profileId);
+        const canViewContent = profileResult?.profileData?.canViewContent !== false;
+        if (!canViewContent) {
+          if (!cancelled) setPosts([]);
+          loadedPosts = [];
+        } else {
+          loadedPosts = await loadPosts(profileResult?.base, profileResult?.profileId);
+        }
         if (!cancelled && profileResult?.profileData) {
           writeProfileCacheByKey(cacheKey, {
             profile: profileResult.profileData,
@@ -618,10 +627,15 @@ export default function Profile() {
     }
 
     try {
-      await api({ method, url: `/api/follow/${encodeURIComponent(followKey)}` });
-      const nextFollowing = !isFollowing;
+      const res = await api({ method, url: `/api/follow/${encodeURIComponent(followKey)}` });
+      const statusText = String(res?.data?.status || res?.data || "").toLowerCase();
+      const requestedNow = statusText.includes("request");
+      const nextFollowing = !isFollowing && !requestedNow;
       setIsFollowing(nextFollowing);
-      setFollowers((prev) => Math.max(0, prev + (nextFollowing ? 1 : -1)));
+      setRequested(requestedNow);
+      if (!requestedNow) {
+        setFollowers((prev) => Math.max(0, prev + (nextFollowing ? 1 : -1)));
+      }
       updateFollowCache([profile?.id, profile?.email, profile?.username, username], nextFollowing);
     } catch (err) {
       console.error(err);
@@ -789,6 +803,21 @@ export default function Profile() {
   const reels = posts.filter((post) => post?.isShortVideo);
   const normalPosts = posts.filter((post) => !post?.isShortVideo);
   const visiblePosts = profileTab === "reels" ? reels : normalPosts;
+  const postsCount =
+    Number.isFinite(Number(profile?.postsCount)) && Number(profile?.postsCount) >= 0
+      ? Number(profile?.postsCount)
+      : Number.isFinite(Number(profile?.posts)) && Number(profile?.posts) >= 0
+        ? Number(profile?.posts)
+        : (normalPosts?.length || 0) + (reels?.length || 0);
+  const isPrivateLocked = Boolean(profile?.privateAccount) && profile?.canViewContent === false && !isOwnProfile;
+  const displayName = profile?.name || profile?.email || profile?.username || "Profile";
+  const displayBio = profile?.bio || "No bio yet";
+  const coverUrl =
+    profile?.coverUrl ||
+    profile?.coverPhotoUrl ||
+    profile?.profileCoverUrl ||
+    profile?.profilePicUrl ||
+    "/default-avatar.png";
 
   const openCreateSheet = () => {
     setCreateSheetOpen(true);
@@ -851,32 +880,41 @@ export default function Profile() {
 
       {!error && profile && (
         <>
-          <section className="profile-header">
-            <div className="profile-summary">
-              <img src={profile.profilePicUrl || "/default-avatar.png"} alt="Profile" className="profile-pic" />
-              <div className="profile-text">
-                <h2 className="profile-name">{profile.name || profile.email || profile.username}</h2>
-                <p className="bio">{profile.bio || "No bio yet"}</p>
+                    <div className="profile-layout">
+            <div className="profile-sidebar">
+  <section className="profile-hero">
+              <div className="profile-cover">
+                <img src={coverUrl} alt="Profile cover" className="profile-cover-img" />
+                <div className="profile-avatar-wrap">
+                  <img src={profile.profilePicUrl || "/default-avatar.png"} alt="Profile" className="profile-avatar" />
+                </div>
               </div>
-            </div>
 
-            <div className="profile-meta">
-              <div className="profile-stats">
+              <div className="profile-identity">
+                <h2 className="profile-name">{displayName}</h2>
+                <p className="bio">{displayBio}</p>
+              </div>
+
+              <div className="profile-stats-row">
                 <button
                   type="button"
-                  className="profile-stat-link"
+                  className="profile-stat-card"
                   onClick={() => navigate(`/profile/${encodeURIComponent(profileRouteKey)}/followers`)}
                 >
                   <b>{followers}</b>
-                  <span>followers</span>
+                  <span>Followers</span>
                 </button>
                 <button
                   type="button"
-                  className="profile-stat-link"
+                  className="profile-stat-card"
                   onClick={() => navigate(`/profile/${encodeURIComponent(profileRouteKey)}/following`)}
                 >
                   <b>{followingCount}</b>
-                  <span>following</span>
+                  <span>Following</span>
+                </button>
+                <button type="button" className="profile-stat-card" onClick={() => setProfileTab("posts")}>
+                  <b>{postsCount}</b>
+                  <span>Posts</span>
                 </button>
               </div>
 
@@ -895,171 +933,189 @@ export default function Profile() {
 
               {isOwnProfile && (
                 <div className="profile-actions-own">
-                  <button className="profile-cta profile-cta-edit" onClick={() => navigate("/profile-setup?mode=edit")}>
-                    Edit Profile
-                  </button>
-                  <button className="profile-cta profile-cta-upload" onClick={openCreateSheet}>
+                  <div className="profile-actions-row">
+                    <button className="profile-action-primary" onClick={() => navigate("/profile-setup?mode=edit")}>
+                      Edit Profile
+                    </button>
+                    <button className="profile-action-icon" onClick={() => navigate("/settings")}
+                    >
+                      Settings
+                    </button>
+                  </div>
+                  <button className="profile-action-secondary" onClick={openCreateSheet}>
                     Create
-                  </button>
-                  <button className="profile-cta profile-cta-settings" onClick={() => navigate("/settings")}>
-                    Settings
                   </button>
                 </div>
               )}
-            </div>
-          </section>
-
-          {isOwnProfile && (
-            <section className="profile-shortcuts">
-              <button type="button" className="profile-shortcut-card" onClick={() => navigate("/anonymous/upload")}>
-                <h4>Anonymous Upload</h4>
-                <p>Share safely without exposing your profile identity.</p>
-              </button>
-              <button type="button" className="profile-shortcut-card" onClick={() => navigate("/anonymous-feed")}>
-                <h4>Anonymous Feed</h4>
-                <p>See all approved anonymous posts and interactions.</p>
-              </button>
-              <button type="button" className="profile-shortcut-card" onClick={() => navigate("/live-recordings")}>
-                <h4>Recorded Live (Private)</h4>
-                <p>View SOS recorded live videos. These are private and not shared in feed.</p>
-              </button>
             </section>
-          )}
+  {isOwnProfile && (
+              <section className="profile-shortcuts">
+                <button type="button" className="profile-shortcut-card" onClick={() => navigate("/anonymous/upload")}>
+                  <div>
+                    <h4>Anonymous Upload</h4>
+                    <p>Share safely without exposing your profile identity.</p>
+                  </div>
+                  <span className="profile-shortcut-arrow">{">"}</span>
+                </button>
+                <button type="button" className="profile-shortcut-card" onClick={() => navigate("/anonymous-feed")}>
+                  <div>
+                    <h4>Anonymous Feed</h4>
+                    <p>See all approved anonymous posts and interactions.</p>
+                  </div>
+                  <span className="profile-shortcut-arrow">{">"}</span>
+                </button>
+                <button type="button" className="profile-shortcut-card" onClick={() => navigate("/live-recordings")}>
+                  <div>
+                    <h4>Private Live</h4>
+                    <p>View SOS recorded live videos. These are private and not shared in feed.</p>
+                  </div>
+                  <span className="profile-shortcut-arrow">{">"}</span>
+                </button>
+              </section>
+            )}
+  {isOwnProfile && highlights.length > 0 && (
+              <section className="profile-highlights">
+                <div className="profile-highlights-head">
+                  <h3>Highlights</h3>
+                  <button type="button" className="profile-highlights-add" onClick={() => navigate("/highlights/create")}>
+                    + New
+                  </button>
+                </div>
+                <div className="profile-highlights-row">
+                  {highlights.map((highlight) => {
+                    const coverRaw =
+                      highlight?.coverUrl || highlight?.items?.[0]?.mediaUrl || highlight?.items?.[0]?.url || "";
+                    const coverUrl = resolveHighlightMediaUrl(coverRaw);
+                    const isVideo = isHighlightVideo(coverUrl);
+                    return (
+                      <div key={highlight.id} className="profile-highlight-card">
+                        <button type="button" className="profile-highlight-thumb" onClick={() => openHighlight(highlight)}>
+                          {coverUrl ? (
+                            isVideo ? (
+                              <video src={coverUrl} muted playsInline preload="metadata" />
+                            ) : (
+                              <img src={coverUrl} alt={highlight.title} />
+                            )
+                          ) : (
+                            <span>{String(highlight.title || "H").slice(0, 1).toUpperCase()}</span>
+                          )}
+                        </button>
+                        <div className="profile-highlight-meta">
+                          <p>{highlight.title}</p>
+                          <small>{highlight.items?.length || 0} stories</small>
+                        </div>
+                        <button
+                          type="button"
+                          className="profile-highlight-delete"
+                          onClick={() => deleteHighlight(highlight.id)}
+                          title="Delete highlight"
+                        >
+                          �
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
 
-          {isOwnProfile && highlights.length > 0 && (
-            <section className="profile-highlights">
-              <div className="profile-highlights-head">
-                <h3>Highlights</h3>
-                <button type="button" className="profile-highlights-add" onClick={() => navigate("/highlights/create")}>
-                  + New
+          
+            </div>
+            <div className="profile-main">
+  <hr className="profile-divider" />
+
+            <div className="profile-posts-head">
+              <h3 className="profile-posts-title">Posts</h3>
+              <div className="profile-post-tabs" role="tablist" aria-label="Profile post filters">
+                <button
+                  type="button"
+                  className={`profile-post-tab ${profileTab === "posts" ? "is-active" : ""}`}
+                  onClick={() => setProfileTab("posts")}
+                  role="tab"
+                  aria-selected={profileTab === "posts"}
+                >
+                  Posts ({normalPosts.length})
+                </button>
+                <button
+                  type="button"
+                  className={`profile-post-tab ${profileTab === "reels" ? "is-active" : ""}`}
+                  onClick={() => setProfileTab("reels")}
+                  role="tab"
+                  aria-selected={profileTab === "reels"}
+                >
+                  Reels ({reels.length})
                 </button>
               </div>
-              <div className="profile-highlights-row">
-                {highlights.map((highlight) => {
-                  const coverRaw =
-                    highlight?.coverUrl || highlight?.items?.[0]?.mediaUrl || highlight?.items?.[0]?.url || "";
-                  const coverUrl = resolveHighlightMediaUrl(coverRaw);
-                  const isVideo = isHighlightVideo(coverUrl);
-                  return (
-                    <div key={highlight.id} className="profile-highlight-card">
-                      <button type="button" className="profile-highlight-thumb" onClick={() => openHighlight(highlight)}>
-                        {coverUrl ? (
-                          isVideo ? (
-                            <video src={coverUrl} muted playsInline preload="metadata" />
-                          ) : (
-                            <img src={coverUrl} alt={highlight.title} />
-                          )
-                        ) : (
-                          <span>{String(highlight.title || "H").slice(0, 1).toUpperCase()}</span>
-                        )}
-                      </button>
-                      <div className="profile-highlight-meta">
-                        <p>{highlight.title}</p>
-                        <small>{highlight.items?.length || 0} stories</small>
-                      </div>
+            </div>
+            {postActionError && <p className="profile-posts-error">{postActionError}</p>}
+            {isPrivateLocked && (
+              <div className="profile-private-note">This account is private. Follow to see posts and reels.</div>
+            )}
+            <div className="profile-posts-grid">
+              {visiblePosts.length === 0 && (
+                <p>{profileTab === "reels" ? "No reels yet" : "No posts yet"}</p>
+              )}
+              {visiblePosts.map((post, index) => (
+                <div
+                  key={`${String(post?.id ?? "post")}-${index}`}
+                  className={`profile-post-card ${post?.isVideo ? "is-playable" : ""} ${String(deleteRevealPostId || "") === String(post?.id || "") ? "is-delete-visible" : ""}`}
+                  onClick={() => openPostInPlayer(post)}
+                  onPointerDown={(event) => handleCardPointerDown(event, post?.id)}
+                  onPointerUp={handleCardPointerEnd}
+                  onPointerCancel={handleCardPointerEnd}
+                  onPointerLeave={handleCardPointerEnd}
+                >
+                  {!post.isVideo && post.contentUrl?.trim() && (
+                    <img src={resolveMediaUrl(post.contentUrl)} alt="" />
+                  )}
+                  {post.isVideo && post.contentUrl?.trim() && (
+                    <video
+                      src={resolveMediaUrl(post.contentUrl)}
+                      autoPlay
+                      muted
+                      loop
+                      preload="metadata"
+                      playsInline
+                      onLoadedMetadata={(event) => handleProfileVideoMeta(post?.id, event)}
+                      onContextMenu={(e) => e.preventDefault()}
+                    />
+                  )}
+                  {isOwnProfile && (
+                    <div className="profile-post-actions">
                       <button
                         type="button"
-                        className="profile-highlight-delete"
-                        onClick={() => deleteHighlight(highlight.id)}
-                        title="Delete highlight"
+                        className="profile-post-delete-inline"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          deletePost(post?.id);
+                        }}
+                        disabled={Boolean(deletingPostIds[post?.id])}
+                        title="Delete post"
                       >
-                        ×
+                        {deletingPostIds[post?.id] ? "Deleting..." : "Delete"}
                       </button>
                     </div>
-                  );
-                })}
-              </div>
-            </section>
-          )}
+                  )}
+                </div>
+              ))}
+            </div>
 
-          <hr className="profile-divider" />
-
-          <div className="profile-posts-head">
-            <h3 className="profile-posts-title">Posts</h3>
-            <div className="profile-post-tabs" role="tablist" aria-label="Profile post filters">
-              <button
-                type="button"
-                className={`profile-post-tab ${profileTab === "posts" ? "is-active" : ""}`}
-                onClick={() => setProfileTab("posts")}
-                role="tab"
-                aria-selected={profileTab === "posts"}
-              >
-                Posts ({normalPosts.length})
+            {isOwnProfile && (
+              <button className="logout-btn-profile" onClick={logout}>
+                Logout
               </button>
-              <button
-                type="button"
-                className={`profile-post-tab ${profileTab === "reels" ? "is-active" : ""}`}
-                onClick={() => setProfileTab("reels")}
-                role="tab"
-                aria-selected={profileTab === "reels"}
-              >
-                Reels ({reels.length})
-              </button>
+            )}
             </div>
           </div>
-          {postActionError && <p className="profile-posts-error">{postActionError}</p>}
-          <div className="profile-posts-grid">
-            {visiblePosts.length === 0 && (
-              <p>{profileTab === "reels" ? "No reels yet" : "No posts yet"}</p>
-            )}
-            {visiblePosts.map((post, index) => (
-              <div
-                key={`${String(post?.id ?? "post")}-${index}`}
-                className={`profile-post-card ${post?.isVideo ? "is-playable" : ""} ${String(deleteRevealPostId || "") === String(post?.id || "") ? "is-delete-visible" : ""}`}
-                onClick={() => openPostInPlayer(post)}
-                onPointerDown={(event) => handleCardPointerDown(event, post?.id)}
-                onPointerUp={handleCardPointerEnd}
-                onPointerCancel={handleCardPointerEnd}
-                onPointerLeave={handleCardPointerEnd}
-              >
-                {!post.isVideo && post.contentUrl?.trim() && (
-                  <img src={resolveMediaUrl(post.contentUrl)} alt="" />
-                )}
-                {post.isVideo && post.contentUrl?.trim() && (
-                  <video
-                    src={resolveMediaUrl(post.contentUrl)}
-                    autoPlay
-                    muted
-                    loop
-                    preload="metadata"
-                    playsInline
-                    onLoadedMetadata={(event) => handleProfileVideoMeta(post?.id, event)}
-                    onContextMenu={(e) => e.preventDefault()}
-                  />
-                )}
-                {isOwnProfile && (
-                  <div className="profile-post-actions">
-                    <button
-                      type="button"
-                      className="profile-post-delete-inline"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        deletePost(post?.id);
-                      }}
-                      disabled={Boolean(deletingPostIds[post?.id])}
-                      title="Delete post"
-                    >
-                      {deletingPostIds[post?.id] ? "Deleting..." : "Delete"}
-                    </button>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
+          </>
+        )}
 
-          {isOwnProfile && (
-            <button className="logout-btn-profile" onClick={logout}>
-              Logout
-            </button>
-          )}
-        </>
-      )}
 
       {activeHighlight && activeHighlight?.items?.length > 0 && (
         <div className="profile-highlight-viewer-backdrop" onClick={closeHighlight}>
           <div className="profile-highlight-viewer" onClick={(event) => event.stopPropagation()}>
             <button type="button" className="profile-highlight-viewer-close" onClick={closeHighlight}>
-              ×
+              �
             </button>
             {(() => {
               const items = activeHighlight.items || [];
@@ -1118,35 +1174,45 @@ export default function Profile() {
             </div>
             <div className="profile-create-grid">
               <button type="button" className="profile-create-card accent-reel" onClick={() => handleCreateAction("reel")}>
-                <span className="profile-create-symbol" aria-hidden="true">▶</span>
+                <span className='profile-create-symbol' aria-hidden='true'>
+                  <FiVideo />
+                </span>
                 <div>
                   <span className="profile-create-label">Reel</span>
                   <small>Short video with music</small>
                 </div>
               </button>
               <button type="button" className="profile-create-card accent-post" onClick={() => handleCreateAction("post")}>
-                <span className="profile-create-symbol" aria-hidden="true">▦</span>
+                <span className='profile-create-symbol' aria-hidden='true'>
+                  <FiImage />
+                </span>
                 <div>
                   <span className="profile-create-label">Post</span>
                   <small>Photo or long video</small>
                 </div>
               </button>
               <button type="button" className="profile-create-card accent-story" onClick={() => handleCreateAction("story")}>
-                <span className="profile-create-symbol" aria-hidden="true">◌</span>
+                <span className='profile-create-symbol' aria-hidden='true'>
+                  <FiBookOpen />
+                </span>
                 <div>
                   <span className="profile-create-label">Story</span>
                   <small>24 hour updates</small>
                 </div>
               </button>
               <button type="button" className="profile-create-card accent-highlights" onClick={() => handleCreateAction("highlights")}>
-                <span className="profile-create-symbol" aria-hidden="true">✦</span>
+                <span className='profile-create-symbol' aria-hidden='true'>
+                  <FiStar />
+                </span>
                 <div>
                   <span className="profile-create-label">Highlights</span>
                   <small>Pin your best moments</small>
                 </div>
               </button>
               <button type="button" className="profile-create-card accent-live" onClick={() => handleCreateAction("live")}>
-                <span className="profile-create-symbol" aria-hidden="true">◎</span>
+                <span className='profile-create-symbol' aria-hidden='true'>
+                  <FiRadio />
+                </span>
                 <div>
                   <span className="profile-create-label">Live</span>
                   <small>Go live with your audience</small>

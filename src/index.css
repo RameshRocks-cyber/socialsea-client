@@ -272,3 +272,94 @@ body,
   margin-left: 0 !important;
   margin-right: 0 !important;
 }
+
+/* Black-only global override (remove blur + color glow) */
+body,
+body.ss-themed {
+  --ss-theme-accent: #101010;
+  --ss-theme-accent-2: #1a1a1a;
+  --ss-theme-bg: #000000;
+  --ss-theme-bg-soft: #0b0b0b;
+  --ss-theme-border: rgba(255, 255, 255, 0.12);
+  --ss-theme-text: #f5f5f5;
+}
+
+body * {
+  backdrop-filter: none !important;
+  filter: none !important;
+}
+
+body,
+.app-main,
+.app-content,
+.auth-screen,
+.feed-page,
+.reels-page,
+.watch-page,
+.yt-watch-page,
+.chat-page,
+.settings-page,
+.profile-page,
+.ss-nav {
+  background: #000 !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+.ss-nav,
+.ss-nav * {
+  text-shadow: none !important;
+}
+
+.ss-nav,
+.auth-card-new,
+.settings-section,
+.settings-panel,
+.chat-header-menu,
+.chat-bubble,
+.explore-tile,
+.long-feed-card,
+.yt-home-card,
+.watch-main,
+.watch-side,
+.watch-item,
+.watch-comments,
+.reel-frame,
+.post-view-card,
+.profile-shortcut-card {
+  background: #0b0b0b !important;
+  background-image: none !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  box-shadow: none !important;
+}
+
+.feed-mode-switch,
+.feed-mode-btn,
+.explore-search-input,
+.yt-chip,
+.watch-action-btn,
+.watch-quality-btn,
+.watch-quality-menu,
+.watch-comment-input-row input,
+.watch-comment-input-row button,
+.reel-action-btn,
+.reel-follow-btn,
+.ss-nav-icon-btn,
+.ss-nav .ss-nav-item,
+.ss-nav .ss-nav-link,
+.auth-primary-btn,
+.auth-secondary-btn,
+.new-chat-btn,
+.call-action,
+.settings-back,
+.settings-panel-head button,
+.settings-select-grid button,
+.watch-later-shortcut,
+.chat-send-btn,
+.mic-fab {
+  background: #111 !important;
+  background-image: none !important;
+  color: #f5f5f5 !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  box-shadow: none !important;
+}

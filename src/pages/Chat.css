@@ -1767,12 +1767,23 @@
 
 .chat-send-btn {
   height: 46px;
-  min-width: 84px;
+  width: 46px;
+  min-width: 46px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   border-radius: 999px !important;
   border: none !important;
-  background: linear-gradient(120deg, #333333, #1e1e1e, #111111) !important;
-  color: #f3fbff;
+  background: linear-gradient(135deg, #3c7cff, #255cff, #1a39c9) !important;
+  color: #ffffff;
   box-shadow: 0 10px 18px rgba(0, 0, 0, 0.36);
+}
+
+.chat-send-btn svg {
+  width: 20px;
+  height: 20px;
 }
 
 .mic-fab.active {
@@ -2059,6 +2070,38 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.chat-contact-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-contact-row .chat-contact {
+  flex: 1;
+}
+
+.chat-contact.is-locked {
+  opacity: 0.7;
+  cursor: default;
+}
+
+.chat-request-btn {
+  border: 1px solid rgba(110, 160, 255, 0.4);
+  background: rgba(10, 20, 36, 0.9);
+  color: #dbeafe;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.chat-request-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .call-panel {
@@ -2903,13 +2946,14 @@
   padding: 0 !important;
   font-size: 0.86rem;
   font-weight: 700;
-  background: linear-gradient(145deg, #343434, #202020 56%, #111111 100%) !important;
-  color: #f2f2f2 !important;
+  background: linear-gradient(135deg, #1b1b1b, #0b0b0b 60%, #000000) !important;
+  color: #ffffff !important;
   box-shadow: 0 12px 22px rgba(0, 0, 0, 0.36);
 }
 
 .chat-page.chat-single-pane .chat-send-btn {
-  color: #04233a !important;
+  color: #ffffff !important;
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.45);
 }
 
 .chat-page.chat-single-pane .emoji-tray {
@@ -3341,4 +3385,19 @@
   }
 }
 
+/* Space out in-call controls so buttons don't overlap */
+.in-call-controls {
+  gap: 12px;
+  flex-wrap: wrap;
+}
 
+.in-call-controls .call-control {
+  margin: 0;
+}
+
+@media (max-width: 520px) {
+  .in-call-controls {
+    gap: 10px;
+    row-gap: 12px;
+  }
+}

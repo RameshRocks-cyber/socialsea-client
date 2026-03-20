@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import { buildProfilePath, persistProfileIdentity } from "../utils/profileRoute";
+import "./ProfileSetup.css";
 
 const NAME_HINT = "3-20 chars: lowercase letters, numbers, dot, underscore";
 
@@ -20,7 +21,9 @@ export default function ProfileSetup() {
   const [name, setName] = useState("");
   const [bio, setBio] = useState("");
   const [photo, setPhoto] = useState(null);
+  const [coverPhoto, setCoverPhoto] = useState(null);
   const [preview, setPreview] = useState("");
+  const [coverPreview, setCoverPreview] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -41,6 +44,7 @@ export default function ProfileSetup() {
         const existingName = normalizeUsernameInput(p?.name || "");
         const existingBio = String(p?.bio || "");
         const existingPic = String(p?.profilePicUrl || p?.profilePic || "");
+        const existingCover = String(p?.coverUrl || p?.coverPhotoUrl || p?.profileCoverUrl || "");
         const completed = Boolean(p?.profileCompleted);
         const id = String(p?.id || localStorage.getItem("userId") || "");
 
@@ -48,6 +52,7 @@ export default function ProfileSetup() {
         setName(existingName);
         setBio(existingBio);
         setPreview(existingPic);
+        setCoverPreview(existingCover);
         persistProfileIdentity(p);
 
         if (completed && !isEditMode) {
@@ -120,6 +125,7 @@ export default function ProfileSetup() {
       form.append("name", name);
       form.append("bio", bio || "");
       if (photo) form.append("profilePic", photo);
+      if (coverPhoto) form.append("coverPhoto", coverPhoto);
 
       const res = await api.post("/api/profile/setup", form);
       const savedProfile = res?.data?.user || res?.data || {};
@@ -138,82 +144,109 @@ export default function ProfileSetup() {
   };
 
   if (loading) {
-    return <div style={{ maxWidth: 460, margin: "24px auto", padding: 16 }}>Loading profile...</div>;
+    return <div className="profile-setup loading">Loading profile...</div>;
   }
 
   return (
-    <div style={{ maxWidth: 460, margin: "24px auto", padding: 16 }}>
-      <h2 style={{ marginBottom: 8 }}>{isEditMode ? "Edit Profile" : "Create Profile"}</h2>
-      <p style={{ marginTop: 0, opacity: 0.8 }}>{NAME_HINT}</p>
+    <div className="profile-setup">
+      <div className="profile-setup-card">
+        <h2>{isEditMode ? "Edit Profile" : "Create Profile"}</h2>
+        <p className="hint">{NAME_HINT}</p>
 
-      <img
-        src={preview || "/default-avatar.png"}
-        alt="Profile preview"
-        style={{
-          width: 120,
-          height: 120,
-          borderRadius: "50%",
-          objectFit: "cover",
-          display: "block",
-          marginBottom: 12
-        }}
-      />
-
-      <input
-        type="file"
-        accept="image/*"
-        onChange={(e) => {
-          const file = e.target.files?.[0] || null;
-          setPhoto(file);
-          if (file) setPreview(URL.createObjectURL(file));
-        }}
-      />
-
-      <input
-        placeholder="username"
-        value={name}
-        onChange={(e) => setName(normalizeUsernameInput(e.target.value))}
-        style={{ width: "100%", marginTop: 12, padding: 10, boxSizing: "border-box" }}
-      />
-
-      <div style={{ minHeight: 24, marginTop: 6 }}>
-        {!nameValid && !!name && <small style={{ color: "#f66" }}>{NAME_HINT}</small>}
-        {nameValid && checkingName && <small>Checking username...</small>}
-        {nameValid && !checkingName && nameAvailable === true && <small style={{ color: "#56d364" }}>Username available</small>}
-        {nameValid && !checkingName && nameAvailable === false && <small style={{ color: "#f66" }}>Username already taken</small>}
-      </div>
-
-      {suggestions.length > 0 && (
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
-          {suggestions.map((s) => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => setName(s)}
-              style={{ padding: "6px 10px", borderRadius: 14, border: "1px solid #355", background: "transparent", cursor: "pointer" }}
-            >
-              {s}
-            </button>
-          ))}
+        <div className="avatar-row">
+          <img
+            src={preview || "/default-avatar.png"}
+            alt="Profile preview"
+            className="avatar-preview"
+          />
+          <div>
+            <label className="field-label">Profile photo</label>
+            <label className="file-btn">
+              Choose file
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => {
+                  const file = e.target.files?.[0] || null;
+                  setPhoto(file);
+                  if (file) setPreview(URL.createObjectURL(file));
+                }}
+              />
+            </label>
+          </div>
         </div>
-      )}
 
-      <textarea
-        placeholder="bio"
-        value={bio}
-        onChange={(e) => setBio(e.target.value)}
-        style={{ width: "100%", marginTop: 8, minHeight: 90, padding: 10, boxSizing: "border-box" }}
-      />
+        <div className="cover-block">
+          <label className="field-label">Cover photo</label>
+          {coverPreview ? (
+            <img
+              src={coverPreview}
+              alt="Cover preview"
+              className="cover-preview"
+            />
+          ) : null}
+          <label className="file-btn">
+            Choose cover
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(e) => {
+                const file = e.target.files?.[0] || null;
+                setCoverPhoto(file);
+                if (file) setCoverPreview(URL.createObjectURL(file));
+              }}
+            />
+          </label>
+        </div>
 
-      {error && <p style={{ color: "#f66", marginTop: 8 }}>{error}</p>}
+        <label className="field-label">Username</label>
+        <input
+          className="text-input"
+          placeholder="username"
+          value={name}
+          onChange={(e) => setName(normalizeUsernameInput(e.target.value))}
+        />
 
-      <button
-        onClick={submit}
-        disabled={saving || !nameValid || nameAvailable === false || checkingName}
-        style={{ marginTop: 10, padding: "10px 14px", cursor: "pointer" }}
-      >
-        {saving ? "Saving..." : "Save"}
-      </button>
+        <div className="status-row">
+          {!nameValid && !!name && <small className="error-text">{NAME_HINT}</small>}
+          {nameValid && checkingName && <small className="muted-text">Checking username...</small>}
+          {nameValid && !checkingName && nameAvailable === true && <small className="ok-text">Username available</small>}
+          {nameValid && !checkingName && nameAvailable === false && <small className="error-text">Username already taken</small>}
+        </div>
+
+        {suggestions.length > 0 && (
+          <div className="suggestions">
+            {suggestions.map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => setName(s)}
+                className="chip"
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <label className="field-label">Bio</label>
+        <textarea
+          className="text-area"
+          placeholder="bio"
+          value={bio}
+          onChange={(e) => setBio(e.target.value)}
+        />
+
+        {error && <p className="error-text">{error}</p>}
+
+        <button
+          onClick={submit}
+          disabled={saving || !nameValid || nameAvailable === false || checkingName}
+          className="primary-btn"
+        >
+          {saving ? "Saving..." : "Save"}
+        </button>
+      </div>
     </div>
   );
 }

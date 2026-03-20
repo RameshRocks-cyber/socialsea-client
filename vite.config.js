@@ -27,7 +27,7 @@ export default defineConfig(({ mode }) => {
       include: ['livekit-client'],
     },
     server: {
-      host: true,
+      host: 'localhost',
       port: 5173,
       strictPort: true,
       proxy: {

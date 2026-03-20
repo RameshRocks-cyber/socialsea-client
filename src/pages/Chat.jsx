@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   FiArrowLeft,
@@ -6,10 +6,12 @@ import {
   FiChevronDown,
   FiMic,
   FiMicOff,
+  FiMonitor,
   FiMoreVertical,
   FiPaperclip,
   FiPhone,
   FiPhoneOff,
+  FiSend,
   FiSmile,
   FiUsers,
   FiUserPlus,
@@ -49,6 +51,8 @@ const CALL_REJOIN_MAX_RETRIES = 2;
 const CALL_REFRESH_GRACE_MS = 20000;
 const CALL_REFRESH_GRACE_KEY = "socialsea_call_refresh_grace_v1";
 const CHAT_ONLINE_WINDOW_MS = 600000;
+const CHAT_PRESENCE_HOLD_MS = 90000;
+const CHAT_CONVO_POLL_MS = 8000;
 const LIVEKIT_URL = import.meta.env.VITE_LIVEKIT_URL || "";
 const RTC_CONFIG = {
   iceServers: [
@@ -65,6 +69,8 @@ const CHAT_WALLPAPER_KEY = "socialsea_chat_wallpaper_v1";
 const BLOCKED_USERS_KEY = "socialsea_blocked_users_v1";
 const CHAT_SHARE_DRAFT_KEY = "socialsea_chat_share_draft_v1";
 const CHAT_DISCOVERY_CACHE_KEY = "socialsea_discovery_contacts_v1";
+const FOLLOWING_CACHE_KEY = "socialsea_following_cache_v1";
+const CHAT_REQUESTS_KEY = "socialsea_chat_requests_v1";
 const DELETE_FOR_EVERYONE_TOKEN = "__SS_DELETE_EVERYONE__:";
 const MESSAGE_REPLY_TOKEN = "__SS_REPLY__:";
 const SIGN_ASSIST_TOKEN = "__SS_SIGN_ASSIST__:";
@@ -512,6 +518,7 @@ export default function Chat() {
   const [callHistoryByContact, setCallHistoryByContact] = useState({});
   const [videoFilterId, setVideoFilterId] = useState("beauty_soft");
   const [showVideoFilters, setShowVideoFilters] = useState(false);
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [bubbleMenu, setBubbleMenu] = useState(null);
   const [showEmojiTray, setShowEmojiTray] = useState(false);
   const [pickerTab, setPickerTab] = useState("emoji");
@@ -572,7 +579,17 @@ export default function Chat() {
   const [translatedIncomingById, setTranslatedIncomingById] = useState({});
   const [translatorError, setTranslatorError] = useState("");
   const [showScrollDown, setShowScrollDown] = useState(false);
+  const [followingCacheTick, setFollowingCacheTick] = useState(0);
   const [nowTick, setNowTick] = useState(Date.now());
+  const [pendingChatRequests, setPendingChatRequests] = useState(() => {
+    try {
+      const raw = safeGetItem(CHAT_REQUESTS_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  });
   const [storyItems, setStoryItems] = useState(() => normalizeStoryList(readStoryCache()));
   const [storyViewerIndex, setStoryViewerIndex] = useState(null);
   const [storyViewerSrc, setStoryViewerSrc] = useState("");
@@ -590,6 +607,7 @@ export default function Chat() {
   const groupStreamsRef = useRef(new Map());
   const groupActiveRef = useRef(false);
   const rejoinAttemptedRef = useRef(false);
+  const presenceHoldRef = useRef(new Map());
 
   useEffect(() => {
     if (!FORCE_BEAUTY_FILTER) return;
@@ -667,6 +685,8 @@ export default function Chat() {
   const remoteStreamRef = useRef(null);
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
+  const screenStreamRef = useRef(null);
+  const cameraTrackRef = useRef(null);
   const remoteAudioRef = useRef(null);
   const livekitRoomRef = useRef(null);
   const livekitRoomIdRef = useRef("");
@@ -736,6 +756,10 @@ export default function Chat() {
   const signLastDetectedTextRef = useRef("");
   const chatServerBaseRef = useRef(String(safeGetItem(CHAT_SERVER_BASE_KEY) || "").trim());
   const resolvingContactProfilesRef = useRef(new Set());
+  const convoLoadingRef = useRef(false);
+  const lastConvoPollRef = useRef(0);
+  const discoveryHydratedRef = useRef(false);
+  const localHydratedRef = useRef(false);
 
   const TRANSLATE_LANG_OPTIONS = [
     { value: "en", label: "English" },
@@ -1358,6 +1382,19 @@ export default function Chat() {
     return () => window.removeEventListener("storage", onStorage);
   }, []);
 
+  useEffect(() => {
+    const onStorage = (event) => {
+      if (!event || event.key === FOLLOWING_CACHE_KEY) {
+        setFollowingCacheTick((prev) => prev + 1);
+      }
+      if (!event || event.key === CHAT_REQUESTS_KEY) {
+        setPendingChatRequests(readChatRequestCache());
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
   const localThreadKey = (a, b) => [String(a || ""), String(b || "")].sort().join(":");
 
   const readLocalChat = () => {
@@ -1373,6 +1410,43 @@ export default function Chat() {
 
   const writeLocalChat = (data) => {
     safeSetItem(LOCAL_CHAT_KEY, JSON.stringify(data));
+  };
+
+  const readFollowingCache = () => {
+    try {
+      const raw = safeGetItem(FOLLOWING_CACHE_KEY);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  };
+
+  const normalizeFollowKey = (value) => String(value || "").trim().toLowerCase();
+
+  const getFollowKeysForContact = (contact) => {
+    if (!contact) return [];
+    return [
+      normalizeFollowKey(contact.id),
+      normalizeFollowKey(contact.email),
+      normalizeFollowKey(contact.username)
+    ].filter(Boolean);
+  };
+
+  const readChatRequestCache = () => {
+    try {
+      const raw = safeGetItem(CHAT_REQUESTS_KEY);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  };
+
+  const writeChatRequestCache = (next) => {
+    safeSetItem(CHAT_REQUESTS_KEY, JSON.stringify(next || {}));
   };
 
   const hiddenMessageStorageKey = () => `${HIDDEN_CHAT_MSG_IDS_KEY}_${myUserId || "guest"}`;
@@ -1490,8 +1564,11 @@ export default function Chat() {
   };
 
   const normalizeTimestamp = (value) => {
-    if (!value && value !== 0) return new Date().toISOString();
-    if (value instanceof Date) return value.toISOString();
+    if (!value && value !== 0) return "";
+    if (value instanceof Date) {
+      const t = value.getTime();
+      return Number.isFinite(t) ? value.toISOString() : "";
+    }
     const asNumber = Number(value);
     if (Number.isFinite(asNumber) && asNumber > 0) {
       const ms = asNumber < 1000000000000 ? asNumber * 1000 : asNumber;
@@ -1499,13 +1576,14 @@ export default function Chat() {
     }
     if (typeof value === "string") {
       const raw = value.trim();
+      if (!raw) return "";
       // Backend may send ISO-like time without timezone; treat it as UTC for consistent ordering/display.
       const noZoneIso = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(raw);
       if (noZoneIso) return new Date(`${raw}Z`).toISOString();
     }
     const parsed = new Date(value);
     if (Number.isFinite(parsed.getTime())) return parsed.toISOString();
-    return new Date().toISOString();
+    return String(value || "");
   };
 
   const toEpochMs = (value) => {
@@ -1528,6 +1606,7 @@ export default function Chat() {
   const normalizeMessage = (message, otherId = "") => {
     const rawText = String(message?.text ?? message?.message ?? message?.content ?? "");
     const { text: normalizedText, replyTo } = parseReplyEnvelope(rawText);
+    const rawTime = message?.createdAt ?? message?.sentAt ?? message?.timestamp ?? message?.time ?? "";
     const senderId = String(
       message?.senderId ?? message?.fromUserId ?? message?.fromId ?? message?.userId ?? message?.sender?.id ?? ""
     );
@@ -1543,16 +1622,20 @@ export default function Chat() {
             ? receiverId !== String(otherId)
             : false;
 
+    const stableId =
+      message?.id ||
+      message?.messageId ||
+      message?.chatId ||
+      [
+        senderId || "unknown",
+        receiverId || otherId || "unknown",
+        String(rawTime || ""),
+        rawText
+      ].join("|");
+
     return {
       ...message,
-      id:
-        message?.id ||
-        [
-          senderId || "unknown",
-          receiverId || otherId || "unknown",
-          normalizeTimestamp(message?.createdAt || message?.sentAt || message?.timestamp || message?.time),
-          rawText
-        ].join("|"),
+      id: stableId,
       senderId: senderId || undefined,
       receiverId: receiverId || undefined,
       text: normalizedText,
@@ -1562,7 +1645,7 @@ export default function Chat() {
       mediaUrl: String(message?.mediaUrl || ""),
       mediaType: String(message?.mediaType || ""),
       fileName: String(message?.fileName || ""),
-      createdAt: normalizeTimestamp(message?.createdAt || message?.sentAt || message?.timestamp || message?.time),
+      createdAt: normalizeTimestamp(rawTime),
       mine
     };
   };
@@ -1686,22 +1769,25 @@ export default function Chat() {
     return [];
   };
 
-  const requestChatArray = async ({ endpoints, params = {}, mapList = null }) => {
+  const requestChatArray = async ({ endpoints, params = {}, mapList = null, timeoutMs = 9000, maxAttempts = Infinity }) => {
     const endpointList = Array.isArray(endpoints) ? endpoints : [endpoints];
     const baseCandidates = buildChatBaseCandidates();
     let firstSuccess = null;
     let lastError = null;
     let authError = null;
+    let attempts = 0;
 
-    for (const baseURL of baseCandidates) {
+    outer: for (const baseURL of baseCandidates) {
       for (const url of endpointList) {
+        if (attempts >= maxAttempts) break outer;
+        attempts += 1;
         try {
           const res = await api.request({
             method: "GET",
             url,
             params,
             baseURL,
-            timeout: 9000,
+            timeout: timeoutMs,
             suppressAuthRedirect: true,
           });
           if (looksLikeHtmlPayload(res?.data)) {
@@ -3899,6 +3985,138 @@ export default function Chat() {
     setIsCameraOff(nextOff);
   };
 
+  const stopScreenShare = async () => {
+    const screenStream = screenStreamRef.current;
+    screenStreamRef.current = null;
+    if (screenStream) {
+      screenStream.getTracks().forEach((track) => {
+        try {
+          track.stop();
+        } catch {
+          // ignore stop errors
+        }
+      });
+    }
+
+    const localStream = localStreamRef.current;
+    const cameraTrack = cameraTrackRef.current;
+    const pc = peerRef.current;
+
+    if (cameraTrack) {
+      if (localStream) {
+        localStream.getVideoTracks().forEach((track) => {
+          if (track !== cameraTrack) {
+            try {
+              localStream.removeTrack(track);
+            } catch {
+              // ignore remove errors
+            }
+          }
+        });
+        if (!localStream.getVideoTracks().includes(cameraTrack)) {
+          try {
+            localStream.addTrack(cameraTrack);
+          } catch {
+            // ignore add errors
+          }
+        }
+      }
+      if (pc) {
+        const sender = pc.getSenders().find((s) => s?.track?.kind === "video");
+        if (sender) {
+          try {
+            await sender.replaceTrack(cameraTrack);
+          } catch {
+            // ignore replace errors
+          }
+        }
+      }
+    }
+
+    if (localVideoRef.current && localStream) {
+      localVideoRef.current.srcObject = localStream;
+      localVideoRef.current.play?.().catch(() => {});
+    }
+
+    setIsScreenSharing(false);
+  };
+
+  const toggleScreenShare = async () => {
+    if (isScreenSharing) {
+      await stopScreenShare();
+      return;
+    }
+    if (callState.mode !== "video" || callState.phase === "idle") return;
+    if (callState.provider === "livekit") {
+      setError("Screen share isn't supported in LiveKit calls yet.");
+      return;
+    }
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      setError("Screen share is not supported in this browser.");
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+      const track = stream.getVideoTracks?.()[0];
+      if (!track) {
+        setError("Screen share failed to start.");
+        return;
+      }
+
+      screenStreamRef.current = stream;
+      const localStream = localStreamRef.current;
+      const pc = peerRef.current;
+
+      if (localStream) {
+        const existingVideo = localStream.getVideoTracks?.()[0] || null;
+        if (existingVideo && existingVideo !== track) {
+          cameraTrackRef.current = existingVideo;
+        }
+        localStream.getVideoTracks().forEach((t) => {
+          if (t !== track) {
+            try {
+              localStream.removeTrack(t);
+            } catch {
+              // ignore remove errors
+            }
+          }
+        });
+        try {
+          if (!localStream.getVideoTracks().includes(track)) {
+            localStream.addTrack(track);
+          }
+        } catch {
+          // ignore add errors
+        }
+      }
+
+      if (pc) {
+        const sender = pc.getSenders().find((s) => s?.track?.kind === "video");
+        if (sender) {
+          await sender.replaceTrack(track);
+        } else if (localStream) {
+          pc.addTrack(track, localStream);
+        }
+      }
+
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = localStream || stream;
+        localVideoRef.current.play?.().catch(() => {});
+      }
+
+      track.onended = () => {
+        stopScreenShare();
+      };
+
+      setIsScreenSharing(true);
+      setError("");
+    } catch {
+      setError("Screen share failed. Please try again.");
+      setIsScreenSharing(false);
+    }
+  };
+
   const upgradeCallToVideo = async () => {
     const current = callStateRef.current;
     if (!current?.peerId || current.phase === "idle" || current.mode === "video") return;
@@ -3990,35 +4208,57 @@ export default function Chat() {
   };
 
   const loadConversations = async () => {
+    if (convoLoadingRef.current) return;
+    convoLoadingRef.current = true;
     let list = [];
+    const finalize = () => {
+      lastConvoPollRef.current = Date.now();
+      convoLoadingRef.current = false;
+    };
     try {
+      if (!localHydratedRef.current) {
+        const fromLocalEarly = extractContactsFromLocalHistory();
+        if (fromLocalEarly.length) {
+          setContacts((prev) => mergeContacts(prev, fromLocalEarly));
+          localHydratedRef.current = true;
+        }
+      }
+      if (!discoveryHydratedRef.current) {
+        const cachedDiscovery = readDiscoveryCache();
+        if (cachedDiscovery.length) {
+          setContacts((prev) => mergeContacts(prev, cachedDiscovery));
+          discoveryHydratedRef.current = true;
+        }
+      }
       const res = await requestChatArray({
         endpoints: [
+          "/api/chat/contacts",
+          "/api/chat/list",
           "/api/chat/conversations",
-          "/chat/conversations",
-          "/api/messages/conversations",
-          "/messages/conversations"
+          "/api/conversations"
         ],
         params: { _: Date.now() },
-        mapList: (items) => items
-          .map(mapUserToContact)
-          .filter((contact) => String(contact?.id || "").trim())
+        mapList: (items) =>
+          items
+            .map((entry) => entry?.user || entry?.contact || entry?.friend || entry?.profile || entry)
+            .map(mapUserToContact)
+            .filter((contact) => String(contact?.id || "").trim()),
+        timeoutMs: 4000,
+        maxAttempts: 4
       });
       list = res.list;
       const fromLocal = extractContactsFromLocalHistory();
       const mergedList = mergeContacts(list, fromLocal);
       setContacts((prev) => mergeContacts(prev, mergedList));
-      if (!list.length && fromLocal.length) {
-        setChatFallbackMode(true);
-      } else {
-        setChatFallbackMode(false);
-      }
+      setChatFallbackMode(false);
       list = mergedList;
+
       if (!list.length) {
-        const discovered = await loadDiscoveryContacts();
-        if (Array.isArray(discovered) && discovered.length) {
-          list = mergeContacts(list, discovered);
-        }
+        loadDiscoveryContacts({ broad: false }).then((discovered) => {
+          if (Array.isArray(discovered) && discovered.length) {
+            setContacts((prev) => mergeContacts(prev, discovered));
+          }
+        });
       }
     } catch (err) {
       const status = err?.response?.status;
@@ -4029,17 +4269,13 @@ export default function Chat() {
           setContacts((prev) => mergeContacts(prev, fromLocal));
         }
         setChatFallbackMode(true);
-        if (!list.length) {
-          const discovered = await loadDiscoveryContacts();
-          if (Array.isArray(discovered) && discovered.length) {
-            list = mergeContacts(list, discovered);
-          }
-        }
       } else if (status === 401 || status === 403) {
         setChatFallbackMode(false);
         setError("Session expired for this server. Please login again.");
         clearAuthStorage();
         navigate("/login", { replace: true });
+        finalize();
+        return;
       } else {
         const fromLocal = extractContactsFromLocalHistory();
         if (fromLocal.length) {
@@ -4051,23 +4287,27 @@ export default function Chat() {
           setChatFallbackMode(true);
           setError("Chat server unavailable. Please try again.");
         }
-        if (!list.length) {
-          const discovered = await loadDiscoveryContacts();
+      }
+
+      if (!list.length) {
+        loadDiscoveryContacts({ broad: false }).then((discovered) => {
           if (Array.isArray(discovered) && discovered.length) {
-            list = mergeContacts(list, discovered);
+            setContacts((prev) => mergeContacts(prev, discovered));
           }
-        }
+        });
       }
     }
 
     if (contactId) {
       setActiveContactId(String(contactId));
+      finalize();
       return;
     }
     setActiveContactId((prev) => prev || (list[0]?.id || ""));
+    finalize();
   };
 
-  const loadDiscoveryContacts = async () => {
+  const loadDiscoveryContacts = async ({ broad = false } = {}) => {
     const meId = String(safeGetItem("userId") || myUserId || "").trim();
     const meEmail = String(safeGetItem("email") || myEmail || "").trim().toLowerCase();
 
@@ -4092,6 +4332,8 @@ export default function Chat() {
           endpoints,
           params: { ...params, _: Date.now() },
           mapList: (items) => normalizeContacts(items, pickUser),
+          timeoutMs: 4000,
+          maxAttempts: 2
         });
         return res.list;
       } catch {
@@ -4104,19 +4346,25 @@ export default function Chat() {
       setContacts((prev) => mergeContacts(prev, cached));
     }
 
-    const feedPromise = fromEndpoints({
-      endpoints: ["/api/feed", "/feed", "/api/posts", "/posts"],
-      pickUser: (entry) => entry?.user || entry?.owner || entry?.author || entry
-    });
-    const reelsPromise = fromEndpoints({
-      endpoints: ["/api/reels", "/reels"],
-      pickUser: (entry) => entry?.user || entry?.owner || entry?.author || entry
-    });
-    const searchPromise = fromEndpoints({
-      endpoints: ["/api/profile/search", "/profile/search", "/api/users/search", "/users/search"],
-      params: { q: "a", query: "a", keyword: "a" },
-      pickUser: (entry) => entry?.user || entry?.contact || entry?.profile || entry
-    });
+    const feedPromise = broad
+      ? fromEndpoints({
+          endpoints: ["/api/feed", "/feed", "/api/posts", "/posts"],
+          pickUser: (entry) => entry?.user || entry?.owner || entry?.author || entry
+        })
+      : Promise.resolve([]);
+    const reelsPromise = broad
+      ? fromEndpoints({
+          endpoints: ["/api/reels", "/reels"],
+          pickUser: (entry) => entry?.user || entry?.owner || entry?.author || entry
+        })
+      : Promise.resolve([]);
+    const searchPromise = broad
+      ? fromEndpoints({
+          endpoints: ["/api/profile/search", "/profile/search", "/api/users/search", "/users/search"],
+          params: { q: "a", query: "a", keyword: "a" },
+          pickUser: (entry) => entry?.user || entry?.contact || entry?.profile || entry
+        })
+      : Promise.resolve([]);
 
     const identityHints = [
       meId,
@@ -4148,22 +4396,14 @@ export default function Chat() {
       });
     });
 
-    const results = await Promise.allSettled([
-      feedPromise,
-      reelsPromise,
-      searchPromise,
-      ...followPromises
-    ]);
-
-    const resolvedLists = results
+    const followResults = await Promise.allSettled(followPromises);
+    const fromFollow = followResults
       .filter((r) => r.status === "fulfilled")
       .map((r) => r.value)
-      .filter((list) => Array.isArray(list));
+      .filter((list) => Array.isArray(list))
+      .flat();
 
-    const fromFeed = resolvedLists[0] || [];
-    const fromReels = resolvedLists[1] || [];
-    const fromSearch = resolvedLists[2] || [];
-    const fromFollow = resolvedLists.slice(3).flat();
+    const [fromFeed, fromReels, fromSearch] = await Promise.all([feedPromise, reelsPromise, searchPromise]);
 
     let fromCache = [];
     if (fromFeed.length + fromReels.length + fromSearch.length + fromFollow.length === 0) {
@@ -4196,7 +4436,7 @@ export default function Chat() {
     }
 
     const fromLocalHistory = extractContactsFromLocalHistory();
-    const discovered = [...fromFeed, ...fromReels, ...fromSearch, ...fromFollow, ...fromCache, ...fromLocalHistory];
+    const discovered = [...fromFollow, ...fromFeed, ...fromReels, ...fromSearch, ...fromCache, ...fromLocalHistory];
     if (fromLocalHistory.length > 0 && fromFeed.length + fromReels.length + fromSearch.length + fromFollow.length === 0) {
       setChatFallbackMode(true);
     }
@@ -4231,6 +4471,7 @@ export default function Chat() {
   const loadThread = async (otherId) => {
     if (!otherId) return;
     const hiddenIds = getHiddenMessageSetForContact(otherId);
+    let localFallbackList = null;
     if (chatFallbackMode) {
       const all = readLocalChat();
       const key = localThreadKey(myUserId, otherId);
@@ -4238,8 +4479,8 @@ export default function Chat() {
       const deleteTargets = new Set(normalized.map((m) => parseDeleteTargetId(m?.text)).filter(Boolean).map(String));
       const visible = normalized.filter((m) => !parseDeleteTargetId(m?.text));
       const list = applyDeleteTargetsToList(visible, deleteTargets).filter((m) => !hiddenIds.has(String(m?.id || "")));
+      localFallbackList = list;
       setMessagesByContact((prev) => ({ ...prev, [String(otherId)]: list }));
-      return;
     }
     try {
       const res = await requestChatArray({
@@ -4250,11 +4491,17 @@ export default function Chat() {
           `/messages/${otherId}`
         ],
         params: { _: Date.now() },
-        mapList: (items) => items.map((m) => normalizeMessage(m, otherId))
+        mapList: (items) => items.map((m) => normalizeMessage(m, otherId)),
+        timeoutMs: chatFallbackMode ? 4500 : 9000,
+        maxAttempts: chatFallbackMode ? 3 : Infinity
       });
       let normalized = Array.isArray(res.list) ? res.list : [];
       let usedLocalHistory = false;
       if (normalized.length === 0) {
+        if (Array.isArray(localFallbackList) && localFallbackList.length > 0) {
+          normalized = localFallbackList;
+          usedLocalHistory = true;
+        }
         const all = readLocalChat();
         const key = localThreadKey(myUserId, otherId);
         const localNormalized = (Array.isArray(all[key]) ? all[key] : []).map((m) => normalizeMessage(m, otherId));
@@ -4269,7 +4516,38 @@ export default function Chat() {
       setMessagesByContact((prev) => {
         const key = String(otherId);
         const oldList = Array.isArray(prev[key]) ? prev[key] : [];
+        if (!usedLocalHistory && list.length === 0 && oldList.length > 0) {
+          return prev;
+        }
+        const oldById = new Map(oldList.map((m) => [String(m?.id || ""), m]));
+        const stableList = list.map((m) => {
+          const old = oldById.get(String(m?.id || ""));
+          if (!old) return m;
+          const hasValidTime = toEpochMs(m?.createdAt || 0) > 0;
+          if (hasValidTime || !old?.createdAt) return m;
+          return { ...m, createdAt: old.createdAt };
+        });
         const pendingLocalMedia = oldList.filter((m) => String(m?.id || "").startsWith("local_media_"));
+        const serverSignatureSet = new Set(
+          stableList.map((m) => `${m?.id || ""}_${m?.createdAt || ""}_${m?.text || ""}`)
+        );
+        const serverIdSet = new Set(stableList.map((m) => String(m?.id || "")));
+        const pendingLocalText = oldList.filter((m) => {
+          if (!m?.mine) return false;
+          const sig = `${m?.id || ""}_${m?.createdAt || ""}_${m?.text || ""}`;
+          if (serverSignatureSet.has(sig)) return false;
+          const createdAt = new Date(normalizeTimestamp(m?.createdAt || 0)).getTime();
+          if (!Number.isFinite(createdAt)) return false;
+          return Date.now() - createdAt < 5 * 60 * 1000;
+        });
+        const keepRecentMissing = oldList.filter((m) => {
+          const id = String(m?.id || "");
+          if (!id || serverIdSet.has(id)) return false;
+          if (deleteTargets.has(id)) return false;
+          const createdAt = new Date(normalizeTimestamp(m?.createdAt || 0)).getTime();
+          if (!Number.isFinite(createdAt)) return false;
+          return Date.now() - createdAt < 10 * 60 * 1000;
+        });
         const oldSignatureSet = new Set(
           oldList.map((m) => `${m?.id || ""}_${m?.createdAt || ""}_${m?.text || ""}`)
         );
@@ -4284,25 +4562,39 @@ export default function Chat() {
           const senderName = contacts.find((c) => c.id === key)?.name || "New message";
           maybeShowBrowserNotification(senderName, String(latest?.text || "You have a new message"));
         }
-        const merged = [...list, ...pendingLocalMedia].sort((a, b) => {
+        const merged = [];
+        const mergedIds = new Set();
+        const pushUnique = (item) => {
+          const id = String(item?.id || "");
+          if (id && mergedIds.has(id)) return;
+          if (id) mergedIds.add(id);
+          merged.push(item);
+        };
+        stableList.forEach(pushUnique);
+        pendingLocalMedia.forEach(pushUnique);
+        pendingLocalText.forEach(pushUnique);
+        keepRecentMissing.forEach(pushUnique);
+        merged.sort((a, b) => {
           const at = new Date(normalizeTimestamp(a?.createdAt || 0)).getTime();
           const bt = new Date(normalizeTimestamp(b?.createdAt || 0)).getTime();
           return at - bt;
         });
         return { ...prev, [key]: merged };
       });
-      setChatFallbackMode(usedLocalHistory);
+      setChatFallbackMode(false);
     } catch (err) {
       const status = Number(err?.response?.status || 0);
       if (status === 404) {
         setChatFallbackMode(true);
-        const all = readLocalChat();
-        const key = localThreadKey(myUserId, otherId);
-        const normalized = (Array.isArray(all[key]) ? all[key] : []).map((m) => normalizeMessage(m, otherId));
-        const deleteTargets = new Set(normalized.map((m) => parseDeleteTargetId(m?.text)).filter(Boolean).map(String));
-        const visible = normalized.filter((m) => !parseDeleteTargetId(m?.text));
-        const list = applyDeleteTargetsToList(visible, deleteTargets).filter((m) => !hiddenIds.has(String(m?.id || "")));
-        setMessagesByContact((prev) => ({ ...prev, [String(otherId)]: list }));
+        if (!localFallbackList) {
+          const all = readLocalChat();
+          const key = localThreadKey(myUserId, otherId);
+          const normalized = (Array.isArray(all[key]) ? all[key] : []).map((m) => normalizeMessage(m, otherId));
+          const deleteTargets = new Set(normalized.map((m) => parseDeleteTargetId(m?.text)).filter(Boolean).map(String));
+          const visible = normalized.filter((m) => !parseDeleteTargetId(m?.text));
+          const list = applyDeleteTargetsToList(visible, deleteTargets).filter((m) => !hiddenIds.has(String(m?.id || "")));
+          setMessagesByContact((prev) => ({ ...prev, [String(otherId)]: list }));
+        }
         return;
       }
       if (status === 401 || status === 403) {
@@ -4707,7 +4999,11 @@ export default function Chat() {
 
   useEffect(() => {
     const timer = setInterval(() => {
-      loadConversations().catch(() => {});
+      const now = Date.now();
+      if (now - lastConvoPollRef.current > CHAT_CONVO_POLL_MS) {
+        lastConvoPollRef.current = now;
+        loadConversations().catch(() => {});
+      }
       if (activeContactId) loadThread(activeContactId).catch(() => {});
     }, POLL_MS);
     return () => clearInterval(timer);
@@ -4943,6 +5239,58 @@ export default function Chat() {
     });
   };
 
+  const followingCache = useMemo(() => readFollowingCache(), [followingCacheTick]);
+
+  const isFollowingContact = useCallback(
+    (contact) => {
+      const keys = getFollowKeysForContact(contact);
+      if (!keys.length) return false;
+      return keys.some((key) => followingCache[key] === true);
+    },
+    [followingCache]
+  );
+
+  const getRequestKey = (contact) => {
+    const raw = contact?.id || contact?.email || contact?.username || "";
+    return normalizeFollowKey(raw);
+  };
+
+  const getRequestStatus = (contact) => {
+    const key = getRequestKey(contact);
+    if (!key) return "";
+    return String(pendingChatRequests?.[key]?.status || "");
+  };
+
+  const setRequestStatus = (contact, status) => {
+    const key = getRequestKey(contact);
+    if (!key) return;
+    setPendingChatRequests((prev) => {
+      const next = { ...(prev || {}) };
+      next[key] = { status, at: Date.now() };
+      writeChatRequestCache(next);
+      return next;
+    });
+  };
+
+  const requestChatAccess = async (contact) => {
+    const key = getRequestKey(contact);
+    if (!key) {
+      setError("Unable to request chat for this user.");
+      return;
+    }
+    const status = getRequestStatus(contact);
+    if (status === "requested" || status === "pending") return;
+    setRequestStatus(contact, "pending");
+    try {
+      await api.post(`/api/follow/${encodeURIComponent(key)}`);
+      setRequestStatus(contact, "requested");
+      setFollowingCacheTick((prev) => prev + 1);
+    } catch {
+      setRequestStatus(contact, "error");
+      setError("Chat request failed. Please try again.");
+    }
+  };
+
   const filteredContacts = useMemo(() => {
     const q = query.trim().toLowerCase();
     const local = !q
@@ -4979,6 +5327,15 @@ export default function Chat() {
     });
   }, [contacts, newChatQuery, searchUsers, myUserId, blockedUsers]);
 
+  const canChatWith = (contact) => {
+    if (!contact) return false;
+    if (isFollowingContact(contact)) return true;
+    const id = String(contact?.id || "").trim();
+    if (!id) return false;
+    const existing = messagesByContact[id];
+    return Array.isArray(existing) && existing.length > 0;
+  };
+
   const openContact = (contact) => {
     const c = mapUserToContact(contact);
     const displayName = getContactDisplayName(c);
@@ -4993,6 +5350,10 @@ export default function Chat() {
     }
     if (isBlockedContact(normalized)) {
       setError("This user is blocked.");
+      return;
+    }
+    if (!canChatWith(normalized)) {
+      setError("Send a chat request first.");
       return;
     }
     setContacts((prev) => mergeContacts(prev, [normalized]));
@@ -5052,11 +5413,25 @@ export default function Chat() {
     );
   };
 
+  const resolveStableOnline = (contactId, computedOnline) => {
+    if (!contactId) return computedOnline;
+    const now = nowTick;
+    const key = String(contactId);
+    if (computedOnline) {
+      presenceHoldRef.current.set(key, now);
+      return true;
+    }
+    const last = presenceHoldRef.current.get(key);
+    if (last && now - last < CHAT_PRESENCE_HOLD_MS) return true;
+    return false;
+  };
+
   const getContactPresence = (contact) => {
     if (!contact) return { online: false, text: "lastseen at --" };
     const latest = getContactActivityTs(contact);
     const hasExplicitOnline = contact?.online === true;
-    const isOnline = hasExplicitOnline || (latest > 0 && nowTick - latest <= CHAT_ONLINE_WINDOW_MS);
+    const computedOnline = hasExplicitOnline || (latest > 0 && nowTick - latest <= CHAT_ONLINE_WINDOW_MS);
+    const isOnline = resolveStableOnline(contact?.id, computedOnline);
     if (isOnline) return { online: true, text: "online" };
     return {
       online: false,
@@ -5285,7 +5660,9 @@ export default function Chat() {
     threadLatestTs
   );
   const hasExplicitOnline = activeContact?.online === true;
-  const isPeerOnline = hasExplicitOnline || (peerLatestActivityTs > 0 && nowTick - peerLatestActivityTs <= CHAT_ONLINE_WINDOW_MS);
+  const computedPeerOnline =
+    hasExplicitOnline || (peerLatestActivityTs > 0 && nowTick - peerLatestActivityTs <= CHAT_ONLINE_WINDOW_MS);
+  const isPeerOnline = resolveStableOnline(activeContactId, computedPeerOnline);
   const headerPresenceText = isPeerOnline
     ? "online"
     : peerLatestActivityTs > 0
@@ -6227,6 +6604,12 @@ export default function Chat() {
   }, [callActive, incomingCall]);
 
   useEffect(() => {
+    if (!callActive && isScreenSharing) {
+      stopScreenShare();
+    }
+  }, [callActive, isScreenSharing]);
+
+  useEffect(() => {
     if (!pipEnabled) return;
     if (pipDismissedRef.current) return;
     const shouldShow = callActive && (callState.mode === "video" || groupCallActive);
@@ -6240,6 +6623,13 @@ export default function Chat() {
     el.requestPictureInPicture?.().catch(() => {});
   }, [pipEnabled, callActive, callState.mode, groupCallActive, hasRemoteVideo]);
   const showVideoCallScreen = callActive && (callState.mode === "video" || groupCallActive);
+  useEffect(() => {
+    const shouldHideNavbar = Boolean(showVideoCallScreen || callActive || incomingCall);
+    document.body.classList.toggle("ss-call-active", shouldHideNavbar);
+    return () => {
+      document.body.classList.remove("ss-call-active");
+    };
+  }, [showVideoCallScreen, callActive, incomingCall]);
   const activeVideoFilter = useMemo(
     () => VIDEO_FILTER_PRESETS.find((preset) => preset.id === videoFilterId) || VIDEO_FILTER_PRESETS[0],
     [videoFilterId]
@@ -7130,16 +7520,41 @@ export default function Chat() {
                 {searchingUsers && <p className="chat-empty">Searching users...</p>}
                 {newChatCandidates.map((c) => {
                   const displayName = getContactDisplayName(c);
+                  const canChat = canChatWith(c);
+                  const requestStatus = getRequestStatus(c);
+                  const requestLabel =
+                    requestStatus === "requested" || requestStatus === "pending"
+                      ? "Requested"
+                      : requestStatus === "error"
+                        ? "Retry"
+                        : "Request";
                   return (
-                    <button key={c.id} type="button" className="chat-contact" onClick={() => startNewChat(c)}>
-                      <span className="chat-avatar">
-                        {c.profilePic ? <img src={c.profilePic} alt={displayName} className="chat-avatar-img" /> : c.avatar}
-                      </span>
-                      <span className="chat-meta">
-                        <strong>{displayName}</strong>
-                        <small>{c.email || c.username || "Start conversation"}</small>
-                      </span>
-                    </button>
+                    <div key={c.id} className="chat-contact-row">
+                      <button
+                        type="button"
+                        className={`chat-contact ${canChat ? "" : "is-locked"}`}
+                        onClick={canChat ? () => startNewChat(c) : undefined}
+                        disabled={!canChat}
+                      >
+                        <span className="chat-avatar">
+                          {c.profilePic ? <img src={c.profilePic} alt={displayName} className="chat-avatar-img" /> : c.avatar}
+                        </span>
+                        <span className="chat-meta">
+                          <strong>{displayName}</strong>
+                          <small>{c.email || c.username || "Start conversation"}</small>
+                        </span>
+                      </button>
+                      {!canChat && (
+                        <button
+                          type="button"
+                          className="chat-request-btn"
+                          onClick={() => requestChatAccess(c)}
+                          disabled={requestStatus === "requested" || requestStatus === "pending"}
+                        >
+                          {requestLabel}
+                        </button>
+                      )}
+                    </div>
                   );
                 })}
                 {!searchingUsers && newChatCandidates.length === 0 && <p className="chat-empty">No users found</p>}
@@ -7421,6 +7836,15 @@ export default function Chat() {
               </button>
               <button type="button" className="call-control" onClick={toggleSpeaker} title="Speaker on/off">
                 {isSpeakerOn ? <FiVolume2 /> : <FiVolumeX />}
+              </button>
+              <button
+                type="button"
+                className={`call-control ${isScreenSharing ? "is-active" : ""}`}
+                onClick={toggleScreenShare}
+                title="Screen share"
+                disabled={callState.mode !== "video" || callState.phase === "idle"}
+              >
+                <FiMonitor />
               </button>
               <button type="button" className="call-control" onClick={toggleCamera} title="Camera on/off">
                 {isCameraOff ? <FiVideoOff /> : <FiVideo />}
@@ -8124,8 +8548,13 @@ export default function Chat() {
                 ))}
               </select>
               {hasDraft ? (
-                <button type="button" className="chat-send-btn composer-send-btn" onClick={sendMessage}>
-                  Send
+                <button
+                  type="button"
+                  className="chat-send-btn composer-send-btn"
+                  onClick={sendMessage}
+                  aria-label="Send message"
+                >
+                  <FiSend />
                 </button>
               ) : (
                 <div className="composer-voice-actions">

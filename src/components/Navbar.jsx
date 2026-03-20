@@ -78,9 +78,26 @@ const BAD_EMERGENCY_HOSTS = new Set([
   "www.socialsea.co.in"
 ]);
 
+const ALLOWED_EMERGENCY_HOSTS = (() => {
+  const raw = String(import.meta.env.VITE_EMERGENCY_HOST_ALLOWLIST || "").trim();
+  if (!raw) return new Set();
+  return new Set(
+    raw
+      .split(",")
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean)
+  );
+})();
+
 const allowLocalEmergencyHosts =
   typeof window !== "undefined" &&
   ["localhost", "127.0.0.1"].includes(String(window.location.hostname || "").toLowerCase());
+
+const isEmergencyHostAllowed = (host) => {
+  const value = String(host || "").trim().toLowerCase();
+  if (!value) return false;
+  return ALLOWED_EMERGENCY_HOSTS.has(value);
+};
 
 const normalizeEmergencyBase = (rawBase) => {
   const value = String(rawBase || "").trim().replace(/\/+$/, "");
@@ -90,7 +107,7 @@ const normalizeEmergencyBase = (rawBase) => {
   if (!/^https?:\/\//i.test(value)) return "";
   try {
     const host = new URL(value).hostname.toLowerCase();
-    if (BAD_EMERGENCY_HOSTS.has(host) && !allowLocalEmergencyHosts) return "";
+    if (BAD_EMERGENCY_HOSTS.has(host) && !allowLocalEmergencyHosts && !isEmergencyHostAllowed(host)) return "";
   } catch {
     return "";
   }
@@ -484,6 +501,14 @@ export default function Navbar() {
   const [cameraBusy, setCameraBusy] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
   const [cameraLoading, setCameraLoading] = useState(false);
+  const [cameraSettingsOpen, setCameraSettingsOpen] = useState(false);
+  const [cameraHighRes, setCameraHighRes] = useState(true);
+  const [cameraMirrorFront, setCameraMirrorFront] = useState(true);
+  const [cameraGridOn, setCameraGridOn] = useState(false);
+  const [showLensTray, setShowLensTray] = useState(true);
+  const [torchOn, setTorchOn] = useState(false);
+  const [capturePreview, setCapturePreview] = useState(null);
+  const [captureBusy, setCaptureBusy] = useState(false);
   const [faceBox, setFaceBox] = useState(null);
   const [emojiPackId, setEmojiPackId] = useState("kawaii");
   const [snapTextOpen, setSnapTextOpen] = useState(false);
@@ -497,6 +522,8 @@ export default function Navbar() {
   const faceDetectTimerRef = useRef(0);
   const faceMotionRef = useRef({ x: 0, y: 0, size: 0 });
   const snapTextInputRef = useRef(null);
+  const galleryInputRef = useRef(null);
+  const cameraHighResRef = useRef(cameraHighRes);
   const [sparkleSeeds] = useState(() =>
     Array.from({ length: 12 }, (_, idx) => ({
       id: `sparkle-${idx}`,
@@ -542,6 +569,10 @@ export default function Navbar() {
   useEffect(() => {
     incomingCallRef.current = incomingCall;
   }, [incomingCall]);
+
+  useEffect(() => {
+    cameraHighResRef.current = cameraHighRes;
+  }, [cameraHighRes]);
 
   useEffect(() => {
     if (!navigator.geolocation) return undefined;
@@ -1535,13 +1566,7 @@ export default function Navbar() {
     };
   }, [location.pathname, isOnSosRoute]);
 
-  const closeCameraStudio = () => {
-    setCameraOpen(false);
-    setCameraReady(false);
-    setCameraLoading(false);
-    setFaceBox(null);
-    setCameraError("");
-    setSnapTextOpen(false);
+  const stopCameraStream = () => {
     const stream = cameraStreamRef.current;
     if (stream) {
       try {
@@ -1556,11 +1581,31 @@ export default function Navbar() {
     }
   };
 
+  const closeCameraStudio = () => {
+    setCameraOpen(false);
+    setCameraReady(false);
+    setCameraLoading(false);
+    setCameraSettingsOpen(false);
+    setCapturePreview(null);
+    setCaptureBusy(false);
+    setFaceBox(null);
+    setCameraError("");
+    setSnapTextOpen(false);
+    setTorchOn(false);
+    stopCameraStream();
+  };
+
   const openCameraStudio = async (forcedFacing, options = {}) => {
     const { forceOpen = false } = options;
-    if (cameraOpen) {
-      if (!forceOpen) closeCameraStudio();
+    if (cameraOpen && !forceOpen) {
+      closeCameraStudio();
       return;
+    }
+    if (cameraOpen && forceOpen) {
+      stopCameraStream();
+      setCameraReady(false);
+      setCameraLoading(true);
+      setCapturePreview(null);
     }
     setCameraError("");
     setCameraReady(false);
@@ -1578,24 +1623,17 @@ export default function Navbar() {
       if (!navigator.mediaDevices?.getUserMedia) {
         throw new Error("Camera is not supported in this browser.");
       }
-      const stopActiveStream = () => {
-        const stream = cameraStreamRef.current;
-        if (!stream) return;
-        try {
-          stream.getTracks().forEach((track) => track.stop());
-        } catch {
-          // ignore
-        }
-      };
-      const getCameraStream = async (facingMode) => {
+      const getCameraStream = async (facingMode, preferHighRes = true) => {
         const preferred = String(facingMode || "user");
+        const targetWidth = preferHighRes ? 1280 : 640;
+        const targetHeight = preferHighRes ? 720 : 480;
         const exactConstraints = {
           audio: false,
-          video: { facingMode: { exact: preferred }, width: { ideal: 960 }, height: { ideal: 720 } }
+          video: { facingMode: { exact: preferred }, width: { ideal: targetWidth }, height: { ideal: targetHeight } }
         };
         const idealConstraints = {
           audio: false,
-          video: { facingMode: preferred, width: { ideal: 960 }, height: { ideal: 720 } }
+          video: { facingMode: preferred, width: { ideal: targetWidth }, height: { ideal: targetHeight } }
         };
         try {
           return await navigator.mediaDevices.getUserMedia(exactConstraints);
@@ -1607,9 +1645,8 @@ export default function Navbar() {
           }
         }
       };
-      stopActiveStream();
       const facing = forcedFacing || cameraFacing;
-      const stream = await getCameraStream(facing);
+      const stream = await getCameraStream(facing, cameraHighResRef.current);
       cameraStreamRef.current = stream;
       requestAnimationFrame(() => {
         const video = cameraVideoRef.current;
@@ -1670,6 +1707,25 @@ export default function Navbar() {
     }
     cameraStreamRef.current = null;
   }, []);
+
+  const applyTorch = async (enabled) => {
+    const stream = cameraStreamRef.current;
+    const track = stream?.getVideoTracks?.()[0];
+    if (!track || typeof track.applyConstraints !== "function") return false;
+    const caps = typeof track.getCapabilities === "function" ? track.getCapabilities() : {};
+    if (!caps || !caps.torch) return false;
+    try {
+      await track.applyConstraints({ advanced: [{ torch: Boolean(enabled) }] });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  useEffect(() => {
+    if (!cameraOpen) return;
+    void applyTorch(torchOn);
+  }, [torchOn, cameraOpen]);
 
   const activeLens = SNAP_LENSES.find((x) => x.id === activeLensId) || SNAP_LENSES[0];
   const cameraFilterCss = activeLens?.filter || "none";
@@ -1797,11 +1853,148 @@ export default function Navbar() {
       const next = cameraFacing === "user" ? "environment" : "user";
       setCameraFacing(next);
       if (cameraOpen) {
-        closeCameraStudio();
-        setTimeout(() => {
-          void openCameraStudio(next);
-        }, 150);
+        void openCameraStudio(next, { forceOpen: true });
       }
+    }
+  };
+
+  const buildCaptureFileName = () => {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    return `socialsea-${stamp}.jpg`;
+  };
+
+  const captureSnapshot = async () => {
+    if (captureBusy) return;
+    setCaptureBusy(true);
+    setCameraError("");
+    try {
+      const video = cameraVideoRef.current;
+      if (!video || video.readyState < 2) {
+        setCameraError("Camera not ready yet.");
+        return;
+      }
+      const width = Number(video.videoWidth || 0) || 720;
+      const height = Number(video.videoHeight || 0) || 1280;
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        setCameraError("Could not capture photo.");
+        return;
+      }
+      const shouldMirror = cameraFacing === "user" && cameraMirrorFront;
+      ctx.save();
+      if (shouldMirror) {
+        ctx.translate(width, 0);
+        ctx.scale(-1, 1);
+      }
+      if (cameraFilterCss && cameraFilterCss !== "none") {
+        ctx.filter = cameraFilterCss;
+      }
+      ctx.drawImage(video, 0, 0, width, height);
+      ctx.restore();
+
+      if (snapText) {
+        ctx.save();
+        ctx.filter = "none";
+        ctx.fillStyle = snapTextColor || "#ffffff";
+        ctx.font = `${Math.max(18, Number(snapTextSize) || 28)}px sans-serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "bottom";
+        ctx.fillText(snapText, width / 2, height - 36);
+        ctx.restore();
+      }
+
+      const fileName = buildCaptureFileName();
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
+      const file = blob ? new File([blob], fileName, { type: "image/jpeg" }) : null;
+      setCapturePreview({ dataUrl, blob, file, fileName, createdAt: Date.now() });
+    } finally {
+      setCaptureBusy(false);
+    }
+  };
+
+  const downloadCapture = () => {
+    if (!capturePreview?.blob) return;
+    const url = URL.createObjectURL(capturePreview.blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = capturePreview.fileName || "socialsea-photo.jpg";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const shareCapture = async () => {
+    try {
+      if (!capturePreview) return;
+      if (navigator.share && capturePreview.file) {
+        await navigator.share({
+          files: [capturePreview.file],
+          title: "SocialSea Photo"
+        });
+        return;
+      }
+      setCameraError("Sharing is not supported on this device.");
+    } catch (err) {
+      setCameraError(err?.message || "Sharing failed.");
+    }
+  };
+
+  const clearCapture = () => {
+    setCapturePreview(null);
+  };
+
+  const openGalleryPicker = () => {
+    galleryInputRef.current?.click();
+  };
+
+  const handleGalleryPick = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = String(reader.result || "");
+      setCapturePreview({ dataUrl, blob: file, file, fileName: file.name, createdAt: Date.now() });
+      event.target.value = "";
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const toggleTorch = async () => {
+    const next = !torchOn;
+    setTorchOn(next);
+    if (next) {
+      const ok = await applyTorch(true);
+      if (!ok) {
+        setTorchOn(false);
+        setCameraError("Flash/torch not supported on this device.");
+      }
+    } else {
+      await applyTorch(false);
+    }
+  };
+
+  const switchCamera = async () => {
+    const next = cameraFacing === "user" ? "environment" : "user";
+    setCameraFacing(next);
+    if (cameraOpen) {
+      await openCameraStudio(next, { forceOpen: true });
+    }
+  };
+
+  const toggleCameraSettings = () => {
+    setCameraSettingsOpen((prev) => !prev);
+  };
+
+  const toggleHighRes = (next) => {
+    cameraHighResRef.current = next;
+    setCameraHighRes(next);
+    if (cameraOpen) {
+      void openCameraStudio(cameraFacing, { forceOpen: true });
     }
   };
 
@@ -2341,10 +2534,15 @@ export default function Navbar() {
                 <button type="button" className="ss-snap-icon-btn" onClick={closeCameraStudio} title="Close">
                   <FiX />
                 </button>
-                <button type="button" className="ss-snap-icon-btn" title="Flash">
+                <button type="button" className="ss-snap-icon-btn" title="Flash" onClick={toggleTorch}>
                   <FiSlash />
                 </button>
-                <button type="button" className="ss-snap-icon-btn" title="Settings">
+                <button
+                  type="button"
+                  className="ss-snap-icon-btn"
+                  title="Settings"
+                  onClick={toggleCameraSettings}
+                >
                   <FiSettings />
                 </button>
               </header>
@@ -2372,7 +2570,7 @@ export default function Navbar() {
               <div className="ss-camera-preview">
                 <video
                   ref={cameraVideoRef}
-                  className={`ss-camera-video ${cameraFacing === "user" ? "is-mirrored" : ""}`}
+                  className={`ss-camera-video ${cameraFacing === "user" && cameraMirrorFront ? "is-mirrored" : ""}`}
                   style={{ filter: cameraFilterCss }}
                   autoPlay
                   playsInline
@@ -2405,6 +2603,74 @@ export default function Navbar() {
                         Retry
                       </button>
                     </div>
+                  </div>
+                )}
+                {cameraGridOn && <div className="ss-camera-grid" aria-hidden="true" />}
+                {capturePreview && (
+                  <div className="ss-camera-capture-preview" aria-live="polite">
+                    <img src={capturePreview.dataUrl} alt="Captured" />
+                    <div className="ss-camera-capture-actions">
+                      <button type="button" onClick={downloadCapture}>Save</button>
+                      <button type="button" onClick={shareCapture}>Share</button>
+                      <button type="button" onClick={clearCapture}>Retake</button>
+                    </div>
+                  </div>
+                )}
+                {cameraSettingsOpen && (
+                  <div className="ss-camera-settings-panel">
+                    <h4>Camera Settings</h4>
+                    <label className="ss-camera-setting">
+                      <span>High Quality</span>
+                      <input
+                        type="checkbox"
+                        checked={cameraHighRes}
+                        onChange={(e) => toggleHighRes(e.target.checked)}
+                      />
+                    </label>
+                    <label className="ss-camera-setting">
+                      <span>Mirror Front Camera</span>
+                      <input
+                        type="checkbox"
+                        checked={cameraMirrorFront}
+                        onChange={(e) => setCameraMirrorFront(e.target.checked)}
+                      />
+                    </label>
+                    <label className="ss-camera-setting">
+                      <span>Grid Lines</span>
+                      <input
+                        type="checkbox"
+                        checked={cameraGridOn}
+                        onChange={(e) => setCameraGridOn(e.target.checked)}
+                      />
+                    </label>
+                    <label className="ss-camera-setting">
+                      <span>Auto Emoji</span>
+                      <input
+                        type="checkbox"
+                        checked={autoEmojiRotate}
+                        onChange={(e) => setAutoEmojiRotate(e.target.checked)}
+                      />
+                    </label>
+                    <label className="ss-camera-setting">
+                      <span>Sparkle</span>
+                      <input
+                        type="checkbox"
+                        checked={sparkleOn}
+                        onChange={(e) => setSparkleOn(e.target.checked)}
+                      />
+                    </label>
+                    <label className="ss-camera-setting">
+                      <span>Show Lenses</span>
+                      <input
+                        type="checkbox"
+                        checked={showLensTray}
+                        onChange={(e) => setShowLensTray(e.target.checked)}
+                      />
+                    </label>
+                    <label className="ss-camera-setting">
+                      <span>Flash/Torch</span>
+                      <input type="checkbox" checked={torchOn} onChange={() => void toggleTorch()} />
+                    </label>
                   </div>
                 )}
                 {!!snapText && (
@@ -2469,7 +2735,7 @@ export default function Navbar() {
                     style={(() => {
                       if (!faceBox) return undefined;
                       const { x, y, width, height, videoWidth, videoHeight } = faceBox;
-                      const mirrorX = cameraFacing === "user";
+                      const mirrorX = cameraFacing === "user" && cameraMirrorFront;
                       const rawLeft = mirrorX ? videoWidth - (x + width) : x;
                       const centerX = (rawLeft + width / 2) / videoWidth;
                       const anchorY = Math.max(0, (y - height * 0.26) / videoHeight);
@@ -2503,7 +2769,7 @@ export default function Navbar() {
                       style={(() => {
                         if (!faceBox) return undefined;
                         const { x, y, width, height, videoWidth, videoHeight } = faceBox;
-                        const mirrorX = cameraFacing === "user";
+                        const mirrorX = cameraFacing === "user" && cameraMirrorFront;
                         const rawLeft = mirrorX ? videoWidth - (x + width) : x;
                         const centerX = (rawLeft + width / 2) / videoWidth;
                         const anchorMode = activeLens?.maskAnchor || "above";
@@ -2528,7 +2794,7 @@ export default function Navbar() {
               </div>
 
               <div className="ss-snap-bottom">
-                <div className="ss-snap-lenses">
+                <div className={`ss-snap-lenses ${showLensTray ? "" : "is-hidden"}`}>
                   {SNAP_LENSES.map((lens) => (
                     <button
                       key={lens.id}
@@ -2544,11 +2810,17 @@ export default function Navbar() {
                 </div>
 
                 <div className="ss-snap-control-row">
-                  <button type="button" className="ss-snap-side-btn" title="Gallery">
+                  <button type="button" className="ss-snap-side-btn" title="Gallery" onClick={openGalleryPicker}>
                     <FiImage />
                   </button>
-                  <button type="button" className="ss-snap-shutter" title="Capture" />
-                  <button type="button" className="ss-snap-side-btn" title="Rotate">
+                  <button
+                    type="button"
+                    className="ss-snap-shutter"
+                    title="Capture"
+                    onClick={captureSnapshot}
+                    disabled={!cameraReady || captureBusy || !!capturePreview}
+                  />
+                  <button type="button" className="ss-snap-side-btn" title="Rotate" onClick={switchCamera}>
                     <FiRotateCcw />
                   </button>
                 </div>
@@ -2556,13 +2828,25 @@ export default function Navbar() {
                 <div className="ss-snap-pill">
                   <span className="ss-snap-pill-mark">🔖</span>
                   <span className="ss-snap-pill-label">{activeLens.label}</span>
-                  <button type="button" className="ss-snap-pill-close" title="Hide">
+                  <button
+                    type="button"
+                    className="ss-snap-pill-close"
+                    title="Hide"
+                    onClick={() => setShowLensTray((prev) => !prev)}
+                  >
                     <FiChevronDown />
                   </button>
                 </div>
               </div>
 
               {cameraError && <p className="ss-camera-error">{cameraError}</p>}
+              <input
+                ref={galleryInputRef}
+                className="ss-camera-gallery-input"
+                type="file"
+                accept="image/*"
+                onChange={handleGalleryPick}
+              />
             </div>
           </section>
         </div>

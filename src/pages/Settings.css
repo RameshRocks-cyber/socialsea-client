@@ -145,6 +145,14 @@
   line-height: 1;
 }
 
+.settings-note {
+  margin: 0;
+  padding: 4px 12px 10px 60px;
+  color: #9aa3b2;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
 .settings-panel {
   margin-top: 6px;
   border: 1px solid var(--ss-card-border);
@@ -461,4 +469,51 @@
 .settings-location-link:hover {
   transform: translateY(-1px);
   filter: brightness(1.07);
+}
+
+.settings-privacy-page .settings-shell {
+  min-height: 100vh;
+  max-width: none;
+  margin: 0;
+  gap: 0;
+  padding: 0;
+  align-content: center;
+}
+
+.settings-privacy-page .settings-top {
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  justify-content: center;
+  text-align: center;
+}
+
+.settings-privacy-page .settings-top > div {
+  text-align: center;
+}
+
+.settings-privacy-page .settings-panel {
+  max-width: none;
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+  padding: 0;
+}
+
+.settings-privacy-page {
+  padding: 0;
+}
+
+.settings-privacy-page .settings-select-grid button.active {
+  border-color: rgba(255, 255, 255, 0.85);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(220, 220, 220, 0.95));
+  color: #0a0a0a;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.4),
+    0 10px 20px rgba(0, 0, 0, 0.35);
 }

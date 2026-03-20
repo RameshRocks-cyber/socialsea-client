@@ -352,8 +352,8 @@ export default function Notifications() {
     setFollowBusyById((prev) => ({ ...prev, [id]: true }));
     try {
       const res = await api.post(`/api/follow/${encodeURIComponent(target)}`);
-      const msg = String(res?.data || "").toLowerCase();
-      if (res?.status >= 200 && res?.status < 300 && !msg.includes("cannot follow")) {
+      const statusText = String(res?.data?.status || res?.data || "").toLowerCase();
+      if (res?.status >= 200 && res?.status < 300 && statusText.includes("following")) {
         updateFollowCache(
           [item?.id, item?.actorIdentifier, item?.actorEmail, item?.actorUsername, item?.actorName, target],
           true

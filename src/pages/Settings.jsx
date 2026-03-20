@@ -69,6 +69,7 @@ export default function Settings() {
   const [activePanel, setActivePanel] = useState("");
   const [colorTheme, setColorTheme] = useState(readTheme);
   const [customThemeColors, setCustomThemeColorsState] = useState(readCustomThemeColors);
+  const [privacyBusy, setPrivacyBusy] = useState(false);
 
   const [closeFriends, setCloseFriends] = useState(() => readJsonArray(CLOSE_FRIENDS_KEY));
   const [blockedUsers, setBlockedUsers] = useState(() => readJsonArray(BLOCKED_KEY));
@@ -82,6 +83,26 @@ export default function Settings() {
   useEffect(() => {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(prefs));
   }, [prefs]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadPrivacy = async () => {
+      try {
+        const res = await api.get("/api/profile/me");
+        const data = res?.data?.user || res?.data || {};
+        const value = data?.privateAccount ?? data?.accountPrivate;
+        if (!cancelled && typeof value === "boolean") {
+          setPrefs((prev) => ({ ...prev, accountPrivate: value }));
+        }
+      } catch {
+        // keep local preference if backend is unavailable
+      }
+    };
+    loadPrivacy();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     localStorage.setItem(CLOSE_FRIENDS_KEY, JSON.stringify(closeFriends));
@@ -186,7 +207,26 @@ export default function Settings() {
     [itemsById, panelIds]
   );
 
-  const setToggle = (key) => setPrefs((prev) => ({ ...prev, [key]: !prev[key] }));
+  const setAccountPrivacy = async (next) => {
+    if (privacyBusy || next === prefs.accountPrivate) return;
+    setPrefs((prev) => ({ ...prev, accountPrivate: next }));
+    setPrivacyBusy(true);
+    try {
+      await api.post("/api/profile/me/privacy", { privateAccount: next });
+    } catch {
+      // Keep local selection if the backend is unavailable
+    } finally {
+      setPrivacyBusy(false);
+    }
+  };
+
+  const setToggle = (key) => {
+    if (key === "accountPrivate") {
+      setAccountPrivacy(!prefs.accountPrivate);
+      return;
+    }
+    setPrefs((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
   const setChoice = (key, value) => setPrefs((prev) => ({ ...prev, [key]: value }));
 
   const removeFromPanel = (id) => {
@@ -321,7 +361,7 @@ export default function Settings() {
             icon={"P"}
             title="Account privacy"
             value={prefs.accountPrivate ? "Private" : "Public"}
-            onClick={() => setToggle("accountPrivate")}
+            onClick={() => navigate("/settings/privacy")}
           />
           <Row icon={"C"} title="Close Friends" value={String(closeFriends.length)} onClick={() => setActivePanel("closeFriends")} />
           <Row

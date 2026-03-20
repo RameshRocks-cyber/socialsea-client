@@ -36,6 +36,41 @@
   backdrop-filter: blur(12px);
 }
 
+/* Hide navbar on chat conversation screen */
+.ss-nav-wrap.is-chat-conversation {
+  display: none;
+}
+
+/* Hide navbar during active call screens */
+body.ss-call-active .ss-nav-wrap {
+  display: none;
+}
+
+/* Black-only navbar buttons */
+.ss-nav {
+  background: #000 !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+}
+
+.ss-camera-btn,
+.ss-sos-chip,
+.ss-sos-mobile,
+.ss-link,
+.ss-link.is-active,
+.ss-link:hover {
+  background: #0b0b0b !important;
+  background-image: none !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  box-shadow: none !important;
+  color: #f5f5f5 !important;
+}
+
+.ss-link:hover {
+  background: #111 !important;
+}
+
 .ss-brand {
   display: inline-flex;
   align-items: center;
@@ -267,21 +302,21 @@
   position: fixed;
   inset: 0;
   z-index: 2000;
-  background: rgba(2, 8, 24, 0.72);
+  background: #000;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 14px;
+  padding: 0;
   pointer-events: auto;
 }
 
 .ss-snap-modal {
-  width: min(430px, 100vw);
-  height: min(94vh, 900px);
-  border-radius: 26px;
-  border: 1px solid rgba(120, 160, 255, 0.35);
+  width: 100vw;
+  height: 100vh;
+  border-radius: 0;
+  border: none;
   overflow: hidden;
-  box-shadow: 0 22px 46px rgba(2, 10, 28, 0.7);
+  box-shadow: none;
   background: #000;
 }
 
@@ -710,6 +745,96 @@
   .ss-link-icon {
     font-size: 1.06rem;
   }
+}
+
+.ss-snap-lenses.is-hidden {
+  display: none;
+}
+
+.ss-camera-grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.14) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.14) 1px, transparent 1px);
+  background-size: 33.333% 100%, 100% 33.333%;
+  opacity: 0.35;
+}
+
+.ss-camera-capture-preview {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  padding: 16px 14px max(18px, env(safe-area-inset-bottom));
+  gap: 14px;
+}
+
+.ss-camera-capture-preview img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.ss-camera-capture-actions {
+  position: absolute;
+  bottom: max(16px, env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 12px;
+  z-index: 7;
+}
+
+.ss-camera-capture-actions button {
+  padding: 10px 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: #111;
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.ss-camera-settings-panel {
+  position: absolute;
+  top: max(64px, env(safe-area-inset-top));
+  right: 14px;
+  z-index: 7;
+  background: rgba(0, 0, 0, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 12px;
+  padding: 12px;
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ss-camera-settings-panel h4 {
+  font-size: 0.9rem;
+  color: #fff;
+  margin-bottom: 4px;
+}
+
+.ss-camera-setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  color: #f0f0f0;
+  gap: 10px;
+}
+
+.ss-camera-gallery-input {
+  display: none;
 }
 
 @media (max-width: 900px) {

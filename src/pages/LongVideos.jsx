@@ -10,8 +10,8 @@ const QUALITY_OPTIONS = ["auto", "1080", "720", "480", "360"];
 const MIN_LONG_VIDEO_FALLBACK_SECONDS = 45;
 const LONG_WATCH_CACHE_KEY = "socialsea_long_watch_cache_v1";
 const FEED_CACHE_KEY = "socialsea_feed_cache_v1";
-const FAST_REQUEST_TIMEOUT_MS = 4200;
-const BACKGROUND_REQUEST_TIMEOUT_MS = 7000;
+const FAST_REQUEST_TIMEOUT_MS = 2500;
+const BACKGROUND_REQUEST_TIMEOUT_MS = 5000;
 const WATCH_CATEGORIES = [
   "All",
   "Music",
@@ -185,12 +185,14 @@ export default function LongVideos() {
       typeof window !== "undefined"
         ? localStorage.getItem("socialsea_auth_base_url") || sessionStorage.getItem("socialsea_auth_base_url")
         : "";
+    const origin = typeof window !== "undefined" ? String(window.location.origin || "").trim() : "";
     const candidates = [
-      isLocalDev ? "/api" : "",
       String(api.defaults.baseURL || "").trim(),
       String(getApiBaseUrl() || "").trim(),
       String(storedBase || "").trim(),
-      String(import.meta.env.VITE_API_URL || "").trim()
+      String(import.meta.env.VITE_API_URL || "").trim(),
+      isLocalDev ? "/api" : "/api",
+      origin
     ].filter(Boolean);
 
     if (!candidates.length) return [undefined];
@@ -479,7 +481,10 @@ export default function LongVideos() {
     };
 
     const load = async () => {
-      setIsLoading(true);
+      const cached = readCachedWatchPosts();
+      const hasCached = cached.length > 0;
+      if (hasCached) setAllPosts(cached);
+      setIsLoading(!hasCached);
       try {
         const [fromFeed, fromReels, fromMe, fromProfile] = await Promise.all([
           fetchAny(["/api/feed", "/feed", "/api/posts", "/posts"]),
@@ -564,6 +569,12 @@ export default function LongVideos() {
       cancelled = true;
     };
   }, [postId]);
+
+  useEffect(() => {
+    if (isLoading && watchableVideos.length) {
+      setIsLoading(false);
+    }
+  }, [isLoading, watchableVideos.length]);
 
   useEffect(() => {
     const liked = readIdMap("likedPostIds");

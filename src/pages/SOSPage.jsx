@@ -50,9 +50,26 @@ const BAD_EMERGENCY_HOSTS = new Set([
   "www.socialsea.co.in"
 ]);
 
+const ALLOWED_EMERGENCY_HOSTS = (() => {
+  const raw = String(import.meta.env.VITE_EMERGENCY_HOST_ALLOWLIST || "").trim();
+  if (!raw) return new Set();
+  return new Set(
+    raw
+      .split(",")
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean)
+  );
+})();
+
 const allowLocalEmergencyHosts =
   typeof window !== "undefined" &&
   ["localhost", "127.0.0.1"].includes(String(window.location.hostname || "").toLowerCase());
+
+const isEmergencyHostAllowed = (host) => {
+  const value = String(host || "").trim().toLowerCase();
+  if (!value) return false;
+  return ALLOWED_EMERGENCY_HOSTS.has(value);
+};
 
 const normalizeEmergencyBase = (rawBase) => {
   const value = String(rawBase || "").trim().replace(/\/+$/, "");
@@ -62,7 +79,7 @@ const normalizeEmergencyBase = (rawBase) => {
   if (!/^https?:\/\//i.test(value)) return "";
   try {
     const host = new URL(value).hostname.toLowerCase();
-    if (BAD_EMERGENCY_HOSTS.has(host) && !allowLocalEmergencyHosts) return "";
+    if (BAD_EMERGENCY_HOSTS.has(host) && !allowLocalEmergencyHosts && !isEmergencyHostAllowed(host)) return "";
   } catch {
     return "";
   }
@@ -204,6 +221,7 @@ export default function SOSPage() {
   const [elapsedSec, setElapsedSec] = useState(0);
   const [lastLocation, setLastLocation] = useState(null);
   const [locationCount, setLocationCount] = useState(0);
+  const [nearbyCount, setNearbyCount] = useState(null);
   const [recordingInfo, setRecordingInfo] = useState({
     audio: false,
     video: false,
@@ -854,14 +872,19 @@ export default function SOSPage() {
           const res = await callEmergency("post", "trigger", payload);
 
           const id = res?.data?.alertId || null;
+          const rawNearby = res?.data?.nearbyCount;
+          const parsedNearby = Number(rawNearby);
+          const resolvedNearby = Number.isFinite(parsedNearby) ? parsedNearby : null;
           setAlertId(id);
           setAlertDisplayId(id ? String(id) : null);
           setBackendStatus("SOS sent to backend (5km)");
+          setNearbyCount(resolvedNearby);
           persistSession({
             alertId: id,
             alertDisplayId: id ? String(id) : null,
             reporterUserId,
             backendStatus: "SOS sent to backend (5km)",
+            nearbyCount: resolvedNearby,
             updatedAt: nowIso()
           });
           broadcastSosSignal("triggered", {
@@ -879,11 +902,13 @@ export default function SOSPage() {
             ? "Backend emergency endpoint not found (404). Local SOS is still active."
             : `Backend error: ${status || ""} ${err?.message || ""}`.trim();
           setBackendStatus(backendMessage);
+          setNearbyCount(null);
           persistSession({
             alertId: null,
             alertDisplayId: localId,
             reporterUserId,
             backendStatus: backendMessage,
+            nearbyCount: null,
             updatedAt: nowIso()
           });
           broadcastSosSignal("triggered-local", {
@@ -1703,6 +1728,9 @@ export default function SOSPage() {
       setLocationCount(session.locationCount || 0);
       setRecordingInfo(session.recordingInfo || { audio: false, video: false, chunks: 0, bytes: 0 });
       setBackendStatus(session.backendStatus || "Local SOS active");
+      if (session.nearbyCount != null) {
+        setNearbyCount(Number.isFinite(Number(session.nearbyCount)) ? Number(session.nearbyCount) : null);
+      }
       if (session.startedAt) {
         const sec = Math.max(0, Math.floor((Date.now() - new Date(session.startedAt).getTime()) / 1000));
         setElapsedSec(sec);
@@ -1765,6 +1793,7 @@ export default function SOSPage() {
             <p>Longitude: {lastLocation?.longitude ?? "-"}</p>
             <p>Accuracy: {lastLocation?.accuracy ? `${Math.round(lastLocation.accuracy)} m` : "-"}</p>
             <p>Updates: {locationCount}</p>
+            <p>Nearby users (5km): {nearbyCount ?? "-"}</p>
           </div>
           <div>
             <h3>Live Audio/Video</h3>

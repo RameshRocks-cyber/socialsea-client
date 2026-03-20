@@ -97,8 +97,16 @@ export default function Reels() {
         typeof window !== "undefined"
           ? localStorage.getItem("socialsea_auth_base_url") || sessionStorage.getItem("socialsea_auth_base_url")
           : "";
-      const activeBase = String(api.defaults.baseURL || storedBase || getApiBaseUrl() || "").trim();
-      return activeBase ? [activeBase] : [];
+      const origin = typeof window !== "undefined" ? String(window.location.origin || "").trim() : "";
+      const candidates = [
+        String(api.defaults.baseURL || "").trim(),
+        String(getApiBaseUrl() || "").trim(),
+        String(storedBase || "").trim(),
+        String(import.meta.env.VITE_API_URL || "").trim(),
+        "/api",
+        origin
+      ].filter(Boolean);
+      return [...new Set(candidates)];
     };
     const extractList = (payload) =>
       Array.isArray(payload)
@@ -711,15 +719,15 @@ export default function Reels() {
     const followTarget = reel?.user?.email || reel?.username;
     if (!followTarget) return;
     const key = reelOwnerKey(reel);
-    try {
-      const res = await api.post(`/api/follow/${encodeURIComponent(followTarget)}`);
-      const msg = String(res?.data || "").toLowerCase();
-      if (res.status >= 200 && res.status < 300 && !msg.includes("cannot follow")) {
-        setFollowingByKey((prev) => ({ ...prev, [key]: true }));
+      try {
+        const res = await api.post(`/api/follow/${encodeURIComponent(followTarget)}`);
+        const status = String(res?.data?.status || res?.data || "").toLowerCase();
+        if (res.status >= 200 && res.status < 300 && status.includes("following")) {
+          setFollowingByKey((prev) => ({ ...prev, [key]: true }));
+        }
+      } catch {
+        // noop
       }
-    } catch {
-      // noop
-    }
   };
 
   const toggleMute = () => {
