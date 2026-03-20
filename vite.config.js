@@ -11,7 +11,7 @@ export default defineConfig(({ mode }) => {
     'node_modules/livekit-client/dist/livekit-client.esm.mjs',
   )
   const env = loadEnv(mode, process.cwd(), '')
-  const devProxyTarget = env.VITE_DEV_PROXY_TARGET || 'https://socialsea.co.in'
+  const devProxyTarget = env.VITE_DEV_PROXY_TARGET || 'https://api.socialsea.co.in'
 
   return {
     plugins: [react()],
@@ -32,6 +32,11 @@ export default defineConfig(({ mode }) => {
       strictPort: true,
       proxy: {
         '/api': {
+          target: devProxyTarget,
+          changeOrigin: true,
+          secure: false,
+        },
+        '/uploads': {
           target: devProxyTarget,
           changeOrigin: true,
           secure: false,

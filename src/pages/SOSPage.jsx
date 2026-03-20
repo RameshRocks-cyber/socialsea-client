@@ -194,6 +194,30 @@ const alertIdsMatch = (a, b) => {
   if (Number.isFinite(nLeft) && Number.isFinite(nRight)) return nLeft === nRight;
   return false;
 };
+const resolveNearbyCount = (item) => {
+  if (!item || typeof item !== "object") return null;
+  const rawCount =
+    item?.nearbyCount ??
+    item?.nearby_count ??
+    item?.nearbyUsersCount ??
+    item?.nearbyUserCount ??
+    item?.nearbyTotal ??
+    item?.nearbyUsersTotal;
+  const parsed = Number(rawCount);
+  const arrayCandidates = [
+    item?.nearbyUsers,
+    item?.nearby,
+    item?.nearbyPeople,
+    item?.nearbyUserList,
+    item?.nearbyUsersList
+  ].find((value) => Array.isArray(value));
+  const arrayCount = Array.isArray(arrayCandidates) ? arrayCandidates.length : null;
+  if (Number.isFinite(parsed)) {
+    if (parsed === 0 && Number.isFinite(arrayCount) && arrayCount > 0) return arrayCount;
+    return parsed;
+  }
+  return Number.isFinite(arrayCount) ? arrayCount : null;
+};
 
 const blobToDataUrl = (blob) =>
   new Promise((resolve, reject) => {
@@ -614,6 +638,69 @@ export default function SOSPage() {
     }
   };
 
+  useEffect(() => {
+    if (isLiveView) return undefined;
+    const currentAlertId = String(alertId || alertDisplayId || "").trim();
+    if (!currentAlertId) return undefined;
+    let cancelled = false;
+
+    const normalizeAlerts = (data) => {
+      if (Array.isArray(data)) return data;
+      if (Array.isArray(data?.alerts)) return data.alerts;
+      if (Array.isArray(data?.activeAlerts)) return data.activeAlerts;
+      if (Array.isArray(data?.nearbyAlerts)) return data.nearbyAlerts;
+      if (Array.isArray(data?.nearby)) return data.nearby;
+      if (Array.isArray(data?.sosAlerts)) return data.sosAlerts;
+      if (Array.isArray(data?.items)) return data.items;
+      if (Array.isArray(data?.data)) return data.data;
+      if (Array.isArray(data?.result)) return data.result;
+      if (Array.isArray(data?.payload)) return data.payload;
+      if (data?.alert && typeof data.alert === "object") return [data.alert];
+      if (data?.activeAlert && typeof data.activeAlert === "object") return [data.activeAlert];
+      if (data && typeof data === "object") return [data];
+      return [];
+    };
+
+    const pollNearby = async () => {
+      try {
+        const params = {
+          includeNearby: true,
+          includeReporter: true,
+          radiusMeters: RADIUS_METERS
+        };
+        if (lastLocation?.latitude != null && lastLocation?.longitude != null) {
+          params.lat = lastLocation.latitude;
+          params.lon = lastLocation.longitude;
+          params.latitude = lastLocation.latitude;
+          params.longitude = lastLocation.longitude;
+        }
+        const res = await callEmergency("get", "active", undefined, {
+          params,
+          suppressAuthRedirect: true
+        });
+        if (cancelled) return;
+        const list = normalizeAlerts(res?.data);
+        const matched = list.find((item) =>
+          alertIdsMatch(item?.alertId || item?.alertDisplayId || item?.id, currentAlertId)
+        );
+        const resolved = resolveNearbyCount(matched);
+        if (Number.isFinite(resolved)) {
+          setNearbyCount(resolved);
+          persistSession({ nearbyCount: resolved, updatedAt: nowIso() });
+        }
+      } catch {
+        // keep last known nearby count
+      }
+    };
+
+    pollNearby();
+    const timer = setInterval(pollNearby, 6000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [isLiveView, alertId, alertDisplayId, lastLocation?.latitude, lastLocation?.longitude]);
+
   const fetchPreviewFrame = async (alertLikeId) => {
     const id = String(alertLikeId || "").trim();
     if (!id) return false;
@@ -872,9 +959,7 @@ export default function SOSPage() {
           const res = await callEmergency("post", "trigger", payload);
 
           const id = res?.data?.alertId || null;
-          const rawNearby = res?.data?.nearbyCount;
-          const parsedNearby = Number(rawNearby);
-          const resolvedNearby = Number.isFinite(parsedNearby) ? parsedNearby : null;
+          const resolvedNearby = resolveNearbyCount(res?.data);
           setAlertId(id);
           setAlertDisplayId(id ? String(id) : null);
           setBackendStatus("SOS sent to backend (5km)");

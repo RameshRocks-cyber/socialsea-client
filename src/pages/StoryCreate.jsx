@@ -152,6 +152,9 @@ export default function StoryCreate() {
         addStoryToLocalCache({
           id: res?.data?.id || res?.data?.postId || Date.now(),
           mediaUrl,
+          mediaType: file?.type || (isVideo ? "video" : "image"),
+          type: isVideo ? "VIDEO" : "IMAGE",
+          isVideo: !!isVideo,
           storyText: storyText.trim(),
           caption: caption.trim(),
           privacy,

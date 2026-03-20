@@ -179,20 +179,35 @@ export default function LongVideos() {
   };
 
   const buildBaseCandidates = () => {
-    const host = typeof window !== "undefined" ? String(window.location.hostname || "").toLowerCase() : "";
-    const isLocalDev = host === "localhost" || host === "127.0.0.1";
     const storedBase =
       typeof window !== "undefined"
         ? localStorage.getItem("socialsea_auth_base_url") || sessionStorage.getItem("socialsea_auth_base_url")
         : "";
     const origin = typeof window !== "undefined" ? String(window.location.origin || "").trim() : "";
+    const apiBase = String(getApiBaseUrl() || "").trim();
+    const envBase = String(import.meta.env.VITE_API_URL || "").trim();
+    const toHost = (value) => {
+      if (!value || !/^https?:\/\//i.test(value)) return "";
+      try {
+        return new URL(value).hostname.toLowerCase();
+      } catch {
+        return "";
+      }
+    };
+    const originHost = toHost(origin);
+    const apiHost = toHost(apiBase || envBase);
+    const preferSameOrigin =
+      !apiBase ||
+      apiBase.startsWith("/") ||
+      (apiHost && originHost && apiHost === originHost);
+
     const candidates = [
       String(api.defaults.baseURL || "").trim(),
-      String(getApiBaseUrl() || "").trim(),
+      apiBase,
       String(storedBase || "").trim(),
-      String(import.meta.env.VITE_API_URL || "").trim(),
-      isLocalDev ? "/api" : "/api",
-      origin
+      envBase,
+      preferSameOrigin ? "/api" : "",
+      preferSameOrigin ? origin : ""
     ].filter(Boolean);
 
     if (!candidates.length) return [undefined];
@@ -571,12 +586,6 @@ export default function LongVideos() {
   }, [postId]);
 
   useEffect(() => {
-    if (isLoading && watchableVideos.length) {
-      setIsLoading(false);
-    }
-  }, [isLoading, watchableVideos.length]);
-
-  useEffect(() => {
     const liked = readIdMap("likedPostIds");
     const disliked = readIdMap("dislikedPostIds");
     const normalizedLiked = { ...liked };
@@ -650,6 +659,12 @@ export default function LongVideos() {
     if (routePostCandidate) return uniqueByPostKey([routePostCandidate, ...baseList]);
     return baseList;
   }, [longVideos, videoPosts, allPosts, postId]);
+
+  useEffect(() => {
+    if (isLoading && watchableVideos.length) {
+      setIsLoading(false);
+    }
+  }, [isLoading, watchableVideos.length]);
 
   useEffect(() => {    if (!watchableVideos.length) return;
     watchableVideos.forEach((post) => {

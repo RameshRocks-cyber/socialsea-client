@@ -5,6 +5,8 @@ import { formatDateTime } from "../admin/adminMetrics";
 const SOS_SESSION_KEY = "socialsea_sos_session_v1";
 const SOS_SIGNAL_KEY = "socialsea_sos_signal_v1";
 const SOS_SIGNAL_CHANNEL = "socialsea_sos_signal_channel_v1";
+const REQUEST_TIMEOUT_MS = 3500;
+const ADMIN_USERS_CACHE_MS = 30000;
 
 const toRecordingShape = (item) => ({
   id: item?.id ?? item?.alertId ?? "",
@@ -217,6 +219,7 @@ export default function AdminLiveRecordings() {
   const [note, setNote] = useState("");
   const [expandedNearbyByAlert, setExpandedNearbyByAlert] = useState({});
   const liveSignalRowRef = useRef(null);
+  const adminUsersRef = useRef({ list: [], fetchedAt: 0 });
 
   useEffect(() => {
     let channel = null;
@@ -293,47 +296,84 @@ export default function AdminLiveRecordings() {
 
       let bestList = [];
       let lastError = null;
-      let adminUsers = [];
 
-      for (const base of baseCandidates) {
-        for (const endpoint of endpointCandidates) {
-          try {
-            const res = await api.get(endpoint, { baseURL: base });
-            const list = normalizeList(res?.data)
+      const fetchRecordingsFromBase = async (base) => {
+        if (!base) return { list: [], error: null };
+        const results = await Promise.allSettled(
+          endpointCandidates.map((endpoint) =>
+            api.get(endpoint, { baseURL: base, timeout: REQUEST_TIMEOUT_MS })
+          )
+        );
+        let best = [];
+        let err = null;
+        results.forEach((result) => {
+          if (result.status === "fulfilled") {
+            const list = normalizeList(result.value?.data)
               .map(toRecordingShape)
               .filter((x) => x.id !== "");
-            if (list.length > bestList.length) {
-              bestList = list;
-            }
-          } catch (err) {
-            lastError = err;
+            if (list.length > best.length) best = list;
+          } else if (!err) {
+            err = result.reason;
           }
+        });
+        return { list: best, error: err };
+      };
+
+      const getAdminUsers = async () => {
+        const cached = adminUsersRef.current;
+        const age = Date.now() - Number(cached.fetchedAt || 0);
+        if (Array.isArray(cached.list) && cached.list.length > 0 && age < ADMIN_USERS_CACHE_MS) {
+          return cached.list;
         }
+        try {
+          const usersRes = await api.get("/api/admin/users", { timeout: REQUEST_TIMEOUT_MS });
+          const list = Array.isArray(usersRes?.data) ? usersRes.data : [];
+          adminUsersRef.current = { list, fetchedAt: Date.now() };
+          return list;
+        } catch {
+          return Array.isArray(cached.list) ? cached.list : [];
+        }
+      };
+
+      const primaryBase = baseCandidates[0];
+      const fallbackBases = baseCandidates.slice(1);
+
+      if (primaryBase) {
+        const primary = await fetchRecordingsFromBase(primaryBase);
+        bestList = primary.list;
+        lastError = primary.error;
+      }
+
+      if (bestList.length === 0 && fallbackBases.length > 0) {
+        const fallbackResults = await Promise.allSettled(
+          fallbackBases.map((base) => fetchRecordingsFromBase(base))
+        );
+        fallbackResults.forEach((result) => {
+          if (result.status !== "fulfilled") return;
+          if (result.value.list.length > bestList.length) {
+            bestList = result.value.list;
+          }
+          if (!lastError && result.value.error) {
+            lastError = result.value.error;
+          }
+        });
       }
 
       if (bestList.length === 0) {
         try {
-          const [alertsRes, usersRes] = await Promise.all([
-            api.get("/api/emergency/active"),
-            api.get("/api/admin/users")
-          ]);
+          const alertsRes = await api.get("/api/emergency/active", { timeout: REQUEST_TIMEOUT_MS });
           const alerts = Array.isArray(alertsRes?.data) ? alertsRes.data : [];
-          adminUsers = Array.isArray(usersRes?.data) ? usersRes.data : [];
-          bestList = alerts.map((a) => toActiveAlertShape(a, adminUsers)).filter((x) => x.id !== "");
+          if (alerts.length > 0) {
+            const adminUsers = await getAdminUsers();
+            bestList = alerts.map((a) => toActiveAlertShape(a, adminUsers)).filter((x) => x.id !== "");
+          }
         } catch {
           // keep endpoint errors from above
         }
       }
 
       if (bestList.length === 0) {
-        try {
-          if (!adminUsers.length) {
-            const usersRes = await api.get("/api/admin/users");
-            adminUsers = Array.isArray(usersRes?.data) ? usersRes.data : [];
-          }
-        } catch {
-          // no-op
-        }
+        const adminUsers = await getAdminUsers();
         const localSession = readLocalSosSession();
         const localRow = toLocalSosShape(localSession, adminUsers);
         if (localRow) {

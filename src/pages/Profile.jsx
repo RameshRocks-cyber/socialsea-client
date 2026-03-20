@@ -803,12 +803,15 @@ export default function Profile() {
   const reels = posts.filter((post) => post?.isShortVideo);
   const normalPosts = posts.filter((post) => !post?.isShortVideo);
   const visiblePosts = profileTab === "reels" ? reels : normalPosts;
+  const loadedPostsCount = (normalPosts?.length || 0) + (reels?.length || 0);
   const postsCount =
-    Number.isFinite(Number(profile?.postsCount)) && Number(profile?.postsCount) >= 0
-      ? Number(profile?.postsCount)
-      : Number.isFinite(Number(profile?.posts)) && Number(profile?.posts) >= 0
-        ? Number(profile?.posts)
-        : (normalPosts?.length || 0) + (reels?.length || 0);
+    loadedPostsCount > 0
+      ? loadedPostsCount
+      : Number.isFinite(Number(profile?.postsCount)) && Number(profile?.postsCount) >= 0
+        ? Number(profile?.postsCount)
+        : Number.isFinite(Number(profile?.posts)) && Number(profile?.posts) >= 0
+          ? Number(profile?.posts)
+          : loadedPostsCount;
   const isPrivateLocked = Boolean(profile?.privateAccount) && profile?.canViewContent === false && !isOwnProfile;
   const displayName = profile?.name || profile?.email || profile?.username || "Profile";
   const displayBio = profile?.bio || "No bio yet";

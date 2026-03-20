@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef } from "react";
+﻿import { Suspense, lazy, useEffect, useRef } from "react";
 import { BrowserRouter, Routes, Route, useLocation, Navigate, useNavigate } from "react-router-dom";
 import Navbar from "./components/Navbar";
 import Feed from "./components/Feed";
@@ -9,7 +9,6 @@ import Upload from "./pages/Upload";
 import Reels from "./pages/Reels";
 import HighlightsCreate from "./pages/HighlightsCreate";
 import Notifications from "./pages/Notifications";
-import Chat from "./pages/Chat";
 import Profile from "./pages/Profile";
 import AnonymousFeed from "./pages/AnonymousFeed";
 import AnonymousUpload from "./pages/AnonymousUpload";
@@ -43,6 +42,8 @@ import { getApiBaseUrl } from "./api/baseUrl";
 import api from "./api/axios";
 import PageErrorBoundary from "./components/PageErrorBoundary";
 import "./App.css";
+
+const Chat = lazy(() => import("./pages/Chat"));
 
 const isLoopbackHost = (host) => {
   const value = String(host || "").trim().toLowerCase();
@@ -152,6 +153,39 @@ function AppRoutes() {
     const minSendGapMs = 8000;
     let intervalId = null;
 
+    const normalizePresenceBase = (rawValue) => {
+      const value = String(rawValue || "").trim().replace(/\/+$/, "");
+      if (!value || value === "/") return "";
+      if (value.startsWith("/")) return value;
+      if (!/^https?:\/\//i.test(value)) return "";
+      return value;
+    };
+
+    const resolvePresenceBase = () => {
+      const storedBase =
+        localStorage.getItem("socialsea_auth_base_url") || sessionStorage.getItem("socialsea_auth_base_url");
+      const runtimeHost =
+        typeof window !== "undefined" ? String(window.location.hostname || "").trim() : "";
+      const runtimeHostBase =
+        runtimeHost && (isLoopbackHost(runtimeHost) || isPrivateIpHost(runtimeHost))
+          ? `http://${runtimeHost}:8080`
+          : "";
+      const candidates = [
+        import.meta.env.VITE_DEV_PROXY_TARGET,
+        import.meta.env.VITE_API_BASE_URL,
+        import.meta.env.VITE_API_URL,
+        getApiBaseUrl(),
+        api.defaults.baseURL,
+        storedBase,
+        runtimeHostBase
+      ]
+        .map(normalizePresenceBase)
+        .filter(Boolean);
+
+      const absolute = candidates.find((value) => /^https?:\/\//i.test(value));
+      return absolute || candidates[0] || "";
+    };
+
     const sendPresence = (latitude, longitude) => {
       if (!active) return;
       if (typeof latitude !== "number" || typeof longitude !== "number") return;
@@ -162,38 +196,22 @@ function AppRoutes() {
       if (now - lastSentAt < minSendGapMs) return;
       lastSentAt = now;
       const payload = { latitude, longitude, reporterEmail };
-      const storedBase =
-        localStorage.getItem("socialsea_auth_base_url") || sessionStorage.getItem("socialsea_auth_base_url");
-      const runtimeHost =
-        typeof window !== "undefined" ? String(window.location.hostname || "").trim() : "";
-      const runtimeHostBase =
-        runtimeHost && (isLoopbackHost(runtimeHost) || isPrivateIpHost(runtimeHost))
-          ? `http://${runtimeHost}:8080`
-          : "";
-      const bases = [
-        getApiBaseUrl(),
-        api.defaults.baseURL,
-        storedBase,
-        runtimeHostBase,
-        "http://localhost:8080",
-        "http://127.0.0.1:8080",
-        "https://api.socialsea.co.in"
-      ].filter((value, index, arr) => value && arr.indexOf(value) === index);
-      bases.forEach((baseURL, index) => {
-        api
-          .request({
-            method: "POST",
-            url: "/api/emergency/presence",
-            data: payload,
-            baseURL,
-            skipAuth: true
-          })
-          .catch(() => {
-            if (index === bases.length - 1) {
-              // ignore final failure
-            }
-          });
-      });
+      const baseURL = resolvePresenceBase();
+      if (!baseURL) return;
+      api
+        .request({
+          method: "POST",
+          url: "/api/emergency/presence",
+          data: payload,
+          baseURL,
+          timeout: 6000,
+          suppressAuthRedirect: true,
+          skipAuth: !authed,
+          skipRefresh: !authed
+        })
+        .catch(() => {
+          // ignore presence failures
+        });
     };
 
     const onPos = (pos) => {
@@ -354,7 +372,7 @@ function AppRoutes() {
                 element={
                   <ProtectedRoute>
                     <PageErrorBoundary title="Chat crashed">
-                      <Chat />
+                      <Suspense fallback={<div style={{ padding: 20, color: "#fff" }}>Loading chat...</div>}><Chat /></Suspense>
                     </PageErrorBoundary>
                   </ProtectedRoute>
                 }
@@ -364,7 +382,7 @@ function AppRoutes() {
                 element={
                   <ProtectedRoute>
                     <PageErrorBoundary title="Chat crashed">
-                      <Chat />
+                      <Suspense fallback={<div style={{ padding: 20, color: "#fff" }}>Loading chat...</div>}><Chat /></Suspense>
                     </PageErrorBoundary>
                   </ProtectedRoute>
                 }

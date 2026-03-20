@@ -596,6 +596,8 @@ export default function Chat() {
   const [storyViewerMuted, setStoryViewerMuted] = useState(true);
   const [storyViewerLoading, setStoryViewerLoading] = useState(false);
   const [storyViewerLoadError, setStoryViewerLoadError] = useState("");
+  const [storyViewerMediaKind, setStoryViewerMediaKind] = useState("unknown");
+  const [storyViewerBlobType, setStoryViewerBlobType] = useState("");
   const [storyOptionsOpen, setStoryOptionsOpen] = useState(false);
   const [soundPrefs, setSoundPrefs] = useState(readSoundPrefs);
   const [hasRemoteVideo, setHasRemoteVideo] = useState(false);
@@ -714,6 +716,7 @@ export default function Chat() {
   const storyViewerCandidatesRef = useRef([]);
   const storyViewerCandidateIndexRef = useRef(0);
   const storyViewerBlobUrlRef = useRef("");
+  const storyViewerLoadTimeoutRef = useRef(null);
   const seenSignalsRef = useRef(new Set());
   const longPressTimerRef = useRef(null);
   const touchStartPointRef = useRef({ x: 0, y: 0 });
@@ -1698,6 +1701,22 @@ export default function Chat() {
     return value;
   };
 
+  const resolveAbsoluteChatBase = () => {
+    const candidates = [
+      import.meta.env.VITE_DEV_PROXY_TARGET,
+      import.meta.env.VITE_API_BASE_URL,
+      import.meta.env.VITE_API_URL,
+      safeGetItem("socialsea_auth_base_url"),
+      safeGetItem("socialsea_otp_base_url"),
+      api.defaults.baseURL,
+      getApiBaseUrl(),
+      chatServerBaseRef.current
+    ]
+      .map(normalizeBaseCandidate)
+      .filter(Boolean);
+    return candidates.find((value) => /^https?:\/\//i.test(value)) || "";
+  };
+
   const looksLikeHtmlPayload = (value) =>
     typeof value === "string" &&
     (/^\s*<!doctype html/i.test(value) || /<html[\s>]/i.test(value));
@@ -1725,18 +1744,19 @@ export default function Chat() {
       ["localhost", "127.0.0.1"].includes(String(window.location.hostname || "").toLowerCase());
     const storedAuthBase = safeGetItem("socialsea_auth_base_url");
     const storedOtpBase = safeGetItem("socialsea_otp_base_url");
-    const localDefaults = ["/api", "http://localhost:8080", "http://127.0.0.1:8080", "https://api.socialsea.co.in", "https://socialsea.co.in"];
-    const deployedDefaults = ["/api", "https://api.socialsea.co.in", "https://socialsea.co.in"];
+    const absoluteBase = resolveAbsoluteChatBase();
+    const relativeBase = normalizeBaseCandidate(getApiBaseUrl()) || "/api";
     return [
       chatServerBaseRef.current,
-      "/api",
+      absoluteBase,
+      relativeBase,
       storedAuthBase,
       storedOtpBase,
       api.defaults.baseURL,
       getApiBaseUrl(),
       import.meta.env.VITE_API_BASE_URL,
       import.meta.env.VITE_API_URL,
-      ...(isLocalDev ? [...localDefaults, ...deployedDefaults] : deployedDefaults),
+      ...(isLocalDev ? [] : []),
     ]
       .map(normalizeBaseCandidate)
       .filter((value, index, arr) => value && arr.indexOf(value) === index);
@@ -5023,7 +5043,10 @@ export default function Chat() {
         ]);
         if (disposed) return;
         const SockJS = sockjsModule?.default || sockjsModule;
-        const base = getApiBaseUrl().replace(/\/+$/, "");
+        const rawBase = resolveAbsoluteChatBase() || normalizeBaseCandidate(getApiBaseUrl());
+        const origin = typeof window !== "undefined" ? String(window.location.origin || "") : "";
+        const base = rawBase && rawBase.startsWith("/") ? `${origin}${rawBase}` : String(rawBase || "");
+        if (!base) return;
 
         const client = new Client({
           webSocketFactory: () => new SockJS(`${base}/ws?token=${encodeURIComponent(token)}`),
@@ -5441,7 +5464,9 @@ export default function Chat() {
 
   const resolveStoryMediaUrl = (raw) => {
     if (!raw) return "";
-    return String(raw).startsWith("http") ? String(raw) : toApiUrl(String(raw));
+    const normalized = String(raw);
+    if (/^(blob:|data:|https?:\/\/)/i.test(normalized)) return normalized;
+    return toApiUrl(normalized);
   };
 
   const revokeStoryViewerBlobUrl = useCallback(() => {
@@ -5454,6 +5479,12 @@ export default function Chat() {
     storyViewerBlobUrlRef.current = "";
   }, []);
 
+  const clearStoryViewerLoadTimer = useCallback(() => {
+    if (!storyViewerLoadTimeoutRef.current) return;
+    clearTimeout(storyViewerLoadTimeoutRef.current);
+    storyViewerLoadTimeoutRef.current = null;
+  }, []);
+
   const buildStoryMediaCandidates = useCallback((raw) => {
     const value = String(raw || "").trim();
     if (!value) return [];
@@ -5464,16 +5495,66 @@ export default function Chat() {
       if (collected.includes(normalized)) return;
       collected.push(normalized);
     };
+    const normalizeBase = (base) => String(base || "").trim().replace(/\/+$/, "");
+    const addBase = (base, path) => {
+      const normalizedBase = normalizeBase(base);
+      if (!normalizedBase || !path) return;
+      add(`${normalizedBase}${path}`);
+    };
+    const apiBase = normalizeBase(getApiBaseUrl());
+    const relPath = value.startsWith("/") ? value : `/${value.replace(/^\/+/, "")}`;
+    const relPathNoApi = relPath.replace(/^\/api(?=\/|$)/i, "") || relPath;
+    const devProxyBase = normalizeBase(import.meta.env?.VITE_DEV_PROXY_TARGET);
+    const stripApiPath = (base) => {
+      const normalized = normalizeBase(base);
+      if (!normalized) return "";
+      if (normalized.startsWith("/")) return normalized.replace(/\/api$/i, "");
+      try {
+        const parsed = new URL(normalized);
+        if (/\/api\/?$/i.test(parsed.pathname)) {
+          parsed.pathname = parsed.pathname.replace(/\/api\/?$/i, "");
+          return parsed.toString().replace(/\/+$/, "");
+        }
+      } catch {
+        // ignore URL parse errors
+      }
+      return "";
+    };
+    const stripApiSubdomain = (base) => {
+      const normalized = normalizeBase(base);
+      if (!normalized || normalized.startsWith("/")) return "";
+      try {
+        const parsed = new URL(normalized);
+        if (/^api\./i.test(parsed.hostname)) {
+          parsed.hostname = parsed.hostname.replace(/^api\./i, "");
+          return parsed.toString().replace(/\/+$/, "");
+        }
+      } catch {
+        // ignore URL parse errors
+      }
+      return "";
+    };
 
     add(value);
-    const relPath = value.startsWith("/") ? value : `/${value.replace(/^\/+/, "")}`;
     if (!/^https?:\/\//i.test(value)) {
       add(toApiUrl(relPath));
       if (typeof window !== "undefined") {
         add(`${window.location.origin}${relPath}`);
       }
-      const apiBase = String(getApiBaseUrl() || "").trim().replace(/\/+$/, "");
-      if (apiBase) add(`${apiBase}${relPath}`);
+      if (apiBase) addBase(apiBase, relPath);
+      if (devProxyBase) addBase(devProxyBase, relPath);
+      const apiBaseNoPath = stripApiPath(apiBase);
+      if (apiBaseNoPath) addBase(apiBaseNoPath, relPath);
+      const apiBaseNoSub = stripApiSubdomain(apiBase);
+      if (apiBaseNoSub) addBase(apiBaseNoSub, relPath);
+      if (relPathNoApi !== relPath) {
+        add(relPathNoApi);
+        if (typeof window !== "undefined") add(`${window.location.origin}${relPathNoApi}`);
+        if (devProxyBase) addBase(devProxyBase, relPathNoApi);
+        if (apiBase) addBase(apiBase, relPathNoApi);
+        if (apiBaseNoPath) addBase(apiBaseNoPath, relPathNoApi);
+        if (apiBaseNoSub) addBase(apiBaseNoSub, relPathNoApi);
+      }
       return collected;
     }
 
@@ -5482,8 +5563,21 @@ export default function Chat() {
       const pathWithQuery = `${parsed.pathname || ""}${parsed.search || ""}${parsed.hash || ""}`;
       if (pathWithQuery) {
         if (typeof window !== "undefined") add(`${window.location.origin}${pathWithQuery}`);
-        const apiBase = String(getApiBaseUrl() || "").trim().replace(/\/+$/, "");
-        if (apiBase) add(`${apiBase}${pathWithQuery}`);
+        if (apiBase) addBase(apiBase, pathWithQuery);
+        if (devProxyBase) addBase(devProxyBase, pathWithQuery);
+        const apiBaseNoPath = stripApiPath(apiBase);
+        if (apiBaseNoPath) addBase(apiBaseNoPath, pathWithQuery);
+        const apiBaseNoSub = stripApiSubdomain(apiBase);
+        if (apiBaseNoSub) addBase(apiBaseNoSub, pathWithQuery);
+        if (pathWithQuery.startsWith("/api/")) {
+          const trimmedPath = pathWithQuery.replace(/^\/api(?=\/|$)/i, "") || pathWithQuery;
+          add(trimmedPath);
+          if (typeof window !== "undefined") add(`${window.location.origin}${trimmedPath}`);
+          if (devProxyBase) addBase(devProxyBase, trimmedPath);
+          if (apiBase) addBase(apiBase, trimmedPath);
+          if (apiBaseNoPath) addBase(apiBaseNoPath, trimmedPath);
+          if (apiBaseNoSub) addBase(apiBaseNoSub, trimmedPath);
+        }
       }
     } catch {
       // ignore URL parse errors
@@ -5511,6 +5605,12 @@ export default function Chat() {
         const blobUrl = URL.createObjectURL(blob);
         storyViewerBlobUrlRef.current = blobUrl;
         setStoryViewerSrc(blobUrl);
+        setStoryViewerBlobType(blobType);
+        if (blobType.startsWith("video/")) {
+          setStoryViewerMediaKind("video");
+        } else if (blobType.startsWith("image/")) {
+          setStoryViewerMediaKind("image");
+        }
         setStoryViewerLoadError("");
         return true;
       } catch {
@@ -5538,16 +5638,61 @@ export default function Chat() {
   }, [loadStoryViewerBlobFallback]);
 
   const isStoryVideo = (url) =>
-    /\.(mp4|mov|webm|mkv|m4v|avi|mpg|mpeg|3gp|ogv)(\?|#|$)/i.test(String(url || ""));
+    /\.(mp4|mov|webm|mkv|m4v|avi|mpg|mpeg|3gp|ogv|m3u8|mpd)(\?|#|$)/i.test(String(url || ""));
+
+  const detectStoryMediaKind = (value) => {
+    const raw = String(value || "").trim().toLowerCase();
+    if (!raw) return "";
+    if (raw === "video" || raw === "reel") return "video";
+    if (raw === "image" || raw === "photo" || raw === "pic") return "image";
+    if (raw.includes("video")) return "video";
+    if (raw.includes("image")) return "image";
+    if (/\b(mp4|mov|webm|mkv|m4v|avi|mpg|mpeg|3gp|ogv)\b/.test(raw)) return "video";
+    if (/\b(jpg|jpeg|png|gif|webp|bmp|svg)\b/.test(raw)) return "image";
+    return "";
+  };
+
+  const inferStoryMediaKind = (story, url, blobType = "") => {
+    if (!story) {
+      const blobKind = detectStoryMediaKind(blobType);
+      if (blobKind) return blobKind;
+      return isStoryVideo(url) ? "video" : "";
+    }
+    if (story?.isVideo === true) return "video";
+    if (story?.isVideo === false) return "image";
+    const candidates = [
+      story?.mediaType,
+      story?.contentType,
+      story?.mimeType,
+      story?.fileType,
+      story?.type,
+      story?.mediaKind,
+      story?.media?.type,
+      story?.media?.contentType
+    ];
+    for (const candidate of candidates) {
+      const kind = detectStoryMediaKind(candidate);
+      if (kind) return kind;
+    }
+    const blobKind = detectStoryMediaKind(blobType);
+    if (blobKind) return blobKind;
+    return isStoryVideo(url) ? "video" : "";
+  };
 
   const activeStory = storyViewerIndex != null ? storyItems[storyViewerIndex] : null;
-  const openStory = (idx) => setStoryViewerIndex(idx);
+  const openStory = (idx) => {
+    setStoryViewerMuted(true);
+    setStoryViewerIndex(idx);
+  };
   const closeStory = () => {
     setStoryViewerIndex(null);
     setStoryViewerMuted(true);
     setStoryViewerLoading(false);
     setStoryViewerLoadError("");
     setStoryViewerSrc("");
+    setStoryViewerMediaKind("unknown");
+    setStoryViewerBlobType("");
+    clearStoryViewerLoadTimer();
     revokeStoryViewerBlobUrl();
   };
   const openStoryOptions = () => setStoryOptionsOpen(true);
@@ -5559,8 +5704,11 @@ export default function Chat() {
       setStoryViewerMuted(true);
       setStoryViewerLoading(false);
       setStoryViewerLoadError("");
+      setStoryViewerMediaKind("unknown");
+      setStoryViewerBlobType("");
       storyViewerCandidatesRef.current = [];
       storyViewerCandidateIndexRef.current = 0;
+      clearStoryViewerLoadTimer();
       revokeStoryViewerBlobUrl();
       return;
     }
@@ -5571,15 +5719,49 @@ export default function Chat() {
     setStoryViewerMuted(true);
     setStoryViewerLoading(false);
     setStoryViewerLoadError(candidates.length ? "" : "Story media not available");
+    const inferredKind = inferStoryMediaKind(activeStory, rawUrl, "");
+    setStoryViewerMediaKind(inferredKind || "unknown");
+    setStoryViewerBlobType("");
+    clearStoryViewerLoadTimer();
     revokeStoryViewerBlobUrl();
     setStoryViewerSrc(String(candidates[0] || ""));
-  }, [activeStory, buildStoryMediaCandidates, revokeStoryViewerBlobUrl, storyViewerIndex]);
+  }, [activeStory, buildStoryMediaCandidates, clearStoryViewerLoadTimer, revokeStoryViewerBlobUrl, storyViewerIndex]);
 
   useEffect(() => {
     return () => {
+      clearStoryViewerLoadTimer();
       revokeStoryViewerBlobUrl();
     };
-  }, [revokeStoryViewerBlobUrl]);
+  }, [clearStoryViewerLoadTimer, revokeStoryViewerBlobUrl]);
+
+  useEffect(() => {
+    if (storyViewerIndex == null || !activeStory) return;
+    const mediaUrl = storyViewerSrc || resolveStoryMediaUrl(activeStory?.mediaUrl || activeStory?.url || "");
+    const inferredKind =
+      storyViewerMediaKind === "unknown"
+        ? inferStoryMediaKind(activeStory, mediaUrl, storyViewerBlobType)
+        : storyViewerMediaKind;
+    if (inferredKind !== "video") return;
+    clearStoryViewerLoadTimer();
+    setStoryViewerLoading(true);
+    storyViewerLoadTimeoutRef.current = setTimeout(() => {
+      const videoEl = storyViewerVideoRef.current;
+      if (videoEl && videoEl.readyState >= 2 && Number.isFinite(videoEl.duration) && videoEl.duration > 0) {
+        setStoryViewerLoading(false);
+        return;
+      }
+      handleStoryViewerMediaError();
+    }, 2200);
+    return () => clearStoryViewerLoadTimer();
+  }, [
+    storyViewerSrc,
+    storyViewerIndex,
+    activeStory,
+    storyViewerMediaKind,
+    storyViewerBlobType,
+    clearStoryViewerLoadTimer,
+    handleStoryViewerMediaError
+  ]);
   const deleteStoryAt = (index) => {
     setStoryItems((prev) => {
       if (!Array.isArray(prev) || prev.length === 0) return prev;
@@ -5624,6 +5806,7 @@ export default function Chat() {
     openStory(0);
   };
   const goNextStory = () => {
+    setStoryViewerMuted(true);
     setStoryViewerIndex((prev) => {
       if (prev == null) return null;
       const next = prev + 1;
@@ -5631,6 +5814,7 @@ export default function Chat() {
     });
   };
   const goPrevStory = () => {
+    setStoryViewerMuted(true);
     setStoryViewerIndex((prev) => {
       if (prev == null) return null;
       const next = prev - 1;
@@ -8707,7 +8891,11 @@ export default function Chat() {
             </button>
             {(() => {
               const mediaUrl = storyViewerSrc || resolveStoryMediaUrl(activeStory?.mediaUrl || activeStory?.url || "");
-              const isVideo = isStoryVideo(mediaUrl);
+              const inferredKind =
+                storyViewerMediaKind === "unknown"
+                  ? inferStoryMediaKind(activeStory, mediaUrl, storyViewerBlobType)
+                  : storyViewerMediaKind;
+              const isVideo = isStoryVideo(mediaUrl) || inferredKind === "video";
               const label = String(activeStory?.storyText || activeStory?.caption || "Story").trim();
               return (
                 <>
@@ -8715,6 +8903,7 @@ export default function Chat() {
                     {mediaUrl ? (
                       isVideo ? (
                         <video
+                          key={mediaUrl}
                           ref={storyViewerVideoRef}
                           src={mediaUrl}
                           autoPlay
@@ -8724,12 +8913,19 @@ export default function Chat() {
                           loop
                           preload="auto"
                           onLoadedData={(event) => {
+                            clearStoryViewerLoadTimer();
+                            setStoryViewerLoading(false);
                             event.currentTarget.play?.().catch(() => {});
                           }}
                           onCanPlay={(event) => {
+                            clearStoryViewerLoadTimer();
+                            setStoryViewerLoading(false);
                             event.currentTarget.play?.().catch(() => {});
                           }}
-                          onError={handleStoryViewerMediaError}
+                          onError={() => {
+                            clearStoryViewerLoadTimer();
+                            handleStoryViewerMediaError();
+                          }}
                         />
                       ) : (
                         <img src={mediaUrl} alt={label} onError={handleStoryViewerMediaError} />

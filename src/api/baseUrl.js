@@ -130,6 +130,33 @@ export function getApiBaseUrl() {
 export function toApiUrl(path = "") {
   const base = getApiBaseUrl();
   if (!path) return base;
-  if (/^https?:\/\//i.test(path)) return path;
-  return `${base}${path.startsWith("/") ? path : `/${path}`}`;
+  if (/^https?:\/\//i.test(path)) {
+    try {
+      const url = new URL(path);
+      if (url.pathname.startsWith("/api/uploads/")) {
+        url.pathname = url.pathname.replace("/api/uploads/", "/uploads/");
+        return url.toString();
+      }
+    } catch {
+      // ignore url parse errors
+    }
+    return path;
+  }
+  const baseTrimmed = String(base || "").replace(/\/+$/, "");
+  let normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  if (normalizedPath.startsWith("/api/uploads/")) {
+    normalizedPath = normalizedPath.replace("/api/uploads/", "/uploads/");
+  }
+  if (baseTrimmed.endsWith("/api")) {
+    if (normalizedPath.startsWith("/uploads/")) {
+      return `${baseTrimmed.replace(/\/api$/, "")}${normalizedPath}`;
+    }
+    if (normalizedPath.startsWith("/api/")) {
+      return `${baseTrimmed}${normalizedPath.replace(/^\/api/, "")}`;
+    }
+  }
+  if (baseTrimmed === "/api" && normalizedPath.startsWith("/uploads/")) {
+    return normalizedPath;
+  }
+  return `${baseTrimmed}${normalizedPath}`;
 }

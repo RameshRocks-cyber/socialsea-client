@@ -1260,6 +1260,8 @@ export default function Navbar() {
     const normalizeAlerts = (data) => {
       if (Array.isArray(data)) return data;
       if (Array.isArray(data?.alerts)) return data.alerts;
+      if (Array.isArray(data?.alerts?.items)) return data.alerts.items;
+      if (Array.isArray(data?.alerts?.rows)) return data.alerts.rows;
       if (Array.isArray(data?.activeAlerts)) return data.activeAlerts;
       if (Array.isArray(data?.nearbyAlerts)) return data.nearbyAlerts;
       if (Array.isArray(data?.nearby)) return data.nearby;
@@ -1268,6 +1270,8 @@ export default function Navbar() {
       if (Array.isArray(data?.data)) return data.data;
       if (Array.isArray(data?.result)) return data.result;
       if (Array.isArray(data?.payload)) return data.payload;
+      if (Array.isArray(data?.result?.alerts)) return data.result.alerts;
+      if (Array.isArray(data?.payload?.alerts)) return data.payload.alerts;
       if (data?.alert && typeof data.alert === "object") return [data.alert];
       if (data?.activeAlert && typeof data.activeAlert === "object") return [data.activeAlert];
       if (data && typeof data === "object" && (data.active || data.alertId || data.alertDisplayId || data.latitude || data.longitude || data.reporterEmail)) {
@@ -1283,7 +1287,9 @@ export default function Navbar() {
       const suffixText = String(suffix || "").toLowerCase();
       const isPublicEmergencyEndpoint = suffixText === "active";
       const params = buildEmergencyQueryParams();
-      const mergedParams = params ? { ...params, includeReporter: true } : { includeReporter: true };
+      const mergedParams = params
+        ? { ...params, includeReporter: true, includeNearby: true }
+        : { includeReporter: true, includeNearby: true };
       for (const url of urls) {
         const baseURL = /^https?:\/\//i.test(url) ? undefined : api.defaults.baseURL;
         const path = /^https?:\/\//i.test(url) ? url : url;
