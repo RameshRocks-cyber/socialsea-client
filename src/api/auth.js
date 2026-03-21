@@ -264,19 +264,22 @@ export const forgotPassword = (emailOrUsername) => {
 
   const isOtpAccepted = (payload) => {
     if (payload == null) return true;
-    if (typeof payload === "string") {
-      const text = payload.trim().toLowerCase();
-      if (!text) return true;
-      if (looksLikeHtml(payload)) return false;
-      if (text.includes("failed") || text.includes("invalid") || text.includes("not found") || text.includes("error")) {
-        return false;
-      }
-      return true;
+  if (typeof payload === "string") {
+    const text = payload.trim().toLowerCase();
+    if (!text) return true;
+    if (looksLikeHtml(payload)) return false;
+    if (text.includes("otp") && text.includes("generated")) return true;
+    if (text.includes("failed") || text.includes("invalid") || text.includes("not found") || text.includes("error")) {
+      return false;
     }
-    if (typeof payload === "object") {
-      if (payload.success === false || payload.sent === false || payload.otpSent === false) return false;
-      const status = String(payload.status || "").toLowerCase();
-      if (status === "error" || status === "failed") return false;
+    return true;
+  }
+  if (typeof payload === "object") {
+    if (payload.deliveryFailed === true) return true;
+    if (payload.debugOtp != null && String(payload.debugOtp).trim()) return true;
+    if (payload.success === false || payload.sent === false || payload.otpSent === false) return false;
+    const status = String(payload.status || "").toLowerCase();
+    if (status === "error" || status === "failed") return false;
       const msg = String(payload.message || payload.error || "").toLowerCase();
       if (msg.includes("not found") || msg.includes("invalid") || msg.includes("failed") || msg.includes("error")) {
         return false;

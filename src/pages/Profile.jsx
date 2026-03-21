@@ -815,12 +815,24 @@ export default function Profile() {
   const isPrivateLocked = Boolean(profile?.privateAccount) && profile?.canViewContent === false && !isOwnProfile;
   const displayName = profile?.name || profile?.email || profile?.username || "Profile";
   const displayBio = profile?.bio || "No bio yet";
-  const coverUrl =
+  const coverRaw =
     profile?.coverUrl ||
     profile?.coverPhotoUrl ||
     profile?.profileCoverUrl ||
-    profile?.profilePicUrl ||
-    "/default-avatar.png";
+    "";
+  const fallbackCover = profile?.profilePicUrl || "/default-avatar.png";
+  const coverResolved = coverRaw ? resolveMediaUrl(coverRaw) : resolveMediaUrl(fallbackCover);
+  const storedCoverBust =
+    typeof window !== "undefined"
+      ? sessionStorage.getItem("profile_cover_bust") || localStorage.getItem("profile_cover_bust")
+      : "";
+  const coverBust = String(
+    profile?.coverUpdatedAt || profile?.coverUpdated || profile?.updatedAt || profile?.updated || storedCoverBust || ""
+  ).trim();
+  const coverUrl =
+    coverRaw && coverBust
+      ? `${coverResolved}${coverResolved.includes("?") ? "&" : "?"}v=${encodeURIComponent(coverBust)}`
+      : coverResolved;
 
   const openCreateSheet = () => {
     setCreateSheetOpen(true);
@@ -1013,7 +1025,7 @@ export default function Profile() {
                           onClick={() => deleteHighlight(highlight.id)}
                           title="Delete highlight"
                         >
-                          ×
+                          Ã—
                         </button>
                       </div>
                     );
@@ -1118,7 +1130,7 @@ export default function Profile() {
         <div className="profile-highlight-viewer-backdrop" onClick={closeHighlight}>
           <div className="profile-highlight-viewer" onClick={(event) => event.stopPropagation()}>
             <button type="button" className="profile-highlight-viewer-close" onClick={closeHighlight}>
-              ×
+              Ã—
             </button>
             {(() => {
               const items = activeHighlight.items || [];

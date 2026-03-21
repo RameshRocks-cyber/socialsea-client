@@ -45,7 +45,12 @@ export default function ProfileSetup() {
         const existingBio = String(p?.bio || "");
         const existingPic = String(p?.profilePicUrl || p?.profilePic || "");
         const existingCover = String(p?.coverUrl || p?.coverPhotoUrl || p?.profileCoverUrl || "");
-        const completed = Boolean(p?.profileCompleted);
+        const completed =
+          Boolean(p?.profileCompleted) ||
+          Boolean(existingName) ||
+          Boolean(existingBio.trim()) ||
+          Boolean(existingPic) ||
+          Boolean(existingCover);
         const id = String(p?.id || localStorage.getItem("userId") || "");
 
         setUserId(id);
@@ -125,13 +130,21 @@ export default function ProfileSetup() {
       form.append("name", name);
       form.append("bio", bio || "");
       if (photo) form.append("profilePic", photo);
-      if (coverPhoto) form.append("coverPhoto", coverPhoto);
+      if (coverPhoto) {
+        ["coverPhoto", "cover", "coverImage"].forEach((key) => form.append(key, coverPhoto));
+      }
 
       const res = await api.post("/api/profile/setup", form);
       const savedProfile = res?.data?.user || res?.data || {};
       const savedId = String(savedProfile?.id || userId || localStorage.getItem("userId") || "me");
       persistProfileIdentity(savedProfile);
       localStorage.setItem("profileCompleted", "true");
+      if (coverPhoto) {
+        const bust = String(Date.now());
+        sessionStorage.setItem("profile_cover_bust", bust);
+        localStorage.setItem("profile_cover_bust", bust);
+      }
+      localStorage.removeItem("socialsea_profile_cache_v1");
       navigate(buildProfilePath(savedProfile, savedId), { replace: true });
     } catch (err) {
       const message = err?.response?.data?.message || "Failed to update profile";

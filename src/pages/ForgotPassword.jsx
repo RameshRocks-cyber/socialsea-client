@@ -56,11 +56,24 @@ export default function ForgotPassword() {
       const res = await forgotPassword(identifier.trim());
       const payload = res?.data || {};
       const deliveryFailed = payload?.deliveryFailed === true;
+      const receivedDebugOtp =
+        payload?.debugOtp != null && String(payload.debugOtp).trim()
+          ? String(payload.debugOtp).trim()
+          : "";
       setOtpSent(true);
       if (deliveryFailed) {
         setSuccess("Email delivery failed on server.");
       } else {
         setSuccess("OTP sent. Check Inbox/Spam, then enter OTP and your new password.");
+      }
+      if (receivedDebugOtp && canShowDebugOtp) {
+        setDebugOtp(receivedDebugOtp);
+        setOtp(receivedDebugOtp);
+        setSuccess((prev) =>
+          deliveryFailed
+            ? "Email delivery failed on server. Use the OTP below to continue."
+            : prev
+        );
       }
     } catch (err) {
       setError(parseErrorMessage(err, "Failed to send OTP."));
@@ -202,6 +215,9 @@ export default function ForgotPassword() {
 
         {error && <p className="auth-error">{error}</p>}
         {success && <p className="auth-success">{success}</p>}
+        {debugOtp && canShowDebugOtp && (
+          <p className="auth-debug-otp">OTP: {debugOtp}</p>
+        )}
 
         <p className="auth-foot">
           Remembered it? <Link to="/login">Back to login</Link>

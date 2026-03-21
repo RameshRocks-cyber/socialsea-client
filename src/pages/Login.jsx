@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import api from "../api/axios";
 import { loginWithPassword, registerWithPassword } from "../api/auth";
 import { clearAuthStorage } from "../auth";
-import { persistProfileIdentity } from "../utils/profileRoute";
+import { buildProfilePath, persistProfileIdentity } from "../utils/profileRoute";
 import "./AuthScreen.css";
 
 function parseErrorMessage(err, fallback) {
@@ -83,10 +83,14 @@ export default function Login() {
         Boolean(String(profile?.name || "").trim()) ||
         Boolean(String(profile?.profilePic || profile?.profilePicUrl || "").trim());
       persistAuthValue("profileCompleted", completed ? "true" : "false");
+      if (completed) {
+        navigate(buildProfilePath(profile, userId), { replace: true });
+        return;
+      }
     } catch {
       persistAuthValue("profileCompleted", "false");
     }
-    navigate("/profile-setup");
+    navigate("/profile-setup", { replace: true });
   };
 
   const onPasswordLogin = async (e) => {

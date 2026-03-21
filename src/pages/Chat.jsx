@@ -56,13 +56,36 @@ const CHAT_CONVO_POLL_MS = 8000;
 const CHAT_REMOTE_DISABLE_MS = 5 * 60 * 1000;
 const STORY_FEED_DISABLE_MS = 5 * 60 * 1000;
 const LIVEKIT_URL = import.meta.env.VITE_LIVEKIT_URL || "";
+const TURN_URLS = String(import.meta.env.VITE_TURN_URLS || "")
+  .split(",")
+  .map((v) => v.trim())
+  .filter(Boolean);
+const TURN_USERNAME = String(import.meta.env.VITE_TURN_USERNAME || "").trim();
+const TURN_CREDENTIAL = String(import.meta.env.VITE_TURN_CREDENTIAL || "").trim();
+const TURN_FORCE_RELAY = String(import.meta.env.VITE_TURN_FORCE_RELAY || "").toLowerCase() === "true";
+const EXTRA_ICE_SERVERS = TURN_URLS.length
+  ? [
+      {
+        urls: TURN_URLS,
+        username: TURN_USERNAME || undefined,
+        credential: TURN_CREDENTIAL || undefined
+      }
+    ]
+  : [];
 const RTC_CONFIG = {
   iceServers: [
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" },
-    { urls: "stun:stun2.l.google.com:19302" }
+    { urls: "stun:stun2.l.google.com:19302" },
+    { urls: "stun:stun.cloudflare.com:3478" },
+    { urls: "stun:stun.stunprotocol.org:3478" },
+    { urls: "stun:global.stun.twilio.com:3478" },
+    ...EXTRA_ICE_SERVERS
   ],
-  iceCandidatePoolSize: 10
+  iceCandidatePoolSize: 10,
+  iceTransportPolicy: TURN_FORCE_RELAY ? "relay" : "all",
+  bundlePolicy: "max-bundle",
+  rtcpMuxPolicy: "require"
 };
 const CHAT_FAVORITES_KEY = "socialsea_chat_favorites_v1";
 const CHAT_CUSTOM_STICKERS_KEY = "socialsea_chat_custom_stickers_v1";
@@ -204,6 +227,8 @@ const loadExternalScript = (src, id) => {
     script.src = src;
     script.id = id;
     script.async = true;
+    script.crossOrigin = "anonymous";
+    script.referrerPolicy = "no-referrer";
     script.onload = () => resolve();
     script.onerror = () => reject(new Error(`Failed to load ${src}`));
     document.head.appendChild(script);
@@ -295,7 +320,7 @@ const STICKER_PACKS = [
   { id: "coding", label: "Coding", value: "??????" },
   { id: "travel", label: "Travel", value: "??????" }
 ];
-const FORCE_BEAUTY_FILTER = true;
+const FORCE_BEAUTY_FILTER = String(import.meta.env.VITE_FORCE_BEAUTY_FILTER || "false").toLowerCase() === "true";
 const VIDEO_FILTER_PRESETS = [
   { id: "beauty_soft", label: "Beauty", short: "B", css: "brightness(1.12) saturate(1.22) contrast(1.08)" },
   { id: "studio_clear", label: "Studio", short: "S", css: "brightness(1.08) contrast(1.1) saturate(1.06)" },
@@ -391,6 +416,7 @@ export default function Chat() {
   const navigate = useNavigate();
   const { contactId } = useParams();
   const location = useLocation();
+  const isConversationRoute = Boolean(contactId);
 
   const safeGetItem = (key) => {
     try {
@@ -482,7 +508,7 @@ export default function Chat() {
     const baseCandidates = Array.from(
       new Set(
         [
-          String(api?.defaults?.baseURL || "").replace(/\/+$/, ""),
+          api?.defaults?.baseURL,
           getApiBaseUrl(),
           import.meta.env?.VITE_API_BASE_URL,
           import.meta.env?.VITE_API_URL,
@@ -490,7 +516,7 @@ export default function Chat() {
           "https://api.socialsea.co.in",
           "https://socialsea.co.in"
         ]
-          .map((value) => String(value || "").trim().replace(/\/+$/, ""))
+          .map((value) => normalizeBaseCandidate(value))
           .filter(Boolean)
       )
     );
@@ -590,6 +616,8 @@ export default function Chat() {
   const [videoFilterId, setVideoFilterId] = useState("beauty_soft");
   const [showVideoFilters, setShowVideoFilters] = useState(false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [remoteIsScreenShare, setRemoteIsScreenShare] = useState(false);
+  const [localVideoPos, setLocalVideoPos] = useState(null);
   const [bubbleMenu, setBubbleMenu] = useState(null);
   const [showEmojiTray, setShowEmojiTray] = useState(false);
   const [pickerTab, setPickerTab] = useState("emoji");
@@ -661,6 +689,11 @@ export default function Chat() {
       return {};
     }
   });
+  const [chatRequests, setChatRequests] = useState([]);
+  const [sentChatRequests, setSentChatRequests] = useState([]);
+  const [chatRequestsLoading, setChatRequestsLoading] = useState(false);
+  const [chatRequestError, setChatRequestError] = useState("");
+  const [chatRequestBusyById, setChatRequestBusyById] = useState({});
   const [storyItems, setStoryItems] = useState(() => normalizeStoryList(readStoryCache()));
   const [storyViewerIndex, setStoryViewerIndex] = useState(null);
   const activeStory = storyViewerIndex != null ? storyItems[storyViewerIndex] : null;
@@ -682,6 +715,18 @@ export default function Chat() {
   const groupActiveRef = useRef(false);
   const rejoinAttemptedRef = useRef(false);
   const presenceHoldRef = useRef(new Map());
+  const localVideoDragRef = useRef({ active: false, offsetX: 0, offsetY: 0 });
+
+  const isScreenShareStream = useCallback((stream) => {
+    if (!stream || typeof stream.getVideoTracks !== "function") return false;
+    const track = stream.getVideoTracks()[0];
+    if (!track) return false;
+    const label = String(track.label || "").toLowerCase();
+    const hint = String(track.contentHint || "").toLowerCase();
+    if (label.includes("screen") || label.includes("display") || label.includes("window") || label.includes("tab")) return true;
+    if (hint.includes("screen") || hint.includes("detail") || hint.includes("text")) return true;
+    return false;
+  }, []);
 
   useEffect(() => {
     if (!FORCE_BEAUTY_FILTER) return;
@@ -696,6 +741,15 @@ export default function Chat() {
   const [signAssistContinuousMode, setSignAssistContinuousMode] = useState(false);
   const [signAssistBusy, setSignAssistBusy] = useState(false);
   const [signAssistStatus, setSignAssistStatus] = useState("");
+  useEffect(() => {
+    if (!signAssistEnabled) return;
+    if (callState.mode !== "video" || callState.phase === "idle") return;
+    const videoTrack = localStreamRef.current?.getVideoTracks?.()[0];
+    if (videoTrack && !videoTrack.enabled) {
+      videoTrack.enabled = true;
+      setIsCameraOff(false);
+    }
+  }, [signAssistEnabled, callState.mode, callState.phase]);
   const [blockedUsers, setBlockedUsers] = useState(() => {
     try {
       const raw = localStorage.getItem(BLOCKED_USERS_KEY);
@@ -1487,6 +1541,164 @@ export default function Chat() {
     return () => window.removeEventListener("storage", onStorage);
   }, []);
 
+  useEffect(() => {
+    if (isConversationRoute) return undefined;
+    let active = true;
+
+    const isPendingRequest = (request) => {
+      const status = String(request?.status || request?.followStatus || request?.state || "")
+        .trim()
+        .toLowerCase();
+      if (!status) return true;
+      if (status.includes("pending")) return true;
+      if (status.includes("request")) return true;
+      return false;
+    };
+
+    const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
+
+    const isIncomingRequest = (request) => {
+      const receiver =
+        request?.receiver ||
+        request?.target ||
+        request?.toUser ||
+        request?.user ||
+        request?.recipient ||
+        {};
+      const receiverId = String(request?.receiverId || receiver?.id || receiver?.userId || "").trim();
+      const receiverEmail = normalizeEmail(request?.receiverEmail || receiver?.email);
+      if (!receiverId && !receiverEmail) return true;
+      if (myUserId && receiverId && receiverId === String(myUserId)) return true;
+      if (myEmail && receiverEmail && receiverEmail === normalizeEmail(myEmail)) return true;
+      return false;
+    };
+
+    const isOutgoingRequest = (request) => {
+      const sender =
+        request?.sender ||
+        request?.actor ||
+        request?.fromUser ||
+        request?.requester ||
+        request?.initiator ||
+        {};
+      const senderId = String(request?.senderId || sender?.id || sender?.userId || "").trim();
+      const senderEmail = normalizeEmail(request?.senderEmail || sender?.email);
+      if (!senderId && !senderEmail) return false;
+      if (myUserId && senderId && senderId === String(myUserId)) return true;
+      if (myEmail && senderEmail && senderEmail === normalizeEmail(myEmail)) return true;
+      return false;
+    };
+
+    const isFollowRequestNotification = (item) => {
+      const kind = String(item?.kind || item?.type || "").trim().toLowerCase();
+      const status = String(item?.status || item?.followStatus || item?.relationship || item?.state || "")
+        .trim()
+        .toLowerCase();
+      const title = String(item?.title || "");
+      const message = String(item?.message || item?.text || "");
+      const combined = `${title} ${message}`.toLowerCase();
+      if (status.includes("request") || status.includes("pending")) return true;
+      if (kind.includes("follow")) {
+        if (combined.includes("request")) return true;
+        if (combined.includes("requested")) return true;
+      }
+      return /requested to follow|follow request|requested you/i.test(combined);
+    };
+
+    const mapNotificationToRequest = (item) => {
+      const id = String(item?.followRequestId || item?.requestId || "").trim();
+      const status = item?.followRequestStatus || item?.followStatus || item?.status || "PENDING";
+      const sender =
+        item?.sender ||
+        item?.actor ||
+        item?.user ||
+        item?.fromUser ||
+        item?.requester ||
+        item?.initiator ||
+        item?.profile ||
+        item?.actorUser ||
+        item?.actorProfile ||
+        item?.actorInfo ||
+        item?.userProfile ||
+        null;
+      return {
+        ...item,
+        id,
+        status,
+        ...(sender ? { sender } : {})
+      };
+    };
+
+    const loadRequests = async (showLoader = false) => {
+      if (showLoader) setChatRequestsLoading(true);
+      setChatRequestError("");
+      try {
+        const res = await requestChatArray({
+          endpoints: [
+            "/api/follow/requests",
+            "/api/follow/pending-requests",
+            "/follow/requests",
+            "/follow/pending-requests"
+          ],
+          timeoutMs: 6000,
+          maxAttempts: 8
+        });
+        let list = Array.isArray(res?.list) ? res.list : [];
+        if (Array.isArray(list) && list.length === 0) {
+          try {
+            const notifRes = await requestChatArray({
+              endpoints: ["/api/notifications", "/notifications"],
+              timeoutMs: 5000,
+              maxAttempts: 4
+            });
+            const notifList = Array.isArray(notifRes?.list) ? notifRes.list : [];
+            list = notifList.filter(isFollowRequestNotification).map(mapNotificationToRequest);
+          } catch {
+            // ignore notification fallback failures
+          }
+        }
+        if (!active) return;
+        const pending = Array.isArray(list) ? list.filter(isPendingRequest) : [];
+        const hasIdentity = Boolean(String(myUserId || "").trim() || String(myEmail || "").trim());
+        const sourceUrl = String(res?.url || "").toLowerCase();
+        if (!hasIdentity) {
+          setChatRequests(pending);
+          setSentChatRequests([]);
+        } else if (sourceUrl.includes("pending-requests")) {
+          setChatRequests([]);
+          setSentChatRequests(pending);
+        } else if (sourceUrl.includes("/requests") && !sourceUrl.includes("pending-requests")) {
+          setChatRequests(pending);
+          setSentChatRequests([]);
+        } else {
+          const outgoing = pending.filter(isOutgoingRequest);
+          const incoming = pending.filter((req) => isIncomingRequest(req) && !isOutgoingRequest(req));
+          setChatRequests(incoming);
+          setSentChatRequests(outgoing);
+        }
+      } catch (err) {
+        if (!active) return;
+        setChatRequests([]);
+        setSentChatRequests([]);
+        const status = Number(err?.response?.status || 0);
+        if (status === 401 || status === 403) {
+          setChatRequestError("Login required to view chat requests.");
+        } else {
+          setChatRequestError("Chat requests unavailable.");
+        }
+      } finally {
+        if (active && showLoader) setChatRequestsLoading(false);
+      }
+    };
+
+    loadRequests(true);
+    const timer = setInterval(() => loadRequests(false), 10000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [isConversationRoute, myUserId, myEmail]);
+
   const localThreadKey = (a, b) => [String(a || ""), String(b || "")].sort().join(":");
 
   const readLocalChat = () => {
@@ -1516,6 +1728,21 @@ export default function Chat() {
   };
 
   const normalizeFollowKey = (value) => String(value || "").trim().toLowerCase();
+
+  const writeFollowingCache = (value) => {
+    safeSetItem(FOLLOWING_CACHE_KEY, JSON.stringify(value || {}));
+  };
+
+  const updateFollowCache = (identifiers, following) => {
+    const keys = (identifiers || []).map(normalizeFollowKey).filter(Boolean);
+    if (!keys.length) return;
+    const cache = readFollowingCache();
+    keys.forEach((key) => {
+      cache[key] = Boolean(following);
+    });
+    writeFollowingCache(cache);
+    setFollowingCacheTick((prev) => prev + 1);
+  };
 
   const getFollowKeysForContact = (contact) => {
     if (!contact) return [];
@@ -1796,11 +2023,55 @@ export default function Chat() {
     return visible;
   };
 
+  const isPrivateIpHost = (host) => {
+    const value = String(host || "").trim();
+    if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(value)) return false;
+    const parts = value.split(".").map((n) => Number(n));
+    if (parts.some((n) => !Number.isFinite(n) || n < 0 || n > 255)) return false;
+    const [a, b] = parts;
+    if (a === 10) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    return false;
+  };
+
+  const isLocalRuntime = () => {
+    if (typeof window === "undefined") return false;
+    const host = String(window.location.hostname || "").toLowerCase();
+    return host === "localhost" || host === "127.0.0.1" || isPrivateIpHost(host);
+  };
+
+  const isLocalAbsoluteHost = (host) => {
+    const value = String(host || "").toLowerCase();
+    return value === "localhost" || value === "127.0.0.1" || isPrivateIpHost(value);
+  };
+
   const normalizeBaseCandidate = (rawValue) => {
     const value = String(rawValue || "").trim().replace(/\/+$/, "");
     if (!value || value === "/") return "";
     if (value.startsWith("/")) return value;
     if (!/^https?:\/\//i.test(value)) return "";
+    if (isLocalRuntime()) {
+      try {
+        const host = new URL(value).hostname.toLowerCase();
+        if (!isLocalAbsoluteHost(host)) {
+          const preferred = String(getApiBaseUrl() || "").trim();
+          if (preferred && /^https?:\/\//i.test(preferred)) {
+            try {
+              const preferredHost = new URL(preferred).hostname.toLowerCase();
+              if (preferredHost && preferredHost === host) {
+                return value;
+              }
+            } catch {
+              // ignore preferred host parsing failures
+            }
+          }
+          return "";
+        }
+      } catch {
+        return "";
+      }
+    }
     return value;
   };
 
@@ -2552,6 +2823,7 @@ export default function Chat() {
     if (!s) {
       setHasRemoteVideo(false);
       setHasRemoteAudio(false);
+      setRemoteIsScreenShare(false);
       return;
     }
     const hasVideo = s.getVideoTracks().some((t) => t.readyState !== "ended");
@@ -2560,7 +2832,14 @@ export default function Chat() {
     const elHasVideo = Boolean(videoEl && videoEl.videoWidth > 0 && videoEl.videoHeight > 0);
     setHasRemoteVideo(hasVideo || elHasVideo);
     setHasRemoteAudio(hasAudio);
-  }, []);
+    setRemoteIsScreenShare(isScreenShareStream(s));
+  }, [isScreenShareStream]);
+
+  useEffect(() => {
+    if (callState.phase === "idle" || callState.mode !== "video") {
+      setRemoteIsScreenShare(false);
+    }
+  }, [callState.phase, callState.mode]);
 
   useEffect(() => {
     const el = remoteVideoRef.current;
@@ -5419,9 +5698,83 @@ export default function Chat() {
     });
   };
 
+  const resolveChatRequestContact = (request) => {
+    const contact = mapUserToContact(request);
+    if (!contact?.id) return null;
+    const displayName = getContactDisplayName(contact);
+    return {
+      ...contact,
+      name: displayName,
+      avatar: (displayName[0] || contact?.avatar || "U").toUpperCase()
+    };
+  };
+
+  const resolveChatRequestIdentifiers = (request, contact) => {
+    const sender = request?.sender || request?.actor || request?.user || {};
+    return [
+      contact?.id,
+      contact?.email,
+      contact?.username,
+      sender?.id,
+      sender?.email,
+      sender?.username,
+      sender?.name,
+      request?.senderId,
+      request?.senderEmail,
+      request?.senderUsername
+    ].filter(Boolean);
+  };
+
+  const acceptChatRequest = async (request) => {
+    const idText = String(request?.id || "").trim();
+    if (!idText || chatRequestBusyById[idText]) return;
+    setChatRequestBusyById((prev) => ({ ...prev, [idText]: true }));
+    setChatRequestError("");
+    try {
+      await api.post(`/api/follow/requests/${encodeURIComponent(idText)}/accept`);
+      setChatRequests((prev) => prev.filter((entry) => String(entry?.id || "") !== idText));
+      const contact = resolveChatRequestContact(request);
+      if (contact?.id) {
+        setContacts((prev) => mergeContacts(prev, [contact]));
+        updateFollowCache(resolveChatRequestIdentifiers(request, contact), true);
+      }
+    } catch {
+      setChatRequestError("Unable to accept chat request.");
+    } finally {
+      setChatRequestBusyById((prev) => ({ ...prev, [idText]: false }));
+    }
+  };
+
+  const rejectChatRequest = async (request) => {
+    const idText = String(request?.id || "").trim();
+    if (!idText || chatRequestBusyById[idText]) return;
+    setChatRequestBusyById((prev) => ({ ...prev, [idText]: true }));
+    setChatRequestError("");
+    try {
+      await api.post(`/api/follow/requests/${encodeURIComponent(idText)}/reject`);
+      setChatRequests((prev) => prev.filter((entry) => String(entry?.id || "") !== idText));
+      const contact = resolveChatRequestContact(request);
+      if (contact?.id) {
+        updateFollowCache(resolveChatRequestIdentifiers(request, contact), false);
+      }
+    } catch {
+      setChatRequestError("Unable to reject chat request.");
+    } finally {
+      setChatRequestBusyById((prev) => ({ ...prev, [idText]: false }));
+    }
+  };
+
   const requestChatAccess = async (contact) => {
-    const key = getRequestKey(contact);
-    if (!key) {
+    const primaryKey = getRequestKey(contact);
+    const identifierCandidates = [
+      primaryKey,
+      contact?.email,
+      contact?.username,
+      contact?.name
+    ]
+      .map((value) => String(value || "").trim())
+      .filter((value, index, arr) => value && arr.indexOf(value) === index);
+    if (!identifierCandidates.length) {
       setError("Unable to request chat for this user.");
       return;
     }
@@ -5429,9 +5782,47 @@ export default function Chat() {
     if (status === "requested" || status === "pending") return;
     setRequestStatus(contact, "pending");
     try {
-      await api.post(`/api/follow/${encodeURIComponent(key)}`);
+      let res = null;
+      for (const candidate of identifierCandidates) {
+        const encoded = encodeURIComponent(candidate);
+        try {
+          res = await requestChatMutation({
+            method: "POST",
+            endpoints: [`/api/follow/requests/${encoded}`, `/api/follow/${encoded}`]
+          });
+          break;
+        } catch (err) {
+          const code = Number(err?.response?.status || 0);
+          if (code === 400 || code === 404) {
+            res = null;
+            continue;
+          }
+          throw err;
+        }
+      }
+      if (!res) {
+        throw new Error("Unable to resolve user for chat request.");
+      }
+      const rawStatus = res?.data?.status ?? res?.data?.message ?? res?.data;
+      const nextStatus = String(rawStatus || "").toLowerCase();
+      if (nextStatus.includes("error")) {
+        setRequestStatus(contact, "error");
+        setError("Chat request failed. Please try again.");
+        return;
+      }
+      if (nextStatus.includes("follow")) {
+        updateFollowCache(
+          [contact?.id, contact?.email, contact?.username, ...identifierCandidates],
+          true
+        );
+        setRequestStatus(contact, "");
+        return;
+      }
+      if (nextStatus.includes("request") || nextStatus.includes("pending")) {
+        setRequestStatus(contact, "requested");
+        return;
+      }
       setRequestStatus(contact, "requested");
-      setFollowingCacheTick((prev) => prev + 1);
     } catch {
       setRequestStatus(contact, "error");
       setError("Chat request failed. Please try again.");
@@ -5517,7 +5908,6 @@ export default function Chat() {
   const activeContact = contacts.find((c) => c.id === activeContactId) || null;
   const activeContactBlocked = activeContact ? isBlockedContact(activeContact) : false;
   const activeMessages = messagesByContact[activeContactId] || [];
-  const isConversationRoute = Boolean(contactId);
   const activeCallHistory = Array.isArray(callHistoryByContact[activeContactId])
     ? callHistoryByContact[activeContactId]
     : [];
@@ -7188,6 +7578,67 @@ export default function Chat() {
     () => VIDEO_FILTER_PRESETS.find((preset) => preset.id === videoFilterId) || VIDEO_FILTER_PRESETS[0],
     [videoFilterId]
   );
+  useEffect(() => {
+    if (!showVideoCallScreen) {
+      setLocalVideoPos(null);
+      localVideoDragRef.current.active = false;
+    }
+  }, [showVideoCallScreen]);
+
+  const startLocalVideoDrag = useCallback(
+    (event) => {
+      if (!showVideoCallScreen || groupCallActive) return;
+      const video = localVideoRef.current;
+      if (!video) return;
+      const rect = video.getBoundingClientRect();
+      const point =
+        event?.touches?.[0] ||
+        event?.changedTouches?.[0] ||
+        event;
+      if (!point) return;
+      event.preventDefault?.();
+      event.stopPropagation?.();
+      localVideoDragRef.current.active = true;
+      localVideoDragRef.current.offsetX = point.clientX - rect.left;
+      localVideoDragRef.current.offsetY = point.clientY - rect.top;
+      if (!localVideoPos) {
+        setLocalVideoPos({ x: rect.left, y: rect.top });
+      }
+    },
+    [showVideoCallScreen, groupCallActive, localVideoPos]
+  );
+
+  useEffect(() => {
+    const handleMove = (event) => {
+      if (!localVideoDragRef.current.active) return;
+      const video = localVideoRef.current;
+      if (!video) return;
+      const point =
+        event?.touches?.[0] ||
+        event?.changedTouches?.[0] ||
+        event;
+      if (!point) return;
+      event.preventDefault?.();
+      const rect = video.getBoundingClientRect();
+      const padding = 8;
+      const maxX = Math.max(padding, window.innerWidth - rect.width - padding);
+      const maxY = Math.max(padding, window.innerHeight - rect.height - padding);
+      const nextX = Math.min(maxX, Math.max(padding, point.clientX - localVideoDragRef.current.offsetX));
+      const nextY = Math.min(maxY, Math.max(padding, point.clientY - localVideoDragRef.current.offsetY));
+      setLocalVideoPos({ x: nextX, y: nextY });
+    };
+    const handleEnd = () => {
+      localVideoDragRef.current.active = false;
+    };
+    window.addEventListener("pointermove", handleMove, { passive: false });
+    window.addEventListener("pointerup", handleEnd);
+    window.addEventListener("pointercancel", handleEnd);
+    return () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleEnd);
+      window.removeEventListener("pointercancel", handleEnd);
+    };
+  }, []);
   const callStatusText =
     callPhaseNote ||
     (callState.phase === "in-call"
@@ -8024,6 +8475,95 @@ export default function Chat() {
         />
         {error && <p className="chat-error">{error}</p>}
         {!error && !!shareHint && <p className="chat-empty">{shareHint}</p>}
+        <div className="chat-requests">
+          <div className="chat-requests-head">
+            <h3>Chat Requests</h3>
+            {chatRequests.length > 0 && <span className="chat-requests-count">{chatRequests.length}</span>}
+          </div>
+          <div className="chat-requests-list">
+            {chatRequestsLoading && <p className="chat-request-empty">Loading requests...</p>}
+            {!chatRequestsLoading && !chatRequestError && chatRequests.length === 0 && (
+              <p className="chat-request-empty">No new requests</p>
+            )}
+            {chatRequestError && <p className="chat-request-error">{chatRequestError}</p>}
+            {chatRequests.map((req) => {
+              const contact = resolveChatRequestContact(req);
+              if (!contact) return null;
+              const displayName = getContactDisplayName(contact);
+              const requestId = String(req?.id || "").trim();
+              const busy = Boolean(requestId && chatRequestBusyById[requestId]);
+              const actionable = Boolean(requestId);
+              return (
+                <div key={requestId || contact.id} className="chat-request-card">
+                  <span className="chat-avatar">
+                    {contact.profilePic ? (
+                      <img src={contact.profilePic} alt={displayName} className="chat-avatar-img" />
+                    ) : (
+                      contact.avatar
+                    )}
+                  </span>
+                  <span className="chat-request-meta">
+                    <strong>{displayName}</strong>
+                    <small>{contact.email || contact.username || "Chat request"}</small>
+                  </span>
+                  <div className="chat-request-actions">
+                    <button
+                      type="button"
+                      className="chat-request-btn accept"
+                      onClick={() => acceptChatRequest(req)}
+                      disabled={!actionable || busy}
+                    >
+                      Accept
+                    </button>
+                    <button
+                      type="button"
+                      className="chat-request-btn reject"
+                      onClick={() => rejectChatRequest(req)}
+                      disabled={!actionable || busy}
+                    >
+                      Reject
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        <div className="chat-requests chat-requests-sent">
+          <div className="chat-requests-head">
+            <h3>Sent Requests</h3>
+            {sentChatRequests.length > 0 && <span className="chat-requests-count">{sentChatRequests.length}</span>}
+          </div>
+          <div className="chat-requests-list">
+            {chatRequestsLoading && sentChatRequests.length === 0 && (
+              <p className="chat-request-empty">Loading requests...</p>
+            )}
+            {!chatRequestsLoading && sentChatRequests.length === 0 && (
+              <p className="chat-request-empty">No sent requests</p>
+            )}
+            {sentChatRequests.map((req) => {
+              const contact = resolveChatRequestContact(req);
+              if (!contact) return null;
+              const displayName = getContactDisplayName(contact);
+              return (
+                <div key={`sent-${req?.id || contact.id}`} className="chat-request-card">
+                  <span className="chat-avatar">
+                    {contact.profilePic ? (
+                      <img src={contact.profilePic} alt={displayName} className="chat-avatar-img" />
+                    ) : (
+                      contact.avatar
+                    )}
+                  </span>
+                  <span className="chat-request-meta">
+                    <strong>{displayName}</strong>
+                    <small>{contact.email || contact.username || "Awaiting response"}</small>
+                  </span>
+                  <span className="chat-request-status">Pending</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
         <div className="chat-contact-list">
           {filteredContacts.map((c) => {
             const presence = getContactPresence(c);
@@ -8077,11 +8617,13 @@ export default function Chat() {
                   const canChat = canChatWith(c);
                   const requestStatus = getRequestStatus(c);
                   const requestLabel =
-                    requestStatus === "requested" || requestStatus === "pending"
-                      ? "Requested"
-                      : requestStatus === "error"
-                        ? "Retry"
-                        : "Request";
+                    requestStatus === "following"
+                      ? "Following"
+                      : requestStatus === "requested" || requestStatus === "pending"
+                        ? "Requested"
+                        : requestStatus === "error"
+                          ? "Retry"
+                          : "Request";
                   return (
                     <div key={c.id} className="chat-contact-row">
                       <button
@@ -8201,7 +8743,7 @@ export default function Chat() {
             </div>
           </div>
         )}
-        {callActive && !incomingCall && (
+        {callActive && !incomingCall && !showVideoCallScreen && (
           <button
             type="button"
             className="call-floating-end"
@@ -8222,7 +8764,7 @@ export default function Chat() {
                     autoPlay
                     playsInline
                     muted
-                    className="wa-video-local"
+                    className={`wa-video-local ${isScreenSharing ? "is-screen" : "is-mirror"}`}
                     style={{ filter: activeVideoFilter.css }}
                     data-allow-simultaneous="true"
                   />
@@ -8233,7 +8775,7 @@ export default function Chat() {
                     <video
                       autoPlay
                       playsInline
-                      className="wa-video-remote"
+                      className={`wa-video-remote ${isScreenShareStream(tile.stream) ? "is-screen" : "is-mirror"}`}
                       style={{ filter: activeVideoFilter.css }}
                       data-allow-simultaneous="true"
                       ref={(el) => {
@@ -8258,7 +8800,7 @@ export default function Chat() {
                     ref={remoteVideoRef}
                     autoPlay
                     playsInline
-                    className="wa-video-remote"
+                    className={`wa-video-remote ${remoteIsScreenShare ? "is-screen" : "is-mirror"}`}
                     style={{ filter: activeVideoFilter.css }}
                     data-allow-simultaneous="true"
                   />
@@ -8273,8 +8815,14 @@ export default function Chat() {
                     autoPlay
                     playsInline
                     muted
-                    className="wa-video-local"
-                    style={{ filter: activeVideoFilter.css, transform: "scaleX(-1)" }}
+                    className={`wa-video-local ${isScreenSharing ? "is-screen" : "is-mirror"} ${localVideoPos ? "is-dragged" : ""}`}
+                    style={{
+                      filter: activeVideoFilter.css,
+                      ...(localVideoPos
+                        ? { left: `${localVideoPos.x}px`, top: `${localVideoPos.y}px`, right: "auto", bottom: "auto" }
+                        : {})
+                    }}
+                    onPointerDown={startLocalVideoDrag}
                     data-allow-simultaneous="true"
                   />
               </>
@@ -8427,6 +8975,14 @@ export default function Chat() {
                 onClick={() => setSignAssistEnabled((prev) => !prev)}
                 title="Sign assist">
                 <MdSignLanguage />
+              </button>
+              <button
+                type="button"
+                className="call-hangup"
+                onClick={() => finishCall(true)}
+                title="End call"
+              >
+                <FiPhoneOff />
               </button>
             </div>
           </div>

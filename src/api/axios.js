@@ -2,7 +2,36 @@ import axios from "axios";
 import { getApiBaseUrl } from "./baseUrl";
 import { clearAuthStorage } from "../auth";
 
+const normalizeBase = (value) => String(value || "").trim().replace(/\/+$/, "");
+const readStoredBase = () => {
+  try {
+    return normalizeBase(
+      localStorage.getItem("socialsea_auth_base_url") ||
+        sessionStorage.getItem("socialsea_auth_base_url") ||
+        ""
+    );
+  } catch {
+    return "";
+  }
+};
+
+const previousBase = readStoredBase();
 const BASE_URL = getApiBaseUrl();
+const nextBase = readStoredBase() || normalizeBase(BASE_URL);
+
+if (previousBase && nextBase && previousBase !== nextBase) {
+  clearAuthStorage();
+  try {
+    localStorage.removeItem("socialsea_profile_cache_v1");
+    localStorage.removeItem("socialsea_following_cache_v1");
+    localStorage.removeItem("socialsea_otp_base_url");
+    sessionStorage.removeItem("socialsea_profile_cache_v1");
+    sessionStorage.removeItem("socialsea_following_cache_v1");
+    sessionStorage.removeItem("socialsea_otp_base_url");
+  } catch {
+    // ignore storage errors
+  }
+}
 
 const api = axios.create({
   baseURL: BASE_URL,

@@ -32,6 +32,21 @@ export default defineConfig(({ mode }) => {
   const detectedPort = readBackendPort()
   const fallbackDevTarget = detectedPort ? `http://localhost:${detectedPort}` : 'http://localhost:8080'
   const devProxyTarget = (env.VITE_DEV_PROXY_TARGET || '').trim() || fallbackDevTarget
+  const isLocalProxyTarget = (value) => {
+    const raw = String(value || '').trim().toLowerCase()
+    if (!raw) return false
+    if (raw.startsWith('/')) return true
+    if (raw.includes('localhost') || raw.includes('127.0.0.1')) return true
+    const ipMatch = raw.match(/https?:\/\/(\d{1,3}(?:\.\d{1,3}){3})/)
+    if (!ipMatch) return false
+    const [a, b] = ipMatch[1].split('.').map((n) => Number(n))
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return false
+    if (a === 10) return true
+    if (a === 172 && b >= 16 && b <= 31) return true
+    if (a === 192 && b === 168) return true
+    return false
+  }
+  const useProxy = isLocalProxyTarget(devProxyTarget)
 
   return {
     plugins: [react()],
@@ -50,24 +65,26 @@ export default defineConfig(({ mode }) => {
       host: 'localhost',
       port: 5173,
       strictPort: true,
-      proxy: {
-        '/api': {
-          target: devProxyTarget,
-          changeOrigin: true,
-          secure: false,
-        },
-        '/uploads': {
-          target: devProxyTarget,
-          changeOrigin: true,
-          secure: false,
-        },
-        '/ws': {
-          target: devProxyTarget,
-          changeOrigin: true,
-          secure: false,
-          ws: true,
-        },
-      },
+      proxy: useProxy
+        ? {
+            '/api': {
+              target: devProxyTarget,
+              changeOrigin: true,
+              secure: false,
+            },
+            '/uploads': {
+              target: devProxyTarget,
+              changeOrigin: true,
+              secure: false,
+            },
+            '/ws': {
+              target: devProxyTarget,
+              changeOrigin: true,
+              secure: false,
+              ws: true,
+            },
+          }
+        : {},
       hmr: {
         protocol: 'ws',
         host: 'localhost',

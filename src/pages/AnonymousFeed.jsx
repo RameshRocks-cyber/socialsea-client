@@ -124,8 +124,8 @@ export default function AnonymousFeed() {
         { url: "/api/anonymous/feed", filter: (list) => list, allowEmpty: true },
         { url: "/api/feed/anonymous", filter: (list) => list, allowEmpty: true },
         { url: "/anonymous/feed", filter: (list) => list, allowEmpty: true },
-        // Fallback: filter anonymous items from full feed (only accept if non-empty)
-        { url: "/api/feed", filter: (list) => list.filter(isAnonymousItem), allowEmpty: false },
+        // Fallback: filter anonymous items from full feed (accept empty -> "No anonymous posts yet")
+        { url: "/api/feed", filter: (list) => list.filter(isAnonymousItem), allowEmpty: true },
       ];
       const baseCandidates = buildBaseCandidates();
 

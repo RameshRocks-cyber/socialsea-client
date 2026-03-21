@@ -42,6 +42,12 @@ const SOS_SUPPRESSED_ALERTS_KEY = "socialsea_sos_suppressed_alerts_v1";
 const SOS_SUPPRESSED_ALERTS_AT_KEY = "socialsea_sos_suppressed_alerts_at_v1";
 const SOS_SEEN_ALERTS_KEY = "socialsea_sos_seen_alerts_v1";
 const SOS_ALERT_SUPPRESS_TTL_MS = 5 * 60 * 1000;
+const SOS_SIGNAL_STALE_MS = 2 * 60 * 1000;
+const SOS_ALERT_STALE_MINUTES = Number(import.meta.env.VITE_EMERGENCY_ALERT_STALE_MINUTES || 180);
+const SOS_ALERT_STALE_MS =
+  Number.isFinite(SOS_ALERT_STALE_MINUTES) && SOS_ALERT_STALE_MINUTES > 0
+    ? SOS_ALERT_STALE_MINUTES * 60 * 1000
+    : 0;
 const allowSelfEmergencyPopup = (() => {
   if (typeof window === "undefined") return false;
   const host = String(window.location.hostname || "").toLowerCase().trim();
@@ -262,6 +268,47 @@ const readSessionValue = (key) => {
   }
 };
 
+const toEpochMs = (value) => {
+  if (value == null || value === "") return 0;
+  const raw = Number(value);
+  if (Number.isFinite(raw)) {
+    return raw > 1000000000000 ? raw : raw * 1000;
+  }
+  const parsed = new Date(String(value)).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const readAlertTimestampMs = (alert) => {
+  if (!alert || typeof alert !== "object") return 0;
+  const candidate =
+    alert?.updatedAt ??
+    alert?.lastUpdatedAt ??
+    alert?.startedAt ??
+    alert?.createdAt ??
+    alert?.triggeredAt ??
+    alert?.raisedAt ??
+    alert?.timestamp ??
+    alert?.at ??
+    alert?.time ??
+    alert?.lastActiveAt ??
+    alert?.lastSeenAt ??
+    alert?.lastHeartbeatAt ??
+    alert?.heartbeatAt ??
+    alert?.eventAt ??
+    alert?.alertAt;
+  return toEpochMs(candidate);
+};
+
+const isSosSessionStale = (session) => {
+  if (!SOS_ALERT_STALE_MS || !session || typeof session !== "object") return false;
+  const updatedMs = toEpochMs(
+    session?.updatedAt ?? session?.lastUpdatedAt ?? session?.startedAt ?? session?.createdAt ?? session?.triggeredAt
+  );
+  return updatedMs > 0 && Date.now() - updatedMs > SOS_ALERT_STALE_MS;
+};
+
+const isSessionActive = (session) => Boolean(session?.active) && !isSosSessionStale(session);
+
 const readSuppressedAlertIds = () => {
   try {
     const raw = sessionStorage.getItem(SOS_SUPPRESSED_ALERTS_KEY);
@@ -307,7 +354,7 @@ const readIsSosActive = () => {
     const raw = localStorage.getItem(SOS_SESSION_KEY);
     if (!raw) return false;
     const parsed = JSON.parse(raw);
-    return Boolean(parsed?.active);
+    return Boolean(parsed?.active) && !isSosSessionStale(parsed);
   } catch {
     return false;
   }
@@ -671,7 +718,7 @@ export default function Navbar() {
           return true;
         }
         if (
-          session?.active &&
+          isSessionActive(session) &&
           ((sessionReporterEmail && incomingEmail && sessionReporterEmail === incomingEmail) ||
             (sessionReporterUserId && incomingUserId && sessionReporterUserId === incomingUserId))
         ) {
@@ -1022,7 +1069,7 @@ export default function Navbar() {
           isOwnBrowserSession(session) ||
           isOwnEmergency({ reporterEmail: session?.reporterEmail, reporterUserId: session?.reporterUserId });
         if (!isOwnSession) return;
-        if (session?.active) {
+        if (isSessionActive(session)) {
           ownSosStopUntilRef.current = 0;
           try {
             sessionStorage.removeItem(SOS_OWN_STOP_AT_KEY);
@@ -1143,7 +1190,7 @@ export default function Navbar() {
       if (event?.key === SOS_SESSION_KEY && event.newValue) {
         try {
           const session = JSON.parse(event.newValue);
-          const isActive = Boolean(session?.active);
+          const isActive = isSessionActive(session);
           if (!isActive) {
             const stoppedId = normalizeAlertId(session?.alertId || session?.alertDisplayId);
             if (stoppedId) {
@@ -1199,7 +1246,17 @@ export default function Navbar() {
       try {
         const raw = localStorage.getItem(SOS_SIGNAL_KEY);
         if (!raw) return;
-        processSignal(JSON.parse(raw), { requireFresh: false });
+        const payload = JSON.parse(raw);
+        const atMs = readEpoch(payload?.at || payload?.timestamp);
+        if (SOS_SIGNAL_STALE_MS > 0 && atMs && Date.now() - atMs > SOS_SIGNAL_STALE_MS) {
+          try {
+            localStorage.removeItem(SOS_SIGNAL_KEY);
+          } catch {
+            // ignore storage issues
+          }
+          return;
+        }
+        processSignal(payload, { requireFresh: true });
       } catch {
         // ignore parse/storage issues
       }
@@ -1208,7 +1265,7 @@ export default function Navbar() {
         const rawSession = localStorage.getItem(SOS_SESSION_KEY);
         if (!rawSession) return;
         const session = JSON.parse(rawSession);
-        if (!session?.active) {
+        if (!isSessionActive(session)) {
           const stoppedId = normalizeAlertId(session?.alertId || session?.alertDisplayId);
           if (stoppedId) {
             suppressAlert(stoppedId);
@@ -1306,6 +1363,56 @@ export default function Navbar() {
       return [];
     };
 
+    const normalizeActiveValue = (value) => {
+      if (typeof value === "boolean") return value;
+      if (typeof value === "number") return value > 0;
+      if (typeof value === "string") {
+        const trimmed = value.trim().toLowerCase();
+        if (!trimmed) return undefined;
+        if (["false", "0", "no", "inactive", "stopped", "stop", "ended", "closed", "resolved", "cancelled", "canceled"].includes(trimmed)) {
+          return false;
+        }
+        if (["true", "1", "yes", "active", "open", "live", "started", "triggered", "ongoing"].includes(trimmed)) {
+          return true;
+        }
+      }
+      return undefined;
+    };
+
+    const isAlertActive = (alert) => {
+      if (!alert || typeof alert !== "object") return false;
+      const statusText = String(
+        alert?.status ||
+          alert?.state ||
+          alert?.alertStatus ||
+          alert?.sosStatus ||
+          ""
+      )
+        .trim()
+        .toLowerCase();
+      if (statusText) {
+        if (/(stopp?ed|ended|closed|resolved|inactive|cancelled|canceled|completed|expired)/i.test(statusText)) {
+          return false;
+        }
+        if (/(active|open|live|triggered|ongoing|started)/i.test(statusText)) {
+          return true;
+        }
+      }
+      if (alert?.stoppedAt || alert?.endedAt || alert?.resolvedAt || alert?.closedAt) return false;
+      const direct = normalizeActiveValue(
+        alert?.active ??
+          alert?.isActive ??
+          alert?.activeAlert ??
+          alert?.enabled ??
+          alert?.isLive ??
+          alert?.inProgress
+      );
+      if (typeof direct === "boolean") return direct;
+      const updatedMs = readAlertTimestampMs(alert);
+      if (SOS_ALERT_STALE_MS > 0 && updatedMs && Date.now() - updatedMs > SOS_ALERT_STALE_MS) return false;
+      return true;
+    };
+
     const requestEmergencyData = async (suffix) => {
       let res = null;
       let lastError = null;
@@ -1374,7 +1481,7 @@ export default function Navbar() {
 
         if (disposed) return;
         const alerts = payloads.flatMap((data) => normalizeAlerts(data));
-        const activeAlerts = alerts.filter((a) => (typeof a?.active === "boolean" ? a.active : true));
+        const activeAlerts = alerts.filter((a) => isAlertActive(a));
         activeAlertIdsRef.current = new Set(
           activeAlerts
             .map((a) => String(a?.alertId || a?.alertDisplayId || "").trim())
@@ -1415,7 +1522,7 @@ export default function Navbar() {
         }
 
         for (const a of alerts) {
-          const isActiveAlert = typeof a?.active === "boolean" ? a.active : true;
+          const isActiveAlert = isAlertActive(a);
           const id = String(a?.alertId || a?.alertDisplayId || "").trim();
           const reporter = String(a?.reporterEmail || "").trim().toLowerCase();
           const dedupeKey = buildEmergencyDedupeKey(a);
@@ -1556,7 +1663,7 @@ export default function Navbar() {
           return;
         }
         const session = JSON.parse(raw);
-        if (!session?.active) {
+        if (!isSessionActive(session)) {
           sosEmergencyMissesRef.current = 3;
           sosPopupStickyRef.current = false;
           sosPopupStickyIdRef.current = "";
@@ -2159,7 +2266,7 @@ export default function Navbar() {
       const isOwn =
         isOwnBrowserSession(session) ||
         isOwnEmergency({ reporterEmail: session?.reporterEmail, reporterUserId: session?.reporterUserId });
-      if (!isOwn || session?.active) return { isOwnStopped: false, isRecentOwnStop: false, alertId: "" };
+      if (!isOwn || isSessionActive(session)) return { isOwnStopped: false, isRecentOwnStop: false, alertId: "" };
       const updatedMs = new Date(session?.updatedAt || session?.stoppedAt || "").getTime();
       const isRecent = Number.isFinite(updatedMs) && Date.now() - updatedMs < 120000;
       return {
@@ -2177,7 +2284,7 @@ export default function Navbar() {
       const raw = localStorage.getItem(SOS_SESSION_KEY);
       if (!raw) return false;
       const session = JSON.parse(raw);
-      if (!Boolean(session?.triggeredByCurrentBrowser) || !Boolean(session?.active)) return false;
+      if (!Boolean(session?.triggeredByCurrentBrowser) || !isSessionActive(session)) return false;
       const currentKnown = Boolean(myUserId || myEmail);
       if (!currentKnown) return true;
       return matchesCurrentSessionUser(session);

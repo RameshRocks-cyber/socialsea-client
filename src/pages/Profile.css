@@ -997,11 +997,13 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
+  align-items: flex-end;
 }
 
 .profile-actions-row {
-  display: grid;
-  grid-template-columns: 1fr auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
   gap: 10px;
 }
 
@@ -1128,12 +1130,19 @@
   }
 
   .profile-actions-row {
-    grid-template-columns: 1fr;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
   }
 
   .profile-action-icon {
     width: 100%;
     text-align: center;
+  }
+
+  .profile-actions-own {
+    align-items: stretch;
   }
 }
 
