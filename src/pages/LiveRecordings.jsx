@@ -50,6 +50,10 @@ const writeRecordingsPin = (pin) => {
   localStorage.setItem(LIVE_RECORDINGS_PIN_KEY, String(pin || "").trim());
 };
 
+const clearRecordingsPin = () => {
+  localStorage.removeItem(LIVE_RECORDINGS_PIN_KEY);
+};
+
 const readHiddenRecordingIds = () => {
   try {
     const raw = localStorage.getItem(LIVE_RECORDINGS_HIDDEN_KEY);
@@ -367,6 +371,17 @@ export default function LiveRecordings() {
     setUnlocked(true);
   };
 
+  const handleForgotPin = () => {
+    const ok = window.confirm("Reset the 6-digit password? You will need to set a new one to continue.");
+    if (!ok) return;
+    clearRecordingsPin();
+    setPinMode("setup");
+    setPinInput("");
+    setPinConfirmInput("");
+    setPinError("");
+    setUnlocked(false);
+  };
+
   const handleDelete = async (item) => {
     const idText = String(item?.id || "").trim();
     if (!idText || deletingId) return;
@@ -588,6 +603,11 @@ export default function LiveRecordings() {
             )}
             {pinError && <p className="live-recordings-error">{pinError}</p>}
             <button type="submit">{pinMode === "setup" ? "Save & Open" : "Unlock"}</button>
+            {pinMode === "unlock" && (
+              <button type="button" className="live-recordings-forgot" onClick={handleForgotPin}>
+                Forgot password?
+              </button>
+            )}
           </form>
         </section>
       </div>

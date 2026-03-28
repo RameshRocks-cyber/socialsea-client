@@ -218,7 +218,7 @@ export default function Feed() {
       if (!silent) setIsLoading(true);
       try {
         const baseCandidates = buildBaseCandidates();
-        const endpoints = ["/api/feed", "/feed", "/api/posts", "/posts"];
+        const endpoints = ["/api/feed"];
         let res = null;
         let lastErr = null;
         let fallbackRes = null;
@@ -273,7 +273,7 @@ export default function Feed() {
           scheduleRetry();
         }
 
-        if (list.length === 0) {
+        if (list.length === 0 && String(import.meta.env?.VITE_ENABLE_ACTUATOR_PROBE || "") === "true") {
           try {
             const healthRes = await api.get("/actuator/health", {
               skipAuth: true,

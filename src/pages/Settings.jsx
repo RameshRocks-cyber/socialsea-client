@@ -2,12 +2,29 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../api/axios";
 import { DEFAULT_SOUND_PREFS, SETTINGS_KEY, getSoundLabel, readSoundPrefs } from "./soundPrefs";
+import {
+  CONTENT_TYPE_OPTIONS,
+  DEFAULT_CONTENT_TYPES,
+  getContentTypeLabel,
+  normalizeContentTypeList
+} from "./contentPrefs";
 import { COLOR_THEME_OPTIONS, readTheme, setTheme, readCustomThemeColors, setCustomThemeColors } from "../theme";
 import "./Settings.css";
 
 const CLOSE_FRIENDS_KEY = "socialsea_close_friends_v1";
 const BLOCKED_KEY = "socialsea_blocked_users_v1";
-
+const NOTIFICATION_CHARACTERS = [
+  "Lion",
+  "Dog",
+  "Puppy",
+  "Cat",
+  "Panda",
+  "Bunny",
+  "Penguin",
+  "Anime Hero",
+  "Robot Cat",
+  "Cartoon Kid"
+];
 const defaultPrefs = {
   accountPrivate: true,
   crossposting: false,
@@ -18,9 +35,18 @@ const defaultPrefs = {
   tagsMentions: "People You Follow",
   comments: "Everyone",
   notifications: true,
+  notificationBuddy: true,
+  notificationBuddyCharacter: "Cat",
+  notificationBuddyVoiceEnabled: true,
+  notificationBuddyVoiceName: "",
+  notificationBuddyVoiceRate: 1,
+  notificationBuddyVoicePitch: 1,
+  studyModeReels: false,
   dailyTimeLimit: "2h/day",
   notificationSound: DEFAULT_SOUND_PREFS.notificationSound,
-  ringtoneSound: DEFAULT_SOUND_PREFS.ringtoneSound
+  ringtoneSound: DEFAULT_SOUND_PREFS.ringtoneSound,
+  contentTypes: DEFAULT_CONTENT_TYPES,
+  jobMode: "profile"
 };
 
 const readIds = (key) => {
@@ -44,14 +70,41 @@ const readJsonArray = (key) => {
   }
 };
 
+const normalizeJobMode = (prefs) => {
+  if (prefs?.jobMode === "post" || prefs?.jobMode === "profile" || prefs?.jobMode === "off" || prefs?.jobMode === "storage") {
+    return prefs.jobMode;
+  }
+  if (typeof prefs?.showJobsOnProfile === "boolean") {
+    return prefs.showJobsOnProfile ? "profile" : "off";
+  }
+  return "profile";
+};
+
+const normalizeNotificationCharacter = (value) =>
+  NOTIFICATION_CHARACTERS.includes(value) ? value : defaultPrefs.notificationBuddyCharacter;
+
 const readPrefs = () => {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
-    if (!raw) return { ...defaultPrefs, ...readSoundPrefs() };
+    if (!raw) {
+      const base = { ...defaultPrefs, ...readSoundPrefs() };
+      const normalized = { ...base, jobMode: normalizeJobMode(base) };
+      normalized.notificationBuddyCharacter = normalizeNotificationCharacter(normalized.notificationBuddyCharacter);
+      normalized.contentTypes = normalizeContentTypeList(normalized.contentTypes);
+      return normalized;
+    }
     const parsed = JSON.parse(raw);
-    return { ...defaultPrefs, ...(parsed || {}), ...readSoundPrefs() };
+    const base = { ...defaultPrefs, ...(parsed || {}), ...readSoundPrefs() };
+    const normalized = { ...base, jobMode: normalizeJobMode(base) };
+    normalized.notificationBuddyCharacter = normalizeNotificationCharacter(normalized.notificationBuddyCharacter);
+    normalized.contentTypes = normalizeContentTypeList(normalized.contentTypes);
+    return normalized;
   } catch {
-    return { ...defaultPrefs, ...readSoundPrefs() };
+    const base = { ...defaultPrefs, ...readSoundPrefs() };
+    const normalized = { ...base, jobMode: normalizeJobMode(base) };
+    normalized.notificationBuddyCharacter = normalizeNotificationCharacter(normalized.notificationBuddyCharacter);
+    normalized.contentTypes = normalizeContentTypeList(normalized.contentTypes);
+    return normalized;
   }
 };
 
@@ -75,13 +128,34 @@ export default function Settings() {
   const [blockedUsers, setBlockedUsers] = useState(() => readJsonArray(BLOCKED_KEY));
   const [userQuery, setUserQuery] = useState("");
   const [userResults, setUserResults] = useState([]);
+  const jobMode =
+    prefs.jobMode === "post" ? "post" :
+    prefs.jobMode === "storage" ? "storage" :
+    prefs.jobMode === "off" ? "off" :
+    "profile";
   const colorThemeLabel = useMemo(() => {
     const match = COLOR_THEME_OPTIONS.find((opt) => opt.id === colorTheme);
     return match ? match.label : "Ocean";
   }, [colorTheme]);
+  const contentTypeSelection = useMemo(
+    () => normalizeContentTypeList(prefs.contentTypes),
+    [prefs.contentTypes]
+  );
+  const contentTypeSummary = useMemo(() => {
+    const total = CONTENT_TYPE_OPTIONS.length;
+    if (contentTypeSelection.length === 0 || contentTypeSelection.length >= total) return "All";
+    if (contentTypeSelection.length === 1) return getContentTypeLabel(contentTypeSelection[0]);
+    if (contentTypeSelection.length === 2) {
+      return `${getContentTypeLabel(contentTypeSelection[0])}, ${getContentTypeLabel(contentTypeSelection[1])}`;
+    }
+    return `${contentTypeSelection.length} selected`;
+  }, [contentTypeSelection]);
 
   useEffect(() => {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(prefs));
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new Event("ss-settings-update"));
+    }
   }, [prefs]);
 
   useEffect(() => {
@@ -228,6 +302,7 @@ export default function Settings() {
     setPrefs((prev) => ({ ...prev, [key]: !prev[key] }));
   };
   const setChoice = (key, value) => setPrefs((prev) => ({ ...prev, [key]: value }));
+  const setJobMode = (mode) => setPrefs((prev) => ({ ...prev, jobMode: mode }));
 
   const removeFromPanel = (id) => {
     if (activePanel === "saved") {
@@ -317,8 +392,52 @@ export default function Settings() {
         </header>
 
         <section className="settings-section">
+          <h2>Jobs</h2>
+          <Row
+            icon={"J"}
+            title="Jobs on profile"
+            value={jobMode === "profile" ? "On" : "Off"}
+            onClick={() => {
+              setJobMode(jobMode === "profile" ? "off" : "profile");
+              setActivePanel("");
+            }}
+          />
+          <Row
+            icon={"PJ"}
+            title="Post a Job"
+            value={jobMode === "post" ? "On" : "Off"}
+            onClick={() => {
+              setJobMode(jobMode === "post" ? "off" : "post");
+              setActivePanel("");
+            }}
+          />
+          <Row
+            icon={"SV"}
+            title="Storage Vault"
+            value={jobMode === "storage" ? "On" : "Off"}
+            onClick={() => {
+              setJobMode(jobMode === "storage" ? "off" : "storage");
+              setActivePanel("");
+            }}
+          />
+          <p className="settings-note">Turn one on, or keep all off to hide.</p>
+        </section>
+
+        <section className="settings-section">
           <h2>How you use SocialSea</h2>
           <Row icon={"AP"} title="Appearance" value={colorThemeLabel} onClick={() => setActivePanel("theme")} />
+          <Row
+            icon={"CT"}
+            title="Content types"
+            value={contentTypeSummary}
+            onClick={() => navigate("/settings/content-types")}
+          />
+          <Row
+            icon={"ST"}
+            title="Study mode (hide Reels)"
+            value={prefs.studyModeReels ? "On" : "Off"}
+            onClick={() => setToggle("studyModeReels")}
+          />
           <Row icon={"B"} title="Saved" value={savedIds.length} onClick={() => navigate("/saved")} />
           <Row icon={"A"} title="Archive" value={archiveIds.length} onClick={() => setActivePanel("archive")} />
           <Row icon={"Y"} title="Your activity" onClick={() => setActivePanel("activity")} />
@@ -339,6 +458,12 @@ export default function Settings() {
             title="Notifications"
             value={prefs.notifications ? "On" : "Off"}
             onClick={() => navigate("/notifications")}
+          />
+          <Row
+            icon={"NC"}
+            title="Notification Character"
+            value={prefs.notificationBuddy ? `On - ${prefs.notificationBuddyCharacter}` : "Off"}
+            onClick={() => navigate("/settings/notification-buddy")}
           />
           <Row
             icon={"NS"}

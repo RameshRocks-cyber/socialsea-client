@@ -46,6 +46,11 @@ body.ss-call-active .ss-nav-wrap {
   display: none;
 }
 
+/* Hide navbar when story viewer is open */
+body.ss-story-viewer-open .ss-nav-wrap {
+  display: none;
+}
+
 /* Black-only navbar buttons */
 .ss-nav {
   background: #000 !important;

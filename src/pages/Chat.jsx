@@ -17,6 +17,7 @@ import {
   FiUserPlus,
   FiVolume2,
   FiVolumeX,
+  FiX,
   FiVideo,
   FiVideoOff
 } from "react-icons/fi";
@@ -55,6 +56,8 @@ const CHAT_PRESENCE_HOLD_MS = 90000;
 const CHAT_CONVO_POLL_MS = 8000;
 const CHAT_REMOTE_DISABLE_MS = 5 * 60 * 1000;
 const STORY_FEED_DISABLE_MS = 5 * 60 * 1000;
+const STORY_IMAGE_DURATION_MS = 6500;
+const STORY_MEDIA_LOAD_TIMEOUT_MS = 2500;
 const LIVEKIT_URL = import.meta.env.VITE_LIVEKIT_URL || "";
 const TURN_URLS = String(import.meta.env.VITE_TURN_URLS || "")
   .split(",")
@@ -520,7 +523,7 @@ export default function Chat() {
           .filter(Boolean)
       )
     );
-    const endpoints = ["/api/stories/feed", "/stories/feed"];
+    const endpoints = ["/api/stories/feed"];
     let sawMissing = false;
     for (const base of baseCandidates) {
       for (const endpoint of endpoints) {
@@ -577,6 +580,7 @@ export default function Chat() {
   const [myEmail, setMyEmail] = useState(String(safeGetItem("email") || ""));
 
   const [contacts, setContacts] = useState([]);
+  const [contactActionId, setContactActionId] = useState("");
   const [activeContactId, setActiveContactId] = useState("");
   const [messagesByContact, setMessagesByContact] = useState({});
   const [inputText, setInputText] = useState("");
@@ -704,6 +708,8 @@ export default function Chat() {
   const [storyViewerMediaKind, setStoryViewerMediaKind] = useState("unknown");
   const [storyViewerBlobType, setStoryViewerBlobType] = useState("");
   const [storyOptionsOpen, setStoryOptionsOpen] = useState(false);
+  const [storyPlayerProgress, setStoryPlayerProgress] = useState(0);
+  const [storyPlayerPaused, setStoryPlayerPaused] = useState(false);
   const [soundPrefs, setSoundPrefs] = useState(readSoundPrefs);
   const [hasRemoteVideo, setHasRemoteVideo] = useState(false);
   const [hasRemoteAudio, setHasRemoteAudio] = useState(false);
@@ -843,11 +849,19 @@ export default function Chat() {
   const storyViewerCandidatesRef = useRef([]);
   const storyViewerCandidateIndexRef = useRef(0);
   const storyViewerBlobUrlRef = useRef("");
+  const storyViewerBlobTriedRef = useRef(new Set());
   const storyViewerLoadTimeoutRef = useRef(null);
+  const storyPlayerRafRef = useRef(null);
+  const storyPlayerDurationRef = useRef(STORY_IMAGE_DURATION_MS);
+  const storyPlayerElapsedRef = useRef(0);
+  const storyPlayerLastTickRef = useRef(0);
+  const storyPlayerPausedRef = useRef(false);
   const storyFeedDisabledUntilRef = useRef(0);
   const chatApiDisabledUntilRef = useRef(0);
   const seenSignalsRef = useRef(new Set());
   const longPressTimerRef = useRef(null);
+  const contactLongPressTimerRef = useRef(null);
+  const contactLongPressTriggeredRef = useRef(false);
   const touchStartPointRef = useRef({ x: 0, y: 0 });
   const touchSwipeReplyRef = useRef({ triggered: false });
   const tabIdRef = useRef(`${Date.now()}_${Math.random().toString(36).slice(2, 7)}`);
@@ -1519,6 +1533,17 @@ export default function Chat() {
   }, []);
 
   useEffect(() => {
+    if (typeof document === "undefined") return undefined;
+    const className = "ss-story-viewer-open";
+    if (storyViewerIndex != null) {
+      document.body.classList.add(className);
+    } else {
+      document.body.classList.remove(className);
+    }
+    return () => document.body.classList.remove(className);
+  }, [storyViewerIndex]);
+
+  useEffect(() => {
     const onStorage = (event) => {
       if (!event || event.key === SETTINGS_KEY) {
         setSoundPrefs(readSoundPrefs());
@@ -1633,26 +1658,48 @@ export default function Chat() {
       if (showLoader) setChatRequestsLoading(true);
       setChatRequestError("");
       try {
-        const res = await requestChatArray({
-          endpoints: [
-            "/api/follow/requests",
-            "/api/follow/pending-requests",
-            "/follow/requests",
-            "/follow/pending-requests"
-          ],
-          timeoutMs: 6000,
-          maxAttempts: 8
-        });
-        let list = Array.isArray(res?.list) ? res.list : [];
-        if (Array.isArray(list) && list.length === 0) {
+        let res = null;
+        let usedNotifications = false;
+        let list = [];
+        let sourceUrl = "";
+        try {
+          res = await requestChatArray({
+            endpoints: ["/api/follow/requests", "/api/follow/pending-requests"],
+            timeoutMs: 6000,
+            maxAttempts: 8
+          });
+          list = Array.isArray(res?.list) ? res.list : [];
+          sourceUrl = String(res?.url || "");
+        } catch (err) {
+          const status = Number(err?.response?.status || 0);
+          if (status === 405) {
+            try {
+              const notifRes = await requestChatArray({
+                endpoints: ["/api/notifications"],
+                timeoutMs: 5000,
+                maxAttempts: 4
+              });
+              const notifList = Array.isArray(notifRes?.list) ? notifRes.list : [];
+              list = notifList.filter(isFollowRequestNotification).map(mapNotificationToRequest);
+              sourceUrl = String(notifRes?.url || "");
+              usedNotifications = true;
+            } catch {
+              throw err;
+            }
+          } else {
+            throw err;
+          }
+        }
+        if (!usedNotifications && Array.isArray(list) && list.length === 0) {
           try {
             const notifRes = await requestChatArray({
-              endpoints: ["/api/notifications", "/notifications"],
+              endpoints: ["/api/notifications"],
               timeoutMs: 5000,
               maxAttempts: 4
             });
             const notifList = Array.isArray(notifRes?.list) ? notifRes.list : [];
             list = notifList.filter(isFollowRequestNotification).map(mapNotificationToRequest);
+            sourceUrl = String(notifRes?.url || sourceUrl);
           } catch {
             // ignore notification fallback failures
           }
@@ -1660,14 +1707,17 @@ export default function Chat() {
         if (!active) return;
         const pending = Array.isArray(list) ? list.filter(isPendingRequest) : [];
         const hasIdentity = Boolean(String(myUserId || "").trim() || String(myEmail || "").trim());
-        const sourceUrl = String(res?.url || "").toLowerCase();
+        const normalizedSourceUrl = String(sourceUrl || "").toLowerCase();
         if (!hasIdentity) {
           setChatRequests(pending);
           setSentChatRequests([]);
-        } else if (sourceUrl.includes("pending-requests")) {
+        } else if (normalizedSourceUrl.includes("pending-requests")) {
           setChatRequests([]);
           setSentChatRequests(pending);
-        } else if (sourceUrl.includes("/requests") && !sourceUrl.includes("pending-requests")) {
+        } else if (
+          normalizedSourceUrl.includes("/requests") &&
+          !normalizedSourceUrl.includes("pending-requests")
+        ) {
           setChatRequests(pending);
           setSentChatRequests([]);
         } else {
@@ -1681,10 +1731,11 @@ export default function Chat() {
         setChatRequests([]);
         setSentChatRequests([]);
         const status = Number(err?.response?.status || 0);
+        const statusLabel = status ? `HTTP ${status}` : "Network error";
         if (status === 401 || status === 403) {
-          setChatRequestError("Login required to view chat requests.");
+          setChatRequestError(`Login required to view chat requests (${statusLabel}).`);
         } else {
-          setChatRequestError("Chat requests unavailable.");
+          setChatRequestError(`Chat requests unavailable (${statusLabel}).`);
         }
       } finally {
         if (active && showLoader) setChatRequestsLoading(false);
@@ -4647,12 +4698,7 @@ export default function Chat() {
         return;
       }
       const res = await requestChatArray({
-        endpoints: [
-          "/api/chat/contacts",
-          "/api/chat/list",
-          "/api/chat/conversations",
-          "/api/conversations"
-        ],
+        endpoints: ["/api/chat/conversations"],
         params: { _: Date.now() },
         mapList: (items) =>
           items
@@ -4765,13 +4811,13 @@ export default function Chat() {
 
     const feedPromise = broad
       ? fromEndpoints({
-          endpoints: ["/api/feed", "/feed", "/api/posts", "/posts"],
+        endpoints: ["/api/feed"],
           pickUser: (entry) => entry?.user || entry?.owner || entry?.author || entry
         })
       : Promise.resolve([]);
     const reelsPromise = broad
       ? fromEndpoints({
-          endpoints: ["/api/reels", "/reels"],
+        endpoints: ["/api/reels"],
           pickUser: (entry) => entry?.user || entry?.owner || entry?.author || entry
         })
       : Promise.resolve([]);
@@ -4794,14 +4840,14 @@ export default function Chat() {
       const safeIdentity = encodeURIComponent(identity);
       return fromEndpoints({
         endpoints: [
-          `/api/follow/list?type=following&user=${safeIdentity}`,
-          `/api/follow/list?type=followers&user=${safeIdentity}`,
-          `/api/profile/${safeIdentity}/following`,
-          `/api/profile/${safeIdentity}/followers`,
           `/api/follow/${safeIdentity}/following/users`,
           `/api/follow/${safeIdentity}/followers/users`,
+          `/api/profile/${safeIdentity}/following`,
+          `/api/profile/${safeIdentity}/followers`,
           `/api/follow/${safeIdentity}/following`,
-          `/api/follow/${safeIdentity}/followers`
+          `/api/follow/${safeIdentity}/followers`,
+          `/api/follow/following/${safeIdentity}`,
+          `/api/follow/followers/${safeIdentity}`
         ],
         pickUser: (entry) =>
           entry?.user ||
@@ -5451,8 +5497,14 @@ export default function Chat() {
         if (!base) return;
         const wsBase = base.replace(/\/api\/?$/, "") || base;
 
+        const wsOrigin = wsBase.startsWith("ws") ? wsBase : wsBase.replace(/^http/i, "ws");
+        const transport = String(import.meta.env?.VITE_WS_TRANSPORT || "").toLowerCase();
+        const useSockJS = transport === "sockjs";
         const client = new Client({
-          webSocketFactory: () => new SockJS(`${wsBase}/ws?token=${encodeURIComponent(token)}`),
+          ...(useSockJS
+            ? { webSocketFactory: () => new SockJS(`${wsBase}/ws?token=${encodeURIComponent(token)}`) }
+            : { brokerURL: `${wsOrigin}/ws?token=${encodeURIComponent(token)}` }),
+          connectHeaders: { Authorization: `Bearer ${token}` },
           reconnectDelay: 3000,
           debug: () => {}
         });
@@ -5803,26 +5855,13 @@ export default function Chat() {
       if (!res) {
         throw new Error("Unable to resolve user for chat request.");
       }
-      const rawStatus = res?.data?.status ?? res?.data?.message ?? res?.data;
-      const nextStatus = String(rawStatus || "").toLowerCase();
-      if (nextStatus.includes("error")) {
-        setRequestStatus(contact, "error");
-        setError("Chat request failed. Please try again.");
-        return;
-      }
-      if (nextStatus.includes("follow")) {
-        updateFollowCache(
-          [contact?.id, contact?.email, contact?.username, ...identifierCandidates],
-          true
-        );
+      const nextStatus = String(res?.data?.status || "").toLowerCase();
+      if (nextStatus.includes("following")) {
+        updateFollowCache([contact?.id, contact?.email, contact?.username], true);
         setRequestStatus(contact, "");
-        return;
-      }
-      if (nextStatus.includes("request") || nextStatus.includes("pending")) {
+      } else {
         setRequestStatus(contact, "requested");
-        return;
       }
-      setRequestStatus(contact, "requested");
     } catch {
       setRequestStatus(contact, "error");
       setError("Chat request failed. Please try again.");
@@ -5896,6 +5935,7 @@ export default function Chat() {
     }
     setContacts((prev) => mergeContacts(prev, [normalized]));
     setActiveContactId(normalized.id);
+    setContactActionId("");
     navigate(`/chat/${normalized.id}`);
   };
 
@@ -5903,6 +5943,116 @@ export default function Chat() {
     openContact(contact);
     setNewChatOpen(false);
     setNewChatQuery("");
+  };
+
+  const toggleContactActions = (contactId) => {
+    const id = String(contactId || "").trim();
+    if (!id) return;
+    setContactActionId((prev) => (String(prev) === id ? "" : id));
+  };
+
+  const startContactLongPress = (contactId) => (event) => {
+    if (!contactId) return;
+    if (event?.pointerType === "mouse") return;
+    contactLongPressTriggeredRef.current = false;
+    if (contactLongPressTimerRef.current) {
+      clearTimeout(contactLongPressTimerRef.current);
+    }
+    contactLongPressTimerRef.current = setTimeout(() => {
+      contactLongPressTriggeredRef.current = true;
+      setContactActionId(String(contactId));
+    }, 600);
+  };
+
+  const stopContactLongPress = () => {
+    if (contactLongPressTimerRef.current) {
+      clearTimeout(contactLongPressTimerRef.current);
+      contactLongPressTimerRef.current = null;
+    }
+  };
+
+  const handleContactPointerUp = (event, contact) => {
+    const id = String(contact?.id || "").trim();
+    if (!id) return;
+    if (event?.pointerType === "mouse") {
+      if (typeof event?.button === "number" && event.button !== 0) return;
+      toggleContactActions(id);
+      return;
+    }
+    stopContactLongPress();
+    if (contactLongPressTriggeredRef.current) {
+      contactLongPressTriggeredRef.current = false;
+      return;
+    }
+    if (String(contactActionId) === id) {
+      setContactActionId("");
+      return;
+    }
+    openContact(contact);
+  };
+
+  const handleContactKeyDown = (event, contact) => {
+    if (!event) return;
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      openContact(contact);
+    }
+  };
+
+  const deleteConversation = async (contact) => {
+    const id = String(contact?.id || "").trim();
+    if (!id) return;
+    const label = getContactDisplayName(contact);
+    const confirmed = window.confirm(`Delete entire chat with ${label}? This will remove the conversation for you.`);
+    if (!confirmed) return;
+
+    setError("");
+    try {
+      await api.delete(`/api/chat/${id}`);
+    } catch (err) {
+      if (!chatFallbackMode) {
+        setError(err?.response?.data?.message || "Failed to delete chat.");
+        return;
+      }
+    }
+
+    setContacts((prev) => prev.filter((c) => String(c?.id) !== id));
+    setMessagesByContact((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    setCallHistoryByContact((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      historyRef.current = next;
+      writeCallHistory(next);
+      return next;
+    });
+
+    try {
+      const key = localThreadKey(myUserId, id);
+      const all = readLocalChat();
+      if (all && typeof all === "object") {
+        const next = { ...all };
+        delete next[key];
+        writeLocalChat(next);
+      }
+      const hiddenMap = readHiddenMessageMap();
+      if (hiddenMap && typeof hiddenMap === "object") {
+        const next = { ...hiddenMap };
+        delete next[key];
+        writeHiddenMessageMap(next);
+      }
+    } catch {
+      // ignore local cache cleanup errors
+    }
+
+    if (String(activeContactId) === id) {
+      setActiveContactId("");
+      navigate("/chat");
+    }
+    setContactActionId("");
   };
 
   const activeContact = contacts.find((c) => c.id === activeContactId) || null;
@@ -6020,6 +6170,26 @@ export default function Chat() {
     const relPathNoApi = relPath.replace(/^\/api(?=\/|$)/i, "") || relPath;
     const devProxyBase = normalizeBase(import.meta.env?.VITE_DEV_PROXY_TARGET);
     const apiFallbackBase = normalizeBase(import.meta.env?.VITE_API_FALLBACK || "https://api.socialsea.co.in");
+    const localBases = (() => {
+      if (typeof window === "undefined") return [];
+      const host = String(window.location.hostname || "").trim().toLowerCase();
+      if (!host) return [];
+      const isLocalHost = host === "localhost" || host === "127.0.0.1";
+      const isPrivateIp = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(host);
+      if (isLocalHost) {
+        return ["http://localhost:8080", "http://127.0.0.1:8080"];
+      }
+      if (isPrivateIp) {
+        return [`http://${host}:8080`];
+      }
+      return [];
+    })();
+    const addLocalBases = (path) => {
+      if (!localBases.length || !path) return;
+      for (const base of localBases) {
+        addBase(base, path);
+      }
+    };
     const uploadApiPath = relPath.startsWith("/uploads/") ? `/api${relPath}` : "";
     const stripApiPath = (base) => {
       const normalized = normalizeBase(base);
@@ -6051,8 +6221,17 @@ export default function Chat() {
       return "";
     };
 
-    add(value);
-    if (!/^https?:\/\//i.test(value)) {
+    const hasScheme = /^https?:\/\//i.test(value);
+    if (!hasScheme) {
+      if (value.startsWith("//")) {
+        add(`https:${value}`);
+      } else if (!value.startsWith("/") && /[a-z0-9-]+\.[a-z0-9-]+/i.test(value)) {
+        add(`https://${value.replace(/^\/+/, "")}`);
+      }
+
+      if (relPath.startsWith("/uploads/")) {
+        addLocalBases(relPath);
+      }
       add(toApiUrl(relPath));
       if (typeof window !== "undefined") {
         add(`${window.location.origin}${relPath}`);
@@ -6060,6 +6239,7 @@ export default function Chat() {
       if (apiBase) addBase(apiBase, relPath);
       if (devProxyBase) addBase(devProxyBase, relPath);
       if (apiFallbackBase) addBase(apiFallbackBase, relPath);
+      addLocalBases(relPath);
       const apiBaseNoPath = stripApiPath(apiBase);
       if (apiBaseNoPath) addBase(apiBaseNoPath, relPath);
       const apiBaseNoSub = stripApiSubdomain(apiBase);
@@ -6070,6 +6250,7 @@ export default function Chat() {
         if (apiBase) addBase(apiBase, uploadApiPath);
         if (devProxyBase) addBase(devProxyBase, uploadApiPath);
         if (apiFallbackBase) addBase(apiFallbackBase, uploadApiPath);
+        addLocalBases(uploadApiPath);
         if (apiBaseNoPath) addBase(apiBaseNoPath, uploadApiPath);
         if (apiBaseNoSub) addBase(apiBaseNoSub, uploadApiPath);
       }
@@ -6079,20 +6260,34 @@ export default function Chat() {
         if (devProxyBase) addBase(devProxyBase, relPathNoApi);
         if (apiBase) addBase(apiBase, relPathNoApi);
         if (apiFallbackBase) addBase(apiFallbackBase, relPathNoApi);
+        addLocalBases(relPathNoApi);
         if (apiBaseNoPath) addBase(apiBaseNoPath, relPathNoApi);
         if (apiBaseNoSub) addBase(apiBaseNoSub, relPathNoApi);
       }
+      add(value);
       return collected;
     }
+
+    add(value);
 
     try {
       const parsed = new URL(value);
       const pathWithQuery = `${parsed.pathname || ""}${parsed.search || ""}${parsed.hash || ""}`;
+      const host = String(parsed.hostname || "").toLowerCase();
+      const isFrontendHost =
+        host === "socialsea.co.in" || host === "www.socialsea.co.in" || host.endsWith(".netlify.app");
       if (pathWithQuery) {
         if (typeof window !== "undefined") add(`${window.location.origin}${pathWithQuery}`);
         if (apiBase) addBase(apiBase, pathWithQuery);
         if (devProxyBase) addBase(devProxyBase, pathWithQuery);
         if (apiFallbackBase) addBase(apiFallbackBase, pathWithQuery);
+        if (/^\/(uploads|api)\//i.test(pathWithQuery)) {
+          addLocalBases(pathWithQuery);
+        }
+        if (isFrontendHost && /^\/uploads\//i.test(pathWithQuery)) {
+          const apiHost = host.startsWith("www.") ? `api.${host.replace(/^www\./, "")}` : `api.${host}`;
+          add(`https://${apiHost}${pathWithQuery}`);
+        }
         const apiBaseNoPath = stripApiPath(apiBase);
         if (apiBaseNoPath) addBase(apiBaseNoPath, pathWithQuery);
         const apiBaseNoSub = stripApiSubdomain(apiBase);
@@ -6104,6 +6299,7 @@ export default function Chat() {
           if (devProxyBase) addBase(devProxyBase, trimmedPath);
           if (apiBase) addBase(apiBase, trimmedPath);
           if (apiFallbackBase) addBase(apiFallbackBase, trimmedPath);
+          addLocalBases(trimmedPath);
           if (apiBaseNoPath) addBase(apiBaseNoPath, trimmedPath);
           if (apiBaseNoSub) addBase(apiBaseNoSub, trimmedPath);
         }
@@ -6114,6 +6310,7 @@ export default function Chat() {
           if (devProxyBase) addBase(devProxyBase, apiPath);
           if (apiBase) addBase(apiBase, apiPath);
           if (apiFallbackBase) addBase(apiFallbackBase, apiPath);
+          addLocalBases(apiPath);
           if (apiBaseNoPath) addBase(apiBaseNoPath, apiPath);
           if (apiBaseNoSub) addBase(apiBaseNoSub, apiPath);
         }
@@ -6214,6 +6411,14 @@ export default function Chat() {
       if (inferredKind) setStoryViewerMediaKind(inferredKind);
       setStoryViewerBlobType("");
 
+      if (/\/api\/stories\/media\//i.test(candidate)) {
+        const ok = await tryBlobForStoryCandidate(i);
+        if (ok) {
+          setStoryViewerLoading(false);
+          return true;
+        }
+      }
+
       // Prefer direct playback (enables range/streaming). Blob fallback happens later if needed.
       setStoryViewerSrc(candidate);
       return true;
@@ -6227,6 +6432,8 @@ export default function Chat() {
     const candidates = Array.isArray(storyViewerCandidatesRef.current) ? storyViewerCandidatesRef.current : [];
     const candidate = String(candidates[index] || "").trim();
     if (!candidate || /^(blob:|data:)/i.test(candidate)) return false;
+    if (storyViewerBlobTriedRef.current.has(candidate)) return false;
+    storyViewerBlobTriedRef.current.add(candidate);
     let result = await fetchStoryBlob(candidate, false);
     if (!result.ok && (result.status === 401 || result.status === 403)) {
       result = await fetchStoryBlob(candidate, true);
@@ -6248,14 +6455,21 @@ export default function Chat() {
 
   const handleStoryViewerMediaError = useCallback(() => {
     const candidates = Array.isArray(storyViewerCandidatesRef.current) ? storyViewerCandidatesRef.current : [];
-    const nextIndex = Number(storyViewerCandidateIndexRef.current || 0) + 1;
-    if (nextIndex < candidates.length) {
-      void loadStoryViewerCandidate(nextIndex);
-      return;
-    }
-    setStoryViewerLoadError("Could not load this story media.");
-    setStoryViewerLoading(false);
-  }, [loadStoryViewerCandidate]);
+    const currentIndex = Number(storyViewerCandidateIndexRef.current || 0);
+    const nextIndex = currentIndex + 1;
+    const tryNext = () => {
+      if (nextIndex < candidates.length) {
+        void loadStoryViewerCandidate(nextIndex);
+        return;
+      }
+      setStoryViewerLoadError("Could not load this story media.");
+      setStoryViewerLoading(false);
+    };
+    void tryBlobForStoryCandidate(currentIndex).then((ok) => {
+      if (ok) return;
+      tryNext();
+    });
+  }, [loadStoryViewerCandidate, tryBlobForStoryCandidate]);
 
   const openStory = (idx) => {
     setStoryViewerMuted(true);
@@ -6271,6 +6485,7 @@ export default function Chat() {
     setStoryViewerBlobType("");
     clearStoryViewerLoadTimer();
     revokeStoryViewerBlobUrl();
+    storyViewerBlobTriedRef.current = new Set();
   };
   const openStoryOptions = () => setStoryOptionsOpen(true);
   const closeStoryOptions = () => setStoryOptionsOpen(false);
@@ -6287,6 +6502,7 @@ export default function Chat() {
       storyViewerCandidateIndexRef.current = 0;
       clearStoryViewerLoadTimer();
       revokeStoryViewerBlobUrl();
+      storyViewerBlobTriedRef.current = new Set();
       return;
     }
     const rawUrl = String(activeStory?.mediaUrl || activeStory?.url || "").trim();
@@ -6300,11 +6516,34 @@ export default function Chat() {
     };
     if (activeStory?.id) {
       const proxyPath = `/api/stories/media/${activeStory.id}`;
-      addFirst(toApiUrl(proxyPath));
-      if (typeof window !== "undefined") addFirst(`${window.location.origin}${proxyPath}`);
+      const proxyCandidates = buildStoryMediaCandidates(proxyPath);
+      const preferProxy = !/^https?:\/\//i.test(rawUrl) && !rawUrl.startsWith("//");
+      const addProxy = (value) => {
+        const normalized = String(value || "").trim();
+        if (!normalized) return;
+        if (candidates.includes(normalized)) return;
+        if (preferProxy) {
+          addFirst(normalized);
+        } else {
+          candidates.push(normalized);
+        }
+      };
+      if (proxyCandidates.length) {
+        if (preferProxy) {
+          for (let i = proxyCandidates.length - 1; i >= 0; i -= 1) {
+            addProxy(proxyCandidates[i]);
+          }
+        } else {
+          proxyCandidates.forEach((item) => addProxy(item));
+        }
+      } else {
+        addProxy(toApiUrl(proxyPath));
+        if (typeof window !== "undefined") addProxy(`${window.location.origin}${proxyPath}`);
+      }
     }
     storyViewerCandidatesRef.current = candidates;
     storyViewerCandidateIndexRef.current = 0;
+    storyViewerBlobTriedRef.current = new Set();
     setStoryViewerMuted(true);
     setStoryViewerLoading(false);
     setStoryViewerLoadError(candidates.length ? "" : "Story media not available");
@@ -6351,7 +6590,7 @@ export default function Chat() {
       void tryBlobForStoryCandidate(currentIndex).then((ok) => {
         if (!ok) handleStoryViewerMediaError();
       });
-    }, 6000);
+    }, STORY_MEDIA_LOAD_TIMEOUT_MS);
     return () => clearStoryViewerLoadTimer();
   }, [
     storyViewerSrc,
@@ -6408,6 +6647,11 @@ export default function Chat() {
   };
   const goNextStory = () => {
     setStoryViewerMuted(true);
+    if (storyPlayerPausedRef.current) {
+      storyPlayerPausedRef.current = false;
+      setStoryPlayerPaused(false);
+    }
+    storyPlayerLastTickRef.current = 0;
     setStoryViewerIndex((prev) => {
       if (prev == null) return null;
       const next = prev + 1;
@@ -6416,12 +6660,161 @@ export default function Chat() {
   };
   const goPrevStory = () => {
     setStoryViewerMuted(true);
+    if (storyPlayerPausedRef.current) {
+      storyPlayerPausedRef.current = false;
+      setStoryPlayerPaused(false);
+    }
+    storyPlayerLastTickRef.current = 0;
     setStoryViewerIndex((prev) => {
       if (prev == null) return null;
       const next = prev - 1;
       return next >= 0 ? next : prev;
     });
   };
+
+  const resolvedStoryMediaUrl =
+    storyViewerIndex != null && activeStory
+      ? storyViewerSrc || resolveStoryMediaUrl(activeStory?.mediaUrl || activeStory?.url || "")
+      : "";
+  const resolvedStoryMediaKind =
+    storyViewerMediaKind === "unknown"
+      ? inferStoryMediaKind(activeStory, resolvedStoryMediaUrl, storyViewerBlobType)
+      : storyViewerMediaKind;
+  const resolvedStoryIsVideo =
+    resolvedStoryMediaKind === "video" || isStoryVideo(resolvedStoryMediaUrl);
+
+  const stopStoryProgress = useCallback(() => {
+    if (storyPlayerRafRef.current) {
+      cancelAnimationFrame(storyPlayerRafRef.current);
+      storyPlayerRafRef.current = null;
+    }
+  }, []);
+
+  const resetStoryProgress = useCallback(
+    (durationMs = STORY_IMAGE_DURATION_MS) => {
+      stopStoryProgress();
+      storyPlayerDurationRef.current = durationMs;
+      storyPlayerElapsedRef.current = 0;
+      storyPlayerLastTickRef.current = 0;
+      setStoryPlayerProgress(0);
+    },
+    [stopStoryProgress]
+  );
+
+  const runStoryProgress = useCallback(() => {
+    stopStoryProgress();
+    const tick = (now) => {
+      if (storyPlayerPausedRef.current) {
+        storyPlayerRafRef.current = null;
+        return;
+      }
+      if (!storyPlayerLastTickRef.current) {
+        storyPlayerLastTickRef.current = now;
+      }
+      const delta = now - storyPlayerLastTickRef.current;
+      storyPlayerLastTickRef.current = now;
+      storyPlayerElapsedRef.current += Math.max(delta, 0);
+      const progress = Math.min(
+        1,
+        storyPlayerElapsedRef.current / Math.max(storyPlayerDurationRef.current, 1)
+      );
+      setStoryPlayerProgress(progress);
+      if (progress >= 1) {
+        goNextStory();
+        return;
+      }
+      storyPlayerRafRef.current = requestAnimationFrame(tick);
+    };
+    storyPlayerRafRef.current = requestAnimationFrame(tick);
+  }, [goNextStory, stopStoryProgress]);
+
+  const pauseStoryPlayback = useCallback(() => {
+    if (storyPlayerPausedRef.current) return;
+    storyPlayerPausedRef.current = true;
+    setStoryPlayerPaused(true);
+    storyPlayerLastTickRef.current = 0;
+    if (storyViewerVideoRef.current) {
+      storyViewerVideoRef.current.pause?.();
+    }
+    stopStoryProgress();
+  }, [stopStoryProgress]);
+
+  const resumeStoryPlayback = useCallback(() => {
+    if (!storyPlayerPausedRef.current) return;
+    storyPlayerPausedRef.current = false;
+    setStoryPlayerPaused(false);
+    storyPlayerLastTickRef.current = 0;
+    if (resolvedStoryIsVideo && storyViewerVideoRef.current) {
+      storyViewerVideoRef.current.play?.().catch(() => {});
+      return;
+    }
+    runStoryProgress();
+  }, [resolvedStoryIsVideo, runStoryProgress]);
+
+  const handleStoryVideoLoaded = useCallback((event) => {
+    const duration = Number(event?.currentTarget?.duration || 0);
+    if (Number.isFinite(duration) && duration > 0) {
+      storyPlayerDurationRef.current = duration * 1000;
+    }
+    setStoryPlayerProgress(0);
+    if (!storyPlayerPausedRef.current) {
+      event.currentTarget.play?.().catch(() => {});
+    }
+  }, []);
+
+  const handleStoryVideoTimeUpdate = useCallback((event) => {
+    const duration = Number(event?.currentTarget?.duration || 0);
+    if (!Number.isFinite(duration) || duration <= 0) return;
+    const current = Number(event?.currentTarget?.currentTime || 0);
+    const progress = Math.min(1, Math.max(0, current / duration));
+    setStoryPlayerProgress(progress);
+  }, []);
+
+  const handleStoryVideoEnded = useCallback(() => {
+    goNextStory();
+  }, [goNextStory]);
+
+  useEffect(() => {
+    storyPlayerPausedRef.current = storyPlayerPaused;
+  }, [storyPlayerPaused]);
+
+  useEffect(() => {
+    if (storyViewerIndex == null || !activeStory) {
+      stopStoryProgress();
+      storyPlayerPausedRef.current = false;
+      setStoryPlayerPaused(false);
+      setStoryPlayerProgress(0);
+      storyPlayerElapsedRef.current = 0;
+      return;
+    }
+
+    if (resolvedStoryIsVideo) {
+      stopStoryProgress();
+      storyPlayerElapsedRef.current = 0;
+      setStoryPlayerProgress(0);
+      return;
+    }
+
+    if (!resolvedStoryMediaUrl || storyViewerLoading || storyViewerLoadError) {
+      stopStoryProgress();
+      return;
+    }
+
+    resetStoryProgress(STORY_IMAGE_DURATION_MS);
+    runStoryProgress();
+
+    return () => stopStoryProgress();
+  }, [
+    storyViewerIndex,
+    activeStory,
+    resolvedStoryIsVideo,
+    resolvedStoryMediaUrl,
+    storyViewerLoading,
+    storyViewerLoadError,
+    resetStoryProgress,
+    runStoryProgress,
+    stopStoryProgress
+  ]);
 
   const peerLatestMessageTs = activeMessages
     .filter((m) => !m?.mine)
@@ -8210,6 +8603,19 @@ export default function Chat() {
     });
   };
 
+  const openBubbleMenuOnClick = (event, item) => {
+    if (!item) return;
+    if (event?.pointerType && event.pointerType !== "mouse") return;
+    if (typeof event?.button === "number" && event.button !== 0) return;
+    const target = event?.target;
+    if (target?.closest?.("a, button, input, textarea, select, audio, video, img")) return;
+    setBubbleMenu({
+      x: event.clientX || 120,
+      y: event.clientY || 120,
+      item
+    });
+  };
+
   const onBubbleTouchStart = (item, touchEvent) => {
     const t = touchEvent.touches?.[0];
     if (!t) return;
@@ -8568,27 +8974,51 @@ export default function Chat() {
           {filteredContacts.map((c) => {
             const presence = getContactPresence(c);
             const displayName = getContactDisplayName(c);
+            const contactId = c?.id != null ? String(c.id) : "";
+            const isActive = String(activeContactId) === contactId;
+            const showActions = Boolean(contactId) && String(contactActionId) === contactId;
+            const contactKey = contactId || c?.email || displayName;
             return (
-              <button
-                key={c.id}
-                type="button"
-                className={`chat-contact ${activeContactId === c.id ? "active" : ""}`}
-                onClick={() => openContact(c)}
-              >
-                <span className="chat-avatar">
-                  {c.profilePic ? <img src={c.profilePic} alt={displayName} className="chat-avatar-img" /> : c.avatar}
-                  <span className={`chat-presence-dot ${presence.online ? "is-online" : ""}`} />
-                </span>
-                <span className="chat-meta">
-                  <span className="chat-meta-row">
-                    <strong>{displayName}</strong>
-                    <span className={`chat-status-pill ${presence.online ? "is-online" : ""}`}>
-                      {presence.text}
-                    </span>
+              <div key={contactKey} className={`chat-contact-card ${isActive ? "active" : ""}`}>
+                <button
+                  type="button"
+                  className={`chat-contact ${isActive ? "active" : ""}`}
+                  onPointerDown={startContactLongPress(contactId)}
+                  onPointerUp={(e) => handleContactPointerUp(e, c)}
+                  onPointerLeave={stopContactLongPress}
+                  onPointerCancel={stopContactLongPress}
+                  onDoubleClick={() => openContact(c)}
+                  onKeyDown={(e) => handleContactKeyDown(e, c)}
+                >
+                  <span className="chat-avatar">
+                    {c.profilePic ? <img src={c.profilePic} alt={displayName} className="chat-avatar-img" /> : c.avatar}
+                    <span className={`chat-presence-dot ${presence.online ? "is-online" : ""}`} />
                   </span>
-                  <small>{c.lastMessage || "Tap to start chatting"}</small>
-                </span>
-              </button>
+                  <span className="chat-meta">
+                    <span className="chat-meta-row">
+                      <strong>{displayName}</strong>
+                      <span className={`chat-status-pill ${presence.online ? "is-online" : ""}`}>
+                        {presence.text}
+                      </span>
+                    </span>
+                    <small>{c.lastMessage || "Tap to start chatting"}</small>
+                  </span>
+                </button>
+                {showActions && (
+                  <div className="chat-contact-actions">
+                    <button
+                      type="button"
+                      className="chat-contact-delete"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        deleteConversation(c);
+                      }}
+                    >
+                      Delete chat
+                    </button>
+                  </div>
+                )}
+              </div>
             );
           })}
           {!error && filteredContacts.length === 0 && <p className="chat-empty">No users found</p>}
@@ -9342,6 +9772,7 @@ export default function Chat() {
                     }`}
                     data-chat-msg-id={item.kind === "message" ? String(item.raw?.id || "") : undefined}
                     onContextMenu={enableBubbleMenu ? (e) => openBubbleMenu(e, item) : undefined}
+                    onPointerUp={enableBubbleMenu ? (e) => openBubbleMenuOnClick(e, item) : undefined}
                     onTouchStart={enableBubbleMenu ? (e) => onBubbleTouchStart(item, e) : undefined}
                     onTouchMove={enableBubbleMenu ? (e) => onBubbleTouchMove(item, e) : undefined}
                     onTouchEnd={enableBubbleMenu ? onBubbleTouchEnd : undefined}
@@ -9819,21 +10250,67 @@ export default function Chat() {
       )}
       {storyViewerIndex != null && activeStory && (
         <div className="chat-story-viewer-backdrop" onClick={closeStory}>
-          <div className="chat-story-viewer" onClick={(e) => e.stopPropagation()}>
-            <button type="button" className="chat-story-viewer-close" onClick={closeStory}>
-              ×
-            </button>
+          <div className="chat-story-player" onClick={(e) => e.stopPropagation()}>
             {(() => {
-              const mediaUrl = storyViewerSrc || resolveStoryMediaUrl(activeStory?.mediaUrl || activeStory?.url || "");
-              const inferredKind =
-                storyViewerMediaKind === "unknown"
-                  ? inferStoryMediaKind(activeStory, mediaUrl, storyViewerBlobType)
-                  : storyViewerMediaKind;
-              const isVideo = isStoryVideo(mediaUrl) || inferredKind === "video";
+              const mediaUrl = resolvedStoryMediaUrl;
+              const isVideo = resolvedStoryIsVideo;
               const label = String(activeStory?.storyText || activeStory?.caption || "Story").trim();
               return (
                 <>
-                  <div className="chat-story-viewer-media">
+                  <div className="chat-story-progress">
+                    {storyItems.map((story, idx) => {
+                      const key = story?.id ? `${story.id}` : `${idx}`;
+                      let width = 0;
+                      if (idx < storyViewerIndex) width = 100;
+                      else if (idx === storyViewerIndex) width = Math.round(storyPlayerProgress * 100);
+                      return (
+                        <div key={key} className="chat-story-progress-bar">
+                          <span style={{ width: `${width}%` }} />
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="chat-story-player-header">
+                    <div className="chat-story-player-meta">
+                      <strong>{label || "Story"}</strong>
+                      <span>
+                        {storyViewerIndex + 1}/{storyItems.length}
+                      </span>
+                    </div>
+                    <div className="chat-story-player-actions">
+                      {isVideo && mediaUrl && (
+                        <button
+                          type="button"
+                          className="ghost"
+                          aria-label={storyViewerMuted ? "Unmute story" : "Mute story"}
+                          onClick={() => {
+                            setStoryViewerMuted((prev) => {
+                              const next = !prev;
+                              if (storyViewerVideoRef.current) {
+                                storyViewerVideoRef.current.muted = next;
+                                if (!next) {
+                                  storyViewerVideoRef.current.play?.().catch(() => {});
+                                }
+                              }
+                              return next;
+                            });
+                          }}
+                        >
+                          {storyViewerMuted ? <FiVolumeX /> : <FiVolume2 />}
+                        </button>
+                      )}
+                      <button type="button" className="close" aria-label="Close story" onClick={closeStory}>
+                        <FiX />
+                      </button>
+                    </div>
+                  </div>
+                  <div
+                    className="chat-story-player-media"
+                    onPointerDown={pauseStoryPlayback}
+                    onPointerUp={resumeStoryPlayback}
+                    onPointerLeave={resumeStoryPlayback}
+                    onPointerCancel={resumeStoryPlayback}
+                  >
                     {mediaUrl ? (
                       isVideo ? (
                         <video
@@ -9843,67 +10320,92 @@ export default function Chat() {
                           autoPlay
                           muted={storyViewerMuted}
                           playsInline
-                          controls
-                          loop
                           preload="auto"
+                          controls={false}
                           onLoadedData={(event) => {
                             clearStoryViewerLoadTimer();
                             setStoryViewerLoading(false);
-                            event.currentTarget.play?.().catch(() => {});
+                            handleStoryVideoLoaded(event);
                           }}
                           onCanPlay={(event) => {
                             clearStoryViewerLoadTimer();
                             setStoryViewerLoading(false);
-                            event.currentTarget.play?.().catch(() => {});
+                            handleStoryVideoLoaded(event);
                           }}
+                          onTimeUpdate={handleStoryVideoTimeUpdate}
+                          onEnded={handleStoryVideoEnded}
                           onError={() => {
                             clearStoryViewerLoadTimer();
                             handleStoryViewerMediaError();
                           }}
+                          onPlay={() => {
+                            if (!storyPlayerPausedRef.current) {
+                              setStoryPlayerPaused(false);
+                            }
+                          }}
+                          onPause={() => {
+                            if (!storyPlayerPausedRef.current) {
+                              setStoryPlayerPaused(true);
+                            }
+                          }}
                         />
                       ) : (
-                        <img src={mediaUrl} alt={label} onError={handleStoryViewerMediaError} />
+                        <img
+                          src={mediaUrl}
+                          alt={label}
+                          onLoad={() => setStoryViewerLoading(false)}
+                          onError={handleStoryViewerMediaError}
+                        />
                       )
                     ) : (
-                      <div className="chat-story-viewer-empty">Story media not available</div>
+                      <div className="chat-story-player-empty">Story media not available</div>
+                    )}
+                    {storyViewerLoading && <div className="chat-story-player-status">Loading story...</div>}
+                    {storyViewerLoadError && (
+                      <div className="chat-story-player-status error">{storyViewerLoadError}</div>
+                    )}
+                    {storyPlayerPaused && !storyViewerLoadError && (
+                      <div className="chat-story-player-paused">Paused</div>
                     )}
                   </div>
-                  {isVideo && mediaUrl && (
-                    <button
-                      type="button"
-                      className="chat-story-viewer-audio-toggle"
-                      onClick={() => {
-                        setStoryViewerMuted((prev) => {
-                          const next = !prev;
-                          if (storyViewerVideoRef.current) {
-                            storyViewerVideoRef.current.muted = next;
-                            if (!next) {
-                              storyViewerVideoRef.current.play?.().catch(() => {});
-                            }
-                          }
-                          return next;
-                        });
-                      }}
-                    >
-                      {storyViewerMuted ? "Unmute" : "Mute"}
-                    </button>
+                  {label && <p className="chat-story-player-caption">{label}</p>}
+                  {storyItems.length > 1 && (
+                    <div className="chat-story-player-footer">
+                      <button type="button" onClick={goPrevStory} disabled={storyViewerIndex <= 0}>
+                        Prev
+                      </button>
+                      <button type="button" onClick={goNextStory} disabled={storyViewerIndex >= storyItems.length - 1}>
+                        Next
+                      </button>
+                    </div>
                   )}
-                  {storyViewerLoading && <p className="chat-story-viewer-caption">Loading story media...</p>}
-                  {storyViewerLoadError && <p className="chat-story-viewer-caption">{storyViewerLoadError}</p>}
-                  {label && <p className="chat-story-viewer-caption">{label}</p>}
+                  {storyItems.length > 1 && (
+                    <div className="chat-story-player-nav">
+                      <button
+                        type="button"
+                        className="prev"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          goPrevStory();
+                        }}
+                        disabled={storyViewerIndex <= 0}
+                        aria-label="Previous story"
+                      />
+                      <button
+                        type="button"
+                        className="next"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          goNextStory();
+                        }}
+                        disabled={storyViewerIndex >= storyItems.length - 1}
+                        aria-label="Next story"
+                      />
+                    </div>
+                  )}
                 </>
               );
             })()}
-            {storyItems.length > 1 && (
-              <div className="chat-story-viewer-nav">
-                <button type="button" onClick={goPrevStory} disabled={storyViewerIndex <= 0}>
-                  Prev
-                </button>
-                <button type="button" onClick={goNextStory} disabled={storyViewerIndex >= storyItems.length - 1}>
-                  Next
-                </button>
-              </div>
-            )}
           </div>
         </div>
       )}

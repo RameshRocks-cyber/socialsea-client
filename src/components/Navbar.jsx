@@ -14,6 +14,7 @@ import {
   FiVideo,
   FiX
 } from "react-icons/fi";
+import { FaGraduationCap } from "react-icons/fa";
 import api from "../api/axios";
 import { getApiBaseUrl } from "../api/baseUrl";
 import "./Navbar.css";
@@ -257,6 +258,17 @@ const readShowSosInNavbar = () => {
     return true;
   } catch {
     return true;
+  }
+};
+
+const readStudyModeReels = () => {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw);
+    return Boolean(parsed?.studyModeReels);
+  } catch {
+    return false;
   }
 };
 
@@ -566,6 +578,7 @@ export default function Navbar() {
   const profileTarget = "/profile/me";
   const [incomingCall, setIncomingCall] = useState(null);
   const [showSosInNavbar, setShowSosInNavbar] = useState(readShowSosInNavbar);
+  const [studyModeReels, setStudyModeReels] = useState(readStudyModeReels);
   const [sosActive, setSosActive] = useState(readIsSosActive);
   const [sosPopup, setSosPopup] = useState(null);
   const [sosUserLocation, setSosUserLocation] = useState(null);
@@ -635,13 +648,36 @@ export default function Navbar() {
   const cameraVideoRef = useRef(null);
   const cameraStreamRef = useRef(null);
 
-  const items = ITEMS.map((item) =>
-    item.label === "Profile" ? { ...item, to: profileTarget } : item
-  );
+  const items = ITEMS.map((item) => {
+    if (item.label === "Profile") return { ...item, to: profileTarget };
+    if (item.to === "/reels") {
+      return {
+        ...item,
+        icon: studyModeReels ? FaGraduationCap : item.icon
+      };
+    }
+    return item;
+  });
 
   useEffect(() => {
     incomingCallRef.current = incomingCall;
   }, [incomingCall]);
+
+  useEffect(() => {
+    const refresh = () => {
+      setShowSosInNavbar(readShowSosInNavbar());
+      setStudyModeReels(readStudyModeReels());
+    };
+    const onStorage = (event) => {
+      if (!event || event.key === SETTINGS_KEY) refresh();
+    };
+    window.addEventListener("ss-settings-update", refresh);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener("ss-settings-update", refresh);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, []);
 
   useEffect(() => {
     cameraHighResRef.current = cameraHighRes;
@@ -1470,12 +1506,7 @@ export default function Navbar() {
         try {
           payloads.push(await requestEmergencyData("active"));
         } catch {
-          // fall back to assist endpoint
-          try {
-            payloads.push(await requestEmergencyData("assist/active"));
-          } catch {
-            // ignore
-          }
+          // ignore emergency polling errors; avoid hitting invalid assist/active endpoint
         }
         if (!payloads.length) return;
 

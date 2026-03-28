@@ -6,6 +6,7 @@ import { HiHandThumbUp, HiOutlineHandThumbUp } from "react-icons/hi2";
 import api from "../api/axios";
 import { getApiBaseUrl, toApiUrl } from "../api/baseUrl";
 import { readLiveBroadcast, subscribeLiveBroadcast } from "../utils/liveBroadcast";
+import StudyMode from "./StudyMode";
 import "./Reels.css";
 
 const MAX_REEL_SECONDS = 60;
@@ -19,6 +20,18 @@ const GESTURE_SCRIPT_TF = "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/
 const GESTURE_SCRIPT_HANDPOSE =
   "https://cdn.jsdelivr.net/npm/@tensorflow-models/handpose@0.0.7/dist/handpose.min.js";
 const CHAT_SHARE_DRAFT_KEY = "socialsea_chat_share_draft_v1";
+const SETTINGS_KEY = "socialsea_settings_v1";
+
+const readStudyModeReels = () => {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw);
+    return Boolean(parsed?.studyModeReels);
+  } catch {
+    return false;
+  }
+};
 
 function loadScript(src, id) {
   if (document.getElementById(id)) return Promise.resolve();
@@ -38,6 +51,7 @@ export default function Reels() {
   const [reels, setReels] = useState([]);
   const [error, setError] = useState("");
   const [liveBroadcast, setLiveBroadcast] = useState(() => readLiveBroadcast());
+  const [studyModeReels, setStudyModeReels] = useState(readStudyModeReels);
   const [gestureEnabled, setGestureEnabled] = useState(false);
   const [gestureStatus, setGestureStatus] = useState("Hand signals are off");
   const [gestureError, setGestureError] = useState("");
@@ -91,6 +105,28 @@ export default function Reels() {
   }, [location.search]);
 
   useEffect(() => {
+    const refresh = () => setStudyModeReels(readStudyModeReels());
+    const onStorage = (event) => {
+      if (!event || event.key === SETTINGS_KEY) refresh();
+    };
+    window.addEventListener("ss-settings-update", refresh);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener("ss-settings-update", refresh);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (studyModeReels) {
+      setGestureEnabled(false);
+      setError("");
+      setReels([]);
+    }
+  }, [studyModeReels, targetPostId]);
+
+  useEffect(() => {
+    if (studyModeReels) return undefined;
     let cancelled = false;
     const buildBaseCandidates = () => {
       const storedBase =
@@ -253,7 +289,7 @@ export default function Reels() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [studyModeReels]);
 
   useEffect(() => {
     const unsubscribe = subscribeLiveBroadcast((next) => setLiveBroadcast(next));
@@ -894,7 +930,7 @@ export default function Reels() {
     gestureRunningRef.current = true;
     setGestureStatus("Hand signals active");
 
-    const detect = async () => {
+  const detect = async () => {
       if (!gestureRunningRef.current || !cameraVideoRef.current || !handModelRef.current) return;
       try {
         const predictions = await handModelRef.current.estimateHands(cameraVideoRef.current, true);
@@ -969,9 +1005,13 @@ export default function Reels() {
         setGestureError("Unable to read hand gestures");
       }
       detectFrameRef.current = requestAnimationFrame(detect);
-    };
-    detectFrameRef.current = requestAnimationFrame(detect);
   };
+  detectFrameRef.current = requestAnimationFrame(detect);
+  };
+
+  if (studyModeReels) {
+    return <StudyMode />;
+  }
 
   return (
     <div className="reels-page">

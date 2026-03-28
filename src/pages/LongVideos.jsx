@@ -502,19 +502,16 @@ export default function LongVideos() {
       setIsLoading(!hasCached);
       try {
         const [fromFeed, fromReels, fromMe, fromProfile] = await Promise.all([
-          fetchAny(["/api/feed", "/feed", "/api/posts", "/posts"]),
-          fetchAny(["/api/reels", "/reels"]),
-          fetchAny(["/api/profile/me/posts", "/profile/me/posts", "/api/me/posts", "/me/posts"]),
-          fetchAny(["/api/profile/posts", "/profile/posts"])
+          fetchAny(["/api/feed"]),
+          fetchAny(["/api/reels"]),
+          fetchAny(["/api/profile/me/posts"]),
+          fetchAny(["/api/profile/posts"])
         ]);
         let posts = [...fromFeed, ...fromReels, ...fromMe, ...fromProfile].filter(Boolean);
 
         if (postId) {
           const direct = await fetchOne([
-            `/api/posts/${encodeURIComponent(postId)}`,
-            `/posts/${encodeURIComponent(postId)}`,
-            `/api/feed/${encodeURIComponent(postId)}`,
-            `/feed/${encodeURIComponent(postId)}`
+            `/api/feed/${encodeURIComponent(postId)}`
           ]);
           if (direct) posts = [direct, ...posts];
         }

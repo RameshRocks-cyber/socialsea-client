@@ -96,9 +96,8 @@ function getPathCandidates(identifier, kind) {
         : [kind];
 
   return [
-    ...kindAliases.map((alias) => `/api/follow/list?type=${alias}&user=${safeId}`),
-    ...kindAliases.map((alias) => `/api/profile/${safeId}/${alias}`),
     ...kindAliases.map((alias) => `/api/follow/${safeId}/${alias}/users`),
+    ...kindAliases.map((alias) => `/api/profile/${safeId}/${alias}`),
     ...kindAliases.map((alias) => `/api/follow/${safeId}/${alias}`),
     ...kindAliases.map((alias) => `/api/follow/${alias}/${safeId}`)
   ].filter((path, index, arr) => arr.indexOf(path) === index);

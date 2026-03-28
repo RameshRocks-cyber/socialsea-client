@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <ellipse cx="128" cy="222" rx="56" ry="10" fill="#111827" opacity="0.22" />
+  
+  <circle cx="128" cy="70" r="36" fill="#f8d6b5" stroke="rgba(15,23,42,0.18)" stroke-width="2" />
+  
+    <path d="M88 76 C94 46 162 46 168 76 L168 96 C158 104 142 108 128 108 C114 108 98 104 88 96 Z" fill="#7a5b0a" />
+  
+  
+      <polygon points="118,118 140,124 128,148 150,152 116,188 132,154 112,150" fill="#f59e0b" />
+    
+  <circle cx="114" cy="74" r="6" fill="#111827" />
+  <circle cx="142" cy="74" r="6" fill="#111827" />
+  <circle cx="116" cy="72" r="2" fill="#f8fafc" />
+  <circle cx="144" cy="72" r="2" fill="#f8fafc" />
+  <circle cx="106" cy="86" r="6" fill="#f9a8d4" opacity="0.7" />
+  <circle cx="150" cy="86" r="6" fill="#f9a8d4" opacity="0.7" />
+  <rect x="116" y="90" width="24" height="6" rx="3" fill="#f4b4c7" />
+
+  <rect x="100" y="112" width="56" height="70" rx="20" fill="#facc15" stroke="rgba(15,23,42,0.18)" stroke-width="2" />
+  <rect x="106" y="128" width="44" height="20" rx="10" fill="rgba(255,255,255,0.25)" />
+
+  <rect x="78" y="124" width="16" height="46" rx="8" fill="#f8d6b5" stroke="rgba(15,23,42,0.18)" stroke-width="2" />
+  <rect x="162" y="124" width="16" height="46" rx="8" fill="#f8d6b5" stroke="rgba(15,23,42,0.18)" stroke-width="2" />
+  <ellipse cx="86" cy="172" rx="10" ry="8" fill="#f8d6b5" stroke="rgba(15,23,42,0.18)" stroke-width="2" />
+  <ellipse cx="170" cy="172" rx="10" ry="8" fill="#f8d6b5" stroke="rgba(15,23,42,0.18)" stroke-width="2" />
+
+  <rect x="110" y="178" width="14" height="40" rx="7" fill="#d97706" stroke="rgba(15,23,42,0.18)" stroke-width="2" />
+  <rect x="132" y="178" width="14" height="40" rx="7" fill="#d97706" stroke="rgba(15,23,42,0.18)" stroke-width="2" />
+  <rect x="104" y="214" width="24" height="12" rx="6" fill="#111827" />
+  <rect x="130" y="214" width="24" height="12" rx="6" fill="#111827" />
+</svg>

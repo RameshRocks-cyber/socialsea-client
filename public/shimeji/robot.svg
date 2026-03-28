@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <ellipse cx="128" cy="222" rx="56" ry="10" fill="#111827" opacity="0.22" />
+  
+  <circle cx="128" cy="70" r="36" fill="#dbeafe" stroke="rgba(15,23,42,0.18)" stroke-width="2" />
+  
+      <path d="M86 78 C90 40 166 40 170 78 L170 98 C160 106 144 110 128 110 C112 110 96 106 86 98 Z" fill="#0ea5e9" />
+      <path d="M96 78 C112 64 144 64 160 78" fill="none" stroke="rgba(15,23,42,0.18)" stroke-width="2" stroke-linecap="round" />
+    
+  
+      <rect x="98" y="76" width="60" height="12" rx="6" fill="#1e293b" />
+      <rect x="108" y="78" width="40" height="8" rx="4" fill="#38bdf8" />
+    
+  <circle cx="114" cy="74" r="6" fill="#111827" />
+  <circle cx="142" cy="74" r="6" fill="#111827" />
+  <circle cx="116" cy="72" r="2" fill="#f8fafc" />
+  <circle cx="144" cy="72" r="2" fill="#f8fafc" />
+  <circle cx="106" cy="86" r="6" fill="#f9a8d4" opacity="0.7" />
+  <circle cx="150" cy="86" r="6" fill="#f9a8d4" opacity="0.7" />
+  <rect x="116" y="90" width="24" height="6" rx="3" fill="#f4b4c7" />
+
+  <rect x="100" y="112" width="56" height="70" rx="20" fill="#38bdf8" stroke="rgba(15,23,42,0.18)" stroke-width="2" />
+  <rect x="106" y="128" width="44" height="20" rx="10" fill="rgba(255,255,255,0.25)" />
+
+  <rect x="78" y="124" width="16" height="46" rx="8" fill="#dbeafe" stroke="rgba(15,23,42,0.18)" stroke-width="2" />
+  <rect x="162" y="124" width="16" height="46" rx="8" fill="#dbeafe" stroke="rgba(15,23,42,0.18)" stroke-width="2" />
+  <ellipse cx="86" cy="172" rx="10" ry="8" fill="#dbeafe" stroke="rgba(15,23,42,0.18)" stroke-width="2" />
+  <ellipse cx="170" cy="172" rx="10" ry="8" fill="#dbeafe" stroke="rgba(15,23,42,0.18)" stroke-width="2" />
+
+  <rect x="110" y="178" width="14" height="40" rx="7" fill="#1e3a8a" stroke="rgba(15,23,42,0.18)" stroke-width="2" />
+  <rect x="132" y="178" width="14" height="40" rx="7" fill="#1e3a8a" stroke="rgba(15,23,42,0.18)" stroke-width="2" />
+  <rect x="104" y="214" width="24" height="12" rx="6" fill="#111827" />
+  <rect x="130" y="214" width="24" height="12" rx="6" fill="#111827" />
+</svg>

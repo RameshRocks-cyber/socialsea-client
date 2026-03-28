@@ -68,6 +68,16 @@
   font-weight: 700;
 }
 
+.live-recordings-forgot {
+  border: 1px solid rgba(92, 137, 232, 0.35);
+  background: transparent;
+  color: #9eb6e6;
+  border-radius: 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
 .live-recordings-layout {
   display: grid;
   grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr);

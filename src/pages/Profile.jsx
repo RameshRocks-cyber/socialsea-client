@@ -4,6 +4,9 @@ import { FiBookOpen, FiImage, FiRadio, FiStar, FiVideo } from "react-icons/fi";
 import api from "../api/axios";
 import { getApiBaseUrl, toApiUrl } from "../api/baseUrl";
 import { clearAuthStorage } from "../auth";
+import { SETTINGS_KEY } from "./soundPrefs";
+import { getJobsByOwner, removeCompanyJob } from "../data/jobStore";
+import { getVaultCount } from "../services/vaultStorage";
 import { buildProfilePath, getProfileIdentifier, persistProfileIdentity } from "../utils/profileRoute";
 import "./Profile.css";
 
@@ -15,6 +18,22 @@ const PROFILE_REQ_TIMEOUT_MS = 2500;
 const POSTS_REQ_TIMEOUT_MS = 2500;
 const FOLLOWING_REQ_TIMEOUT_MS = 1800;
 const MAX_SHORT_VIDEO_SECONDS = 90;
+
+const readJobMode = () => {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    if (parsed?.jobMode === "post" || parsed?.jobMode === "profile" || parsed?.jobMode === "off" || parsed?.jobMode === "storage") {
+      return parsed.jobMode;
+    }
+    if (typeof parsed?.showJobsOnProfile === "boolean") {
+      return parsed.showJobsOnProfile ? "profile" : "off";
+    }
+    return "profile";
+  } catch {
+    return "profile";
+  }
+};
 
 const readFollowingCache = () => {
   try {
@@ -57,8 +76,7 @@ const getPathCandidates = (identifier, kind) => {
     `/api/follow/${safeId}/${kind}/users`,
     `/api/profile/${safeId}/${kind}`,
     `/api/follow/${safeId}/${kind}`,
-    `/api/follow/${kind}/${safeId}`,
-    `/api/follow/list?type=${kind}&user=${safeId}`
+    `/api/follow/${kind}/${safeId}`
   ];
 };
 
@@ -249,6 +267,9 @@ export default function Profile() {
   const [deleteRevealPostId, setDeleteRevealPostId] = useState(null);
   const [videoMetaByPost, setVideoMetaByPost] = useState({});
   const [profileTab, setProfileTab] = useState("posts");
+  const [companyJobs, setCompanyJobs] = useState([]);
+  const [vaultCount, setVaultCount] = useState(0);
+  const [jobMode, setJobMode] = useState(() => readJobMode());
   const [createSheetOpen, setCreateSheetOpen] = useState(false);
   const [highlights, setHighlights] = useState(() => readHighlights());
   const [activeHighlight, setActiveHighlight] = useState(null);
@@ -264,6 +285,36 @@ export default function Profile() {
     String(username || "").trim().toLowerCase() === String(myEmail || "").trim().toLowerCase() ||
     String(username || "").trim().toLowerCase() === String(myName || "").trim().toLowerCase() ||
     profile?.id === Number(myUserId);
+
+  useEffect(() => {
+    const handleStorage = (event) => {
+      if (event?.key === SETTINGS_KEY) {
+        setJobMode(readJobMode());
+      }
+    };
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, []);
+
+  useEffect(() => {
+    if (!isOwnProfile || jobMode !== "profile") return;
+    setCompanyJobs(getJobsByOwner(profileRouteKey));
+  }, [isOwnProfile, profileRouteKey, jobMode]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!isOwnProfile || jobMode !== "storage") return undefined;
+    getVaultCount()
+      .then((count) => {
+        if (!cancelled) setVaultCount(count);
+      })
+      .catch(() => {
+        if (!cancelled) setVaultCount(0);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOwnProfile, jobMode]);
 
   useEffect(() => {
     let cancelled = false;
@@ -511,8 +562,6 @@ export default function Profile() {
               {
                 baseURL: base,
                 suppressAuthRedirect: true,
-                skipAuth: true,
-                skipRefresh: true,
                 params: { _: Date.now() },
                 headers: {
                   "Cache-Control": "no-cache",
@@ -538,13 +587,11 @@ export default function Profile() {
               const res = await requestWithTimeout(
                 endpoint,
                 {
-                  baseURL: base,
-                  suppressAuthRedirect: true,
-                  skipAuth: true,
-                  skipRefresh: true,
-                  params: { _: Date.now() },
-                  headers: {
-                    "Cache-Control": "no-cache",
+                baseURL: base,
+                suppressAuthRedirect: true,
+                params: { _: Date.now() },
+                headers: {
+                  "Cache-Control": "no-cache",
                     Pragma: "no-cache"
                   }
                 },
@@ -888,6 +935,18 @@ export default function Profile() {
     });
   };
 
+  const handleRemoveJob = (jobId) => {
+    removeCompanyJob(jobId);
+    setCompanyJobs((prev) => prev.filter((job) => job.id !== jobId));
+  };
+
+  const visibleCompanyJobs = companyJobs.slice(0, 3);
+
+  const showJobsOnProfile = jobMode === "profile";
+  const showPostJobOnProfile = jobMode === "post";
+  const showStorageOnProfile = jobMode === "storage";
+  const showActionPanelLeft = showJobsOnProfile || showPostJobOnProfile || showStorageOnProfile;
+
   return (
     <div className="profile-page">
       {error && <div>{error}</div>}
@@ -946,24 +1005,119 @@ export default function Profile() {
                 </div>
               )}
 
-              {isOwnProfile && (
-                <div className="profile-actions-own">
-                  <div className="profile-actions-row">
-                    <button className="profile-action-primary" onClick={() => navigate("/profile-setup?mode=edit")}>
-                      Edit Profile
-                    </button>
-                    <button className="profile-action-icon" onClick={() => navigate("/settings")}
-                    >
-                      Settings
+            </section>
+            {isOwnProfile && (
+              <section
+                className={`profile-action-panel ${
+                  showActionPanelLeft ? "" : "is-jobs-hidden"
+                }`.trim()}
+              >
+                {showActionPanelLeft && (
+                  <div className="profile-action-panel-left">
+                    {showStorageOnProfile && (
+                      <div className="profile-vault">
+                        <div className="profile-vault-header">
+                          <div>
+                            <h4>Storage Vault</h4>
+                            <p>Private files stored on this device.</p>
+                          </div>
+                          <button type="button" className="profile-vault-button" onClick={() => navigate("/storage/unlock")}>
+                            Open
+                          </button>
+                        </div>
+                        <div className="profile-vault-meta">
+                          <span>{vaultCount} item{vaultCount === 1 ? "" : "s"} saved</span>
+                        </div>
+                      </div>
+                    )}
+                    {showJobsOnProfile && (
+                      <>
+                        <div className="profile-job-grid">
+                          <button type="button" className="profile-job-button" onClick={() => navigate("/jobs")}>
+                            <span>Jobs</span>
+                            <small>Company roles and open listings</small>
+                          </button>
+                          <button type="button" className="profile-job-button" onClick={() => navigate("/job-notifications")}>
+                            <span>Job Notifications</span>
+                            <small>Matches based on your skills</small>
+                          </button>
+                          <button
+                            type="button"
+                            className="profile-job-button profile-job-button-wide"
+                            onClick={() => navigate("/job-profile")}
+                          >
+                            <span>Job Profile</span>
+                            <small>Resume view of studies, skills, projects</small>
+                          </button>
+                        </div>
+
+                        <div className="profile-job-list">
+                          {visibleCompanyJobs.length === 0 ? (
+                            <p className="profile-job-empty">No jobs posted yet.</p>
+                          ) : (
+                            visibleCompanyJobs.map((job) => (
+                              <div key={job.id} className="profile-job-item">
+                                <div>
+                                  <h4>{job.title || "Job Role"}</h4>
+                                  <small>
+                                    {[job.location, job.salary].filter(Boolean).join(" â€¢ ") || "Details pending"}
+                                  </small>
+                                </div>
+                                <div className="profile-job-item-actions">
+                                  <button
+                                    type="button"
+                                    className="profile-job-link"
+                                    onClick={() => navigate(`/jobs/${job.id}`)}
+                                  >
+                                    View
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="profile-job-remove"
+                                    onClick={() => handleRemoveJob(job.id)}
+                                  >
+                                    Remove
+                                  </button>
+                                </div>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </>
+                    )}
+
+                    {showPostJobOnProfile && (
+                      <div className="profile-job-grid">
+                        <button
+                          type="button"
+                          className="profile-job-button profile-job-button-wide"
+                          onClick={() => navigate("/post-job?mode=job")}
+                        >
+                          <span>Post a Job</span>
+                          <small>Create a new job opening</small>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+                <div className="profile-action-panel-right">
+                  <div className="profile-actions-own">
+                    <div className="profile-actions-row">
+                      <button className="profile-action-primary" onClick={() => navigate("/profile-setup?mode=edit")}>
+                        Edit Profile
+                      </button>
+                      <button className="profile-action-icon" onClick={() => navigate("/settings")}>
+                        Settings
+                      </button>
+                    </div>
+                    <button className="profile-action-secondary" onClick={openCreateSheet}>
+                      Create
                     </button>
                   </div>
-                  <button className="profile-action-secondary" onClick={openCreateSheet}>
-                    Create
-                  </button>
                 </div>
-              )}
-            </section>
-  {isOwnProfile && (
+              </section>
+            )}
+            {isOwnProfile && (
               <section className="profile-shortcuts">
                 <button type="button" className="profile-shortcut-card" onClick={() => navigate("/anonymous/upload")}>
                   <div>
@@ -988,7 +1142,7 @@ export default function Profile() {
                 </button>
               </section>
             )}
-  {isOwnProfile && highlights.length > 0 && (
+            {isOwnProfile && highlights.length > 0 && (
               <section className="profile-highlights">
                 <div className="profile-highlights-head">
                   <h3>Highlights</h3>

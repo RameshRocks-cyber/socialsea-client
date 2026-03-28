@@ -1,0 +1,637 @@
+.storage-page {
+  min-height: 100vh;
+  background: #050505;
+  color: #f5f5f5;
+}
+
+.storage-shell {
+  width: min(100%, 960px);
+  margin: 0 auto;
+  padding: 18px 16px 48px;
+}
+
+.storage-top {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+
+.storage-top-copy {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.storage-top-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.storage-top-btn {
+  border-radius: 999px;
+  padding: 6px 12px;
+  border: 1px solid #2d2d2d;
+  background: #0f0f0f;
+  color: #f5f5f5;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.storage-top-btn.secondary {
+  background: transparent;
+  color: #d0d0d0;
+}
+
+.storage-back {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid #2a2a2a;
+  background: #0b0b0b;
+  color: #f5f5f5;
+  cursor: pointer;
+}
+
+.storage-top h1 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.storage-subtitle {
+  margin: 6px 0 0;
+  color: #b6b6b6;
+  font-size: 13px;
+}
+
+.storage-plans {
+  border: 1px solid #252525;
+  border-radius: 16px;
+  padding: 16px;
+  background: #0b0b0b;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.storage-plan-header h2 {
+  margin: 0 0 6px;
+  font-size: 18px;
+}
+
+.storage-plan-header p {
+  margin: 0;
+  color: #b6b6b6;
+  font-size: 13px;
+}
+
+.storage-plan-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.storage-plan-card {
+  border: 1px solid #2b2b2b;
+  border-radius: 14px;
+  padding: 14px;
+  background: #0f0f0f;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.storage-plan-card.active {
+  border-color: #f5f5f5;
+  box-shadow: 0 0 0 1px rgba(245, 245, 245, 0.6);
+}
+
+.storage-plan-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.storage-plan-title h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.storage-plan-badge {
+  border-radius: 999px;
+  padding: 2px 8px;
+  border: 1px solid #333333;
+  background: #141414;
+  color: #d6d6d6;
+  font-size: 11px;
+}
+
+.storage-plan-copy {
+  margin: 0;
+  color: #cfcfcf;
+  font-size: 13px;
+}
+
+.storage-plan-detail {
+  margin: 0;
+  color: #9c9c9c;
+  font-size: 12px;
+}
+
+.storage-plan-btn {
+  border-radius: 999px;
+  padding: 8px 14px;
+  border: 1px solid #303030;
+  background: #121212;
+  color: #f5f5f5;
+  font-size: 13px;
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+.storage-billing {
+  border: 1px solid #252525;
+  border-radius: 16px;
+  padding: 16px;
+  background: #0b0b0b;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.storage-billing-header h3 {
+  margin: 0 0 6px;
+  font-size: 17px;
+}
+
+.storage-billing-header p {
+  margin: 0;
+  color: #b6b6b6;
+  font-size: 13px;
+}
+
+.storage-billing-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.storage-billing-card {
+  border: 1px solid #2b2b2b;
+  border-radius: 14px;
+  padding: 12px;
+  background: #0f0f0f;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.storage-billing-card h4 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.storage-billing-label {
+  font-size: 12px;
+  color: #c6c6c6;
+}
+
+.storage-billing-input {
+  border-radius: 10px;
+  border: 1px solid #2b2b2b;
+  background: #121212;
+  color: #f5f5f5;
+  padding: 9px 12px;
+  font-size: 13px;
+}
+
+.storage-billing-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+  color: #cfcfcf;
+}
+
+.storage-billing-row strong {
+  color: #f5f5f5;
+  font-weight: 600;
+}
+
+.storage-billing-row.total strong {
+  font-size: 14px;
+}
+
+.storage-billing-note {
+  margin: 0;
+  font-size: 12px;
+  color: #9a9a9a;
+}
+
+.storage-bank-list {
+  display: grid;
+  gap: 6px;
+}
+
+.storage-bank-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  color: #cfcfcf;
+}
+
+.storage-bank-item strong {
+  color: #f5f5f5;
+  font-weight: 600;
+}
+
+.storage-billing-status {
+  margin: 0;
+  font-size: 12px;
+  color: #9bdcff;
+}
+
+.vault-lock {
+  border: 1px solid #252525;
+  border-radius: 16px;
+  padding: 16px;
+  background: #0b0b0b;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.vault-lock-header h3 {
+  margin: 0 0 6px;
+  font-size: 18px;
+}
+
+.vault-lock-header p {
+  margin: 0;
+  color: #b6b6b6;
+  font-size: 13px;
+}
+
+.vault-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.vault-field label {
+  font-size: 12px;
+  color: #c6c6c6;
+}
+
+.vault-field input {
+  border-radius: 10px;
+  border: 1px solid #2b2b2b;
+  background: #121212;
+  color: #f5f5f5;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+.vault-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 10px;
+  max-height: 52vh;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.vault-card {
+  position: relative;
+  border-radius: 12px;
+  border: 1px solid #dedede;
+  background: #ffffff;
+  color: #111111;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  cursor: pointer;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.16);
+}
+
+.vault-card img {
+  width: 100%;
+  height: 120px;
+  object-fit: contain;
+  background: #ffffff;
+  border-radius: 10px;
+}
+
+.vault-card.is-selected {
+  border-color: #111111;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.65);
+}
+
+.vault-card-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #111111;
+  text-align: center;
+  letter-spacing: 0.3px;
+}
+
+.vault-card-count {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  border-radius: 999px;
+  padding: 2px 6px;
+  background: #111111;
+  color: #ffffff;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.vault-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.vault-actions button {
+  border-radius: 999px;
+  padding: 8px 14px;
+  border: 1px solid #2f2f2f;
+  background: #121212;
+  color: #f5f5f5;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.vault-actions .secondary {
+  background: transparent;
+  color: #d0d0d0;
+}
+
+.vault-error {
+  margin: 0;
+  color: #ff7a7a;
+  font-size: 12px;
+}
+
+.vault-empty {
+  margin: 0;
+  font-size: 12px;
+  color: #9a9a9a;
+}
+
+.vault-selected {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.vault-selected-slot {
+  border-radius: 12px;
+  border: 1px dashed #2f2f2f;
+  background: #101010;
+  min-height: 72px;
+  padding: 6px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.vault-selected-slot.has {
+  border-style: solid;
+  border-color: #1d1d1d;
+  background: #ffffff;
+}
+
+.vault-selected-slot img {
+  width: 100%;
+  height: 60px;
+  object-fit: contain;
+  background: #ffffff;
+  border-radius: 8px;
+}
+
+.vault-selected-placeholder {
+  font-size: 12px;
+  color: #7d7d7d;
+}
+
+.vault-selected-index {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: #111111;
+  color: #ffffff;
+}
+
+.storage-uploader {
+  border: 1px solid #252525;
+  border-radius: 16px;
+  padding: 14px;
+  background: #0b0b0b;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.storage-upload-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.storage-upload-row h3 {
+  margin: 0 0 6px;
+  font-size: 16px;
+}
+
+.storage-upload-row p {
+  margin: 0;
+  color: #a2a2a2;
+  font-size: 13px;
+}
+
+.storage-upload-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.storage-upload-btn,
+.storage-clear-btn {
+  border-radius: 999px;
+  padding: 8px 14px;
+  border: 1px solid #303030;
+  background: #121212;
+  color: #f5f5f5;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.storage-clear-btn {
+  background: transparent;
+  color: #d0d0d0;
+}
+
+.storage-uploader input[type="file"] {
+  display: none;
+}
+
+.storage-meta {
+  margin: 0;
+  font-size: 12px;
+  color: #9a9a9a;
+}
+
+.storage-tip {
+  margin: 0;
+  font-size: 12px;
+  color: #8d8d8d;
+}
+
+.storage-error {
+  margin: 0;
+  color: #ff7a7a;
+  font-size: 12px;
+}
+
+.storage-grid {
+  margin-top: 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.storage-empty {
+  margin: 0;
+  padding: 18px;
+  border: 1px dashed #2a2a2a;
+  border-radius: 14px;
+  color: #9a9a9a;
+  text-align: center;
+  font-size: 13px;
+}
+
+.storage-item {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid #242424;
+  background: #0b0b0b;
+}
+
+.storage-preview {
+  width: 72px;
+  height: 72px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #151515;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.storage-preview img,
+.storage-preview video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.storage-file-icon {
+  font-size: 11px;
+  letter-spacing: 0.6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid #2f2f2f;
+  background: #171717;
+  color: #cfcfcf;
+}
+
+.storage-info h4 {
+  margin: 0 0 6px;
+  font-size: 15px;
+  color: #f5f5f5;
+}
+
+.storage-info p {
+  margin: 0;
+  font-size: 12px;
+  color: #a4a4a4;
+}
+
+.storage-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.storage-action {
+  border-radius: 999px;
+  padding: 6px 12px;
+  border: 1px solid #303030;
+  background: #111111;
+  color: #f5f5f5;
+  font-size: 12px;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.storage-action.secondary {
+  background: transparent;
+  color: #d0d0d0;
+}
+
+@media (max-width: 640px) {
+  .storage-top {
+    flex-wrap: wrap;
+  }
+
+  .storage-top-actions {
+    width: 100%;
+  }
+
+  .vault-selected {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .vault-selected-slot {
+    min-height: 62px;
+  }
+
+  .vault-selected-slot img {
+    height: 52px;
+  }
+
+  .vault-gallery {
+    grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+    max-height: 48vh;
+  }
+
+  .storage-item {
+    grid-template-columns: 64px minmax(0, 1fr);
+  }
+
+  .storage-actions {
+    grid-column: 1 / -1;
+    flex-direction: row;
+    justify-content: flex-start;
+  }
+}

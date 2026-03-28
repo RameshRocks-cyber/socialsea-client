@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { clearLiveBroadcast, readLiveBroadcast, subscribeLiveBroadcast, writeLiveBroadcast } from "../utils/liveBroadcast";
+import { CONTENT_TYPE_OPTIONS, readContentTypePrefs } from "./contentPrefs";
 import "./LiveStart.css";
 
 const FILTER_OPTIONS = [
@@ -20,9 +21,34 @@ const LANGUAGE_OPTIONS = [
   { key: "kn", label: "Kannada" },
   { key: "ml", label: "Malayalam" }
 ];
+const LIVE_CONTENT_TYPE_KEY = "socialsea_live_content_type_v1";
+
+const readContentTypeConfig = () => {
+  const prefs = readContentTypePrefs();
+  const allowed = new Set(prefs.contentTypes);
+  const options = CONTENT_TYPE_OPTIONS.filter((opt) => allowed.has(opt.value));
+  const safeOptions = options.length ? options : CONTENT_TYPE_OPTIONS;
+  const defaultType =
+    safeOptions.find((opt) => opt.value === prefs.defaultType)?.value ||
+    safeOptions[0]?.value ||
+    "study";
+  return { options: safeOptions, defaultType };
+};
+
+const readStoredLiveContentType = (allowed, fallback) => {
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = String(localStorage.getItem(LIVE_CONTENT_TYPE_KEY) || "").trim().toLowerCase();
+    if (raw && allowed.has(raw)) return raw;
+  } catch {
+    // ignore storage read errors
+  }
+  return fallback;
+};
 
 export default function LiveStart() {
   const navigate = useNavigate();
+  const initialContentTypeConfig = readContentTypeConfig();
   const [liveState, setLiveState] = useState(() => readLiveBroadcast());
   const [liveSyncError, setLiveSyncError] = useState("");
   const [title, setTitle] = useState("");
@@ -32,6 +58,11 @@ export default function LiveStart() {
   const [screenSharing, setScreenSharing] = useState(false);
   const [filterKey, setFilterKey] = useState("normal");
   const [languageKey, setLanguageKey] = useState("en");
+  const [contentTypeConfig, setContentTypeConfig] = useState(initialContentTypeConfig);
+  const [contentType, setContentType] = useState(() => {
+    const allowed = new Set(initialContentTypeConfig.options.map((opt) => opt.value));
+    return readStoredLiveContentType(allowed, initialContentTypeConfig.defaultType);
+  });
   const [viewerLanguage, setViewerLanguage] = useState(() => localStorage.getItem("live_view_language") || "en");
   const [translateEnabled, setTranslateEnabled] = useState(() => localStorage.getItem("live_translate_on") === "1");
   const [viewerNotice, setViewerNotice] = useState("");
@@ -50,6 +81,30 @@ export default function LiveStart() {
       stopAllStreams();
     };
   }, []);
+
+  useEffect(() => {
+    const refresh = () => {
+      const next = readContentTypeConfig();
+      setContentTypeConfig(next);
+      setContentType((prev) => {
+        const allowed = new Set(next.options.map((opt) => opt.value));
+        if (allowed.has(prev)) return prev;
+        return readStoredLiveContentType(allowed, next.defaultType);
+      });
+    };
+    refresh();
+    window.addEventListener("ss-settings-update", refresh);
+    return () => window.removeEventListener("ss-settings-update", refresh);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      localStorage.setItem(LIVE_CONTENT_TYPE_KEY, contentType);
+    } catch {
+      // ignore storage failures
+    }
+  }, [contentType]);
 
   useEffect(() => {
     if (!title) {
@@ -268,6 +323,16 @@ export default function LiveStart() {
             <select value={filterKey} onChange={(e) => setFilterKey(e.target.value)}>
               {FILTER_OPTIONS.map((opt) => (
                 <option key={opt.key} value={opt.key}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Content type
+            <select value={contentType} onChange={(e) => setContentType(e.target.value)}>
+              {contentTypeConfig.options.map((opt) => (
+                <option key={opt.value} value={opt.value}>
                   {opt.label}
                 </option>
               ))}

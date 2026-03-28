@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { FiCamera } from "react-icons/fi";
 import { useLocation } from "react-router-dom";
 import api from "../api/axios";
+import { CONTENT_TYPE_OPTIONS, readContentTypePrefs } from "./contentPrefs";
 import "./Upload.css";
 
 const POST_GENRE_MAP_KEY = "socialsea_post_genre_map_v1";
@@ -76,9 +77,22 @@ const sanitizeCreatorSettings = (settings) => {
   return next;
 };
 
+const readContentTypeConfig = () => {
+  const prefs = readContentTypePrefs();
+  const allowed = new Set(prefs.contentTypes);
+  const options = CONTENT_TYPE_OPTIONS.filter((opt) => allowed.has(opt.value));
+  const safeOptions = options.length ? options : CONTENT_TYPE_OPTIONS;
+  const defaultType =
+    safeOptions.find((opt) => opt.value === prefs.defaultType)?.value ||
+    safeOptions[0]?.value ||
+    "study";
+  return { options: safeOptions, defaultType };
+};
+
 export default function Upload() {
   const location = useLocation();
   const videoRef = useRef(null);
+  const initialContentTypeConfig = readContentTypeConfig();
   const [file, setFile] = useState(null);
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [activeFileIndex, setActiveFileIndex] = useState(0);
@@ -119,9 +133,10 @@ export default function Upload() {
     allowDownload: false,
     autoCaptions: true,
     ageRestriction: "all",
-    category: "general",
+    category: initialContentTypeConfig.defaultType,
     scheduleAt: ""
   });
+  const [contentTypeConfig, setContentTypeConfig] = useState(initialContentTypeConfig);
   const uploadType = useMemo(() => {
     const params = new URLSearchParams(location.search);
     return String(params.get("type") || "").toLowerCase();
@@ -137,6 +152,21 @@ export default function Upload() {
     setPreviewUrl(url);
     return () => URL.revokeObjectURL(url);
   }, [file]);
+
+  useEffect(() => {
+    const refresh = () => {
+      const next = readContentTypeConfig();
+      setContentTypeConfig(next);
+      setCreatorSettings((prev) => {
+        const stillValid = next.options.some((opt) => opt.value === prev.category);
+        if (stillValid) return prev;
+        return { ...prev, category: next.defaultType };
+      });
+    };
+    refresh();
+    window.addEventListener("ss-settings-update", refresh);
+    return () => window.removeEventListener("ss-settings-update", refresh);
+  }, []);
 
   const isImage = useMemo(() => !!file?.type?.startsWith("image/"), [file]);
   const isVideo = useMemo(() => !!file?.type?.startsWith("video/"), [file]);
@@ -308,7 +338,7 @@ export default function Upload() {
       allowDownload: false,
       autoCaptions: true,
       ageRestriction: "all",
-      category: "general",
+      category: contentTypeConfig.defaultType,
       scheduleAt: ""
     });
   };
@@ -513,6 +543,22 @@ export default function Upload() {
           value={caption}
           onChange={(e) => setCaption(e.target.value)}
         />
+
+        <div className="video-tool-panel creator-settings-grid">
+          <label>
+            Content type
+            <select
+              value={creatorSettings.category}
+              onChange={(e) => setCreatorSetting("category", e.target.value)}
+            >
+              {contentTypeConfig.options.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
 
         {previewUrl && (
           <div className="upload-preview-wrap">
@@ -981,27 +1027,6 @@ export default function Upload() {
                   <option value="all">All ages</option>
                   <option value="13+">13+</option>
                   <option value="18+">18+</option>
-                </select>
-              </label>
-
-              <label>
-                Genre
-                <select
-                  value={creatorSettings.category}
-                  onChange={(e) => setCreatorSetting("category", e.target.value)}
-                >
-                  <option value="general">General</option>
-                  <option value="music">Music</option>
-                  <option value="mixes">Mixes</option>
-                  <option value="news">News</option>
-                  <option value="live">Live</option>
-                  <option value="comedy">Comedy</option>
-                  <option value="movies">Movies</option>
-                  <option value="gaming">Gaming</option>
-                  <option value="trending">Trending</option>
-                  <option value="education">Education</option>
-                  <option value="fitness">Fitness</option>
-                  <option value="vlog">Vlog</option>
                 </select>
               </label>
 

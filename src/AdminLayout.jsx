@@ -1,5 +1,6 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { useState } from "react";
+import { logout } from "./auth";
 import "./admin/AdminPanel.css";
 
 const NAV_ITEMS = [
@@ -37,6 +38,18 @@ export default function AdminLayout() {
             </NavLink>
           ))}
         </nav>
+        <div className="admin-sidebar-footer">
+          <button
+            type="button"
+            className="admin-logout-btn"
+            onClick={() => {
+              setSidebarOpen(false);
+              logout();
+            }}
+          >
+            Log out
+          </button>
+        </div>
       </aside>
 
       <div className="admin-main">

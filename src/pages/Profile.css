@@ -1000,6 +1000,182 @@
   align-items: flex-end;
 }
 
+.profile-job-actions {
+  max-width: 520px;
+  margin: 12px auto 16px;
+  width: 100%;
+}
+
+.profile-job-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.profile-job-button {
+  border: 1px solid var(--profile-border);
+  background: #0b0b0b;
+  color: var(--profile-text);
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  cursor: pointer;
+}
+
+.profile-job-button span {
+  font-size: 14px;
+}
+
+.profile-job-button small {
+  display: block;
+  font-size: 11px;
+  font-weight: 500;
+  color: #b6b6b6;
+}
+
+.profile-job-button-wide {
+  grid-column: 1 / -1;
+}
+
+.profile-job-form {
+  margin-top: 10px;
+  border: 1px solid var(--profile-border);
+  background: #0f0f0f;
+  border-radius: 12px;
+  padding: 10px;
+  display: grid;
+  gap: 10px;
+}
+
+.profile-job-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.profile-job-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #d5d5d5;
+}
+
+.profile-job-field span {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: #8d8d8d;
+}
+
+.profile-job-field input,
+.profile-job-field textarea {
+  border: 1px solid var(--profile-border);
+  border-radius: 10px;
+  background: #0b0b0b;
+  color: var(--profile-text);
+  padding: 8px 10px;
+  font-family: inherit;
+}
+
+.profile-job-field.full {
+  grid-column: 1 / -1;
+}
+
+.profile-job-error {
+  color: #e28383;
+  font-size: 12px;
+}
+
+.profile-job-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.profile-job-submit {
+  border: 1px solid var(--profile-border);
+  background: #111;
+  color: var(--profile-text);
+  border-radius: 10px;
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.profile-job-list {
+  margin-top: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.profile-job-empty {
+  margin: 0;
+  font-size: 12px;
+  color: #9b9b9b;
+}
+
+.profile-job-item {
+  border: 1px solid var(--profile-border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: #111;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.profile-job-item h4 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.profile-job-item small {
+  color: #b6b6b6;
+  font-size: 11px;
+}
+
+.profile-job-item-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.profile-job-link,
+.profile-job-remove {
+  border: 1px solid var(--profile-border);
+  background: #0b0b0b;
+  color: var(--profile-text);
+  border-radius: 10px;
+  padding: 6px 10px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.profile-job-remove {
+  color: #f0b4b4;
+}
+
+@media (max-width: 560px) {
+  .profile-job-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-job-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-job-item {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
 .profile-actions-row {
   display: inline-flex;
   align-items: center;
@@ -1402,4 +1578,118 @@
 
 .profile-shortcuts {
   margin: 0;
+}
+
+/* Unified Jobs + Profile actions panel */
+.profile-action-panel {
+  margin: 0 12px 12px;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid var(--profile-border);
+  background: #0b0b0b;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.75fr);
+  align-items: stretch;
+}
+
+.profile-action-panel-left,
+.profile-action-panel-right {
+  min-width: 0;
+}
+
+.profile-action-panel-right {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.profile-action-panel-right .profile-actions-own {
+  padding: 0;
+  margin: 0;
+  border-top: 0;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.profile-action-panel-right .profile-actions-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  justify-content: stretch;
+}
+
+.profile-action-panel-right .profile-action-primary,
+.profile-action-panel-right .profile-action-icon,
+.profile-action-panel-right .profile-action-secondary {
+  width: 100%;
+  text-align: center;
+}
+
+.profile-action-panel.is-jobs-hidden {
+  grid-template-columns: 1fr;
+}
+
+.profile-vault {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid var(--profile-border);
+  background: #0f0f10;
+}
+
+.profile-vault-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.profile-vault-header h4 {
+  margin: 0 0 6px;
+  font-size: 16px;
+  color: #f5f5f5;
+}
+
+.profile-vault-header p {
+  margin: 0;
+  font-size: 12px;
+  color: #a6a6a6;
+}
+
+.profile-vault-button {
+  border-radius: 999px;
+  border: 1px solid var(--profile-border);
+  background: #101010;
+  color: #f5f5f5;
+  font-size: 12px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.profile-vault-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #9a9a9a;
+}
+
+.profile-vault-link {
+  border: none;
+  background: transparent;
+  color: #d4d4d4;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0;
+  text-decoration: underline;
+}
+
+@media (max-width: 719px) {
+  .profile-action-panel-right .profile-actions-row {
+    grid-template-columns: 1fr;
+  }
 }

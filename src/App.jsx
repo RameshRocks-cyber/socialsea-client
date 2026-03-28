@@ -1,6 +1,7 @@
 ﻿import { Suspense, lazy, useEffect, useRef } from "react";
 import { BrowserRouter, Routes, Route, useLocation, Navigate, useNavigate } from "react-router-dom";
 import Navbar from "./components/Navbar";
+import NotificationBuddyBoundary from "./components/NotificationBuddyBoundary";
 import Feed from "./components/Feed";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
@@ -24,9 +25,11 @@ import ProtectedRoute from "./components/ProtectedRoute";
 import Unauthorized from "./pages/Unauthorized";
 import ProfileSetup from "./pages/ProfileSetup";
 import Settings from "./pages/Settings";
+import SettingsContentTypes from "./pages/SettingsContentTypes";
 import SettingsSounds from "./pages/SettingsSounds";
 import SettingsLocation from "./pages/SettingsLocation";
 import SettingsPrivacy from "./pages/SettingsPrivacy";
+import NotificationBuddySettings from "./pages/NotificationBuddySettings";
 import SOSPage from "./pages/SOSPage";
 import SOSNavigate from "./pages/SOSNavigate";
 import AdminLayout from "./AdminLayout";
@@ -35,8 +38,22 @@ import FollowRequests from "./pages/FollowRequests";
 import LongVideos from "./pages/LongVideos";
 import FollowConnections from "./pages/FollowConnections";
 import LiveRecordings from "./pages/LiveRecordings";
+import StorageVault from "./pages/StorageVault";
+import StorageVaultUnlock from "./pages/StorageVaultUnlock";
 import LiveStart from "./pages/LiveStart";
 import StoryCreate from "./pages/StoryCreate";
+import Jobs from "./pages/Jobs";
+import CompanyProfile from "./pages/CompanyProfile";
+import CompanyHub from "./pages/CompanyHub";
+import JobDetail from "./pages/JobDetail";
+import JobApply from "./pages/JobApply";
+import JobNotifications from "./pages/JobNotifications";
+import JobProfile from "./pages/JobProfile";
+import PostJob from "./pages/PostJob";
+import ResumeBuilder from "./pages/ResumeBuilder";
+import ApplicantInbox from "./pages/ApplicantInbox.jsx";
+import AppliedJobs from "./pages/AppliedJobs.jsx";
+import ApplicantProfile from "./pages/ApplicantProfile.jsx";
 import { getUserRole, isAuthenticated } from "./auth";
 import { getApiBaseUrl } from "./api/baseUrl";
 import api from "./api/axios";
@@ -345,6 +362,7 @@ function AppRoutes() {
   return (
     <>
       {shouldMountUserNavbar && <Navbar />}
+      {shouldMountUserNavbar && <NotificationBuddyBoundary enabled={showUserNavbar} />}
       <main
         ref={appMainRef}
         className={`app-main ${showUserNavbar ? "with-user-nav" : ""} ${isChatRoute ? "chat-main-route" : ""} ${
@@ -390,6 +408,18 @@ function AppRoutes() {
               <Route path="/profile/:username/followers" element={<ProtectedRoute><FollowConnections /></ProtectedRoute>} />
               <Route path="/profile/:username/following" element={<ProtectedRoute><FollowConnections /></ProtectedRoute>} />
               <Route path="/profile/:username" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+              <Route path="/jobs" element={<ProtectedRoute><Jobs /></ProtectedRoute>} />
+              <Route path="/jobs/:jobId" element={<ProtectedRoute><JobDetail /></ProtectedRoute>} />
+              <Route path="/jobs/:jobId/apply" element={<ProtectedRoute><JobApply /></ProtectedRoute>} />
+              <Route path="/companies/:companyId" element={<ProtectedRoute><CompanyProfile /></ProtectedRoute>} />
+              <Route path="/company-hub" element={<ProtectedRoute><CompanyHub /></ProtectedRoute>} />
+              <Route path="/job-notifications" element={<ProtectedRoute><JobNotifications /></ProtectedRoute>} />
+              <Route path="/applicant-inbox" element={<ProtectedRoute><ApplicantInbox /></ProtectedRoute>} />
+              <Route path="/applicants/:applicationId" element={<ProtectedRoute><ApplicantProfile /></ProtectedRoute>} />
+              <Route path="/job-profile" element={<ProtectedRoute><JobProfile /></ProtectedRoute>} />
+              <Route path="/applied-jobs" element={<ProtectedRoute><AppliedJobs /></ProtectedRoute>} />
+              <Route path="/post-job" element={<ProtectedRoute><PostJob /></ProtectedRoute>} />
+              <Route path="/resume-builder" element={<ProtectedRoute><ResumeBuilder /></ProtectedRoute>} />
               <Route path="/profile/live-recordings" element={<ProtectedRoute><LiveRecordings /></ProtectedRoute>} />
               <Route path="/live-recordings" element={<ProtectedRoute><LiveRecordings /></ProtectedRoute>} />
               <Route path="/live" element={<Navigate to="/live/start" replace />} />
@@ -397,14 +427,18 @@ function AppRoutes() {
               <Route path="/story/create" element={<ProtectedRoute><StoryCreate /></ProtectedRoute>} />
               <Route path="/highlights/create" element={<ProtectedRoute><HighlightsCreate /></ProtectedRoute>} />
               <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+              <Route path="/settings/content-types" element={<ProtectedRoute><SettingsContentTypes /></ProtectedRoute>} />
               <Route path="/settings/sounds" element={<ProtectedRoute><SettingsSounds /></ProtectedRoute>} />
               <Route path="/settings/location" element={<ProtectedRoute><SettingsLocation /></ProtectedRoute>} />
               <Route path="/settings/privacy" element={<ProtectedRoute><SettingsPrivacy /></ProtectedRoute>} />
+              <Route path="/settings/notification-buddy" element={<ProtectedRoute><NotificationBuddySettings /></ProtectedRoute>} />
               <Route path="/sos" element={<ProtectedRoute><SOSPage /></ProtectedRoute>} />
               <Route path="/sos/live/:alertId" element={<ProtectedRoute><SOSPage /></ProtectedRoute>} />
               <Route path="/sos/navigate/:alertId" element={<ProtectedRoute><SOSNavigate /></ProtectedRoute>} />
               <Route path="/saved" element={<ProtectedRoute><Saved /></ProtectedRoute>} />
               <Route path="/follow-requests" element={<ProtectedRoute><FollowRequests /></ProtectedRoute>} />
+              <Route path="/storage/unlock" element={<ProtectedRoute><StorageVaultUnlock /></ProtectedRoute>} />
+              <Route path="/storage" element={<ProtectedRoute><StorageVault /></ProtectedRoute>} />
               <Route path="/profile-setup" element={<ProtectedRoute><ProfileSetup /></ProtectedRoute>} />
               <Route path="/anonymous-feed" element={<ProtectedRoute><AnonymousFeed /></ProtectedRoute>} />
               <Route path="/anonymous/upload" element={<ProtectedRoute><AnonymousUpload /></ProtectedRoute>} />

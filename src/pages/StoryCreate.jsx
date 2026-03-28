@@ -104,6 +104,52 @@ export default function StoryCreate() {
     }
   };
 
+  const toEpochMs = (value) => {
+    if (value == null || value === "") return null;
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value < 1e12 ? value * 1000 : value;
+    }
+    if (value instanceof Date) {
+      const ts = value.getTime();
+      return Number.isFinite(ts) ? ts : null;
+    }
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (!trimmed) return null;
+      const asNumber = Number(trimmed);
+      if (Number.isFinite(asNumber)) {
+        return asNumber < 1e12 ? asNumber * 1000 : asNumber;
+      }
+      const parsed = Date.parse(trimmed);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    return null;
+  };
+
+  const buildStoryForm = () => {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("isStory", "true");
+    form.append("storyPrivacy", privacy);
+    form.append("storyExpiresHours", String(expiryHours));
+    if (caption.trim()) form.append("caption", caption.trim());
+    if (storyText.trim()) form.append("storyText", storyText.trim());
+    form.append("storyStyle", styleKey);
+    form.append(
+      "storyTextStyle",
+      JSON.stringify({
+        bold: textBold,
+        italic: textItalic,
+        underline: textUnderline,
+        background: textBg,
+        align: textAlign,
+        size: textSize,
+        color: textColor || activeStyle.color
+      })
+    );
+    return form;
+  };
+
   const publishStory = async () => {
     setMsg("");
     if (!file) {
@@ -117,30 +163,27 @@ export default function StoryCreate() {
 
     setLoading(true);
     try {
-      const form = new FormData();
-      form.append("file", file);
-      form.append("isStory", "true");
-      form.append("storyPrivacy", privacy);
-      form.append("storyExpiresHours", String(expiryHours));
-      if (caption.trim()) form.append("caption", caption.trim());
-      if (storyText.trim()) form.append("storyText", storyText.trim());
-      form.append("storyStyle", styleKey);
-      form.append(
-        "storyTextStyle",
-        JSON.stringify({
-          bold: textBold,
-          italic: textItalic,
-          underline: textUnderline,
-          background: textBg,
-          align: textAlign,
-          size: textSize,
-          color: textColor || activeStyle.color
-        })
-      );
-
-      const res = await api.post("/api/stories/upload", form, {
-        headers: { "Content-Type": "multipart/form-data" }
-      });
+      const endpoints = ["/api/stories/upload", "/api/posts/upload"];
+      let res = null;
+      let lastError = null;
+      for (const endpoint of endpoints) {
+        try {
+          const form = buildStoryForm();
+          res = await api.post(endpoint, form, { timeout: 20000 });
+          lastError = null;
+          break;
+        } catch (err) {
+          lastError = err;
+          const status = err?.response?.status;
+          if (status === 404 || status === 405 || err?.code === "ERR_NETWORK") {
+            continue;
+          }
+          throw err;
+        }
+      }
+      if (!res && lastError) {
+        throw lastError;
+      }
 
       const mediaUrl =
         res?.data?.mediaUrl ||
@@ -149,17 +192,27 @@ export default function StoryCreate() {
         res?.data?.storyUrl ||
         "";
       if (mediaUrl) {
+        const serverExpiresAt = toEpochMs(res?.data?.expiresAt);
+        const fallbackExpiresAt = Date.now() + expiryHours * 60 * 60 * 1000;
+        const createdAtValue =
+          typeof res?.data?.createdAt === "string" && res.data.createdAt.trim()
+            ? res.data.createdAt
+            : new Date().toISOString();
+        const resolvedIsVideo =
+          typeof res?.data?.isVideo === "boolean" ? res.data.isVideo : !!isVideo;
+        const resolvedMediaType =
+          res?.data?.mediaType || file?.type || (resolvedIsVideo ? "video" : "image");
         addStoryToLocalCache({
           id: res?.data?.id || res?.data?.postId || Date.now(),
           mediaUrl,
-          mediaType: file?.type || (isVideo ? "video" : "image"),
-          type: isVideo ? "VIDEO" : "IMAGE",
-          isVideo: !!isVideo,
+          mediaType: resolvedMediaType,
+          type: resolvedIsVideo ? "VIDEO" : "IMAGE",
+          isVideo: resolvedIsVideo,
           storyText: storyText.trim(),
           caption: caption.trim(),
           privacy,
-          createdAt: new Date().toISOString(),
-          expiresAt: new Date(Date.now() + expiryHours * 60 * 60 * 1000).toISOString()
+          createdAt: createdAtValue,
+          expiresAt: serverExpiresAt ?? fallbackExpiresAt
         });
       }
 
