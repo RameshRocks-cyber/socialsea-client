@@ -11,10 +11,10 @@ const WALK_INTERVAL_MS = 220;
 const WALK_STEP_PX = 5;
 const DRAG_THRESHOLD_PX = 6;
 const BOTTOM_TAP_THRESHOLD_PX = 18;
-const MAX_PANEL_ITEMS = 5;
-const PANEL_MAX_WIDTH = 260;
+const MAX_PANEL_ITEMS = 10;
+const PANEL_MAX_WIDTH = 230;
 const PANEL_HORIZONTAL_MARGIN = 12;
-const PANEL_EST_HEIGHT = 190;
+const PANEL_EST_HEIGHT = 160;
 const SHIMEJI_SCALE = 0.52;
 const BASE_WIDTH = 160;
 const BASE_HEIGHT = 208;
@@ -635,7 +635,7 @@ export default function NotificationBuddy({ enabled = true }) {
   }, [unreadItems]);
 
   const panelListItems = useMemo(() => {
-    const combined = [...unreadItems, ...items];
+    const combined = unreadItems;
     const seen = new Set();
     const output = [];
     for (const entry of combined) {
@@ -647,7 +647,7 @@ export default function NotificationBuddy({ enabled = true }) {
       output.push(entry);
     }
     return output;
-  }, [items, unreadItems]);
+  }, [unreadItems]);
 
   const showSpeech = (text, duration = 5200) => {
     setSpeechText(text);
@@ -962,7 +962,7 @@ export default function NotificationBuddy({ enabled = true }) {
     }
     togglePanel("list");
     if (!panelOpen || panelModeRef.current !== "list") {
-      const text = items.length > 0 ? "Here are your latest notifications." : "No notifications yet.";
+      const text = unreadCount > 0 ? "Here are your new notifications." : "No new notifications yet.";
       showSpeech(text, 2400);
     }
   };
@@ -1033,13 +1033,13 @@ export default function NotificationBuddy({ enabled = true }) {
       ? unreadCount > 0
         ? `${unreadCount} unread`
         : "No unread yet"
-      : items.length > 0
-        ? "Latest notifications"
-        : "No notifications yet";
+      : unreadCount > 0
+        ? "New notifications"
+        : "No new notifications";
 
   const panelHint =
     panelMode === "types"
-      ? "Tap buddy at the bottom to see latest notifications."
+      ? "Tap buddy at the bottom to see new notifications."
       : "Long press buddy to see notification types.";
 
   const panelLayout = useMemo(() => {
@@ -1282,7 +1282,7 @@ export default function NotificationBuddy({ enabled = true }) {
             ) : (
               <div className="ss-notify-buddy-panel-list is-notifications">
                 {panelListItems.length === 0 ? (
-                  <div className="ss-notify-buddy-panel-empty">No notifications yet.</div>
+                  <div className="ss-notify-buddy-panel-empty">No new notifications.</div>
                 ) : (
                   panelListItems.map((entry, idx) => {
                     const kind = deriveKind(entry);

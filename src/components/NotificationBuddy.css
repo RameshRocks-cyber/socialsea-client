@@ -798,8 +798,8 @@
   left: 50%;
   bottom: 155px;
   transform: translateX(-50%);
-  min-width: 220px;
-  max-width: min(260px, 85vw);
+  min-width: 200px;
+  max-width: min(230px, 82vw);
   background: rgba(10, 14, 20, 0.96);
   color: #f1f6ff;
   border: 1px solid rgba(110, 160, 210, 0.35);
@@ -824,6 +824,24 @@
 
 .ss-notify-buddy-panel-list.is-notifications {
   gap: 8px;
+  max-height: 170px;
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(110, 160, 210, 0.6) transparent;
+}
+
+.ss-notify-buddy-panel-list.is-notifications::-webkit-scrollbar {
+  width: 6px;
+}
+
+.ss-notify-buddy-panel-list.is-notifications::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.ss-notify-buddy-panel-list.is-notifications::-webkit-scrollbar-thumb {
+  background: rgba(110, 160, 210, 0.6);
+  border-radius: 999px;
 }
 
 .ss-notify-buddy-panel-row {

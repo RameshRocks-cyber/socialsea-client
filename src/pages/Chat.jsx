@@ -51,7 +51,6 @@ const CALL_REJOIN_RETRY_MS = 6000;
 const CALL_REJOIN_MAX_RETRIES = 2;
 const CALL_REFRESH_GRACE_MS = 20000;
 const CALL_REFRESH_GRACE_KEY = "socialsea_call_refresh_grace_v1";
-const CHAT_ONLINE_WINDOW_MS = 600000;
 const CHAT_PRESENCE_HOLD_MS = 90000;
 const CHAT_CONVO_POLL_MS = 8000;
 const CHAT_REMOTE_DISABLE_MS = 5 * 60 * 1000;
@@ -828,6 +827,7 @@ export default function Chat() {
   const livekitConnectingRef = useRef(false);
   const callTimeoutRef = useRef(null);
   const callStateRef = useRef(callState);
+  const incomingCallRef = useRef(null);
   const callStartedAtRef = useRef(null);
   const callConnectedLoggedRef = useRef(false);
   const rejoinRetryTimerRef = useRef(null);
@@ -1362,6 +1362,10 @@ export default function Chat() {
   useEffect(() => {
     callStateRef.current = callState;
   }, [callState]);
+
+  useEffect(() => {
+    incomingCallRef.current = incomingCall;
+  }, [incomingCall]);
 
   useEffect(() => {
     groupActiveRef.current = groupCallActive;
@@ -2827,6 +2831,36 @@ export default function Chat() {
     }
   };
 
+  const armOutgoingCallTimeout = () => {
+    clearCallTimer();
+    callTimeoutRef.current = setTimeout(() => {
+      const phase = callStateRef.current.phase;
+      if (phase === "dialing" || phase === "connecting") {
+        finishCall(true, "No answer");
+      }
+    }, CALL_RING_MS);
+  };
+
+  const armIncomingCallTimeout = () => {
+    clearCallTimer();
+    callTimeoutRef.current = setTimeout(() => {
+      const incoming = incomingCallRef.current;
+      if (!incoming?.fromUserId) return;
+      if (callStateRef.current.phase !== "idle") return;
+      stopRingtone();
+      setIncomingCall(null);
+      setRingtoneMuted(false);
+      pushCallHistory(incoming.fromUserId, {
+        direction: "incoming",
+        mode: incoming.mode || "audio",
+        status: "missed",
+        peerName: incoming.fromName
+      });
+      setCallError("Missed call");
+      window.setTimeout(() => setCallError(""), 2500);
+    }, CALL_RING_MS);
+  };
+
   const clearDisconnectGuardTimer = () => {
     if (disconnectGuardTimerRef.current) {
       clearTimeout(disconnectGuardTimerRef.current);
@@ -3744,6 +3778,7 @@ export default function Chat() {
       if (signalTime && Date.now() - signalTime > CALL_SIGNAL_MAX_AGE_MS) {
         return;
       }
+      clearCallTimer();
       stopRingtone();
       setIncomingCall(null);
       setRingtoneMuted(false);
@@ -3785,6 +3820,7 @@ export default function Chat() {
       setActiveContactId(fromId);
       navigate(`/chat/${fromId}`);
       startRingtone(true);
+      armIncomingCallTimeout();
       playNotificationBeep();
       maybeShowBrowserNotification(
         "Incoming call",
@@ -3865,6 +3901,7 @@ export default function Chat() {
       setActiveContactId(fromId);
       navigate(`/chat/${fromId}`);
       startRingtone(true);
+      armIncomingCallTimeout();
       playNotificationBeep();
       maybeShowBrowserNotification(
         "Incoming call",
@@ -4219,6 +4256,7 @@ export default function Chat() {
       });
       persistCallRejoin({ peerId: targetId, peerName: targetName, mode, provider: "livekit", roomId });
       startOutgoingRing();
+      armOutgoingCallTimeout();
       pushCallHistory(targetId, {
         direction: "outgoing",
         mode,
@@ -4226,7 +4264,6 @@ export default function Chat() {
         peerName: targetName
       });
       dialStarted = true;
-      clearCallTimer();
       const joined = await connectLivekit(roomId, mode);
       if (joined) {
         sendSignal(targetId, { type: "livekit-invite", mode, roomId });
@@ -4267,6 +4304,7 @@ export default function Chat() {
           provider: "webrtc"
         });
         startOutgoingRing();
+        armOutgoingCallTimeout();
         pushCallHistory(targetId, {
           direction: "outgoing",
           mode,
@@ -4295,6 +4333,7 @@ export default function Chat() {
       return;
     }
     try {
+      clearCallTimer();
       stopRingtone();
       pushCallHistory(call.fromUserId, {
         direction: "incoming",
@@ -4366,6 +4405,7 @@ export default function Chat() {
   };
 
   const declineIncomingCall = () => {
+    clearCallTimer();
     if (incomingCall?.fromUserId) {
       pushCallHistory(incomingCall.fromUserId, {
         direction: "incoming",
@@ -6080,6 +6120,12 @@ export default function Chat() {
     return `lastseen ${d.toLocaleDateString([], { month: "short", day: "numeric" })} at ${timeLabel}`;
   };
 
+  const hasExplicitOnlineFlag = (contact) =>
+    Boolean(contact && Object.prototype.hasOwnProperty.call(contact, "online"));
+
+  const getExplicitOnlineValue = (contact) =>
+    hasExplicitOnlineFlag(contact) ? Boolean(contact?.online) : null;
+
   const getContactActivityTs = (contact) => {
     if (!contact?.id) return 0;
     const msgList = messagesByContact[contact.id] || [];
@@ -6116,9 +6162,11 @@ export default function Chat() {
   const getContactPresence = (contact) => {
     if (!contact) return { online: false, text: "lastseen at --" };
     const latest = getContactActivityTs(contact);
-    const hasExplicitOnline = contact?.online === true;
-    const computedOnline = hasExplicitOnline || (latest > 0 && nowTick - latest <= CHAT_ONLINE_WINDOW_MS);
-    const isOnline = resolveStableOnline(contact?.id, computedOnline);
+    const explicitOnline = getExplicitOnlineValue(contact);
+    if (explicitOnline === false && contact?.id) {
+      presenceHoldRef.current.delete(String(contact.id));
+    }
+    const isOnline = explicitOnline === true ? resolveStableOnline(contact?.id, true) : false;
     if (isOnline) return { online: true, text: "online" };
     return {
       online: false,
@@ -6837,10 +6885,11 @@ export default function Chat() {
     Number.isFinite(peerLatestProfileTs) ? peerLatestProfileTs : 0,
     threadLatestTs
   );
-  const hasExplicitOnline = activeContact?.online === true;
-  const computedPeerOnline =
-    hasExplicitOnline || (peerLatestActivityTs > 0 && nowTick - peerLatestActivityTs <= CHAT_ONLINE_WINDOW_MS);
-  const isPeerOnline = resolveStableOnline(activeContactId, computedPeerOnline);
+  const explicitPeerOnline = getExplicitOnlineValue(activeContact);
+  if (explicitPeerOnline === false && activeContactId) {
+    presenceHoldRef.current.delete(String(activeContactId));
+  }
+  const isPeerOnline = explicitPeerOnline === true ? resolveStableOnline(activeContactId, true) : false;
   const headerPresenceText = isPeerOnline
     ? "online"
     : peerLatestActivityTs > 0
