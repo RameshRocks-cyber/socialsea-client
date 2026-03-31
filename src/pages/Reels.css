@@ -115,6 +115,51 @@
   color: #38d46a;
 }
 
+.reels-gesture-cursor {
+  --cursor-x: 0px;
+  --cursor-y: 0px;
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 22;
+  width: 28px;
+  height: 28px;
+  color: #ffffff;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(var(--cursor-x), var(--cursor-y)) translate(-50%, -50%);
+  transition: opacity 0.15s ease;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.5));
+}
+
+.reels-gesture-cursor.is-active {
+  opacity: 1;
+}
+
+.reels-gesture-cursor-arrow {
+  width: 24px;
+  height: 24px;
+  display: block;
+}
+
+.reels-gesture-cursor-ring {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid rgba(125, 198, 255, 0.85);
+  transform: translate(-50%, -50%) scale(0.6);
+  opacity: 0;
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+.reels-gesture-cursor.is-click .reels-gesture-cursor-ring {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+
 .reels-container {
   height: 100%;
   min-height: 0;
@@ -319,7 +364,7 @@
 }
 
 .reel-action-btn.is-active span {
-  color: #8ec5ff !important;
+  color: #ffffff !important;
 }
 
 .reel-bottom-meta {

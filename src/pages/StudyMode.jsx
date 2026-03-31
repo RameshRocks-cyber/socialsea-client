@@ -1014,9 +1014,9 @@ export default function StudyMode() {
     sendRealtimeEvent({
       type: "session.update",
       session: {
-        output_modalities: outputModalities || ["audio", "text"],
+        output_modalities: outputModalities || ["audio"],
         audio: {
-        output: { voice: "alloy" },
+          output: { voice: "alloy" },
           input: {
             transcription: { model: "gpt-4o-mini-transcribe" },
             turn_detection: {
@@ -1098,7 +1098,7 @@ export default function StudyMode() {
       });
 
       const dc = pc.createDataChannel("oai-events");
-      const initialModalities = enableMic ? ["audio", "text"] : ["text"];
+      const initialModalities = enableMic ? ["audio"] : ["text"];
       dc.onmessage = handleRealtimeMessage;
       dc.onopen = () => {
         sendSessionUpdate(initialModalities);
@@ -1146,7 +1146,7 @@ export default function StudyMode() {
     await ensureRealtimeConnected(next);
     setMicEnabled(next);
     if (realtimeRef.current.dc?.readyState === "open") {
-      sendSessionUpdate(next ? ["audio", "text"] : ["text"]);
+      sendSessionUpdate(next ? ["audio"] : ["text"]);
     }
   };
 
@@ -1154,7 +1154,7 @@ export default function StudyMode() {
     const message = chatInput.trim();
     if (!message) return;
     await ensureRealtimeConnected(false);
-    sendTextMessage(message, voiceEnabled ? ["audio", "text"] : ["text"]);
+    sendTextMessage(message, voiceEnabled ? ["audio"] : ["text"]);
     setChatInput("");
   };
 

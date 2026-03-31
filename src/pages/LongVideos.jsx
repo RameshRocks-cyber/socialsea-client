@@ -1471,7 +1471,7 @@ export default function LongVideos() {
       </header>
 
       {liveBroadcast && (
-        <div className="watch-live-banner" role="button" tabIndex={0} onClick={() => navigate("/live/start")}>
+        <div className="watch-live-banner" role="button" tabIndex={0} onClick={() => navigate("/live/watch")}>
           <div className="watch-live-left">
             <span className="watch-live-dot" />
             <div>

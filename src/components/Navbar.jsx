@@ -22,7 +22,7 @@ import "./Navbar.css";
 const ITEMS = [
   { to: "/feed", icon: FiHome, label: "Feed", match: (p) => p === "/feed" },
   { to: "/reels", icon: FiVideo, label: "Reels", match: (p) => p === "/reels" },
-  { to: "/chat", icon: FiMessageSquare, label: "Chat", match: (p) => p === "/chat" },
+  { to: "/chat", icon: FiMessageSquare, label: "Chat", match: (p) => p === "/chat" || p.startsWith("/chat/") },
   { to: "/notifications", icon: FiBell, label: "Alerts", match: (p) => p === "/notifications" },
   { to: "/profile/me", icon: FiUser, label: "Profile", match: (p) => p.startsWith("/profile") },
 ];
@@ -573,7 +573,8 @@ export default function Navbar() {
   const myName = String(sessionStorage.getItem("name") || localStorage.getItem("name") || "").trim();
   const myUsername = String(sessionStorage.getItem("username") || localStorage.getItem("username") || "").trim().toLowerCase();
   const onChatRoute = location.pathname === "/chat" || location.pathname.startsWith("/chat/");
-  const onChatConversationRoute = location.pathname.startsWith("/chat/");
+  const onChatConversationRoute =
+    location.pathname.startsWith("/chat/") && !location.pathname.startsWith("/chat/requests");
   const isOnSosRoute = location.pathname.startsWith("/sos");
   const profileTarget = "/profile/me";
   const [incomingCall, setIncomingCall] = useState(null);
@@ -948,14 +949,6 @@ export default function Navbar() {
   const acceptIncomingCall = () => {
     if (!incomingCall?.fromUserId) return;
     setIncomingCall(null);
-    try {
-      sessionStorage.setItem(
-        CALL_ACCEPT_TARGET_KEY,
-        JSON.stringify({ fromUserId: String(incomingCall.fromUserId), at: Date.now() })
-      );
-    } catch {
-      // ignore storage issues
-    }
     navigate(`/chat/${incomingCall.fromUserId}`);
   };
 

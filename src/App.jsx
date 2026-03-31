@@ -2,6 +2,7 @@
 import { BrowserRouter, Routes, Route, useLocation, Navigate, useNavigate } from "react-router-dom";
 import Navbar from "./components/Navbar";
 import NotificationBuddyBoundary from "./components/NotificationBuddyBoundary";
+import GestureCursor from "./components/GestureCursor";
 import Feed from "./components/Feed";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
@@ -42,6 +43,7 @@ import StorageVault from "./pages/StorageVault";
 import StorageVaultUnlock from "./pages/StorageVaultUnlock";
 import LiveStart from "./pages/LiveStart";
 import StoryCreate from "./pages/StoryCreate";
+import StoriesPage from "./pages/StoriesPage";
 import Jobs from "./pages/Jobs";
 import CompanyProfile from "./pages/CompanyProfile";
 import CompanyHub from "./pages/CompanyHub";
@@ -82,7 +84,7 @@ const isPrivateIpHost = (host) => {
 const SWIPE_TABS = [
   { path: "/feed", match: (pathname) => pathname === "/feed" || pathname === "/home" || pathname === "/" },
   { path: "/reels", match: (pathname) => pathname === "/reels" },
-  { path: "/chat", match: (pathname) => pathname === "/chat" },
+  { path: "/chat", match: (pathname) => pathname === "/chat" || pathname === "/chat/requests" },
   { path: "/notifications", match: (pathname) => pathname === "/notifications" },
   { path: "/profile/me", match: (pathname) => pathname.startsWith("/profile") },
 ];
@@ -133,7 +135,8 @@ function AppRoutes() {
     location.pathname === "/forgot-password";
   const isReelsRoute = location.pathname === "/reels";
   const isChatRoute = location.pathname === "/chat" || location.pathname.startsWith("/chat/");
-  const isChatConversationRoute = location.pathname.startsWith("/chat/");
+  const isChatConversationRoute =
+    location.pathname.startsWith("/chat/") && !location.pathname.startsWith("/chat/requests");
   const shouldMountUserNavbar = authed && !location.pathname.startsWith("/admin") && !isAuthScreen;
   const showUserNavbar = shouldMountUserNavbar;
   const appMainRef = useRef(null);
@@ -363,6 +366,7 @@ function AppRoutes() {
     <>
       {shouldMountUserNavbar && <Navbar />}
       {shouldMountUserNavbar && <NotificationBuddyBoundary enabled={showUserNavbar} />}
+      <GestureCursor />
       <main
         ref={appMainRef}
         className={`app-main ${showUserNavbar ? "with-user-nav" : ""} ${isChatRoute ? "chat-main-route" : ""} ${
@@ -387,6 +391,16 @@ function AppRoutes() {
               <Route path="/notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
               <Route
                 path="/chat"
+                element={
+                  <ProtectedRoute>
+                    <PageErrorBoundary title="Chat crashed">
+                      <Suspense fallback={<div style={{ padding: 20, color: "#fff" }}>Loading chat...</div>}><Chat /></Suspense>
+                    </PageErrorBoundary>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/chat/requests"
                 element={
                   <ProtectedRoute>
                     <PageErrorBoundary title="Chat crashed">
@@ -424,6 +438,8 @@ function AppRoutes() {
               <Route path="/live-recordings" element={<ProtectedRoute><LiveRecordings /></ProtectedRoute>} />
               <Route path="/live" element={<Navigate to="/live/start" replace />} />
               <Route path="/live/start" element={<ProtectedRoute><LiveStart /></ProtectedRoute>} />
+              <Route path="/live/watch" element={<ProtectedRoute><LiveStart mode="watch" /></ProtectedRoute>} />
+              <Route path="/stories" element={<ProtectedRoute><StoriesPage /></ProtectedRoute>} />
               <Route path="/story/create" element={<ProtectedRoute><StoryCreate /></ProtectedRoute>} />
               <Route path="/highlights/create" element={<ProtectedRoute><HighlightsCreate /></ProtectedRoute>} />
               <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />

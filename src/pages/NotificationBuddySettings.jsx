@@ -37,6 +37,7 @@ const MOVE_SPEED_OPTIONS = [
 const DEFAULT_PREFS = {
   notificationBuddy: true,
   notificationBuddyCharacter: "Cat",
+  notificationBuddyHideWhenEmpty: false,
   notificationBuddySpeed: "medium",
   notificationBuddyVoiceEnabled: true,
   notificationBuddyVoiceName: "",
@@ -166,6 +167,27 @@ export default function NotificationBuddySettings() {
               Off
             </button>
           </div>
+        </section>
+
+        <section className="settings-section">
+          <h2>Hide When Empty</h2>
+          <div className="settings-select-grid buddy-character-grid">
+            <button
+              type="button"
+              className={prefs.notificationBuddyHideWhenEmpty ? "active" : ""}
+              onClick={() => setPrefs((prev) => ({ ...prev, notificationBuddyHideWhenEmpty: true }))}
+            >
+              On
+            </button>
+            <button
+              type="button"
+              className={!prefs.notificationBuddyHideWhenEmpty ? "active" : ""}
+              onClick={() => setPrefs((prev) => ({ ...prev, notificationBuddyHideWhenEmpty: false }))}
+            >
+              Off
+            </button>
+          </div>
+          <p className="settings-note">Hide the buddy when there are no unread notifications.</p>
         </section>
 
         <section className="settings-panel">

@@ -4,6 +4,7 @@ import { FiBell } from "react-icons/fi";
 import api from "../api/axios";
 import "./NotificationBuddy.css";
 
+
 const SETTINGS_STORAGE_KEY = "socialsea_settings_v1";
 const POLL_MS = 12000;
 const LONG_PRESS_MS = 520;
@@ -11,10 +12,20 @@ const WALK_INTERVAL_MS = 220;
 const WALK_STEP_PX = 5;
 const DRAG_THRESHOLD_PX = 6;
 const BOTTOM_TAP_THRESHOLD_PX = 18;
+const HITBOX_INSET_X = 14;
+const HITBOX_INSET_TOP = 18;
+const HITBOX_INSET_BOTTOM = 6;
 const MAX_PANEL_ITEMS = 10;
 const PANEL_MAX_WIDTH = 230;
 const PANEL_HORIZONTAL_MARGIN = 12;
 const PANEL_EST_HEIGHT = 160;
+const PANEL_GAP_PX = -18;
+const DISMISS_ZONE_MIN_WIDTH = 120;
+const DISMISS_ZONE_MAX_WIDTH = 180;
+const DISMISS_ZONE_MIN_HEIGHT = 88;
+const DISMISS_ZONE_MAX_HEIGHT = 140;
+const DISMISS_ZONE_BOTTOM_PAD = 64;
+const DISMISS_ZONE_MOBILE_PAD = 78;
 const SHIMEJI_SCALE = 0.52;
 const BASE_WIDTH = 160;
 const BASE_HEIGHT = 208;
@@ -297,6 +308,19 @@ const readBuddyEnabled = () => {
   return true;
 };
 
+const readHideWhenEmpty = () => {
+  try {
+    const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    if (typeof parsed?.notificationBuddyHideWhenEmpty === "boolean") {
+      return parsed.notificationBuddyHideWhenEmpty;
+    }
+  } catch {
+    // ignore storage issues
+  }
+  return false;
+};
+
 const readVoicePrefs = () => {
   try {
     const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
@@ -487,10 +511,13 @@ export default function NotificationBuddy({ enabled = true }) {
   const location = useLocation();
   const [items, setItems] = useState([]);
   const [panelOpen, setPanelOpen] = useState(false);
-  const [panelMode, setPanelMode] = useState("types");
+  const [panelMode, setPanelMode] = useState("list");
   const [alerting, setAlerting] = useState(false);
   const [speechText, setSpeechText] = useState("");
   const [speechVisible, setSpeechVisible] = useState(false);
+  const [noticeDismissed, setNoticeDismissed] = useState(false);
+  const [softHidden, setSoftHidden] = useState(false);
+  const [dismissHover, setDismissHover] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [character, setCharacter] = useState(readStoredCharacter);
   const [spriteErrors, setSpriteErrors] = useState({});
@@ -510,11 +537,13 @@ export default function NotificationBuddy({ enabled = true }) {
     originY: 0,
     lastX: 0,
     lastY: 0,
-    didDrag: false
+    didDrag: false,
+    allowTap: false
   });
   const [dragging, setDragging] = useState(false);
   const [direction, setDirection] = useState(1);
   const [settingsEnabled, setSettingsEnabled] = useState(readBuddyEnabled);
+  const [hideWhenEmpty, setHideWhenEmpty] = useState(readHideWhenEmpty);
   const walkAreaRef = useRef(null);
   const rootRef = useRef(null);
   const panelModeRef = useRef(panelMode);
@@ -524,6 +553,7 @@ export default function NotificationBuddy({ enabled = true }) {
   const speechTimerRef = useRef(null);
   const longPressRef = useRef({ timer: null, triggered: false });
   const lastUnreadRef = useRef(0);
+  const hiddenUntilUnreadRef = useRef(null);
   const didInitRef = useRef(false);
   const canSpeakRef = useRef(false);
   const displayName = useMemo(() => readDisplayName(), []);
@@ -652,6 +682,7 @@ export default function NotificationBuddy({ enabled = true }) {
   const showSpeech = (text, duration = 5200) => {
     setSpeechText(text);
     setSpeechVisible(true);
+    setNoticeDismissed(false);
     if (speechTimerRef.current) window.clearTimeout(speechTimerRef.current);
     speechTimerRef.current = window.setTimeout(() => {
       setSpeechVisible(false);
@@ -698,14 +729,34 @@ export default function NotificationBuddy({ enabled = true }) {
   const openPanel = (mode) => {
     setPanelMode(mode);
     setPanelOpen(true);
+    setSpeechVisible(false);
+    setSpeechText("");
+    setNoticeDismissed(true);
   };
 
   const togglePanel = (mode) => {
     setPanelMode(mode);
+    if (!panelOpen || panelModeRef.current !== mode) {
+      setSpeechVisible(false);
+      setSpeechText("");
+      setNoticeDismissed(true);
+    }
     setPanelOpen((prev) => {
       if (!prev) return true;
       return panelModeRef.current === mode ? false : true;
     });
+  };
+
+  const isPointerInHitbox = (event) => {
+    const target = event.currentTarget;
+    if (!target?.getBoundingClientRect) return true;
+    const rect = target.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    if (x < 0 || y < 0 || x > rect.width || y > rect.height) return false;
+    if (x < HITBOX_INSET_X || x > rect.width - HITBOX_INSET_X) return false;
+    if (y < HITBOX_INSET_TOP || y > rect.height - HITBOX_INSET_BOTTOM) return false;
+    return true;
   };
 
   const dropToBottom = () => {
@@ -734,6 +785,7 @@ export default function NotificationBuddy({ enabled = true }) {
       setCharacter(readStoredCharacter());
       setVoicePrefs(readVoicePrefs());
       setBuddySpeed(readBuddySpeed());
+      setHideWhenEmpty(readHideWhenEmpty());
     };
     window.addEventListener("storage", refresh);
     window.addEventListener("ss-settings-update", refresh);
@@ -847,6 +899,17 @@ export default function NotificationBuddy({ enabled = true }) {
   }, [loaded, unreadCount, displayName, isEnabled]);
 
   useEffect(() => {
+    if (!softHidden) return;
+    const gate = hiddenUntilUnreadRef.current;
+    if (gate == null) return;
+    if (unreadCount > gate) {
+      hiddenUntilUnreadRef.current = null;
+      setSoftHidden(false);
+      setNoticeDismissed(false);
+    }
+  }, [softHidden, unreadCount]);
+
+  useEffect(() => {
     if (!panelOpen) return undefined;
     const handleOutside = (event) => {
       if (!rootRef.current) return;
@@ -867,6 +930,7 @@ export default function NotificationBuddy({ enabled = true }) {
     setPanelOpen(false);
     setAlerting(false);
     setSpeechVisible(false);
+    setNoticeDismissed(false);
   }, [isEnabled]);
 
   useEffect(() => {
@@ -878,16 +942,48 @@ export default function NotificationBuddy({ enabled = true }) {
   }, []);
 
   if (!isEnabled) return null;
+  if (softHidden) return null;
+  if (hideWhenEmpty && unreadCount === 0) return null;
+
+  const getDismissZone = () => {
+    const bounds = getBounds(walkAreaRef.current);
+    const width = Math.min(DISMISS_ZONE_MAX_WIDTH, Math.max(DISMISS_ZONE_MIN_WIDTH, bounds.width * 0.3));
+    const height = Math.min(DISMISS_ZONE_MAX_HEIGHT, Math.max(DISMISS_ZONE_MIN_HEIGHT, bounds.height * 0.18));
+    const bottomPad = bounds.width <= 768 ? DISMISS_ZONE_MOBILE_PAD : DISMISS_ZONE_BOTTOM_PAD;
+    const left = (bounds.width - width) / 2;
+    const top = bounds.height - bottomPad - height;
+    return {
+      left,
+      right: left + width,
+      top,
+      bottom: top + height,
+      width,
+      height,
+      bottomPad
+    };
+  };
+
+  const isPointInDismissZone = (x, y) => {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+    const zone = getDismissZone();
+    return x >= zone.left && x <= zone.right && y >= zone.top && y <= zone.bottom;
+  };
+
+  const hideBuddyUntilNext = () => {
+    hiddenUntilUnreadRef.current = unreadCount;
+    setSoftHidden(true);
+    setDismissHover(false);
+    setPanelOpen(false);
+    setAlerting(false);
+    setSpeechVisible(false);
+    setSpeechText("");
+    setNoticeDismissed(false);
+  };
 
   const startLongPress = () => {
     longPressRef.current.triggered = false;
     if (longPressRef.current.timer) window.clearTimeout(longPressRef.current.timer);
-    longPressRef.current.timer = window.setTimeout(() => {
-      longPressRef.current.triggered = true;
-      openPanel("types");
-      const text = unreadCount > 0 ? "Here are your notification types." : "No unread notifications yet.";
-      showSpeech(text, 3200);
-    }, LONG_PRESS_MS);
+    longPressRef.current.timer = null;
   };
 
   const cancelLongPress = () => {
@@ -896,6 +992,12 @@ export default function NotificationBuddy({ enabled = true }) {
 
   const handlePointerDown = (event) => {
     if (event.button && event.button !== 0) return;
+    if (!isPointerInHitbox(event)) {
+      dragRef.current.active = false;
+      dragRef.current.allowTap = false;
+      return;
+    }
+    setDismissHover(false);
     dragRef.current = {
       active: true,
       pointerId: event.pointerId,
@@ -905,7 +1007,8 @@ export default function NotificationBuddy({ enabled = true }) {
       originY: positionRef.current.y,
       lastX: positionRef.current.x,
       lastY: positionRef.current.y,
-      didDrag: false
+      didDrag: false,
+      allowTap: true
     };
     setDragging(false);
     startLongPress();
@@ -927,6 +1030,7 @@ export default function NotificationBuddy({ enabled = true }) {
       setDragging(true);
     }
     if (!dragState.didDrag) return;
+    setDismissHover(isPointInDismissZone(event.clientX, event.clientY));
     const bounds = getBounds(walkAreaRef.current);
     const projected = projectToBorder(dragState.originX + dx, dragState.originY + dy, bounds);
     dragState.lastX = projected.x;
@@ -937,19 +1041,28 @@ export default function NotificationBuddy({ enabled = true }) {
   const handlePointerUp = (event) => {
     cancelLongPress();
     const dragState = dragRef.current;
-    if (dragState.active && dragState.pointerId === event.pointerId) {
-      dragState.active = false;
-      if (dragState.didDrag) {
-        setDragging(false);
-        const bounds = getBounds(walkAreaRef.current);
-        const projected = pointToPerimeterProgress(dragState.lastX, dragState.lastY, bounds);
-        walkProgressRef.current = projected.progress;
-        walkSignRef.current = -1;
-        setPosition(projected.point);
-        hasStoredPositionRef.current = true;
-        writeStoredPosition(projected.point);
+    if (!dragState.active || dragState.pointerId !== event.pointerId || !dragState.allowTap) {
+      dragRef.current.active = false;
+      dragRef.current.allowTap = false;
+      return;
+    }
+    dragState.active = false;
+    dragState.allowTap = false;
+    if (dragState.didDrag) {
+      setDragging(false);
+      if (isPointInDismissZone(event.clientX, event.clientY)) {
+        hideBuddyUntilNext();
         return;
       }
+      setDismissHover(false);
+      const bounds = getBounds(walkAreaRef.current);
+      const projected = pointToPerimeterProgress(dragState.lastX, dragState.lastY, bounds);
+      walkProgressRef.current = projected.progress;
+      walkSignRef.current = -1;
+      setPosition(projected.point);
+      hasStoredPositionRef.current = true;
+      writeStoredPosition(projected.point);
+      return;
     }
     setDragging(false);
     if (longPressRef.current.triggered) return;
@@ -961,26 +1074,18 @@ export default function NotificationBuddy({ enabled = true }) {
       return;
     }
     togglePanel("list");
-    if (!panelOpen || panelModeRef.current !== "list") {
-      const text = unreadCount > 0 ? "Here are your new notifications." : "No new notifications yet.";
-      showSpeech(text, 2400);
-    }
   };
 
   const handlePointerCancel = () => {
     cancelLongPress();
     dragRef.current.active = false;
+    dragRef.current.allowTap = false;
     setDragging(false);
+    setDismissHover(false);
   };
 
   const badgeText = unreadCount > 99 ? "99+" : String(unreadCount || "");
   const isHoldingNotice = unreadCount > 0 || speechVisible || alerting;
-  const noticeText = speechVisible
-    ? speechText
-    : unreadCount > 0
-      ? buildSpeechText(displayName, unreadCount)
-      : "";
-  const showNotice = Boolean(noticeText) && isHoldingNotice;
 
   const characterStyle = useMemo(() => getCharacterStyle(character), [character]);
   const characterVars = {
@@ -1055,8 +1160,8 @@ export default function NotificationBuddy({ enabled = true }) {
     const buddyBottom = position.y + scaledHeight;
     const spaceBelow = bounds.height - buddyBottom - PANEL_HORIZONTAL_MARGIN;
     const placeAbove = spaceBelow < panelHeight + 8;
-    const belowOffset = Math.round(scaledHeight + 14);
-    const aboveOffset = Math.round(scaledHeight + 14);
+    const belowOffset = Math.round(scaledHeight + PANEL_GAP_PX);
+    const aboveOffset = Math.round(scaledHeight + PANEL_GAP_PX);
     return {
       width: panelWidth,
       offsetX,
@@ -1068,6 +1173,11 @@ export default function NotificationBuddy({ enabled = true }) {
 
   return (
     <div ref={walkAreaRef} className="ss-shimeji-area">
+      {dragging && (
+        <div className={`ss-shimeji-dismiss ${dismissHover ? "is-active" : ""}`}>
+          <span aria-hidden="true">×</span>
+        </div>
+      )}
       <div
         ref={rootRef}
         className={`ss-shimeji-walker ${alerting ? "is-alerting" : ""}`}
@@ -1084,17 +1194,6 @@ export default function NotificationBuddy({ enabled = true }) {
           onPointerCancel={handlePointerCancel}
           onContextMenu={(event) => event.preventDefault()}
         >
-          {showNotice && (
-            <div className="ss-shimeji-notice" role="status" aria-live="polite">
-              <div className="ss-shimeji-notice-head">
-                <FiBell />
-                <span>Notification</span>
-              </div>
-              <p className="ss-shimeji-notice-title">{characterStyle.label}</p>
-              <p className="ss-shimeji-notice-text">{noticeText}</p>
-            </div>
-          )}
-
           <div className="ss-shimeji-actor" style={actorStyle}>
             <div className={`ss-shimeji-figure ${canUseSprite || canUseSheet ? "has-sprite" : ""}`} style={characterVars}>
               {canUseSheet ? (
@@ -1243,9 +1342,6 @@ export default function NotificationBuddy({ enabled = true }) {
                 </>
               )}
 
-              {unreadCount > 0 && (
-                <div className="ss-shimeji-badge" style={counterFlipStyle}>{badgeText}</div>
-              )}
             </div>
           </div>
         </button>
@@ -1262,7 +1358,6 @@ export default function NotificationBuddy({ enabled = true }) {
               top: panelLayout.placeAbove ? "auto" : `${panelLayout.belowOffset}px`
             }}
           >
-            <div className="ss-notify-buddy-panel-title">{panelTitle}</div>
             {panelMode === "types" ? (
               <div className="ss-notify-buddy-panel-list">
                 {panelEntries.filter((entry) => entry.count > 0).length === 0 ? (
@@ -1302,7 +1397,6 @@ export default function NotificationBuddy({ enabled = true }) {
                       <div key={key} className={`ss-notify-buddy-panel-item tone-${kind}`}>
                         <span className="ss-notify-buddy-panel-dot" aria-hidden="true" />
                         <div className="ss-notify-buddy-panel-item-main">
-                          <span className="ss-notify-buddy-panel-item-label">{label}</span>
                           <span className="ss-notify-buddy-panel-item-text">{text}</span>
                         </div>
                       </div>
@@ -1311,8 +1405,6 @@ export default function NotificationBuddy({ enabled = true }) {
                 )}
               </div>
             )}
-            <div className="ss-notify-buddy-panel-hint">{panelHint}</div>
-            <div className="ss-notify-buddy-panel-hint">Change character in Settings.</div>
           </div>
         )}
       </div>

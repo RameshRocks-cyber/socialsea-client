@@ -44,6 +44,10 @@ function parseUploadError(err) {
 
 export default function StoryCreate() {
   const navigate = useNavigate();
+  const myUserId = sessionStorage.getItem("userId") || localStorage.getItem("userId");
+  const myEmail = sessionStorage.getItem("email") || localStorage.getItem("email");
+  const myUsername = sessionStorage.getItem("username") || localStorage.getItem("username");
+  const myName = sessionStorage.getItem("name") || localStorage.getItem("name");
   const [file, setFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState("");
   const [storyText, setStoryText] = useState("");
@@ -163,27 +167,8 @@ export default function StoryCreate() {
 
     setLoading(true);
     try {
-      const endpoints = ["/api/stories/upload", "/api/posts/upload"];
-      let res = null;
-      let lastError = null;
-      for (const endpoint of endpoints) {
-        try {
-          const form = buildStoryForm();
-          res = await api.post(endpoint, form, { timeout: 20000 });
-          lastError = null;
-          break;
-        } catch (err) {
-          lastError = err;
-          const status = err?.response?.status;
-          if (status === 404 || status === 405 || err?.code === "ERR_NETWORK") {
-            continue;
-          }
-          throw err;
-        }
-      }
-      if (!res && lastError) {
-        throw lastError;
-      }
+      const form = buildStoryForm();
+      const res = await api.post("/api/stories/upload", form, { timeout: 20000 });
 
       const mediaUrl =
         res?.data?.mediaUrl ||
@@ -212,7 +197,11 @@ export default function StoryCreate() {
           caption: caption.trim(),
           privacy,
           createdAt: createdAtValue,
-          expiresAt: serverExpiresAt ?? fallbackExpiresAt
+          expiresAt: serverExpiresAt ?? fallbackExpiresAt,
+          userId: myUserId || undefined,
+          email: myEmail || undefined,
+          username: myUsername || myName || undefined,
+          createdLocally: true
         });
       }
 

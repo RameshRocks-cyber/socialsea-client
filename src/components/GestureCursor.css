@@ -1,0 +1,51 @@
+.gesture-cursor {
+  --cursor-x: 0px;
+  --cursor-y: 0px;
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 40000;
+  width: 28px;
+  height: 28px;
+  color: #ffffff;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(var(--cursor-x), var(--cursor-y)) translate(-50%, -50%);
+  transition: opacity 0.15s ease;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.5));
+}
+
+.gesture-cursor.is-active {
+  opacity: 1;
+}
+
+.gesture-cursor-arrow {
+  width: 24px;
+  height: 24px;
+  display: block;
+}
+
+.gesture-cursor-arrow path {
+  stroke: #111111;
+  stroke-width: 1.5;
+  paint-order: stroke fill;
+  vector-effect: non-scaling-stroke;
+}
+
+.gesture-cursor-ring {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid rgba(125, 198, 255, 0.85);
+  transform: translate(-50%, -50%) scale(0.6);
+  opacity: 0;
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+.gesture-cursor.is-click .gesture-cursor-ring {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}

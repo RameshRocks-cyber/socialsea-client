@@ -47,17 +47,47 @@
   box-shadow: 0 16px 34px rgba(0, 0, 0, 0.45);
 }
 
+.live-start-preview.ratio-horizontal {
+  aspect-ratio: 16 / 9;
+  width: min(520px, 100%);
+}
+
+.live-start-preview.ratio-square {
+  aspect-ratio: 1 / 1;
+  width: min(360px, 100%);
+}
+
 .live-start-video {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
   background: #05070c;
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  transition: opacity 0.2s ease;
 }
 
 .live-start-video.is-mirrored {
   transform: scaleX(-1);
   transform-origin: center;
+}
+
+.live-start-video.is-hidden {
+  opacity: 0;
+}
+
+.live-start-video.is-visible {
+  opacity: 1;
+}
+
+.live-start-video-fallback {
+  z-index: 2;
+}
+
+.live-start-audio {
+  display: none;
 }
 
 .live-start-live-dot {
@@ -123,6 +153,59 @@
 .live-start-controls button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.live-viewer-actions {
+  margin-top: 10px;
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.live-viewer-settings {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+  text-align: left;
+}
+
+.live-viewer-settings label {
+  display: grid;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: #aab6c9;
+}
+
+.live-viewer-settings select,
+.live-viewer-settings input[type="checkbox"] {
+  border-radius: 10px;
+  border: 1px solid rgba(120, 140, 170, 0.35);
+  background: rgba(10, 12, 18, 0.9);
+  color: #e9eef7;
+  padding: 6px 8px;
+}
+
+.live-viewer-settings input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+}
+
+.live-viewer-action-btn {
+  border: 1px solid rgba(120, 140, 170, 0.4);
+  background: rgba(9, 12, 18, 0.9);
+  color: #e9eef7;
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.live-viewer-action-btn:hover {
+  border-color: rgba(255, 140, 90, 0.65);
+  box-shadow: 0 0 0 2px rgba(255, 140, 90, 0.15);
 }
 
 .live-start-toolbar {
@@ -263,6 +346,34 @@
   gap: 10px;
   justify-content: center;
   flex-wrap: wrap;
+}
+
+.live-debug-toggle {
+  margin-top: 12px;
+  border: 1px solid rgba(120, 140, 170, 0.4);
+  background: rgba(9, 12, 18, 0.9);
+  color: #d4dbe7;
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.live-debug-toggle:hover {
+  border-color: rgba(255, 140, 90, 0.65);
+  box-shadow: 0 0 0 2px rgba(255, 140, 90, 0.15);
+}
+
+.live-debug {
+  margin-top: 12px;
+  padding: 10px;
+  border-radius: 10px;
+  background: rgba(6, 8, 12, 0.8);
+  border: 1px solid rgba(90, 104, 128, 0.35);
+  color: #9fb0c7;
+  font-size: 0.72rem;
+  text-align: left;
+  line-height: 1.35;
 }
 
 .live-start-btn {

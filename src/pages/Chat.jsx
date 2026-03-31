@@ -11,6 +11,9 @@ import {
   FiPaperclip,
   FiPhone,
   FiPhoneOff,
+  FiEye,
+  FiHeart,
+  FiMessageCircle,
   FiSend,
   FiSmile,
   FiUsers,
@@ -46,6 +49,10 @@ const STORY_STORAGE_KEY = "socialsea_stories_v1";
 const CALL_POLL_MS = 1200;
 const CALL_SIGNAL_MAX_AGE_MS = 45000;
 const CALL_REJOIN_KEY = "socialsea_call_rejoin_v1";
+const PRESENCE_PING_KEY = "socialsea_presence_ping_v1";
+const PRESENCE_CHANNEL = "socialsea-presence";
+const PRESENCE_TTL_MS = 60000;
+const PRESENCE_PING_MS = 20000;
 const CALL_REJOIN_MAX_AGE_MS = 10 * 60 * 1000;
 const CALL_REJOIN_RETRY_MS = 6000;
 const CALL_REJOIN_MAX_RETRIES = 2;
@@ -57,6 +64,69 @@ const CHAT_REMOTE_DISABLE_MS = 5 * 60 * 1000;
 const STORY_FEED_DISABLE_MS = 5 * 60 * 1000;
 const STORY_IMAGE_DURATION_MS = 6500;
 const STORY_MEDIA_LOAD_TIMEOUT_MS = 2500;
+const formatStoryCount = (value) => {
+  const num = Number(value || 0);
+  if (!Number.isFinite(num)) return "0";
+  return new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(num);
+};
+const normalizeStoryOwnerValue = (value) => String(value ?? "").trim();
+const isStoryEmailLike = (value) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(value || "").trim());
+const normalizeStoryHandle = (value) => {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  if (isStoryEmailLike(raw)) return "";
+  return raw;
+};
+const normalizeStoryUsername = (value) => {
+  const raw = normalizeStoryHandle(value);
+  if (!raw) return "";
+  if (/\s/.test(raw)) return "";
+  return raw;
+};
+const usernameFromEmail = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const at = raw.indexOf("@");
+  if (at <= 0) return "";
+  const local = raw.slice(0, at).trim();
+  if (!local || /\s/.test(local)) return "";
+  return local;
+};
+const getStoryIdValue = (story) => {
+  const id = story?.id ?? story?.storyId ?? story?.postId ?? story?.mediaId;
+  return id != null && id !== "" ? String(id) : "";
+};
+const getStoryUserIdValue = (story) =>
+  normalizeStoryOwnerValue(story?.userId ?? story?.user?.id ?? story?.ownerId ?? story?.authorId ?? story?.profileId);
+const getStoryUserNameRawValue = (story) =>
+  normalizeStoryOwnerValue(
+    story?.username ||
+    story?.userName ||
+    story?.user?.username ||
+    story?.handle ||
+    story?.user?.handle ||
+    story?.ownerName ||
+    story?.name ||
+    story?.user?.name ||
+    story?.user?.displayName ||
+    story?.displayName ||
+    story?.profileName
+  );
+const getStoryUserNameValue = (story) =>
+  normalizeStoryUsername(getStoryUserNameRawValue(story));
+const getStoryUserEmailValue = (story) =>
+  normalizeStoryOwnerValue(story?.email || story?.user?.email || story?.ownerEmail || story?.userEmail);
+const getStoryGroupKey = (story, index = 0) => {
+  const userId = getStoryUserIdValue(story);
+  if (userId) return `uid:${userId}`;
+  const username = getStoryUserNameValue(story);
+  if (username) return `user:${username.toLowerCase()}`;
+  const email = getStoryUserEmailValue(story);
+  if (email) return `email:${email.toLowerCase()}`;
+  const storyId = getStoryIdValue(story);
+  if (storyId) return `story:${storyId}`;
+  return `idx:${index}`;
+};
 const LIVEKIT_URL = import.meta.env.VITE_LIVEKIT_URL || "";
 const TURN_URLS = String(import.meta.env.VITE_TURN_URLS || "")
   .split(",")
@@ -366,6 +436,84 @@ const trimReplyPreview = (value, maxLen = 72) => {
   return `${text.slice(0, Math.max(1, maxLen - 1)).trimEnd()}...`;
 };
 
+const extractReelShare = (value) => {
+  if (typeof window === "undefined") return null;
+  const text = String(value || "");
+  if (!text) return null;
+  const match = text.match(/(https?:\/\/[^\s]+\/reels[^\s]*|\/reels\?[^\s]+)/i);
+  if (!match) return null;
+  const rawLink = match[1].replace(/[)\],.!?]+$/, "");
+  let url = null;
+  try {
+    url = new URL(rawLink, window.location.origin);
+  } catch {
+    return null;
+  }
+  const id =
+    url.searchParams.get("post") ||
+    url.searchParams.get("postId") ||
+    url.searchParams.get("id") ||
+    "";
+  return {
+    href: `${url.pathname}${url.search}`,
+    id,
+    match: rawLink,
+    raw: text
+  };
+};
+
+const normalizeReelCandidate = (value) =>
+  value?.post || value?.reel || value?.item || value;
+
+const getReelIdValue = (value) => {
+  const candidate = normalizeReelCandidate(value);
+  const id =
+    candidate?.id ??
+    candidate?.postId ??
+    candidate?.reelId ??
+    candidate?.mediaId ??
+    candidate?.videoId ??
+    candidate?.contentId ??
+    "";
+  return id != null && id !== "" ? String(id) : "";
+};
+
+const pickReelPreviewFields = (value) => {
+  const candidate = normalizeReelCandidate(value);
+  const asText = (input) =>
+    typeof input === "string" || typeof input === "number"
+      ? String(input).trim()
+      : "";
+  const pickFirst = (...inputs) => {
+    for (const input of inputs) {
+      const text = asText(input);
+      if (text) return text;
+    }
+    return "";
+  };
+  const video = pickFirst(
+    candidate?.contentUrl,
+    candidate?.mediaUrl,
+    candidate?.videoUrl,
+    candidate?.video?.url,
+    candidate?.url,
+    candidate?.fileUrl,
+    candidate?.video
+  );
+  const poster = pickFirst(
+    candidate?.thumbnailUrl,
+    candidate?.thumbUrl,
+    candidate?.previewUrl,
+    candidate?.coverUrl,
+    candidate?.imageUrl,
+    candidate?.posterUrl,
+    candidate?.frameUrl,
+    candidate?.poster,
+    candidate?.thumbnail
+  );
+  return { video, poster };
+};
+
 const parseReplyEnvelope = (rawText) => {
   const raw = String(rawText || "");
   if (!raw.startsWith(MESSAGE_REPLY_TOKEN)) {
@@ -419,6 +567,7 @@ export default function Chat() {
   const { contactId } = useParams();
   const location = useLocation();
   const isConversationRoute = Boolean(contactId);
+  const isRequestsRoute = location.pathname === "/chat/requests";
 
   const safeGetItem = (key) => {
     try {
@@ -450,9 +599,29 @@ export default function Chat() {
   const normalizeStoryList = (list) => {
     if (!Array.isArray(list)) return [];
     const now = Date.now();
+    const toEpochMsLocal = (value) => {
+      if (value == null || value === "") return 0;
+      if (value instanceof Date) {
+        const t = value.getTime();
+        return Number.isFinite(t) ? t : 0;
+      }
+      const numeric = Number(value);
+      if (Number.isFinite(numeric) && numeric > 0) {
+        return numeric < 1000000000000 ? numeric * 1000 : numeric;
+      }
+      const raw = String(value || "").trim();
+      if (!raw) return 0;
+      const parsed = new Date(raw).getTime();
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+    const fallbackExpiryMs = 24 * 60 * 60 * 1000;
     return list
+      .filter(Boolean)
       .filter((item) => {
-        const expiresAt = Number(item?.expiresAt || 0);
+        const explicitExpires = toEpochMsLocal(item?.expiresAt || item?.expires || item?.expiry || 0);
+        const createdAt = toEpochMsLocal(item?.createdAt || item?.created || item?.timestamp || item?.time || 0);
+        const inferredExpires = !explicitExpires && createdAt ? createdAt + fallbackExpiryMs : 0;
+        const expiresAt = explicitExpires || inferredExpires;
         return !expiresAt || expiresAt > now;
       })
       .slice(0, 20);
@@ -524,6 +693,7 @@ export default function Chat() {
     );
     const endpoints = ["/api/stories/feed"];
     let sawMissing = false;
+    let firstSuccess = null;
     for (const base of baseCandidates) {
       for (const endpoint of endpoints) {
         try {
@@ -533,6 +703,7 @@ export default function Chat() {
             suppressAuthRedirect: true
           });
           const list = normalizeStoryList(Array.isArray(res?.data) ? res.data : []);
+          if (!firstSuccess) firstSuccess = list;
           if (list.length) {
             setStoryItems(list);
             writeStoryCache(list);
@@ -544,6 +715,11 @@ export default function Chat() {
           // try next candidate
         }
       }
+    }
+    if (firstSuccess) {
+      setStoryItems(firstSuccess);
+      writeStoryCache(firstSuccess);
+      return;
     }
     if (sawMissing) {
       disableStoryFeedTemporarily();
@@ -593,6 +769,7 @@ export default function Chat() {
   const [chatFallbackMode, setChatFallbackMode] = useState(false);
   const [pendingShareDraft, setPendingShareDraft] = useState("");
   const [shareHint, setShareHint] = useState("");
+  const [reelPreviewById, setReelPreviewById] = useState({});
 
   const [incomingCall, setIncomingCall] = useState(null);
   const [callState, setCallState] = useState({
@@ -623,6 +800,7 @@ export default function Chat() {
   const [localVideoPos, setLocalVideoPos] = useState(null);
   const [bubbleMenu, setBubbleMenu] = useState(null);
   const [showEmojiTray, setShowEmojiTray] = useState(false);
+  const [imagePreview, setImagePreview] = useState(null);
   const [pickerTab, setPickerTab] = useState("emoji");
   const [favoritePicks, setFavoritePicks] = useState(() => {
     try {
@@ -699,7 +877,11 @@ export default function Chat() {
   const [chatRequestBusyById, setChatRequestBusyById] = useState({});
   const [storyItems, setStoryItems] = useState(() => normalizeStoryList(readStoryCache()));
   const [storyViewerIndex, setStoryViewerIndex] = useState(null);
-  const activeStory = storyViewerIndex != null ? storyItems[storyViewerIndex] : null;
+  const [storyViewerItems, setStoryViewerItems] = useState([]);
+  const [storyViewerGroupKey, setStoryViewerGroupKey] = useState(null);
+  const [storyOptionsItems, setStoryOptionsItems] = useState([]);
+  const [storyOptionsGroupKey, setStoryOptionsGroupKey] = useState(null);
+  const activeStory = storyViewerIndex != null ? storyViewerItems[storyViewerIndex] : null;
   const [storyViewerSrc, setStoryViewerSrc] = useState("");
   const [storyViewerMuted, setStoryViewerMuted] = useState(true);
   const [storyViewerLoading, setStoryViewerLoading] = useState(false);
@@ -709,6 +891,158 @@ export default function Chat() {
   const [storyOptionsOpen, setStoryOptionsOpen] = useState(false);
   const [storyPlayerProgress, setStoryPlayerProgress] = useState(0);
   const [storyPlayerPaused, setStoryPlayerPaused] = useState(false);
+  const [storyReactions, setStoryReactions] = useState({});
+  const [storyCommentDraft, setStoryCommentDraft] = useState("");
+  const [storyCommentOpen, setStoryCommentOpen] = useState(false);
+  const [storyUsernamesById, setStoryUsernamesById] = useState({});
+  const [storyUsernamesByEmail, setStoryUsernamesByEmail] = useState({});
+  const storyUsernamesRef = useRef({ byId: {}, byEmail: {} });
+  const storyProfileLookupRef = useRef(new Set());
+  const reelPreviewLoadingRef = useRef(new Set());
+  useEffect(() => {
+    storyUsernamesRef.current = { byId: storyUsernamesById, byEmail: storyUsernamesByEmail };
+  }, [storyUsernamesById, storyUsernamesByEmail]);
+  const storyContactIndex = useMemo(() => {
+    const byId = new Map();
+    const byEmail = new Map();
+    contacts.forEach((contact) => {
+      const id = String(contact?.id || "").trim();
+      if (id && !byId.has(id)) byId.set(id, contact);
+      const email = String(contact?.email || "").trim().toLowerCase();
+      if (email && !byEmail.has(email)) byEmail.set(email, contact);
+    });
+    return { byId, byEmail };
+  }, [contacts]);
+  const resolveStoryUsername = useCallback(
+    (story) => {
+      const userId = String(getStoryUserIdValue(story) || "").trim();
+      if (userId) {
+        const cached = storyUsernamesRef.current.byId?.[userId];
+        if (cached) return cached;
+        const match = storyContactIndex.byId.get(userId);
+        const handle = normalizeStoryUsername(match?.username || match?.handle || "");
+        if (handle) return handle;
+      }
+      const email = String(getStoryUserEmailValue(story) || "").trim().toLowerCase();
+      if (email) {
+        const cached = storyUsernamesRef.current.byEmail?.[email];
+        if (cached) return cached;
+        const match = storyContactIndex.byEmail.get(email);
+        const handle = normalizeStoryUsername(match?.username || match?.handle || "");
+        if (handle) return handle;
+      }
+      const direct = getStoryUserNameValue(story);
+      if (direct) return direct;
+      const rawCandidate = getStoryUserNameRawValue(story);
+      const rawFromEmail = usernameFromEmail(rawCandidate);
+      if (rawFromEmail) return rawFromEmail;
+      const fallback = usernameFromEmail(email);
+      if (fallback) return fallback;
+      return "";
+    },
+    [storyContactIndex]
+  );
+  useEffect(() => {
+    let cancelled = false;
+    const pending = [];
+    storyItems.forEach((story) => {
+      const userId = String(getStoryUserIdValue(story) || "").trim();
+      if (userId) {
+        const key = `id:${userId}`;
+        if (storyUsernamesRef.current.byId?.[userId]) return;
+        if (!storyProfileLookupRef.current.has(key)) pending.push({ key, id: userId, type: "id" });
+        return;
+      }
+      let email = String(getStoryUserEmailValue(story) || "").trim().toLowerCase();
+      if (!email) {
+        const rawCandidate = getStoryUserNameRawValue(story);
+        if (isStoryEmailLike(rawCandidate)) {
+          email = rawCandidate.toLowerCase();
+        }
+      }
+      if (!email) return;
+      const key = `email:${email}`;
+      if (storyUsernamesRef.current.byEmail?.[email]) return;
+      if (!storyProfileLookupRef.current.has(key)) pending.push({ key, id: email, type: "email" });
+    });
+    if (!pending.length) return undefined;
+
+    const run = async () => {
+      for (const item of pending) {
+        if (cancelled) return;
+        storyProfileLookupRef.current.add(item.key);
+        try {
+          const res = await requestChatObject({
+            endpoints: [
+              `/api/profile/${encodeURIComponent(item.id)}`,
+              `/profile/${encodeURIComponent(item.id)}`,
+              `/api/users/${encodeURIComponent(item.id)}`,
+              `/users/${encodeURIComponent(item.id)}`
+            ],
+            params: { _: Date.now() }
+          });
+          if (cancelled) return;
+          const resolved = mapUserToContact(res?.data || {});
+          const handle = normalizeStoryUsername(resolved?.username || resolved?.handle || "");
+          if (!handle) continue;
+          if (item.type === "id") {
+            setStoryUsernamesById((prev) =>
+              prev?.[item.id] === handle ? prev : { ...prev, [item.id]: handle }
+            );
+          } else {
+            setStoryUsernamesByEmail((prev) =>
+              prev?.[item.id] === handle ? prev : { ...prev, [item.id]: handle }
+            );
+          }
+        } catch {
+          // ignore story profile lookup failures
+        } finally {
+          storyProfileLookupRef.current.delete(item.key);
+        }
+      }
+    };
+
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [storyItems]);
+  const storyGroups = useMemo(() => {
+    const groups = [];
+    const seen = new Map();
+    storyItems.forEach((story, index) => {
+      const key = getStoryGroupKey(story, index);
+      let group = seen.get(key);
+      if (!group) {
+        group = {
+          key,
+          userId: getStoryUserIdValue(story),
+          username: getStoryUserNameValue(story),
+          email: getStoryUserEmailValue(story),
+          items: [],
+          latest: story
+        };
+        seen.set(key, group);
+        groups.push(group);
+      }
+      const nextUserId = getStoryUserIdValue(story);
+      if (!group.userId && nextUserId) group.userId = nextUserId;
+      const nextUsername = resolveStoryUsername(story);
+      if (!group.username && nextUsername) group.username = nextUsername;
+      const nextEmail = getStoryUserEmailValue(story);
+      if (!group.email && nextEmail) group.email = nextEmail;
+      group.items.push(story);
+      if (!group.latest) group.latest = story;
+    });
+    return groups;
+  }, [storyItems, resolveStoryUsername]);
+  const storyGroupsByKey = useMemo(() => {
+    const map = new Map();
+    storyGroups.forEach((group) => {
+      map.set(group.key, group);
+    });
+    return map;
+  }, [storyGroups]);
   const [soundPrefs, setSoundPrefs] = useState(readSoundPrefs);
   const [hasRemoteVideo, setHasRemoteVideo] = useState(false);
   const [hasRemoteAudio, setHasRemoteAudio] = useState(false);
@@ -851,11 +1185,14 @@ export default function Chat() {
   const storyViewerBlobUrlRef = useRef("");
   const storyViewerBlobTriedRef = useRef(new Set());
   const storyViewerLoadTimeoutRef = useRef(null);
+  const storyOptionsPausedRef = useRef(false);
+  const activeStoryIdRef = useRef("");
   const storyPlayerRafRef = useRef(null);
   const storyPlayerDurationRef = useRef(STORY_IMAGE_DURATION_MS);
   const storyPlayerElapsedRef = useRef(0);
   const storyPlayerLastTickRef = useRef(0);
   const storyPlayerPausedRef = useRef(false);
+  const viewedStoryIdsRef = useRef(new Set());
   const storyFeedDisabledUntilRef = useRef(0);
   const chatApiDisabledUntilRef = useRef(0);
   const seenSignalsRef = useRef(new Set());
@@ -866,6 +1203,7 @@ export default function Chat() {
   const touchSwipeReplyRef = useRef({ triggered: false });
   const tabIdRef = useRef(`${Date.now()}_${Math.random().toString(36).slice(2, 7)}`);
   const callChannelRef = useRef(null);
+  const presencePulseRef = useRef(new Map());
   const readReceiptChannelRef = useRef(null);
   const messageChannelRef = useRef(null);
   const seenReadReceiptsRef = useRef(new Set());
@@ -1368,6 +1706,11 @@ export default function Chat() {
   }, [incomingCall]);
 
   useEffect(() => {
+    setStoryCommentDraft("");
+    setStoryCommentOpen(false);
+  }, [storyViewerIndex]);
+
+  useEffect(() => {
     groupActiveRef.current = groupCallActive;
   }, [groupCallActive]);
 
@@ -1382,8 +1725,11 @@ export default function Chat() {
     const remoteVideoEl = remoteVideoRef.current;
     const remoteAudioEl = remoteAudioRef.current;
     if (remoteVideoEl) {
-      remoteVideoEl.muted = !speakerOn;
-      if (speakerOn) remoteVideoEl.play?.().catch(() => {});
+      // Keep the remote video element muted so autoplay isn't blocked.
+      // Audio is handled by the dedicated hidden audio element.
+      remoteVideoEl.muted = true;
+      remoteVideoEl.volume = 0;
+      remoteVideoEl.play?.().catch(() => {});
     }
     if (remoteAudioEl) {
       remoteAudioEl.muted = !speakerOn;
@@ -1402,7 +1748,8 @@ export default function Chat() {
     const remoteVideoEl = remoteVideoRef.current;
     const remoteAudioEl = remoteAudioRef.current;
     if (remoteVideoEl) {
-      remoteVideoEl.muted = !isSpeakerOn;
+      remoteVideoEl.muted = true;
+      remoteVideoEl.volume = 0;
       remoteVideoEl.play?.().catch(() => {});
     }
     if (remoteAudioEl) {
@@ -1709,7 +2056,9 @@ export default function Chat() {
           }
         }
         if (!active) return;
-        const pending = Array.isArray(list) ? list.filter(isPendingRequest) : [];
+        const pending = Array.isArray(list)
+          ? list.filter((item) => item && typeof item === "object" && isPendingRequest(item))
+          : [];
         const hasIdentity = Boolean(String(myUserId || "").trim() || String(myEmail || "").trim());
         const normalizedSourceUrl = String(sourceUrl || "").toLowerCase();
         if (!hasIdentity) {
@@ -1951,9 +2300,9 @@ export default function Chat() {
     if (typeof value === "string") {
       const raw = value.trim();
       if (!raw) return "";
-      // Backend may send ISO-like time without timezone; treat it as UTC for consistent ordering/display.
+      // Backend may send ISO-like time without timezone; treat it as local time.
       const noZoneIso = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(raw);
-      if (noZoneIso) return new Date(`${raw}Z`).toISOString();
+      if (noZoneIso) return new Date(raw).toISOString();
     }
     const parsed = new Date(value);
     if (Number.isFinite(parsed.getTime())) return parsed.toISOString();
@@ -1972,8 +2321,7 @@ export default function Chat() {
     }
     const raw = String(value || "").trim();
     if (!raw) return 0;
-    const noZoneIso = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(raw);
-    const parsed = new Date(noZoneIso ? `${raw}Z` : raw).getTime();
+    const parsed = new Date(raw).getTime();
     return Number.isFinite(parsed) ? parsed : 0;
   };
 
@@ -2989,6 +3337,13 @@ export default function Chat() {
           dynacast: true
         });
 
+        const markLivekitInCall = () => {
+          setCallPhaseNote("");
+          setCallState((prev) =>
+            prev.phase === "idle" ? prev : { ...prev, phase: "in-call", provider: "livekit" }
+          );
+        };
+
         room.on(RoomEvent.Disconnected, () => {
           const phase = callStateRef.current.phase;
           if (phase === "idle" || phase === "dialing") return;
@@ -3001,6 +3356,10 @@ export default function Chat() {
               finishCall(false, "Call ended");
             }
           }, 30000);
+        });
+
+        room.on(RoomEvent.Reconnected, () => {
+          markLivekitInCall();
         });
 
         room.on(RoomEvent.TrackSubscribed, (track) => {
@@ -3025,6 +3384,8 @@ export default function Chat() {
           }
           updateRemoteMediaFlags(stream);
           setupRemoteAudioPipeline(stream);
+          kickstartRemotePlayback();
+          markLivekitInCall();
         });
 
         room.on(RoomEvent.TrackUnsubscribed, (track) => {
@@ -3060,7 +3421,7 @@ export default function Chat() {
         updateRemoteMediaFlags(remoteStreamRef.current);
         clearDisconnectGuardTimer();
         setCallState((prev) => (prev.phase === "idle" ? prev : { ...prev, phase: "in-call", provider: "livekit" }));
-        setCallPhaseNote("Connected");
+        setCallPhaseNote("");
         if (callStateRef.current.peerId && callStateRef.current.peerId !== "group") {
           sendSignal(callStateRef.current.peerId, { type: "connected", mode, provider: "livekit" });
         }
@@ -3072,7 +3433,7 @@ export default function Chat() {
         return false;
       }
     },
-    [LIVEKIT_URL, livekitEnabled, updateRemoteMediaFlags, setupRemoteAudioPipeline, disconnectLivekit]
+    [LIVEKIT_URL, livekitEnabled, updateRemoteMediaFlags, setupRemoteAudioPipeline, kickstartRemotePlayback, disconnectLivekit]
   );
 
   const stopStream = (stream) => {
@@ -3279,6 +3640,7 @@ export default function Chat() {
     localStreamRef.current = stream;
     if (localVideoRef.current) {
       localVideoRef.current.srcObject = stream;
+      localVideoRef.current.play?.().catch(() => {});
     }
     return stream;
   };
@@ -3833,8 +4195,12 @@ export default function Chat() {
       if (current.peerId === fromId && current.provider === "livekit") {
         clearCallTimer();
         stopOutgoingRing();
-        setCallState((prev) => (prev.phase === "in-call" ? prev : { ...prev, phase: "connecting" }));
-        setCallPhaseNote("Connecting media...");
+        if (current.phase !== "in-call") {
+          setCallState((prev) => (prev.phase === "in-call" ? prev : { ...prev, phase: "connecting" }));
+          setCallPhaseNote("Connecting media...");
+        } else {
+          setCallPhaseNote("");
+        }
       }
       return;
     }
@@ -3844,6 +4210,7 @@ export default function Chat() {
         return;
       }
       const nextMode = signal?.mode === "video" ? "video" : "audio";
+      let bypassBusyCheck = false;
       if (
         current.phase !== "idle" &&
         current.peerId === fromId &&
@@ -3874,13 +4241,23 @@ export default function Chat() {
           clearCallTimer();
           closePeer();
           resetMedia();
-          setCallState({ phase: "idle", mode: "audio", peerId: "", peerName: "", initiatedByMe: false });
+          const idleState = {
+            phase: "idle",
+            mode: "audio",
+            peerId: "",
+            peerName: "",
+            initiatedByMe: false,
+            provider: "webrtc"
+          };
+          setCallState(idleState);
+          callStateRef.current = idleState;
+          bypassBusyCheck = true;
         } else {
           sendSignal(fromId, { type: "busy", mode: signal?.mode || "audio" });
           return;
         }
       }
-      if (callStateRef.current.phase !== "idle") {
+      if (!bypassBusyCheck && callStateRef.current.phase !== "idle") {
         sendSignal(fromId, { type: "busy", mode: signal?.mode || "audio" });
         return;
       }
@@ -4223,9 +4600,11 @@ export default function Chat() {
     }
   };
 
-  const startOutgoingCall = async (mode) => {
-    if (!activeContactId) return;
-    if (activeContactId === myUserId) {
+  const startOutgoingCall = async (mode, options = {}) => {
+    const { targetId: overrideTargetId, targetName: overrideTargetName, forceWebrtc = false } = options || {};
+    const resolvedTargetId = String(overrideTargetId || activeContactId || "");
+    if (!resolvedTargetId) return;
+    if (resolvedTargetId === myUserId) {
       setCallError("Cannot call your own account");
       return;
     }
@@ -4235,21 +4614,23 @@ export default function Chat() {
       return;
     }
 
-    const targetId = String(activeContactId);
+    const targetId = resolvedTargetId;
     const targetName =
-      contacts.find((c) => c.id === targetId)?.name || normalizeDisplayName(`User ${targetId}`);
+      String(overrideTargetName || "").trim() ||
+      contacts.find((c) => c.id === targetId)?.name ||
+      normalizeDisplayName(`User ${targetId}`);
 
     try {
       setCallError("");
       setIsMuted(false);
       setIsSpeakerOn(true);
-    let dialStarted = false;
-    if (livekitEnabled) {
-      const roomId = buildLivekitRoomId(targetId);
-      setCallState({
-        phase: "dialing",
-        mode,
-        peerId: targetId,
+      let dialStarted = false;
+      if (livekitEnabled && !forceWebrtc) {
+        const roomId = buildLivekitRoomId(targetId);
+        setCallState({
+          phase: "dialing",
+          mode,
+          peerId: targetId,
         peerName: targetName,
         initiatedByMe: true,
         provider: "livekit"
@@ -4272,7 +4653,7 @@ export default function Chat() {
       disconnectLivekit();
       clearCallRejoin();
       setCallPhaseNote("");
-    }
+      }
 
       const stream = await ensureLocalStream(mode);
       const pc = createPeerConnection(targetId, mode);
@@ -4319,11 +4700,17 @@ export default function Chat() {
         mode,
         sdp: offer.sdp
       });
-
-      clearCallTimer();
     } catch {
       finishCall(false, "Could not start call. Allow mic/camera and try again.");
     }
+  };
+
+  const getVideoSender = (pc) => {
+    if (!pc) return null;
+    const direct = pc.getSenders?.().find((s) => s?.track?.kind === "video");
+    if (direct) return direct;
+    const transceiver = pc.getTransceivers?.().find((t) => t?.receiver?.track?.kind === "video");
+    return transceiver?.sender || null;
   };
 
   const acceptIncomingCall = async () => {
@@ -4346,12 +4733,6 @@ export default function Chat() {
       setIsSpeakerOn(true);
       if (call.provider === "livekit" || call.roomId) {
         const roomId = String(call.roomId || buildLivekitRoomId(call.fromUserId));
-        const joined = await connectLivekit(roomId, call.mode);
-        if (!joined) {
-          finishCall(false, "Could not join LiveKit call");
-          return;
-        }
-        sendSignal(call.fromUserId, { type: "livekit-accept", mode: call.mode, roomId });
         setCallState({
           phase: "connecting",
           mode: call.mode,
@@ -4367,6 +4748,32 @@ export default function Chat() {
           provider: "livekit",
           roomId
         });
+        const joined = await connectLivekit(roomId, call.mode);
+        if (!joined) {
+          const fallbackState = {
+            phase: "idle",
+            mode: "audio",
+            peerId: "",
+            peerName: "",
+            initiatedByMe: false,
+            provider: "webrtc"
+          };
+          setCallState(fallbackState);
+          callStateRef.current = fallbackState;
+          setCallPhaseNote("");
+          setIncomingCall(null);
+          setRingtoneMuted(false);
+          setCallError("LiveKit unavailable. Falling back to WebRTC...");
+          window.setTimeout(() => setCallError(""), 2500);
+          clearCallRejoin();
+          await startOutgoingCall(call.mode, {
+            targetId: String(call.fromUserId || ""),
+            targetName: call.fromName,
+            forceWebrtc: true
+          });
+          return;
+        }
+        sendSignal(call.fromUserId, { type: "livekit-accept", mode: call.mode, roomId });
         setIncomingCall(null);
         setRingtoneMuted(false);
         return;
@@ -4441,6 +4848,23 @@ export default function Chat() {
       target = null;
     }
     if (!target?.fromUserId) return;
+    const ageMs = Date.now() - Number(target.at || 0);
+    if (!Number.isFinite(ageMs) || ageMs > 45000) {
+      try {
+        sessionStorage.removeItem(CALL_ACCEPT_TARGET_KEY);
+      } catch {
+        // ignore storage issues
+      }
+      return;
+    }
+    if (target?.autoAccept !== true) {
+      try {
+        sessionStorage.removeItem(CALL_ACCEPT_TARGET_KEY);
+      } catch {
+        // ignore storage issues
+      }
+      return;
+    }
     if ((!incomingCall || !incomingCall?.sdp) && target?.sdp) {
       setIncomingCall({
         fromUserId: String(target.fromUserId),
@@ -4520,13 +4944,23 @@ export default function Chat() {
         }
       }
       if (pc) {
-        const sender = pc.getSenders().find((s) => s?.track?.kind === "video");
+        const sender = getVideoSender(pc);
         if (sender) {
           try {
             await sender.replaceTrack(cameraTrack);
           } catch {
             // ignore replace errors
           }
+        }
+        try {
+          const offer = await pc.createOffer();
+          offer.sdp = applySdpQualityHints(offer.sdp, "video");
+          await pc.setLocalDescription(offer);
+          if (callStateRef.current.peerId) {
+            sendSignal(callStateRef.current.peerId, { type: "offer", mode: "video", sdp: offer.sdp });
+          }
+        } catch {
+          // ignore renegotiation failures
         }
       }
     }
@@ -4590,11 +5024,21 @@ export default function Chat() {
       }
 
       if (pc) {
-        const sender = pc.getSenders().find((s) => s?.track?.kind === "video");
+        const sender = getVideoSender(pc);
         if (sender) {
           await sender.replaceTrack(track);
         } else if (localStream) {
           pc.addTrack(track, localStream);
+        }
+        try {
+          const offer = await pc.createOffer();
+          offer.sdp = applySdpQualityHints(offer.sdp, "video");
+          await pc.setLocalDescription(offer);
+          if (callStateRef.current.peerId) {
+            sendSignal(callStateRef.current.peerId, { type: "offer", mode: "video", sdp: offer.sdp });
+          }
+        } catch {
+          // ignore renegotiation failures
         }
       }
 
@@ -4680,7 +5124,7 @@ export default function Chat() {
         }
       }
 
-      const existingVideoSender = pc.getSenders().find((sender) => sender?.track?.kind === "video");
+      const existingVideoSender = getVideoSender(pc);
       if (existingVideoSender) {
         await existingVideoSender.replaceTrack(videoTrack);
       } else {
@@ -4790,6 +5234,10 @@ export default function Chat() {
           setChatFallbackMode(true);
           setError("Chat server unavailable. Please try again.");
         }
+      }
+
+      if (!list.length && contacts.length) {
+        setError("");
       }
 
       if (!list.length) {
@@ -4906,6 +5354,20 @@ export default function Chat() {
       .filter((list) => Array.isArray(list))
       .flat();
 
+    if (fromFollow.length) {
+      const followIdentifiers = [];
+      fromFollow
+        .map((entry) => mapUserToContact(entry))
+        .filter((contact) => String(contact?.id || "").trim())
+        .forEach((contact) => {
+          followIdentifiers.push(contact.id, contact.email, contact.username);
+        });
+      const unique = Array.from(new Set(followIdentifiers.filter(Boolean)));
+      if (unique.length) {
+        updateFollowCache(unique, true);
+      }
+    }
+
     const [fromFeed, fromReels, fromSearch] = await Promise.all([feedPromise, reelsPromise, searchPromise]);
 
     let fromCache = [];
@@ -4945,6 +5407,7 @@ export default function Chat() {
     }
     setContacts((prev) => mergeContacts(prev, discovered));
     if (discovered.length) writeDiscoveryCache(discovered);
+    if (discovered.length) setError("");
     return discovered;
   };
 
@@ -5205,6 +5668,79 @@ export default function Chat() {
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
   }, [myUserId, myEmail]);
+
+  useEffect(() => {
+    if (!myUserId) return undefined;
+    const recordPresence = (payload) => {
+      const userId = String(payload?.userId || "").trim();
+      if (!userId || userId === String(myUserId || "").trim()) return;
+      const at = Number(payload?.at || 0);
+      presencePulseRef.current.set(userId, Number.isFinite(at) && at > 0 ? at : Date.now());
+    };
+
+    const broadcastPresence = () => {
+      const payload = {
+        userId: String(myUserId),
+        at: Date.now(),
+        fromTab: tabIdRef.current
+      };
+      try {
+        presenceChannel?.postMessage({ kind: "presence-ping", payload });
+      } catch {
+        // ignore channel failures
+      }
+      try {
+        localStorage.setItem(PRESENCE_PING_KEY, JSON.stringify(payload));
+      } catch {
+        // ignore storage failures
+      }
+    };
+
+    let presenceChannel = null;
+    if (typeof BroadcastChannel !== "undefined") {
+      try {
+        presenceChannel = new BroadcastChannel(PRESENCE_CHANNEL);
+        presenceChannel.addEventListener("message", (event) => {
+          const packet = event?.data;
+          if (!packet || packet.kind !== "presence-ping") return;
+          if (packet?.payload?.fromTab === tabIdRef.current) return;
+          recordPresence(packet.payload);
+        });
+      } catch {
+        presenceChannel = null;
+      }
+    }
+
+    const onStorage = (event) => {
+      if (event.key !== PRESENCE_PING_KEY || !event.newValue) return;
+      try {
+        const payload = JSON.parse(event.newValue);
+        if (payload?.fromTab === tabIdRef.current) return;
+        recordPresence(payload);
+      } catch {
+        // ignore malformed payload
+      }
+    };
+
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") {
+        broadcastPresence();
+      }
+    };
+
+    window.addEventListener("storage", onStorage);
+    document.addEventListener("visibilitychange", onVisibility);
+    broadcastPresence();
+    const timer = setInterval(broadcastPresence, PRESENCE_PING_MS);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      document.removeEventListener("visibilitychange", onVisibility);
+      clearInterval(timer);
+      if (presenceChannel) {
+        presenceChannel.close();
+      }
+    };
+  }, [myUserId]);
 
   useEffect(() => {
     const onBeforeUnload = () => {
@@ -5784,27 +6320,71 @@ export default function Chat() {
     if (!key) return;
     setPendingChatRequests((prev) => {
       const next = { ...(prev || {}) };
-      next[key] = { status, at: Date.now() };
+      if (!status) {
+        delete next[key];
+      } else {
+        next[key] = { status, at: Date.now() };
+      }
+      writeChatRequestCache(next);
+      return next;
+    });
+  };
+
+  const setRequestStatusByIdentifiers = (identifiers, status) => {
+    const keys = (identifiers || []).map(normalizeFollowKey).filter(Boolean);
+    if (!keys.length) return;
+    setPendingChatRequests((prev) => {
+      const next = { ...(prev || {}) };
+      keys.forEach((key) => {
+        if (!status) {
+          delete next[key];
+        } else {
+          next[key] = { status, at: Date.now() };
+        }
+      });
       writeChatRequestCache(next);
       return next;
     });
   };
 
   const resolveChatRequestContact = (request) => {
-    const contact = mapUserToContact(request);
-    if (!contact?.id) return null;
-    const displayName = getContactDisplayName(contact);
-    return {
+    if (!request || typeof request !== "object") return null;
+    const contact = mapUserToContact(request) || {};
+    const pickValue = (...values) =>
+      values.map((value) => String(value || "").trim()).find(Boolean) || "";
+    const contactId = pickValue(
+      contact?.id,
+      request?.senderId,
+      request?.senderEmail,
+      request?.senderUsername,
+      request?.receiverId,
+      request?.receiverEmail,
+      request?.receiverUsername
+    );
+    const requestId = pickValue(request?.id, request?.requestId, request?.followRequestId);
+    const resolvedId = contactId || requestId;
+    if (!resolvedId) return null;
+    const normalized = {
       ...contact,
+      id: contact?.id || resolvedId,
+      requestFallback: !contactId,
+      email: contact?.email || pickValue(request?.senderEmail, request?.receiverEmail),
+      username: contact?.username || pickValue(request?.senderUsername, request?.receiverUsername),
+      name: contact?.name || pickValue(request?.senderName, request?.receiverName, request?.senderUsername, request?.receiverUsername)
+    };
+    const displayName = getContactDisplayName(normalized);
+    return {
+      ...normalized,
       name: displayName,
-      avatar: (displayName[0] || contact?.avatar || "U").toUpperCase()
+      avatar: (displayName[0] || normalized?.avatar || "U").toUpperCase()
     };
   };
 
   const resolveChatRequestIdentifiers = (request, contact) => {
     const sender = request?.sender || request?.actor || request?.user || {};
+    const contactId = contact?.requestFallback ? "" : contact?.id;
     return [
-      contact?.id,
+      contactId,
       contact?.email,
       contact?.username,
       sender?.id,
@@ -5826,9 +6406,11 @@ export default function Chat() {
       await api.post(`/api/follow/requests/${encodeURIComponent(idText)}/accept`);
       setChatRequests((prev) => prev.filter((entry) => String(entry?.id || "") !== idText));
       const contact = resolveChatRequestContact(request);
-      if (contact?.id) {
+      if (contact?.id && !contact?.requestFallback) {
         setContacts((prev) => mergeContacts(prev, [contact]));
-        updateFollowCache(resolveChatRequestIdentifiers(request, contact), true);
+        const identifiers = resolveChatRequestIdentifiers(request, contact);
+        updateFollowCache(identifiers, true);
+        setRequestStatusByIdentifiers(identifiers, "following");
       }
     } catch {
       setChatRequestError("Unable to accept chat request.");
@@ -5846,8 +6428,10 @@ export default function Chat() {
       await api.post(`/api/follow/requests/${encodeURIComponent(idText)}/reject`);
       setChatRequests((prev) => prev.filter((entry) => String(entry?.id || "") !== idText));
       const contact = resolveChatRequestContact(request);
-      if (contact?.id) {
-        updateFollowCache(resolveChatRequestIdentifiers(request, contact), false);
+      if (contact?.id && !contact?.requestFallback) {
+        const identifiers = resolveChatRequestIdentifiers(request, contact);
+        updateFollowCache(identifiers, false);
+        setRequestStatusByIdentifiers(identifiers, "");
       }
     } catch {
       setChatRequestError("Unable to reject chat request.");
@@ -5898,7 +6482,7 @@ export default function Chat() {
       const nextStatus = String(res?.data?.status || "").toLowerCase();
       if (nextStatus.includes("following")) {
         updateFollowCache([contact?.id, contact?.email, contact?.username], true);
-        setRequestStatus(contact, "");
+        setRequestStatus(contact, "following");
       } else {
         setRequestStatus(contact, "requested");
       }
@@ -5944,9 +6528,43 @@ export default function Chat() {
     });
   }, [contacts, newChatQuery, searchUsers, myUserId, blockedUsers]);
 
+  const outgoingRequestKeys = useMemo(() => {
+    const keys = new Set();
+    sentChatRequests.forEach((req) => {
+      const contact = resolveChatRequestContact(req);
+      if (!contact) return;
+      const identifiers = resolveChatRequestIdentifiers(req, contact);
+      identifiers.forEach((value) => {
+        const key = normalizeFollowKey(value);
+        if (key) keys.add(key);
+      });
+    });
+    return keys;
+  }, [sentChatRequests]);
+
+  const hasOutgoingRequest = (contact) => {
+    if (!contact) return false;
+    const candidates = [contact.id, contact.email, contact.username, contact.name]
+      .map((value) => normalizeFollowKey(value))
+      .filter(Boolean);
+    return candidates.some((key) => outgoingRequestKeys.has(key));
+  };
+
+  const filteredSentChatRequests = useMemo(
+    () =>
+      sentChatRequests.filter((req) => {
+        const contact = resolveChatRequestContact(req);
+        if (!contact) return true;
+        return !isFollowingContact(contact);
+      }),
+    [sentChatRequests, isFollowingContact]
+  );
+  const requestsTotal = chatRequests.length + filteredSentChatRequests.length;
+
   const canChatWith = (contact) => {
     if (!contact) return false;
     if (isFollowingContact(contact)) return true;
+    if (getRequestStatus(contact) === "following") return true;
     const id = String(contact?.id || "").trim();
     if (!id) return false;
     const existing = messagesByContact[id];
@@ -6016,7 +6634,7 @@ export default function Chat() {
     if (!id) return;
     if (event?.pointerType === "mouse") {
       if (typeof event?.button === "number" && event.button !== 0) return;
-      toggleContactActions(id);
+      openContact(contact);
       return;
     }
     stopContactLongPress();
@@ -6102,8 +6720,19 @@ export default function Chat() {
     ? callHistoryByContact[activeContactId]
     : [];
 
+  const clampFutureTimestamp = (ts) => {
+    if (!Number.isFinite(ts) || ts <= 0) return 0;
+    const now = nowTick;
+    const maxFutureSkewMs = 2 * 60 * 1000;
+    if (ts <= now + maxFutureSkewMs) return ts;
+    const offsetMs = new Date(ts).getTimezoneOffset() * 60000;
+    const adjusted = ts + offsetMs;
+    if (adjusted <= now + maxFutureSkewMs) return adjusted;
+    return Math.min(ts, now);
+  };
+
   const formatLastSeen = (value) => {
-    const ts = toEpochMs(value);
+    const ts = clampFutureTimestamp(toEpochMs(value));
     if (!ts) return "lastseen at --";
     const d = new Date(ts);
     const now = new Date(nowTick);
@@ -6138,7 +6767,7 @@ export default function Chat() {
       const t = toEpochMs(c?.at || 0);
       return Number.isFinite(t) && t > max ? t : max;
     }, 0);
-    const profileTs = toEpochMs(contact?.lastActiveAt || 0);
+    const profileTs = clampFutureTimestamp(toEpochMs(contact?.lastActiveAt || 0));
     return Math.max(
       msgTs,
       callTs,
@@ -6159,6 +6788,16 @@ export default function Chat() {
     return false;
   };
 
+  const resolveImplicitOnline = (lastActiveTs, contactId) => {
+    const now = nowTick;
+    if (contactId) {
+      const localPing = presencePulseRef.current.get(String(contactId));
+      if (localPing && now - localPing <= PRESENCE_TTL_MS) return true;
+    }
+    if (!Number.isFinite(lastActiveTs) || lastActiveTs <= 0) return false;
+    return now - lastActiveTs <= CHAT_PRESENCE_HOLD_MS;
+  };
+
   const getContactPresence = (contact) => {
     if (!contact) return { online: false, text: "lastseen at --" };
     const latest = getContactActivityTs(contact);
@@ -6166,7 +6805,12 @@ export default function Chat() {
     if (explicitOnline === false && contact?.id) {
       presenceHoldRef.current.delete(String(contact.id));
     }
-    const isOnline = explicitOnline === true ? resolveStableOnline(contact?.id, true) : false;
+    const isOnline =
+      explicitOnline === true
+        ? resolveStableOnline(contact?.id, true)
+        : explicitOnline == null
+          ? resolveImplicitOnline(latest, contact?.id)
+          : false;
     if (isOnline) return { online: true, text: "online" };
     return {
       online: false,
@@ -6439,7 +7083,7 @@ export default function Chat() {
       setStoryViewerLoading(false);
       return false;
     }
-    const story = storyViewerIndex != null ? storyItems[storyViewerIndex] : null;
+    const story = storyViewerIndex != null ? storyViewerItems[storyViewerIndex] : null;
     setStoryViewerLoading(true);
     setStoryViewerLoadError("");
     for (let i = startIndex; i < candidates.length; i += 1) {
@@ -6474,7 +7118,7 @@ export default function Chat() {
     setStoryViewerLoadError("Could not load this story media.");
     setStoryViewerLoading(false);
     return false;
-  }, [clearStoryViewerLoadTimer, fetchStoryBlob, revokeStoryViewerBlobUrl, storyItems, storyViewerIndex]);
+  }, [clearStoryViewerLoadTimer, fetchStoryBlob, revokeStoryViewerBlobUrl, storyViewerItems, storyViewerIndex]);
 
   const tryBlobForStoryCandidate = useCallback(async (index) => {
     const candidates = Array.isArray(storyViewerCandidatesRef.current) ? storyViewerCandidatesRef.current : [];
@@ -6519,12 +7163,39 @@ export default function Chat() {
     });
   }, [loadStoryViewerCandidate, tryBlobForStoryCandidate]);
 
-  const openStory = (idx) => {
+  const isMyStoryGroup = useCallback(
+    (group) => {
+      const groupUserId = String(group?.userId || "").trim();
+      if (groupUserId && myUserId && groupUserId === String(myUserId)) return true;
+      const groupEmail = String(group?.email || "").trim().toLowerCase();
+      if (groupEmail && myEmail && groupEmail === String(myEmail || "").trim().toLowerCase()) return true;
+      return false;
+    },
+    [myUserId, myEmail]
+  );
+
+  const openStoryGroup = (group, idx = 0) => {
+    if (!group || !Array.isArray(group.items) || group.items.length === 0) return;
+    const safeIndex = Math.max(0, Math.min(Number(idx) || 0, group.items.length - 1));
     setStoryViewerMuted(true);
-    setStoryViewerIndex(idx);
+    setStoryViewerGroupKey(group.key || null);
+    setStoryViewerItems(group.items);
+    setStoryViewerIndex(safeIndex);
   };
+  const getStoryGroupLabel = useCallback(
+    (group) => {
+      if (!group) return "Story";
+      if (isMyStoryGroup(group)) return "You";
+      const raw = normalizeStoryUsername(group.username || "");
+      if (raw) return raw;
+      return "Story";
+    },
+    [isMyStoryGroup]
+  );
   const closeStory = () => {
     setStoryViewerIndex(null);
+    setStoryViewerGroupKey(null);
+    setStoryViewerItems([]);
     setStoryViewerMuted(true);
     setStoryViewerLoading(false);
     setStoryViewerLoadError("");
@@ -6535,8 +7206,77 @@ export default function Chat() {
     revokeStoryViewerBlobUrl();
     storyViewerBlobTriedRef.current = new Set();
   };
-  const openStoryOptions = () => setStoryOptionsOpen(true);
-  const closeStoryOptions = () => setStoryOptionsOpen(false);
+  const openStoryOptions = (group) => {
+    if (!group || !Array.isArray(group.items) || group.items.length === 0) return;
+    setStoryOptionsGroupKey(group.key || null);
+    setStoryOptionsItems(group.items);
+    setStoryOptionsOpen(true);
+    if (!storyPlayerPausedRef.current) {
+      storyOptionsPausedRef.current = true;
+      pauseStoryPlayback();
+    } else {
+      storyOptionsPausedRef.current = false;
+    }
+  };
+  const closeStoryOptions = () => {
+    setStoryOptionsOpen(false);
+    setStoryOptionsItems([]);
+    setStoryOptionsGroupKey(null);
+    if (storyOptionsPausedRef.current) {
+      storyOptionsPausedRef.current = false;
+      resumeStoryPlayback();
+    }
+  };
+
+  useEffect(() => {
+    if (!storyViewerGroupKey) {
+      if (storyViewerItems.length) setStoryViewerItems([]);
+      return;
+    }
+    const group = storyGroupsByKey.get(storyViewerGroupKey);
+    if (!group || group.items.length === 0) {
+      setStoryViewerIndex(null);
+      setStoryViewerGroupKey(null);
+      setStoryViewerItems([]);
+      return;
+    }
+    const lastStoryId = activeStoryIdRef.current;
+    setStoryViewerItems(group.items);
+    setStoryViewerIndex((prev) => {
+      if (lastStoryId) {
+        const matchIndex = group.items.findIndex(
+          (item) => String(getStoryIdValue(item)) === String(lastStoryId)
+        );
+        if (matchIndex >= 0) return matchIndex;
+      }
+      if (prev == null) return 0;
+      if (prev >= group.items.length) return group.items.length - 1;
+      return prev;
+    });
+  }, [storyViewerGroupKey, storyGroupsByKey]);
+
+  useEffect(() => {
+    if (storyViewerIndex == null && storyViewerGroupKey) {
+      setStoryViewerGroupKey(null);
+      setStoryViewerItems([]);
+    }
+  }, [storyViewerIndex, storyViewerGroupKey]);
+
+  useEffect(() => {
+    if (!storyOptionsOpen) return;
+    if (!storyOptionsGroupKey) {
+      if (storyOptionsItems.length) setStoryOptionsItems([]);
+      return;
+    }
+    const group = storyGroupsByKey.get(storyOptionsGroupKey);
+    if (!group || group.items.length === 0) {
+      setStoryOptionsOpen(false);
+      setStoryOptionsItems([]);
+      setStoryOptionsGroupKey(null);
+      return;
+    }
+    setStoryOptionsItems(group.items);
+  }, [storyOptionsOpen, storyOptionsGroupKey, storyGroupsByKey]);
 
   useEffect(() => {
     if (storyViewerIndex == null || !activeStory) {
@@ -6650,34 +7390,37 @@ export default function Chat() {
     handleStoryViewerMediaError,
     tryBlobForStoryCandidate
   ]);
-  const deleteStoryAt = (index) => {
+  const deleteStoryItems = (targets) => {
+    if (!Array.isArray(targets) || targets.length === 0) return;
+    const idSet = new Set(
+      targets
+        .map((item) => getStoryIdValue(item))
+        .filter(Boolean)
+        .map((value) => String(value))
+    );
+    const refSet = new Set(targets);
     setStoryItems((prev) => {
       if (!Array.isArray(prev) || prev.length === 0) return prev;
-      const next = prev.filter((_, i) => i !== index);
+      const next = prev.filter((item) => {
+        const id = getStoryIdValue(item);
+        if (id && idSet.has(String(id))) return false;
+        if (refSet.has(item)) return false;
+        return true;
+      });
       writeStoryCache(next);
       return normalizeStoryList(next);
     });
-    setStoryViewerIndex((prev) => {
-      if (prev == null) return prev;
-      if (prev === index) return null;
-      if (prev > index) return prev - 1;
-      return prev;
-    });
   };
-  const clearStories = () => {
-    writeStoryCache([]);
-    setStoryItems([]);
-    setStoryViewerIndex(null);
-  };
-  const startStoryLongPress = () => {
-    if (storyItems.length === 0) return;
+  const startStoryLongPress = (group) => () => {
     if (storyLongPressTimeoutRef.current) {
       clearTimeout(storyLongPressTimeoutRef.current);
     }
     storyLongPressTriggeredRef.current = false;
+    if (!group || !Array.isArray(group.items) || group.items.length === 0) return;
+    if (!isMyStoryGroup(group)) return;
     storyLongPressTimeoutRef.current = setTimeout(() => {
       storyLongPressTriggeredRef.current = true;
-      openStoryOptions();
+      openStoryOptions(group);
     }, 550);
   };
   const cancelStoryLongPress = () => {
@@ -6686,12 +7429,12 @@ export default function Chat() {
       storyLongPressTimeoutRef.current = null;
     }
   };
-  const handleStoryTileClick = () => {
+  const handleStoryTileClick = (group) => {
     if (storyLongPressTriggeredRef.current) {
       storyLongPressTriggeredRef.current = false;
       return;
     }
-    openStory(0);
+    openStoryGroup(group, 0);
   };
   const goNextStory = () => {
     setStoryViewerMuted(true);
@@ -6703,7 +7446,7 @@ export default function Chat() {
     setStoryViewerIndex((prev) => {
       if (prev == null) return null;
       const next = prev + 1;
-      return next < storyItems.length ? next : null;
+      return next < storyViewerItems.length ? next : null;
     });
   };
   const goPrevStory = () => {
@@ -6822,6 +7565,56 @@ export default function Chat() {
     goNextStory();
   }, [goNextStory]);
 
+  const storyKeyFor = (story, index) => {
+    const id = story?.id ?? story?.storyId ?? story?.postId ?? story?.mediaId;
+    if (id != null && id !== "") return `id:${id}`;
+    return `idx:${index}`;
+  };
+
+  const applyStoryStats = (storyId, patch) => {
+    if (!storyId || !patch) return;
+    setStoryItems((prev) =>
+      prev.map((item) => {
+        const id = item?.id ?? item?.storyId ?? item?.postId ?? item?.mediaId;
+        if (String(id) !== String(storyId)) return item;
+        return { ...item, ...patch };
+      })
+    );
+  };
+
+  useEffect(() => {
+    activeStoryIdRef.current = getStoryIdValue(activeStory);
+  }, [activeStory]);
+
+  useEffect(() => {
+    if (storyViewerIndex == null || !activeStory) return;
+    const storyId = activeStory?.id;
+    const storyKey = storyKeyFor(activeStory, storyViewerIndex);
+    const likedFromServer = Boolean(activeStory?.likedByMe);
+    setStoryReactions((prev) => {
+      const current = prev?.[storyKey] || {};
+      if (current.liked === likedFromServer) return prev;
+      return { ...prev, [storyKey]: { ...current, liked: likedFromServer } };
+    });
+    if (!storyId) return;
+    const idText = String(storyId);
+    if (viewedStoryIdsRef.current.has(idText)) return;
+    viewedStoryIdsRef.current.add(idText);
+    api
+      .post(`/api/stories/${storyId}/view`)
+      .then((res) => {
+        if (res?.data && typeof res.data === "object") {
+          applyStoryStats(storyId, {
+            likeCount: res.data.likeCount,
+            commentCount: res.data.commentCount,
+            viewCount: res.data.viewCount,
+            likedByMe: Boolean(res.data.liked)
+          });
+        }
+      })
+      .catch(() => {});
+  }, [storyViewerIndex, activeStory]);
+
   useEffect(() => {
     storyPlayerPausedRef.current = storyPlayerPaused;
   }, [storyPlayerPaused]);
@@ -6878,7 +7671,7 @@ export default function Chat() {
     const t = toEpochMs(m?.createdAt || 0);
     return Number.isFinite(t) && t > max ? t : max;
   }, 0);
-  const peerLatestProfileTs = toEpochMs(activeContact?.lastActiveAt || 0);
+  const peerLatestProfileTs = clampFutureTimestamp(toEpochMs(activeContact?.lastActiveAt || 0));
   const peerLatestActivityTs = Math.max(
     peerLatestMessageTs,
     peerLatestCallTs,
@@ -6889,7 +7682,12 @@ export default function Chat() {
   if (explicitPeerOnline === false && activeContactId) {
     presenceHoldRef.current.delete(String(activeContactId));
   }
-  const isPeerOnline = explicitPeerOnline === true ? resolveStableOnline(activeContactId, true) : false;
+  const isPeerOnline =
+    explicitPeerOnline === true
+      ? resolveStableOnline(activeContactId, true)
+      : explicitPeerOnline == null
+        ? resolveImplicitOnline(peerLatestActivityTs, activeContactId)
+        : false;
   const headerPresenceText = isPeerOnline
     ? "online"
     : peerLatestActivityTs > 0
@@ -7666,7 +8464,7 @@ export default function Chat() {
         : kind === "video"
           ? "[Video]"
           : kind === "audio"
-            ? "?? Voice message"
+            ? "Voice message"
             : "[File]");
     const localTempId = `local_media_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const localPreview = normalizeMessage({
@@ -7716,7 +8514,7 @@ export default function Chat() {
       setContacts((prev) =>
         prev.map((c) => (
           c.id === activeContactId
-            ? { ...c, lastMessage: sent.text || (kind === "audio" ? "?? Voice message" : "[File]") }
+            ? { ...c, lastMessage: sent.text || (kind === "audio" ? "Voice message" : "[File]") }
             : c
         ))
       );
@@ -7967,7 +8765,7 @@ export default function Chat() {
 
         const ext = mimeType.includes("mp4") ? "m4a" : mimeType.includes("ogg") ? "ogg" : "webm";
         const file = new File([blob], `voice-note-${Date.now()}.${ext}`, { type: mimeType });
-        await sendMediaFile(file, { forcedKind: "audio", previewText: "?? Voice message" });
+        await sendMediaFile(file, { forcedKind: "audio", previewText: "Voice message" });
         setTimeout(() => composerInputRef.current?.focus(), 0);
       };
 
@@ -7984,6 +8782,23 @@ export default function Chat() {
   };
 
   const callActive = callState.phase !== "idle" || groupCallActive;
+  const openImagePreview = useCallback((src, alt) => {
+    const safeSrc = String(src || "").trim();
+    if (!safeSrc) return;
+    setImagePreview({ src: safeSrc, alt: String(alt || "Image") });
+  }, []);
+  const closeImagePreview = useCallback(() => {
+    setImagePreview(null);
+  }, []);
+
+  useEffect(() => {
+    if (!imagePreview) return undefined;
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") closeImagePreview();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [imagePreview, closeImagePreview]);
 
   useEffect(() => {
     if (callActive || incomingCall) setShowCallMenu(false);
@@ -8332,16 +9147,37 @@ export default function Chat() {
   const getMessageTickState = (message) => {
     if (!message || !message.mine) return null;
     const rawStatus = String(message.status || message.deliveryStatus || "").toLowerCase();
+    const readAtValue =
+      message.readAt ||
+      message.seenAt ||
+      message.read_at ||
+      message.seen_at ||
+      message.readAtUtc ||
+      message.seenAtUtc ||
+      message.readReceiptAt ||
+      message.readTimestamp;
     const isRead =
-      Boolean(message.readAt || message.seenAt) ||
+      Boolean(readAtValue) ||
       message.read === true ||
       message.seen === true ||
+      message.isRead === true ||
+      message.isSeen === true ||
       rawStatus === "read" ||
-      rawStatus === "seen";
+      rawStatus === "seen" ||
+      rawStatus === "viewed";
     if (isRead) return "read";
-    if (isPeerOnline && activeContactId) return "read";
 
     const messageTs = new Date(normalizeTimestamp(message.createdAt || 0)).getTime();
+    const hasPeerActivityAfter =
+      Number.isFinite(messageTs) &&
+      messageTs > 0 &&
+      (
+        (Number.isFinite(peerLatestMessageTs) && peerLatestMessageTs >= messageTs) ||
+        (Number.isFinite(peerLatestCallTs) && peerLatestCallTs >= messageTs) ||
+        (Number.isFinite(peerLatestProfileTs) && peerLatestProfileTs >= messageTs)
+      );
+    if (hasPeerActivityAfter) return "read";
+
     const idText = String(message.id || "");
     const isLocalPendingId =
       idText.startsWith("local_") ||
@@ -8349,8 +9185,15 @@ export default function Chat() {
       idText.startsWith("temp_");
     const oldEnough = Number.isFinite(messageTs) ? Date.now() - messageTs > 1500 : true;
     const isDelivered =
-      Boolean(message.deliveredAt || message.receivedAt) ||
+      Boolean(
+        message.deliveredAt ||
+        message.receivedAt ||
+        message.delivered_at ||
+        message.received_at ||
+        message.receivedTimestamp
+      ) ||
       message.delivered === true ||
+      message.received === true ||
       rawStatus === "delivered" ||
       rawStatus === "received" ||
       (idText && !isLocalPendingId && oldEnough);
@@ -8472,6 +9315,107 @@ export default function Chat() {
   }, [activeContactId, translatorEnabled, translatorLang]);
 
   useEffect(() => {
+    const messages = Array.isArray(activeMessages) ? activeMessages : [];
+    if (!messages.length) return undefined;
+    const pendingIds = new Set();
+    messages.forEach((msg) => {
+      const share = extractReelShare(msg?.text || "");
+      const id = String(share?.id || "").trim();
+      if (!id) return;
+      if (Object.prototype.hasOwnProperty.call(reelPreviewById, id)) return;
+      pendingIds.add(id);
+    });
+    if (!pendingIds.size) return undefined;
+
+    let cancelled = false;
+    const buildPreviewPayload = (reel) => {
+      const { video, poster } = pickReelPreviewFields(reel);
+      const src = resolveMediaUrl(video);
+      const posterUrl = resolveMediaUrl(poster);
+      if (!src && !posterUrl) return null;
+      return { src, poster: posterUrl };
+    };
+    const findReelInList = (items, targetId) => {
+      if (!Array.isArray(items)) return null;
+      return (
+        items.find((item) => getReelIdValue(item) === targetId) ||
+        items.find((item) => {
+          const candidate = normalizeReelCandidate(item);
+          const altId = getReelIdValue(candidate);
+          return altId === targetId;
+        }) ||
+        null
+      );
+    };
+    const fetchReelById = async (id) => {
+      const safeId = encodeURIComponent(id);
+      try {
+        const res = await requestChatObject({
+          endpoints: [
+            `/api/reels/${safeId}`,
+            `/reels/${safeId}`,
+            `/api/posts/${safeId}`,
+            `/posts/${safeId}`,
+            `/api/feed/${safeId}`,
+            `/feed/${safeId}`
+          ],
+          params: { _: Date.now() }
+        });
+        if (res?.data) return res.data;
+      } catch {
+        // ignore direct lookup failures
+      }
+      const listEndpoints = [
+        ["/api/reels", "/reels"],
+        ["/api/feed", "/feed", "/api/posts", "/posts"]
+      ];
+      for (const endpoints of listEndpoints) {
+        try {
+          const res = await requestChatArray({
+            endpoints,
+            params: { _: Date.now() }
+          });
+          const match = findReelInList(res?.list || [], id);
+          if (match) return match;
+        } catch {
+          // ignore list lookup failures
+        }
+      }
+      return null;
+    };
+
+    const run = async () => {
+      for (const id of pendingIds) {
+        if (cancelled) return;
+        if (reelPreviewLoadingRef.current.has(id)) continue;
+        reelPreviewLoadingRef.current.add(id);
+        try {
+          const reel = await fetchReelById(id);
+          if (cancelled) return;
+          const preview = reel ? buildPreviewPayload(reel) : null;
+          setReelPreviewById((prev) => {
+            if (Object.prototype.hasOwnProperty.call(prev, id)) return prev;
+            return { ...prev, [id]: preview };
+          });
+        } catch {
+          if (cancelled) return;
+          setReelPreviewById((prev) => {
+            if (Object.prototype.hasOwnProperty.call(prev, id)) return prev;
+            return { ...prev, [id]: null };
+          });
+        } finally {
+          reelPreviewLoadingRef.current.delete(id);
+        }
+      }
+    };
+
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeMessages, reelPreviewById]);
+
+  useEffect(() => {
     if (!translatorEnabled) return;
     if (!activeContactId) return;
     const messages = Array.isArray(activeMessages) ? activeMessages : [];
@@ -8509,10 +9453,16 @@ export default function Chat() {
     };
   }, [activeMessages, activeContactId, translatorEnabled, translatorLang, translatedIncomingById]);
 
-  useEffect(() => {
+  const sendVisibleReadReceipts = useCallback(() => {
     if (!isConversationRoute) return;
     if (!myUserId || !activeContactId) return;
-    const incoming = (Array.isArray(activeMessages) ? activeMessages : []).filter((m) => !m?.mine);
+    const visibleIds = getVisibleThreadMessageIds();
+    if (!visibleIds.size) return;
+    const incoming = (Array.isArray(activeMessages) ? activeMessages : []).filter((m) => {
+      if (!m || m.mine) return false;
+      const msgId = String(m.id || "").trim();
+      return msgId && visibleIds.has(msgId);
+    });
     if (!incoming.length) return;
 
     const readUptoMs = incoming.reduce((max, msg) => {
@@ -8547,6 +9497,13 @@ export default function Chat() {
       // ignore broadcast failures
     }
   }, [isConversationRoute, myUserId, activeContactId, activeMessages]);
+
+  useEffect(() => {
+    if (!isConversationRoute) return;
+    requestAnimationFrame(() => {
+      sendVisibleReadReceipts();
+    });
+  }, [isConversationRoute, activeContactId, activeMessages, sendVisibleReadReceipts]);
 
   useEffect(() => {
     if (!isConversationRoute) return;
@@ -8633,6 +9590,7 @@ export default function Chat() {
       scrollRafRef.current = 0;
       refreshThreadScrollState();
       processVisibleAutoSpeak();
+      sendVisibleReadReceipts();
     });
   };
 
@@ -8728,6 +9686,60 @@ export default function Chat() {
 
   const closeBubbleMenu = () => setBubbleMenu(null);
   const hasDraft = inputText.trim().length > 0;
+
+  const getBubbleDownloadInfo = (item) => {
+    if (!item || item.kind !== "message") return null;
+    const raw = item.raw || {};
+    const hasMedia = Boolean(raw.mediaUrl || raw.audioUrl);
+    if (!hasMedia) return null;
+    const url = raw.mediaUrl ? resolveMediaUrl(raw.mediaUrl) : toApiUrl(raw.audioUrl);
+    if (!url) return null;
+    const mediaType = String(raw.mediaType || (raw.audioUrl ? "audio" : "")).toLowerCase();
+    const rawFileName = String(raw.fileName || "").trim();
+    const parsedName = (() => {
+      try {
+        const clean = url.split("?")[0].split("#")[0];
+        const parts = clean.split("/");
+        return parts[parts.length - 1] || "";
+      } catch {
+        return "";
+      }
+    })();
+    let fileName = rawFileName || parsedName;
+    if (!fileName || !/\.[a-z0-9]+$/i.test(fileName)) {
+      const ext =
+        mediaType === "image"
+          ? "jpg"
+          : mediaType === "video"
+            ? "mp4"
+            : mediaType === "audio"
+              ? "webm"
+              : "bin";
+      fileName = `media-${Date.now()}.${ext}`;
+    }
+    return { url, fileName };
+  };
+
+  const saveBubbleMedia = async () => {
+    const info = getBubbleDownloadInfo(bubbleMenu?.item);
+    if (!info) return closeBubbleMenu();
+    try {
+      const res = await fetch(info.url, { credentials: "include" });
+      if (!res.ok) throw new Error("download-failed");
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = info.fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch {
+      window.open(info.url, "_blank");
+    }
+    closeBubbleMenu();
+  };
 
   const copyBubbleItem = async () => {
     const text = bubbleMenu?.item?.text || "";
@@ -8859,13 +9871,23 @@ export default function Chat() {
           Return to call {pipActive ? "(PiP closed)" : ""}
         </button>
       )}
-      {!isConversationRoute && (
+      {!isConversationRoute && !isRequestsRoute && (
         <aside className="chat-sidebar">
         <div className="chat-sidebar-head">
           <h2>Messages</h2>
-          <button type="button" className="new-chat-btn" onClick={() => setNewChatOpen(true)}>
-            + New Chat
-          </button>
+          <div className="chat-sidebar-actions">
+            <button
+              type="button"
+              className="chat-requests-link"
+              onClick={() => navigate("/chat/requests")}
+            >
+              Requests
+              {requestsTotal > 0 && <span className="chat-requests-count">{requestsTotal}</span>}
+            </button>
+            <button type="button" className="new-chat-btn" onClick={() => setNewChatOpen(true)}>
+              + New Chat
+            </button>
+          </div>
         </div>
         <div className="chat-stories">
           <div className="chat-stories-head">
@@ -8879,44 +9901,45 @@ export default function Chat() {
               <span className="chat-story-thumb">+</span>
               <small>Your story</small>
             </button>
-            {storyItems.length > 0 &&
-              (() => {
-                const story = storyItems[0];
-                const mediaUrl = resolveStoryMediaUrl(story?.mediaUrl || story?.url || "");
-                const isVideo = isStoryVideo(mediaUrl);
-                const baseLabel = String(story?.storyText || story?.caption || "Story").trim();
-                const label = storyItems.length > 1 ? `Stories (${storyItems.length})` : baseLabel;
-                return (
-                  <button
-                    type="button"
-                    className="chat-story-tile"
-                    onClick={handleStoryTileClick}
-                    onPointerDown={startStoryLongPress}
-                    onPointerUp={cancelStoryLongPress}
-                    onPointerLeave={cancelStoryLongPress}
-                    onPointerCancel={cancelStoryLongPress}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      if (storyItems.length > 0) openStoryOptions();
-                    }}
-                  >
-                    <span className="chat-story-thumb">
-                      {mediaUrl ? (
-                        isVideo ? (
-                          <video src={mediaUrl} muted playsInline preload="metadata" />
-                        ) : (
-                          <img src={mediaUrl} alt={label} />
-                        )
+            {storyGroups.map((group) => {
+              const story = group.latest || group.items[0];
+              const mediaUrl = resolveStoryMediaUrl(story?.mediaUrl || story?.url || "");
+              const isVideo = isStoryVideo(mediaUrl);
+              const baseLabel = getStoryGroupLabel(group);
+              const label =
+                group.items.length > 1 ? `${baseLabel} (${group.items.length})` : baseLabel;
+              return (
+                <button
+                  key={group.key}
+                  type="button"
+                  className="chat-story-tile"
+                  onClick={() => handleStoryTileClick(group)}
+                  onPointerDown={startStoryLongPress(group)}
+                  onPointerUp={cancelStoryLongPress}
+                  onPointerLeave={cancelStoryLongPress}
+                  onPointerCancel={cancelStoryLongPress}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    if (isMyStoryGroup(group)) openStoryOptions(group);
+                  }}
+                >
+                  <span className="chat-story-thumb">
+                    {mediaUrl ? (
+                      isVideo ? (
+                        <video src={mediaUrl} muted playsInline preload="metadata" />
                       ) : (
-                        <span className="chat-story-fallback">{label.slice(0, 1).toUpperCase()}</span>
-                      )}
-                      {isVideo && <span className="chat-story-play">▶</span>}
-                    </span>
-                    <small>{label.length > 14 ? `${label.slice(0, 12)}...` : label}</small>
-                  </button>
-                );
-              })()}
-            {storyItems.length === 0 && (
+                        <img src={mediaUrl} alt={label} />
+                      )
+                    ) : (
+                      <span className="chat-story-fallback">{label.slice(0, 1).toUpperCase()}</span>
+                    )}
+                    {isVideo && <span className="chat-story-play">▶</span>}
+                  </span>
+                  <small>{label.length > 14 ? `${label.slice(0, 12)}...` : label}</small>
+                </button>
+              );
+            })}
+            {storyGroups.length === 0 && (
               <p className="chat-story-empty">No stories yet</p>
             )}
           </div>
@@ -8930,95 +9953,6 @@ export default function Chat() {
         />
         {error && <p className="chat-error">{error}</p>}
         {!error && !!shareHint && <p className="chat-empty">{shareHint}</p>}
-        <div className="chat-requests">
-          <div className="chat-requests-head">
-            <h3>Chat Requests</h3>
-            {chatRequests.length > 0 && <span className="chat-requests-count">{chatRequests.length}</span>}
-          </div>
-          <div className="chat-requests-list">
-            {chatRequestsLoading && <p className="chat-request-empty">Loading requests...</p>}
-            {!chatRequestsLoading && !chatRequestError && chatRequests.length === 0 && (
-              <p className="chat-request-empty">No new requests</p>
-            )}
-            {chatRequestError && <p className="chat-request-error">{chatRequestError}</p>}
-            {chatRequests.map((req) => {
-              const contact = resolveChatRequestContact(req);
-              if (!contact) return null;
-              const displayName = getContactDisplayName(contact);
-              const requestId = String(req?.id || "").trim();
-              const busy = Boolean(requestId && chatRequestBusyById[requestId]);
-              const actionable = Boolean(requestId);
-              return (
-                <div key={requestId || contact.id} className="chat-request-card">
-                  <span className="chat-avatar">
-                    {contact.profilePic ? (
-                      <img src={contact.profilePic} alt={displayName} className="chat-avatar-img" />
-                    ) : (
-                      contact.avatar
-                    )}
-                  </span>
-                  <span className="chat-request-meta">
-                    <strong>{displayName}</strong>
-                    <small>{contact.email || contact.username || "Chat request"}</small>
-                  </span>
-                  <div className="chat-request-actions">
-                    <button
-                      type="button"
-                      className="chat-request-btn accept"
-                      onClick={() => acceptChatRequest(req)}
-                      disabled={!actionable || busy}
-                    >
-                      Accept
-                    </button>
-                    <button
-                      type="button"
-                      className="chat-request-btn reject"
-                      onClick={() => rejectChatRequest(req)}
-                      disabled={!actionable || busy}
-                    >
-                      Reject
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-        <div className="chat-requests chat-requests-sent">
-          <div className="chat-requests-head">
-            <h3>Sent Requests</h3>
-            {sentChatRequests.length > 0 && <span className="chat-requests-count">{sentChatRequests.length}</span>}
-          </div>
-          <div className="chat-requests-list">
-            {chatRequestsLoading && sentChatRequests.length === 0 && (
-              <p className="chat-request-empty">Loading requests...</p>
-            )}
-            {!chatRequestsLoading && sentChatRequests.length === 0 && (
-              <p className="chat-request-empty">No sent requests</p>
-            )}
-            {sentChatRequests.map((req) => {
-              const contact = resolveChatRequestContact(req);
-              if (!contact) return null;
-              const displayName = getContactDisplayName(contact);
-              return (
-                <div key={`sent-${req?.id || contact.id}`} className="chat-request-card">
-                  <span className="chat-avatar">
-                    {contact.profilePic ? (
-                      <img src={contact.profilePic} alt={displayName} className="chat-avatar-img" />
-                    ) : (
-                      contact.avatar
-                    )}
-                  </span>
-                  <span className="chat-request-meta">
-                    <strong>{displayName}</strong>
-                    <small>{contact.email || contact.username || "Awaiting response"}</small>
-                  </span>
-                  <span className="chat-request-status">Pending</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
         <div className="chat-contact-list">
           {filteredContacts.map((c) => {
             const presence = getContactPresence(c);
@@ -9036,6 +9970,10 @@ export default function Chat() {
                   onPointerUp={(e) => handleContactPointerUp(e, c)}
                   onPointerLeave={stopContactLongPress}
                   onPointerCancel={stopContactLongPress}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    toggleContactActions(contactId);
+                  }}
                   onDoubleClick={() => openContact(c)}
                   onKeyDown={(e) => handleContactKeyDown(e, c)}
                 >
@@ -9094,7 +10032,18 @@ export default function Chat() {
                 {newChatCandidates.map((c) => {
                   const displayName = getContactDisplayName(c);
                   const canChat = canChatWith(c);
-                  const requestStatus = getRequestStatus(c);
+                  const outgoingPending = hasOutgoingRequest(c);
+                  const rawRequestStatus = getRequestStatus(c);
+                  const cleanedStatus =
+                    !chatRequestsLoading && !outgoingPending &&
+                    (rawRequestStatus === "requested" || rawRequestStatus === "pending")
+                      ? ""
+                      : rawRequestStatus;
+                  const requestStatus = isFollowingContact(c)
+                    ? "following"
+                    : outgoingPending
+                      ? "requested"
+                      : cleanedStatus;
                   const requestLabel =
                     requestStatus === "following"
                       ? "Following"
@@ -9138,6 +10087,117 @@ export default function Chat() {
           </div>
         )}
         </aside>
+      )}
+
+      {!isConversationRoute && isRequestsRoute && (
+        <section className="chat-requests-page">
+          <div className="chat-requests-page-head">
+            <button
+              type="button"
+              className="chat-requests-back"
+              onClick={() => navigate("/chat")}
+            >
+              <FiArrowLeft /> Back
+            </button>
+            <h2>Chat Requests</h2>
+            <span className="chat-requests-summary">
+              {chatRequests.length} incoming / {filteredSentChatRequests.length} sent
+            </span>
+          </div>
+          <div className="chat-requests-grid">
+            <div className="chat-requests">
+              <div className="chat-requests-head">
+                <h3>Incoming</h3>
+                {chatRequests.length > 0 && <span className="chat-requests-count">{chatRequests.length}</span>}
+              </div>
+              <div className="chat-requests-list">
+                {chatRequestsLoading && <p className="chat-request-empty">Loading requests...</p>}
+                {!chatRequestsLoading && !chatRequestError && chatRequests.length === 0 && (
+                  <p className="chat-request-empty">No new requests</p>
+                )}
+                {chatRequestError && <p className="chat-request-error">{chatRequestError}</p>}
+                {chatRequests.map((req) => {
+                  const contact = resolveChatRequestContact(req);
+                  if (!contact) return null;
+                  const displayName = getContactDisplayName(contact);
+                  const requestId = String(req?.id || "").trim();
+                  const busy = Boolean(requestId && chatRequestBusyById[requestId]);
+                  const actionable = Boolean(requestId);
+                  return (
+                    <div key={requestId || contact.id} className="chat-request-card">
+                      <span className="chat-avatar">
+                        {contact.profilePic ? (
+                          <img src={contact.profilePic} alt={displayName} className="chat-avatar-img" />
+                        ) : (
+                          contact.avatar
+                        )}
+                      </span>
+                      <span className="chat-request-meta">
+                        <strong>{displayName}</strong>
+                        <small>{contact.email || contact.username || "Chat request"}</small>
+                      </span>
+                      <div className="chat-request-actions">
+                        <button
+                          type="button"
+                          className="chat-request-btn accept"
+                          onClick={() => acceptChatRequest(req)}
+                          disabled={!actionable || busy}
+                        >
+                          Accept
+                        </button>
+                        <button
+                          type="button"
+                          className="chat-request-btn reject"
+                          onClick={() => rejectChatRequest(req)}
+                          disabled={!actionable || busy}
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="chat-requests chat-requests-sent">
+              <div className="chat-requests-head">
+                <h3>Sent</h3>
+                {filteredSentChatRequests.length > 0 && (
+                  <span className="chat-requests-count">{filteredSentChatRequests.length}</span>
+                )}
+              </div>
+              <div className="chat-requests-list">
+                {chatRequestsLoading && filteredSentChatRequests.length === 0 && (
+                  <p className="chat-request-empty">Loading requests...</p>
+                )}
+                {!chatRequestsLoading && filteredSentChatRequests.length === 0 && (
+                  <p className="chat-request-empty">No sent requests</p>
+                )}
+                {filteredSentChatRequests.map((req) => {
+                  const contact = resolveChatRequestContact(req);
+                  if (!contact) return null;
+                  const displayName = getContactDisplayName(contact);
+                  return (
+                    <div key={`sent-${req?.id || contact.id}`} className="chat-request-card">
+                      <span className="chat-avatar">
+                        {contact.profilePic ? (
+                          <img src={contact.profilePic} alt={displayName} className="chat-avatar-img" />
+                        ) : (
+                          contact.avatar
+                        )}
+                      </span>
+                      <span className="chat-request-meta">
+                        <strong>{displayName}</strong>
+                        <small>{contact.email || contact.username || "Awaiting response"}</small>
+                      </span>
+                      <span className="chat-request-status">Pending</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </section>
       )}
 
       {isConversationRoute && (
@@ -9279,6 +10339,7 @@ export default function Chat() {
                     ref={remoteVideoRef}
                     autoPlay
                     playsInline
+                    muted
                     className={`wa-video-remote ${remoteIsScreenShare ? "is-screen" : "is-mirror"}`}
                     style={{ filter: activeVideoFilter.css }}
                     data-allow-simultaneous="true"
@@ -9811,6 +10872,50 @@ export default function Chat() {
                     </div>
                   );
                 }
+                const reelShare = item.kind === "message" ? extractReelShare(item.raw?.text || item.text) : null;
+                const senderName = item.mine
+                  ? "You"
+                  : String(activeContact?.name || activeContact?.username || "User").trim();
+                const senderInitial = senderName ? senderName.charAt(0).toUpperCase() : "U";
+                const renderReelShareCard = (mediaUrl) => {
+                  if (!reelShare) return null;
+                  const openReel = () => {
+                    if (reelShare?.href) navigate(reelShare.href);
+                  };
+                  const preview = reelShare?.id ? reelPreviewById[reelShare.id] : null;
+                  const previewSrc = mediaUrl || preview?.src || "";
+                  const previewPoster = preview?.poster || "";
+                  return (
+                    <div className="chat-reel-wrap">
+                      <div className={`chat-reel-card ${item.mine ? "mine" : "their"}`}>
+                        <button type="button" className="chat-reel-media" onClick={openReel}>
+                          {previewSrc ? (
+                            <video
+                              className="chat-reel-video"
+                              src={previewSrc}
+                              poster={previewPoster || undefined}
+                              muted
+                              playsInline
+                              preload={previewPoster ? "metadata" : "auto"}
+                            />
+                          ) : previewPoster ? (
+                            <img
+                              className="chat-reel-video"
+                              src={previewPoster}
+                              alt="Reel preview"
+                              loading="lazy"
+                            />
+                          ) : (
+                            <div className="chat-reel-video chat-reel-placeholder" />
+                          )}
+                          <div className="chat-reel-overlay">
+                            <span className="chat-reel-play">▶</span>
+                          </div>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                };
                 const enableBubbleMenu = item.kind === "message";
                 const callCard = item.kind === "call" ? formatCallCard(item.raw) : null;
                 return (
@@ -9848,28 +10953,58 @@ export default function Chat() {
                           <audio controls preload="metadata" className="chat-audio" src={toApiUrl(item.raw.audioUrl)} />
                         </div>
                       ) : item.kind === "message" && item.raw?.mediaUrl ? (
-                        item.raw?.mediaType === "image" ? (
-                          <img
-                            src={resolveMediaUrl(item.raw.mediaUrl)}
-                            alt={item.raw?.fileName || "image"}
-                            className="chat-media-image"
-                          />
-                        ) : item.raw?.mediaType === "video" ? (
-                          <video controls preload="metadata" className="chat-media-video" src={resolveMediaUrl(item.raw.mediaUrl)} />
-                        ) : item.raw?.mediaType === "audio" ? (
-                          <div className={`chat-voice-note ${item.mine ? "mine" : "their"}`}>
-                            {item.mine && (
-                              <span className="chat-voice-note-icon" aria-hidden="true">
-                                <FiVolume2 />
-                              </span>
-                            )}
-                            <audio controls preload="metadata" className="chat-audio" src={resolveMediaUrl(item.raw.mediaUrl)} />
-                          </div>
-                        ) : (
-                          <a className="chat-file-link" href={resolveMediaUrl(item.raw.mediaUrl)} target="_blank" rel="noreferrer">
-                            ?? {item.raw?.fileName || "Download file"}
-                          </a>
-                        )
+                        (() => {
+                          const mediaUrl = resolveMediaUrl(item.raw.mediaUrl);
+                          const fileName = String(item.raw?.fileName || "");
+                          const textLabel = String(item.raw?.text || "");
+                          const looksAudio =
+                            item.raw?.mediaType === "audio" ||
+                            /\.(webm|ogg|mp3|m4a|wav|aac|opus)(\?|#|$)/i.test(fileName) ||
+                            /\.(webm|ogg|mp3|m4a|wav|aac|opus)(\?|#|$)/i.test(textLabel) ||
+                            /\.(webm|ogg|mp3|m4a|wav|aac|opus)(\?|#|$)/i.test(mediaUrl);
+                          if (looksAudio) {
+                            return (
+                              <div className={`chat-voice-note ${item.mine ? "mine" : "their"}`}>
+                                {item.mine && (
+                                  <span className="chat-voice-note-icon" aria-hidden="true">
+                                    <FiVolume2 />
+                                  </span>
+                                )}
+                                <audio controls preload="metadata" className="chat-audio" src={mediaUrl} />
+                              </div>
+                            );
+                          }
+                          if (item.raw?.mediaType === "image") {
+                            return (
+                              <button
+                                type="button"
+                                className="chat-media-image-btn"
+                                onClick={() => openImagePreview(mediaUrl, fileName || "image")}
+                              >
+                                <img
+                                  src={mediaUrl}
+                                  alt={fileName || "image"}
+                                  className="chat-media-image"
+                                />
+                              </button>
+                            );
+                          }
+                          if (item.raw?.mediaType === "video") {
+                            if (reelShare) {
+                              return renderReelShareCard(mediaUrl);
+                            }
+                            return (
+                              <video controls preload="metadata" className="chat-media-video" src={mediaUrl} />
+                            );
+                          }
+                          return (
+                            <a className="chat-file-link" href={mediaUrl} target="_blank" rel="noreferrer">
+                              File: {fileName || "Download file"}
+                            </a>
+                          );
+                        })()
+                      ) : item.kind === "message" && reelShare ? (
+                        renderReelShareCard("")
                       ) : item.kind === "message" && /^\[Attachment:\s*.+\]$/i.test(String(item.raw?.text || "")) ? (
                         <span className="chat-attachment-text">{String(item.raw?.text || "")}</span>
                       ) : item.kind === "call" ? (
@@ -10283,6 +11418,9 @@ export default function Chat() {
                   onClick={(e) => e.stopPropagation()}
                 >
                   <button type="button" onClick={copyBubbleItem}>Copy</button>
+                  {getBubbleDownloadInfo(bubbleMenu?.item) && (
+                    <button type="button" onClick={saveBubbleMedia}>Save to gallery</button>
+                  )}
                   {bubbleMenu?.item?.kind === "message" && bubbleMenu?.item?.mine && (
                     <button type="button" className="bubble-menu-danger" onClick={deleteBubbleItemForEveryone}>
                       Delete for everyone
@@ -10291,6 +11429,27 @@ export default function Chat() {
                   <button type="button" onClick={deleteBubbleItem}>Delete</button>
                   <button type="button" onClick={closeBubbleMenu}>Cancel</button>
                 </div>
+              </div>
+            )}
+            {imagePreview && (
+              <div className="chat-image-preview-backdrop" onClick={closeImagePreview}>
+                <button
+                  type="button"
+                  className="chat-image-preview-close"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    closeImagePreview();
+                  }}
+                  aria-label="Close image preview"
+                >
+                  ×
+                </button>
+                <img
+                  src={imagePreview.src}
+                  alt={imagePreview.alt || "Image preview"}
+                  className="chat-image-preview"
+                  onClick={(e) => e.stopPropagation()}
+                />
               </div>
             )}
           </>
@@ -10303,11 +11462,102 @@ export default function Chat() {
             {(() => {
               const mediaUrl = resolvedStoryMediaUrl;
               const isVideo = resolvedStoryIsVideo;
-              const label = String(activeStory?.storyText || activeStory?.caption || "Story").trim();
+              const label = String(activeStory?.storyText || activeStory?.caption || "").trim();
+              const storyUserNameRaw = resolveStoryUsername(activeStory);
+              const storyUserLabel = storyUserNameRaw
+                ? storyUserNameRaw
+                : String(activeStory?.userId || "") === String(myUserId || "")
+                  ? "You"
+                  : "Story";
+              const isMyStoryItem = (() => {
+                const storyUserId = String(getStoryUserIdValue(activeStory) || "").trim();
+                if (storyUserId && myUserId && storyUserId === String(myUserId)) return true;
+                const storyEmail = String(getStoryUserEmailValue(activeStory) || "").trim().toLowerCase();
+                if (storyEmail && myEmail && storyEmail === String(myEmail || "").trim().toLowerCase()) return true;
+                return false;
+              })();
+              const storyKey = storyKeyFor(activeStory, storyViewerIndex);
+              const storyReaction = storyReactions?.[storyKey] || {};
+              const storyLiked = Boolean(storyReaction.liked);
+              const storyLikeCount = Number(activeStory?.likeCount || 0);
+              const storyCommentCount = Number(activeStory?.commentCount || 0);
+              const storyViewCount = Number(activeStory?.viewCount || 0);
+              const storyOptionsGroup = storyViewerGroupKey
+                ? storyGroupsByKey.get(storyViewerGroupKey)
+                : null;
+              const openViewerOptions = () => {
+                const fallbackGroup =
+                  !storyOptionsGroup && storyViewerItems.length
+                    ? { key: storyViewerGroupKey || "viewer", items: storyViewerItems }
+                    : null;
+                const target = storyOptionsGroup || fallbackGroup;
+                if (target) openStoryOptions(target);
+              };
+              const toggleStoryLike = async () => {
+                const nextLiked = !storyLiked;
+                setStoryReactions((prev) => {
+                  const current = prev?.[storyKey] || {};
+                  return {
+                    ...prev,
+                    [storyKey]: { ...current, liked: nextLiked }
+                  };
+                });
+
+                const storyId = activeStory?.id;
+                if (!storyId) return;
+                try {
+                  let payload = null;
+                  if (nextLiked) {
+                    const res = await api.post(`/api/stories/${storyId}/like`);
+                    payload = res?.data;
+                  } else {
+                    const res = await api.delete(`/api/stories/${storyId}/like`);
+                    payload = res?.data;
+                  }
+                  if (payload && typeof payload === "object") {
+                    applyStoryStats(storyId, {
+                      likeCount: payload.likeCount,
+                      commentCount: payload.commentCount,
+                      viewCount: payload.viewCount,
+                      likedByMe: Boolean(payload.liked)
+                    });
+                  }
+                } catch {
+                  setStoryReactions((prev) => {
+                    const current = prev?.[storyKey] || {};
+                    return {
+                      ...prev,
+                      [storyKey]: { ...current, liked: !nextLiked }
+                    };
+                  });
+                }
+              };
+              const submitStoryComment = async () => {
+                const text = String(storyCommentDraft || "").trim();
+                if (!text) return;
+                setStoryCommentDraft("");
+                setStoryCommentOpen(false);
+                const storyId = activeStory?.id;
+                if (!storyId) return;
+                try {
+                  const res = await api.post(`/api/stories/${storyId}/comment`, { text });
+                  const payload = res?.data;
+                  if (payload && typeof payload === "object") {
+                    applyStoryStats(storyId, {
+                      likeCount: payload.likeCount,
+                      commentCount: payload.commentCount,
+                      viewCount: payload.viewCount,
+                      likedByMe: Boolean(payload.liked)
+                    });
+                  }
+                } catch {
+                  // ignore comment failure
+                }
+              };
               return (
                 <>
                   <div className="chat-story-progress">
-                    {storyItems.map((story, idx) => {
+                    {storyViewerItems.map((story, idx) => {
                       const key = story?.id ? `${story.id}` : `${idx}`;
                       let width = 0;
                       if (idx < storyViewerIndex) width = 100;
@@ -10321,9 +11571,9 @@ export default function Chat() {
                   </div>
                   <div className="chat-story-player-header">
                     <div className="chat-story-player-meta">
-                      <strong>{label || "Story"}</strong>
+                      <strong>{storyUserLabel || "Story"}</strong>
                       <span>
-                        {storyViewerIndex + 1}/{storyItems.length}
+                        {storyViewerIndex + 1}/{storyViewerItems.length}
                       </span>
                     </div>
                     <div className="chat-story-player-actions">
@@ -10346,6 +11596,19 @@ export default function Chat() {
                           }}
                         >
                           {storyViewerMuted ? <FiVolumeX /> : <FiVolume2 />}
+                        </button>
+                      )}
+                      {isMyStoryItem && (
+                        <button
+                          type="button"
+                          className="ghost"
+                          aria-label="Story options"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            openViewerOptions();
+                          }}
+                        >
+                          <FiMoreVertical />
                         </button>
                       )}
                       <button type="button" className="close" aria-label="Close story" onClick={closeStory}>
@@ -10418,17 +11681,57 @@ export default function Chat() {
                     )}
                   </div>
                   {label && <p className="chat-story-player-caption">{label}</p>}
-                  {storyItems.length > 1 && (
-                    <div className="chat-story-player-footer">
-                      <button type="button" onClick={goPrevStory} disabled={storyViewerIndex <= 0}>
-                        Prev
+                  <div className="chat-story-reactions">
+                    <span className="chat-story-reaction-user">{storyUserLabel || "Story"}</span>
+                    <div className="chat-story-reaction-buttons">
+                      <button
+                        type="button"
+                        className={`chat-story-reaction-btn ${storyLiked ? "is-liked" : ""}`}
+                        onClick={toggleStoryLike}
+                      >
+                        <FiHeart />
+                        {storyLiked ? "Liked" : "Like"}
                       </button>
-                      <button type="button" onClick={goNextStory} disabled={storyViewerIndex >= storyItems.length - 1}>
-                        Next
+                      <button
+                        type="button"
+                        className="chat-story-reaction-btn"
+                        onClick={() => setStoryCommentOpen((prev) => !prev)}
+                      >
+                        <FiMessageCircle />
+                        Comment
+                      </button>
+                    </div>
+                  </div>
+                  {isMyStoryItem && (
+                    <div className="chat-story-stats" aria-label="Story stats">
+                      <span className="chat-story-stat">
+                        <FiHeart />
+                        {formatStoryCount(storyLikeCount)}
+                      </span>
+                      <span className="chat-story-stat">
+                        <FiMessageCircle />
+                        {formatStoryCount(storyCommentCount)}
+                      </span>
+                      <span className="chat-story-stat">
+                        <FiEye />
+                        {formatStoryCount(storyViewCount)}
+                      </span>
+                    </div>
+                  )}
+                  {storyCommentOpen && (
+                    <div className="chat-story-comment-row">
+                      <input
+                        type="text"
+                        placeholder="Add a comment..."
+                        value={storyCommentDraft}
+                        onChange={(e) => setStoryCommentDraft(e.target.value)}
+                      />
+                      <button type="button" aria-label="Send comment" onClick={submitStoryComment}>
+                        <FiSend />
                       </button>
                     </div>
                   )}
-                  {storyItems.length > 1 && (
+                  {storyViewerItems.length > 1 && (
                     <div className="chat-story-player-nav">
                       <button
                         type="button"
@@ -10447,7 +11750,7 @@ export default function Chat() {
                           e.stopPropagation();
                           goNextStory();
                         }}
-                        disabled={storyViewerIndex >= storyItems.length - 1}
+                        disabled={storyViewerIndex >= storyViewerItems.length - 1}
                         aria-label="Next story"
                       />
                     </div>
@@ -10458,25 +11761,25 @@ export default function Chat() {
           </div>
         </div>
       )}
-      {storyOptionsOpen && storyItems.length > 0 && (
+      {storyOptionsOpen && storyOptionsItems.length > 0 && (
         <div className="chat-story-options-backdrop" onClick={closeStoryOptions}>
           <div className="chat-story-options" onClick={(e) => e.stopPropagation()}>
             <h4>Story options</h4>
             <button
               type="button"
               onClick={() => {
-                deleteStoryAt(0);
+                deleteStoryItems([storyOptionsItems[0]]);
                 closeStoryOptions();
               }}
             >
-              {storyItems.length > 1 ? "Delete latest story" : "Delete story"}
+              {storyOptionsItems.length > 1 ? "Delete latest story" : "Delete story"}
             </button>
-            {storyItems.length > 1 && (
+            {storyOptionsItems.length > 1 && (
               <button
                 type="button"
                 className="danger"
                 onClick={() => {
-                  clearStories();
+                  deleteStoryItems(storyOptionsItems);
                   closeStoryOptions();
                 }}
               >

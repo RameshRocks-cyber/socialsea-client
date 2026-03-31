@@ -12,6 +12,7 @@ import "./Profile.css";
 
 const FOLLOWING_CACHE_KEY = "socialsea_following_cache_v1";
 const HIDDEN_PROFILE_POSTS_KEY = "socialsea_hidden_profile_posts_v1";
+const STORY_STORAGE_KEY = "socialsea_stories_v1";
 const PROFILE_CACHE_KEY = "socialsea_profile_cache_v1";
 const HIGHLIGHTS_STORAGE_KEY = "socialsea_highlights_v1";
 const PROFILE_REQ_TIMEOUT_MS = 2500;
@@ -32,6 +33,19 @@ const readJobMode = () => {
     return "profile";
   } catch {
     return "profile";
+  }
+};
+
+const readShowMyStoriesOnProfile = () => {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    if (typeof parsed?.showMyStoriesOnProfile === "boolean") {
+      return parsed.showMyStoriesOnProfile;
+    }
+    return true;
+  } catch {
+    return true;
   }
 };
 
@@ -106,6 +120,60 @@ const readHiddenProfilePostIds = () => {
   } catch {
     return new Set();
   }
+};
+
+const normalizeMediaVariants = (raw) => {
+  const value = String(raw || "").trim();
+  if (!value) return [];
+  const absolute = value.startsWith("http") ? value : toApiUrl(value);
+  if (absolute && absolute !== value) return [value, absolute];
+  return [value];
+};
+
+const buildStoryMediaSet = (stories) => {
+  const set = new Set();
+  const list = Array.isArray(stories) ? stories : [];
+  list.forEach((story) => {
+    const media =
+      story?.mediaUrl ||
+      story?.url ||
+      story?.fileUrl ||
+      story?.storyUrl ||
+      story?.contentUrl ||
+      "";
+    normalizeMediaVariants(media).forEach((entry) => set.add(entry));
+  });
+  return set;
+};
+
+const readLocalStoryMediaSet = () => {
+  try {
+    const raw = localStorage.getItem(STORY_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return buildStoryMediaSet(parsed);
+  } catch {
+    return new Set();
+  }
+};
+
+const isStoryMediaMatch = (mediaUrl, storySet) => {
+  if (!mediaUrl || !storySet || storySet.size === 0) return false;
+  return normalizeMediaVariants(mediaUrl).some((entry) => storySet.has(entry));
+};
+
+const filterOutStoryPosts = (posts, storySet) => {
+  const list = Array.isArray(posts) ? posts : [];
+  if (!storySet || storySet.size === 0) return list;
+  return list.filter((post) => {
+    const url =
+      post?.contentUrl ||
+      post?.mediaUrl ||
+      post?.imageUrl ||
+      post?.videoUrl ||
+      post?.media?.url ||
+      "";
+    return !isStoryMediaMatch(url, storySet);
+  });
 };
 
 const readHighlights = () => {
@@ -255,6 +323,7 @@ export default function Profile() {
   const navigate = useNavigate();
   const [profile, setProfile] = useState(null);
   const [posts, setPosts] = useState([]);
+  const [postsLoaded, setPostsLoaded] = useState(false);
   const [error, setError] = useState("");
   const [isFollowing, setIsFollowing] = useState(false);
   const [followers, setFollowers] = useState(0);
@@ -270,12 +339,15 @@ export default function Profile() {
   const [companyJobs, setCompanyJobs] = useState([]);
   const [vaultCount, setVaultCount] = useState(0);
   const [jobMode, setJobMode] = useState(() => readJobMode());
+  const [showMyStoriesOnProfile, setShowMyStoriesOnProfile] = useState(() => readShowMyStoriesOnProfile());
   const [createSheetOpen, setCreateSheetOpen] = useState(false);
   const [highlights, setHighlights] = useState(() => readHighlights());
   const [activeHighlight, setActiveHighlight] = useState(null);
   const [activeHighlightIndex, setActiveHighlightIndex] = useState(0);
   const holdTimerRef = useRef(null);
   const deleteRevealHideTimerRef = useRef(null);
+  const storyMediaSetRef = useRef(new Set());
+  const cleanupStoryPostsRef = useRef(false);
   const profileRouteKey = getProfileIdentifier(profile, username, myUsername, myName, myEmail, myUserId) || "me";
 
   const isOwnProfile =
@@ -290,6 +362,7 @@ export default function Profile() {
     const handleStorage = (event) => {
       if (event?.key === SETTINGS_KEY) {
         setJobMode(readJobMode());
+        setShowMyStoriesOnProfile(readShowMyStoriesOnProfile());
       }
     };
     window.addEventListener("storage", handleStorage);
@@ -321,10 +394,15 @@ export default function Profile() {
     const cacheKey = String(username || "").trim().toLowerCase();
     setError("");
     setPostActionError("");
+    setPostsLoaded(false);
+    const localStorySet = readLocalStoryMediaSet();
+    storyMediaSetRef.current = localStorySet;
     const cached = readProfileCacheByKey(cacheKey);
     if (cached) {
       setProfile(cached.profile || null);
-      setPosts(Array.isArray(cached.posts) ? cached.posts : []);
+      const cachedPosts = Array.isArray(cached.posts) ? cached.posts : [];
+      setPosts(filterOutStoryPosts(cachedPosts, localStorySet));
+      setPostsLoaded(cachedPosts.length > 0);
       setFollowers(Number(cached.followers || 0));
       setFollowingCount(Number(cached.followingCount || 0));
       setIsFollowing(Boolean(cached.isFollowing));
@@ -392,6 +470,62 @@ export default function Profile() {
             return String(post?.contentUrl || "").trim();
           });
       };
+
+    const loadStoryMediaSet = async (preferredBase) => {
+      const orderedBases = [preferredBase, ...baseCandidates.filter((b) => b && b !== preferredBase)].filter(Boolean);
+      for (const base of orderedBases.slice(0, 3)) {
+        try {
+          const res = await requestWithTimeout(
+            "/api/stories/mine",
+            {
+              baseURL: base,
+              suppressAuthRedirect: true,
+              params: { _: Date.now() },
+              headers: {
+                "Cache-Control": "no-cache",
+                Pragma: "no-cache"
+              }
+            },
+            5000
+          );
+          const set = buildStoryMediaSet(res?.data);
+          if (Array.isArray(res?.data)) {
+            try {
+              localStorage.setItem(STORY_STORAGE_KEY, JSON.stringify(res.data.slice(0, 120)));
+            } catch {
+              // ignore storage errors
+            }
+          }
+          if (set.size) return set;
+        } catch {
+          // try next base
+        }
+      }
+      return readLocalStoryMediaSet();
+    };
+
+    const cleanupStoryPosts = async (preferredBase, storySet) => {
+      if (cleanupStoryPostsRef.current) return 0;
+      const mediaUrls = Array.from(storySet || []);
+      if (!mediaUrls.length) return 0;
+      cleanupStoryPostsRef.current = true;
+      try {
+        const res = await requestWithTimeout(
+          "/api/profile/me/posts/cleanup-stories",
+          {
+            baseURL: preferredBase,
+            method: "POST",
+            data: { mediaUrls },
+            suppressAuthRedirect: true
+          },
+          8000
+        );
+        const deleted = Number(res?.data?.deleted || 0);
+        return Number.isFinite(deleted) ? deleted : 0;
+      } catch {
+        return 0;
+      }
+    };
 
     const loadProfile = async () => {
       const fetchProfileAtBase = async (base) => {
@@ -571,8 +705,9 @@ export default function Profile() {
               POSTS_REQ_TIMEOUT_MS
             );
             const normalized = normalizePosts(res?.data);
-            if (normalized.length > bestPosts.length) {
-              bestPosts = normalized;
+            const filtered = filterOutStoryPosts(normalized, storyMediaSetRef.current);
+            if (filtered.length > bestPosts.length) {
+              bestPosts = filtered;
             }
           } catch {
             // continue
@@ -598,8 +733,9 @@ export default function Profile() {
                 POSTS_REQ_TIMEOUT_MS
               );
               const normalized = normalizePosts(res?.data);
-              if (normalized.length > bestPosts.length) {
-                bestPosts = normalized;
+              const filtered = filterOutStoryPosts(normalized, storyMediaSetRef.current);
+              if (filtered.length > bestPosts.length) {
+                bestPosts = filtered;
               }
             } catch {
               // continue
@@ -609,6 +745,7 @@ export default function Profile() {
       }
 
       if (!cancelled) setPosts(bestPosts);
+      if (!cancelled) setPostsLoaded(true);
       return bestPosts;
     };
 
@@ -634,9 +771,18 @@ export default function Profile() {
         const canViewContent = profileResult?.profileData?.canViewContent !== false;
         if (!canViewContent) {
           if (!cancelled) setPosts([]);
+          if (!cancelled) setPostsLoaded(true);
           loadedPosts = [];
         } else {
+          const storySet = await loadStoryMediaSet(profileResult?.base);
+          storyMediaSetRef.current = storySet;
           loadedPosts = await loadPosts(profileResult?.base, profileResult?.profileId);
+          if (isOwnProfile && storySet.size > 0) {
+            const deleted = await cleanupStoryPosts(profileResult?.base, storySet);
+            if (deleted > 0) {
+              loadedPosts = await loadPosts(profileResult?.base, profileResult?.profileId);
+            }
+          }
         }
         if (!cancelled && profileResult?.profileData) {
           writeProfileCacheByKey(cacheKey, {
@@ -851,14 +997,13 @@ export default function Profile() {
   const normalPosts = posts.filter((post) => !post?.isShortVideo);
   const visiblePosts = profileTab === "reels" ? reels : normalPosts;
   const loadedPostsCount = (normalPosts?.length || 0) + (reels?.length || 0);
-  const postsCount =
-    loadedPostsCount > 0
-      ? loadedPostsCount
-      : Number.isFinite(Number(profile?.postsCount)) && Number(profile?.postsCount) >= 0
-        ? Number(profile?.postsCount)
-        : Number.isFinite(Number(profile?.posts)) && Number(profile?.posts) >= 0
-          ? Number(profile?.posts)
-          : loadedPostsCount;
+  const postsCount = postsLoaded
+    ? loadedPostsCount
+    : Number.isFinite(Number(profile?.postsCount)) && Number(profile?.postsCount) >= 0
+      ? Number(profile?.postsCount)
+      : Number.isFinite(Number(profile?.posts)) && Number(profile?.posts) >= 0
+        ? Number(profile?.posts)
+        : loadedPostsCount;
   const isPrivateLocked = Boolean(profile?.privateAccount) && profile?.canViewContent === false && !isOwnProfile;
   const displayName = profile?.name || profile?.email || profile?.username || "Profile";
   const displayBio = profile?.bio || "No bio yet";
@@ -1140,6 +1285,15 @@ export default function Profile() {
                   </div>
                   <span className="profile-shortcut-arrow">{">"}</span>
                 </button>
+                {showMyStoriesOnProfile && (
+                  <button type="button" className="profile-shortcut-card" onClick={() => navigate("/stories")}>
+                    <div>
+                      <h4>My Stories</h4>
+                      <p>See all your stories saved in one place.</p>
+                    </div>
+                    <span className="profile-shortcut-arrow">{">"}</span>
+                  </button>
+                )}
               </section>
             )}
             {isOwnProfile && highlights.length > 0 && (

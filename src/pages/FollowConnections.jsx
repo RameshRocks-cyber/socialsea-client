@@ -44,6 +44,20 @@ function readAuthHints() {
   return hints;
 }
 
+function readFollowingCache() {
+  try {
+    const raw = localStorage.getItem(FOLLOWING_CACHE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeFollowingCache(next) {
+  localStorage.setItem(FOLLOWING_CACHE_KEY, JSON.stringify(next || {}));
+}
+
 function readFollowingCacheKeys() {
   try {
     const raw = localStorage.getItem(FOLLOWING_CACHE_KEY);
@@ -262,6 +276,19 @@ function dedupeUsers(list) {
   return result;
 }
 
+function buildIdentityCandidates(user) {
+  const id = String(user?.id || "").trim().toLowerCase();
+  const email = String(user?.email || "").trim().toLowerCase();
+  const username = String(user?.username || "").trim().toLowerCase();
+  const name = String(user?.name || "").trim().toLowerCase();
+  return [id, email, username, name].filter(Boolean);
+}
+
+function isAlreadyFollowing(user, followingSet) {
+  if (!user || !followingSet || followingSet.size === 0) return false;
+  return buildIdentityCandidates(user).some((key) => followingSet.has(key));
+}
+
 const IS_HTTPS_PAGE =
   typeof window !== "undefined" && window.location.protocol === "https:";
 
@@ -386,6 +413,12 @@ export default function FollowConnections() {
   const navigate = useNavigate();
   const kind = location.pathname.endsWith("/following") ? "following" : "followers";
   const [users, setUsers] = useState([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState("");
+  const [followBusyIds, setFollowBusyIds] = useState({});
+  const [followingSet, setFollowingSet] = useState(() => new Set(readFollowingCacheKeys().map((k) => k.toLowerCase())));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [titleName, setTitleName] = useState("");
@@ -538,6 +571,51 @@ export default function FollowConnections() {
     };
   }, [username, kind]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const query = String(searchQuery || "").trim();
+    if (!query || query.length < 2) {
+      setSearchResults([]);
+      setSearchLoading(false);
+      setSearchError("");
+      return undefined;
+    }
+
+    const timer = setTimeout(async () => {
+      setSearchLoading(true);
+      setSearchError("");
+      try {
+        const res = await requestJson(`/api/profile/search?q=${encodeURIComponent(query)}`, 5000);
+        const raw = Array.isArray(res?.data) ? res.data : [];
+        const authHints = readAuthHints();
+        const myId = String(authHints.ids[0] || "").trim().toLowerCase();
+        const myEmail = String(authHints.emails[0] || "").trim().toLowerCase();
+        const normalized = raw.map(normalizeUser).filter((u) => u.id);
+        const filtered = normalized.filter((u) => {
+          const keys = buildIdentityCandidates(u);
+          if (myId && keys.includes(myId)) return false;
+          if (myEmail && keys.includes(myEmail)) return false;
+          return true;
+        });
+        if (!cancelled) {
+          setSearchResults(dedupeUsers(filtered));
+          setSearchLoading(false);
+        }
+      } catch {
+        if (!cancelled) {
+          setSearchResults([]);
+          setSearchLoading(false);
+          setSearchError("Search failed. Check backend connection.");
+        }
+      }
+    }, 350);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [searchQuery]);
+
   const heading = useMemo(() => {
     const person = titleName || username || "User";
     return `${person}'s ${kind}`;
@@ -551,6 +629,29 @@ export default function FollowConnections() {
   const openChat = (person) => {
     if (!person?.id) return;
     navigate(`/chat/${person.id}`);
+  };
+
+  const followUser = async (person) => {
+    if (!person) return;
+    const identifier = person?.email || person?.username || person?.id;
+    if (!identifier) return;
+    const key = String(person?.id || identifier || "").trim();
+    setFollowBusyIds((prev) => ({ ...prev, [key]: true }));
+    try {
+      await api.post(`/api/follow/${encodeURIComponent(identifier)}`);
+      const nextSet = new Set(followingSet);
+      buildIdentityCandidates(person).forEach((k) => nextSet.add(k));
+      setFollowingSet(nextSet);
+      const cache = readFollowingCache();
+      buildIdentityCandidates(person).forEach((k) => {
+        cache[k] = true;
+      });
+      writeFollowingCache(cache);
+    } catch {
+      // ignore follow failures
+    } finally {
+      setFollowBusyIds((prev) => ({ ...prev, [key]: false }));
+    }
   };
 
   return (
@@ -574,6 +675,53 @@ export default function FollowConnections() {
         </div>
 
         <h2>{heading}</h2>
+
+        <div className="follow-search">
+          <input
+            type="search"
+            placeholder=""
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            className="follow-search-input"
+          />
+        </div>
+        {searchLoading && <p className="follow-muted">Searching...</p>}
+        {!searchLoading && searchError && <p className="follow-error">{searchError}</p>}
+        {!searchLoading && searchQuery.trim().length >= 2 && searchResults.length === 0 && !searchError && (
+          <p className="follow-muted">No users found.</p>
+        )}
+        {!searchLoading && searchResults.length > 0 && (
+          <div className="follow-search-results">
+            {searchResults.map((person) => {
+              const busy = Boolean(followBusyIds[String(person?.id || "")]);
+              const followed = isAlreadyFollowing(person, followingSet);
+              return (
+                <div key={`search-${person.id}`} className="follow-item follow-search-item">
+                  <button type="button" className="follow-identity" onClick={() => openProfile(person)}>
+                    {person.profilePic ? (
+                      <img src={person.profilePic} alt={person.name} className="follow-avatar-img" />
+                    ) : (
+                      <span className="follow-avatar-fallback">{person.initials}</span>
+                    )}
+                    <span className="follow-text">
+                      <strong>{person.name}</strong>
+                      <small>{person.bio || person.username || person.email || "No bio yet"}</small>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="follow-follow-btn"
+                    onClick={() => followUser(person)}
+                    disabled={busy || followed}
+                  >
+                    {followed ? "Following" : busy ? "Following..." : "Follow"}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         {loading && <p className="follow-muted">Loading...</p>}
         {!loading && error && <p className="follow-error">{error}</p>}
         {!loading && !error && users.length === 0 && <p className="follow-muted">No {kind} yet.</p>}

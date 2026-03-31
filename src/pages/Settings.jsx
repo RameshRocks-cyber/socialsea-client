@@ -37,16 +37,19 @@ const defaultPrefs = {
   notifications: true,
   notificationBuddy: true,
   notificationBuddyCharacter: "Cat",
+  notificationBuddyHideWhenEmpty: false,
   notificationBuddyVoiceEnabled: true,
   notificationBuddyVoiceName: "",
   notificationBuddyVoiceRate: 1,
   notificationBuddyVoicePitch: 1,
   studyModeReels: false,
+  gestureCursorEnabled: false,
   dailyTimeLimit: "2h/day",
   notificationSound: DEFAULT_SOUND_PREFS.notificationSound,
   ringtoneSound: DEFAULT_SOUND_PREFS.ringtoneSound,
   contentTypes: DEFAULT_CONTENT_TYPES,
-  jobMode: "profile"
+  jobMode: "profile",
+  showMyStoriesOnProfile: true
 };
 
 const readIds = (key) => {
@@ -82,6 +85,8 @@ const normalizeJobMode = (prefs) => {
 
 const normalizeNotificationCharacter = (value) =>
   NOTIFICATION_CHARACTERS.includes(value) ? value : defaultPrefs.notificationBuddyCharacter;
+const normalizeNotificationHideEmpty = (value) =>
+  typeof value === "boolean" ? value : defaultPrefs.notificationBuddyHideWhenEmpty;
 
 const readPrefs = () => {
   try {
@@ -90,6 +95,9 @@ const readPrefs = () => {
       const base = { ...defaultPrefs, ...readSoundPrefs() };
       const normalized = { ...base, jobMode: normalizeJobMode(base) };
       normalized.notificationBuddyCharacter = normalizeNotificationCharacter(normalized.notificationBuddyCharacter);
+      normalized.notificationBuddyHideWhenEmpty = normalizeNotificationHideEmpty(
+        normalized.notificationBuddyHideWhenEmpty
+      );
       normalized.contentTypes = normalizeContentTypeList(normalized.contentTypes);
       return normalized;
     }
@@ -97,12 +105,18 @@ const readPrefs = () => {
     const base = { ...defaultPrefs, ...(parsed || {}), ...readSoundPrefs() };
     const normalized = { ...base, jobMode: normalizeJobMode(base) };
     normalized.notificationBuddyCharacter = normalizeNotificationCharacter(normalized.notificationBuddyCharacter);
+    normalized.notificationBuddyHideWhenEmpty = normalizeNotificationHideEmpty(
+      normalized.notificationBuddyHideWhenEmpty
+    );
     normalized.contentTypes = normalizeContentTypeList(normalized.contentTypes);
     return normalized;
   } catch {
     const base = { ...defaultPrefs, ...readSoundPrefs() };
     const normalized = { ...base, jobMode: normalizeJobMode(base) };
     normalized.notificationBuddyCharacter = normalizeNotificationCharacter(normalized.notificationBuddyCharacter);
+    normalized.notificationBuddyHideWhenEmpty = normalizeNotificationHideEmpty(
+      normalized.notificationBuddyHideWhenEmpty
+    );
     normalized.contentTypes = normalizeContentTypeList(normalized.contentTypes);
     return normalized;
   }
@@ -438,6 +452,12 @@ export default function Settings() {
             value={prefs.studyModeReels ? "On" : "Off"}
             onClick={() => setToggle("studyModeReels")}
           />
+          <Row
+            icon={"HG"}
+            title="Hand gesture cursor"
+            value={prefs.gestureCursorEnabled ? "On" : "Off"}
+            onClick={() => setToggle("gestureCursorEnabled")}
+          />
           <Row icon={"B"} title="Saved" value={savedIds.length} onClick={() => navigate("/saved")} />
           <Row icon={"A"} title="Archive" value={archiveIds.length} onClick={() => setActivePanel("archive")} />
           <Row icon={"Y"} title="Your activity" onClick={() => setActivePanel("activity")} />
@@ -458,6 +478,12 @@ export default function Settings() {
             title="Notifications"
             value={prefs.notifications ? "On" : "Off"}
             onClick={() => navigate("/notifications")}
+          />
+          <Row
+            icon={"MS"}
+            title="My Stories on profile"
+            value={prefs.showMyStoriesOnProfile ? "On" : "Off"}
+            onClick={() => setToggle("showMyStoriesOnProfile")}
           />
           <Row
             icon={"NC"}

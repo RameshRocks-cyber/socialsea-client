@@ -1,11 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { FiBookmark, FiMessageCircle, FiSend, FiVolume2, FiVolumeX } from "react-icons/fi";
+import {
+  FiBookmark,
+  FiMessageCircle,
+  FiSend,
+  FiVolume2,
+  FiVolumeX,
+} from "react-icons/fi";
 import { BsBookmarkFill } from "react-icons/bs";
 import { HiHandThumbUp, HiOutlineHandThumbUp } from "react-icons/hi2";
 import api from "../api/axios";
 import { getApiBaseUrl, toApiUrl } from "../api/baseUrl";
-import { readLiveBroadcast, subscribeLiveBroadcast } from "../utils/liveBroadcast";
 import StudyMode from "./StudyMode";
 import "./Reels.css";
 
@@ -16,7 +21,8 @@ const GESTURE_PLAY_TOGGLE_COOLDOWN_MS = 200;
 const GESTURE_POSE_HOLD_FRAMES = 2;
 const GESTURE_TWO_FINGER_HOLD_FRAMES = 2;
 const GESTURE_RESET_HOLD_FRAMES = 3;
-const GESTURE_SCRIPT_TF = "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js";
+const GESTURE_SCRIPT_TF =
+  "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js";
 const GESTURE_SCRIPT_HANDPOSE =
   "https://cdn.jsdelivr.net/npm/@tensorflow-models/handpose@0.0.7/dist/handpose.min.js";
 const CHAT_SHARE_DRAFT_KEY = "socialsea_chat_share_draft_v1";
@@ -50,7 +56,6 @@ export default function Reels() {
   const navigate = useNavigate();
   const [reels, setReels] = useState([]);
   const [error, setError] = useState("");
-  const [liveBroadcast, setLiveBroadcast] = useState(() => readLiveBroadcast());
   const [studyModeReels, setStudyModeReels] = useState(readStudyModeReels);
   const [gestureEnabled, setGestureEnabled] = useState(false);
   const [gestureStatus, setGestureStatus] = useState("Hand signals are off");
@@ -131,16 +136,20 @@ export default function Reels() {
     const buildBaseCandidates = () => {
       const storedBase =
         typeof window !== "undefined"
-          ? localStorage.getItem("socialsea_auth_base_url") || sessionStorage.getItem("socialsea_auth_base_url")
+          ? localStorage.getItem("socialsea_auth_base_url") ||
+            sessionStorage.getItem("socialsea_auth_base_url")
           : "";
-      const origin = typeof window !== "undefined" ? String(window.location.origin || "").trim() : "";
+      const origin =
+        typeof window !== "undefined"
+          ? String(window.location.origin || "").trim()
+          : "";
       const candidates = [
         String(api.defaults.baseURL || "").trim(),
         String(getApiBaseUrl() || "").trim(),
         String(storedBase || "").trim(),
         String(import.meta.env.VITE_API_URL || "").trim(),
         "/api",
-        origin
+        origin,
       ].filter(Boolean);
       return [...new Set(candidates)];
     };
@@ -170,7 +179,8 @@ export default function Reels() {
             });
             const body = res?.data;
             const looksLikeHtml =
-              typeof body === "string" && (/^\s*<!doctype html/i.test(body) || /<html[\s>]/i.test(body));
+              typeof body === "string" &&
+              (/^\s*<!doctype html/i.test(body) || /<html[\s>]/i.test(body));
             if (looksLikeHtml) {
               const htmlErr = new Error("Received HTML instead of API JSON");
               htmlErr.response = { status: 404, data: body };
@@ -203,8 +213,13 @@ export default function Reels() {
               timeout: 10000,
               suppressAuthRedirect: true,
             });
-            const body = res?.data?.post || res?.data?.item || res?.data?.data || res?.data;
-            if (body && typeof body === "object" && !Array.isArray(body)) return body;
+            const body =
+              res?.data?.post ||
+              res?.data?.item ||
+              res?.data?.data ||
+              res?.data;
+            if (body && typeof body === "object" && !Array.isArray(body))
+              return body;
           } catch (err) {
             lastErr = err;
           }
@@ -223,7 +238,9 @@ export default function Reels() {
 
         const byKey = new Map();
         const pushItem = (item, source) => {
-          const rawUrl = String(item?.contentUrl || item?.mediaUrl || "").trim();
+          const rawUrl = String(
+            item?.contentUrl || item?.mediaUrl || "",
+          ).trim();
           const key = String(item?.id || "") || rawUrl;
           if (!key) return;
           byKey.set(key, { item, source });
@@ -263,14 +280,16 @@ export default function Reels() {
 
             // Keep only explicit reels when metadata is unavailable.
             return explicitReel ? item : null;
-          })
+          }),
         );
 
         if (!cancelled) {
           setError("");
           const nextReels = filtered.filter(Boolean);
           if (targetPostId) {
-            const pickedIndex = nextReels.findIndex((item) => String(item?.id || "").trim() === targetPostId);
+            const pickedIndex = nextReels.findIndex(
+              (item) => String(item?.id || "").trim() === targetPostId,
+            );
             if (pickedIndex > 0) {
               const picked = nextReels[pickedIndex];
               nextReels.splice(pickedIndex, 1);
@@ -292,14 +311,10 @@ export default function Reels() {
   }, [studyModeReels]);
 
   useEffect(() => {
-    const unsubscribe = subscribeLiveBroadcast((next) => setLiveBroadcast(next));
-    return () => unsubscribe();
-  }, []);
-
-  useEffect(() => {
     if (!reels.length) return;
     reels.forEach((reel) => {
-      api.get(`/api/likes/${reel.id}/count`)
+      api
+        .get(`/api/likes/${reel.id}/count`)
         .then((res) => {
           const count = Number(res.data) || 0;
           setLikeCounts((prev) => ({ ...prev, [reel.id]: count }));
@@ -334,7 +349,6 @@ export default function Reels() {
     }
   }, []);
 
-
   useEffect(() => {
     reels.forEach((reel, idx) => {
       const video = videoRefs.current[reel.id];
@@ -362,7 +376,9 @@ export default function Reels() {
 
   useEffect(() => {
     if (!targetPostId || !reels.length) return;
-    const idx = reels.findIndex((r) => String(r?.id || "").trim() === targetPostId);
+    const idx = reels.findIndex(
+      (r) => String(r?.id || "").trim() === targetPostId,
+    );
     if (idx < 0) return;
     setCurrentIndex(idx);
     const container = containerRef.current;
@@ -376,7 +392,8 @@ export default function Reels() {
 
   useEffect(() => {
     return () => {
-      if (tapTrackerRef.current.singleTapTimer) clearTimeout(tapTrackerRef.current.singleTapTimer);
+      if (tapTrackerRef.current.singleTapTimer)
+        clearTimeout(tapTrackerRef.current.singleTapTimer);
       if (scrollIdleTimerRef.current) clearTimeout(scrollIdleTimerRef.current);
       if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current);
       stopGestureControl();
@@ -420,14 +437,19 @@ export default function Reels() {
   };
 
   const getMediaType = (item) => {
-    const rawType = String(item?.type || item?.mediaType || item?.contentType || "")
+    const rawType = String(
+      item?.type || item?.mediaType || item?.contentType || "",
+    )
       .trim()
       .toLowerCase();
     if (rawType.includes("video")) return "VIDEO";
     if (rawType.includes("image")) return "IMAGE";
 
-    const url = String(item?.contentUrl || item?.mediaUrl || "").trim().toLowerCase();
-    if (/\.(mp4|mov|webm|mkv|m4v|avi|mpg|mpeg|3gp|ogv)(\?|#|$)/.test(url)) return "VIDEO";
+    const url = String(item?.contentUrl || item?.mediaUrl || "")
+      .trim()
+      .toLowerCase();
+    if (/\.(mp4|mov|webm|mkv|m4v|avi|mpg|mpeg|3gp|ogv)(\?|#|$)/.test(url))
+      return "VIDEO";
     if (/\.(png|jpe?g|gif|webp|bmp|avif|svg)(\?|#|$)/.test(url)) return "IMAGE";
     return item?.reel ? "VIDEO" : "IMAGE";
   };
@@ -436,9 +458,17 @@ export default function Reels() {
     if (!item || typeof item !== "object") return false;
     if (item?.reel === true || item?.reel === "true") return true;
     if (item?.isReel === true || item?.isReel === "true") return true;
-    if (item?.isShortVideo === true || item?.isShortVideo === "true") return true;
-    if (item?.isShort === true || item?.short === true || item?.shortVideo === true) return true;
-    const rawType = String(item?.type || item?.mediaType || item?.contentType || "")
+    if (item?.isShortVideo === true || item?.isShortVideo === "true")
+      return true;
+    if (
+      item?.isShort === true ||
+      item?.short === true ||
+      item?.shortVideo === true
+    )
+      return true;
+    const rawType = String(
+      item?.type || item?.mediaType || item?.contentType || "",
+    )
       .trim()
       .toLowerCase();
     return rawType.includes("reel") || rawType.includes("short");
@@ -449,7 +479,7 @@ export default function Reels() {
       post?.durationSeconds,
       post?.videoDurationSeconds,
       post?.duration,
-      post?.videoDuration
+      post?.videoDuration,
     ];
     for (const raw of candidates) {
       const n = Number(raw);
@@ -478,18 +508,8 @@ export default function Reels() {
       .join(" ");
   };
 
-  const formatLiveElapsed = (startedAt) => {
-    const start = Number(startedAt || 0);
-    if (!start) return "Just now";
-    const diffSec = Math.max(0, Math.floor((Date.now() - start) / 1000));
-    if (diffSec < 60) return `${diffSec}s ago`;
-    const diffMin = Math.floor(diffSec / 60);
-    if (diffMin < 60) return `${diffMin}m ago`;
-    const diffHr = Math.floor(diffMin / 60);
-    return `${diffHr}h ago`;
-  };
-
-  const reelOwnerKey = (reel) => String(reel?.user?.id || reel?.user?.email || reel?.username || reel?.id);
+  const reelOwnerKey = (reel) =>
+    String(reel?.user?.id || reel?.user?.email || reel?.username || reel?.id);
   const reelOwnerCandidates = (reel) =>
     [
       reel?.user?.id,
@@ -497,14 +517,15 @@ export default function Reels() {
       reel?.username,
       reel?.user?.email,
       reel?.email,
-      reel?.userId
+      reel?.userId,
     ]
       .map((v) => String(v || "").trim())
       .filter(Boolean)
       .filter((v, i, arr) => arr.indexOf(v) === i);
   const reelOwnerProfilePic = (reel) => {
     const ownerKey = reelOwnerKey(reel);
-    if (ownerKey && profilePicByOwner[ownerKey]) return profilePicByOwner[ownerKey];
+    if (ownerKey && profilePicByOwner[ownerKey])
+      return profilePicByOwner[ownerKey];
     const raw =
       reel?.user?.profilePicUrl ||
       reel?.user?.profilePic ||
@@ -540,10 +561,13 @@ export default function Reels() {
         let found = "";
         for (const candidate of candidates) {
           try {
-            const res = await api.get(`/api/profile/${encodeURIComponent(candidate)}`, {
-              suppressAuthRedirect: true,
-              timeout: 4000
-            });
+            const res = await api.get(
+              `/api/profile/${encodeURIComponent(candidate)}`,
+              {
+                suppressAuthRedirect: true,
+                timeout: 4000,
+              },
+            );
             const user = res?.data?.user || res?.data || {};
             const rawPic =
               user?.profilePicUrl ||
@@ -575,7 +599,9 @@ export default function Reels() {
     if (!container || !reels.length) return 0;
     const sections = Array.from(container.querySelectorAll(".reel-item"));
     if (!sections.length) {
-      const idx = Math.round(container.scrollTop / Math.max(1, container.clientHeight));
+      const idx = Math.round(
+        container.scrollTop / Math.max(1, container.clientHeight),
+      );
       return Math.max(0, Math.min(reels.length - 1, idx));
     }
     let bestIdx = 0;
@@ -608,7 +634,10 @@ export default function Reels() {
       el.scrollTo({ top: targetTop, behavior });
     }
     if (bounded !== currentIndexRef.current) setCurrentIndex(bounded);
-    if (pendingScrollIndexRef.current != null && bounded === pendingScrollIndexRef.current) {
+    if (
+      pendingScrollIndexRef.current != null &&
+      bounded === pendingScrollIndexRef.current
+    ) {
       pendingScrollIndexRef.current = null;
       gestureScrollLockRef.current = false;
     }
@@ -639,14 +668,20 @@ export default function Reels() {
 
     const triggerLikeBurst = () => {
       setTapLikeBurstByPost((prev) => ({ ...prev, [postId]: true }));
-      setTimeout(() => setTapLikeBurstByPost((prev) => ({ ...prev, [postId]: false })), 700);
+      setTimeout(
+        () => setTapLikeBurstByPost((prev) => ({ ...prev, [postId]: false })),
+        700,
+      );
     };
 
     if (likeBusyByPostRef.current[postId]) return;
 
     const wasLiked = !!likedPostIdsRef.current[postId];
     const nextLiked = !wasLiked;
-    likeBusyByPostRef.current = { ...likeBusyByPostRef.current, [postId]: true };
+    likeBusyByPostRef.current = {
+      ...likeBusyByPostRef.current,
+      [postId]: true,
+    };
     setLikeBusyByPost((prev) => ({ ...prev, [postId]: true }));
 
     try {
@@ -684,14 +719,17 @@ export default function Reels() {
       }
       setLikeCounts((prev) => ({
         ...prev,
-        [postId]: Math.max(0, (prev[postId] || 0) + (nextLiked ? 1 : -1))
+        [postId]: Math.max(0, (prev[postId] || 0) + (nextLiked ? 1 : -1)),
       }));
 
       if (nextLiked) triggerLikeBurst();
     } catch {
       // keep prior UI state on failure
     } finally {
-      likeBusyByPostRef.current = { ...likeBusyByPostRef.current, [postId]: false };
+      likeBusyByPostRef.current = {
+        ...likeBusyByPostRef.current,
+        [postId]: false,
+      };
       setLikeBusyByPost((prev) => ({ ...prev, [postId]: false }));
     }
   };
@@ -699,7 +737,10 @@ export default function Reels() {
   const loadComments = async (postId) => {
     try {
       const res = await api.get(`/api/comments/${postId}`);
-      setCommentsByPost((prev) => ({ ...prev, [postId]: Array.isArray(res.data) ? res.data : [] }));
+      setCommentsByPost((prev) => ({
+        ...prev,
+        [postId]: Array.isArray(res.data) ? res.data : [],
+      }));
     } catch {
       // noop
     }
@@ -716,7 +757,7 @@ export default function Reels() {
     if (!text) return;
     try {
       await api.post(`/api/comments/${postId}`, text, {
-        headers: { "Content-Type": "text/plain" }
+        headers: { "Content-Type": "text/plain" },
       });
       setCommentTextByPost((prev) => ({ ...prev, [postId]: "" }));
       await loadComments(postId);
@@ -735,17 +776,25 @@ export default function Reels() {
         // ignore storage failures
       }
       navigate(`/chat?share=${encodeURIComponent(shareText)}`);
-      setShareMessageByPost((prev) => ({ ...prev, [reel.id]: "Sharing to chat..." }));
+      setShareMessageByPost((prev) => ({
+        ...prev,
+        [reel.id]: "Sharing to chat...",
+      }));
     } catch {
       setShareMessageByPost((prev) => ({ ...prev, [reel.id]: "Share failed" }));
     }
-    setTimeout(() => setShareMessageByPost((prev) => ({ ...prev, [reel.id]: "" })), 1200);
+    setTimeout(
+      () => setShareMessageByPost((prev) => ({ ...prev, [reel.id]: "" })),
+      1200,
+    );
   };
 
   const toggleSave = (postId) => {
     setSavedPostIds((prev) => {
       const next = { ...prev, [postId]: !prev[postId] };
-      const savedIds = Object.keys(next).filter((id) => next[id]).map((id) => Number(id));
+      const savedIds = Object.keys(next)
+        .filter((id) => next[id])
+        .map((id) => Number(id));
       localStorage.setItem("savedReelIds", JSON.stringify(savedIds));
       return next;
     });
@@ -755,15 +804,21 @@ export default function Reels() {
     const followTarget = reel?.user?.email || reel?.username;
     if (!followTarget) return;
     const key = reelOwnerKey(reel);
-      try {
-        const res = await api.post(`/api/follow/${encodeURIComponent(followTarget)}`);
-        const status = String(res?.data?.status || res?.data || "").toLowerCase();
-        if (res.status >= 200 && res.status < 300 && status.includes("following")) {
-          setFollowingByKey((prev) => ({ ...prev, [key]: true }));
-        }
-      } catch {
-        // noop
+    try {
+      const res = await api.post(
+        `/api/follow/${encodeURIComponent(followTarget)}`,
+      );
+      const status = String(res?.data?.status || res?.data || "").toLowerCase();
+      if (
+        res.status >= 200 &&
+        res.status < 300 &&
+        status.includes("following")
+      ) {
+        setFollowingByKey((prev) => ({ ...prev, [key]: true }));
       }
+    } catch {
+      // noop
+    }
   };
 
   const toggleMute = () => {
@@ -814,6 +869,20 @@ export default function Reels() {
   };
 
   const handleReelTap = (reel, event) => {
+    const target = event?.currentTarget;
+    if (target && typeof target.getBoundingClientRect === "function") {
+      const rect = target.getBoundingClientRect();
+      const clickY = Number(event?.clientY || 0);
+      const relY = rect.height ? (clickY - rect.top) / rect.height : 0.5;
+      if (relY <= 0.33) {
+        scrollToIndex(currentIndexRef.current - 1);
+        return;
+      }
+      if (relY >= 0.67) {
+        scrollToIndex(currentIndexRef.current + 1);
+        return;
+      }
+    }
     const tapCount = Number(event?.detail || 1);
     if (tapTrackerRef.current.singleTapTimer) {
       clearTimeout(tapTrackerRef.current.singleTapTimer);
@@ -847,7 +916,8 @@ export default function Reels() {
     const pinkyTip = landmarks[20];
     const thumbTip = landmarks[4];
 
-    const handSize = Math.hypot(middleMcp[0] - wrist[0], middleMcp[1] - wrist[1]) || 1;
+    const handSize =
+      Math.hypot(middleMcp[0] - wrist[0], middleMcp[1] - wrist[1]) || 1;
     const extMargin = Math.max(3, handSize * 0.09);
     const isFingerExtended = (tip, pip, mcp) =>
       Number(tip?.[1]) < Number(pip?.[1]) - extMargin &&
@@ -856,16 +926,29 @@ export default function Reels() {
     const middleExtended = isFingerExtended(middleTip, middlePip, middleMcp);
     const ringExtended = isFingerExtended(ringTip, ringPip, ringMcp);
     const pinkyExtended = isFingerExtended(pinkyTip, pinkyPip, pinkyMcp);
-    const extendedCount = [indexExtended, middleExtended, ringExtended, pinkyExtended].filter(Boolean).length;
+    const extendedCount = [
+      indexExtended,
+      middleExtended,
+      ringExtended,
+      pinkyExtended,
+    ].filter(Boolean).length;
 
-    const thumbToIndex = Math.hypot(thumbTip[0] - indexMcp[0], thumbTip[1] - indexMcp[1]);
-    const thumbToWrist = Math.hypot(thumbTip[0] - wrist[0], thumbTip[1] - wrist[1]);
+    const thumbToIndex = Math.hypot(
+      thumbTip[0] - indexMcp[0],
+      thumbTip[1] - indexMcp[1],
+    );
+    const thumbToWrist = Math.hypot(
+      thumbTip[0] - wrist[0],
+      thumbTip[1] - wrist[1],
+    );
     const thumbBent =
       thumbToIndex < handSize * 0.28 ||
       thumbToWrist < handSize * 0.32 ||
-      (Number(thumbTip[1]) > Number(thumbIp[1]) + handSize * 0.04 && extendedCount <= 1);
+      (Number(thumbTip[1]) > Number(thumbIp[1]) + handSize * 0.04 &&
+        extendedCount <= 1);
 
-    if (indexExtended && extendedCount === 1) return { pose: "oneFinger", handSize };
+    if (indexExtended && extendedCount === 1)
+      return { pose: "oneFinger", handSize };
     if (extendedCount === 3) return { pose: "threeFingers", handSize };
     if (thumbBent) return { pose: "thumbBent", handSize };
     return { pose: "none" };
@@ -902,8 +985,10 @@ export default function Reels() {
     setGestureStatus("Starting hand signals...");
     await loadScript(GESTURE_SCRIPT_TF, "tfjs-reels-gesture");
     await loadScript(GESTURE_SCRIPT_HANDPOSE, "handpose-reels-gesture");
-    if (!window.handpose) throw new Error("Hand model unavailable in this browser");
-    if (!navigator.mediaDevices?.getUserMedia) throw new Error("Camera access is not supported");
+    if (!window.handpose)
+      throw new Error("Hand model unavailable in this browser");
+    if (!navigator.mediaDevices?.getUserMedia)
+      throw new Error("Camera access is not supported");
 
     if (!handModelRef.current) {
       handModelRef.current = await window.handpose.load();
@@ -913,9 +998,9 @@ export default function Reels() {
         facingMode: "user",
         width: { ideal: 1920 },
         height: { ideal: 1080 },
-        frameRate: { ideal: 30, max: 30 }
+        frameRate: { ideal: 30, max: 30 },
       },
-      audio: false
+      audio: false,
     });
     cameraStreamRef.current = stream;
 
@@ -930,10 +1015,18 @@ export default function Reels() {
     gestureRunningRef.current = true;
     setGestureStatus("Hand signals active");
 
-  const detect = async () => {
-      if (!gestureRunningRef.current || !cameraVideoRef.current || !handModelRef.current) return;
+    const detect = async () => {
+      if (
+        !gestureRunningRef.current ||
+        !cameraVideoRef.current ||
+        !handModelRef.current
+      )
+        return;
       try {
-        const predictions = await handModelRef.current.estimateHands(cameraVideoRef.current, true);
+        const predictions = await handModelRef.current.estimateHands(
+          cameraVideoRef.current,
+          true,
+        );
         if (predictions.length) {
           const handState = readHandState(predictions[0].landmarks);
           const now = Date.now();
@@ -1005,8 +1098,8 @@ export default function Reels() {
         setGestureError("Unable to read hand gestures");
       }
       detectFrameRef.current = requestAnimationFrame(detect);
-  };
-  detectFrameRef.current = requestAnimationFrame(detect);
+    };
+    detectFrameRef.current = requestAnimationFrame(detect);
   };
 
   if (studyModeReels) {
@@ -1015,46 +1108,6 @@ export default function Reels() {
 
   return (
     <div className="reels-page">
-      {liveBroadcast && (
-        <div className="reels-live-banner" role="button" tabIndex={0} onClick={() => navigate("/live/start")}>
-          <span className="reels-live-dot" />
-          <div className="reels-live-text">
-            <strong>Live now</strong>
-            <small>
-              {liveBroadcast.title || `${liveBroadcast.hostName || "Creator"} is live`} •{" "}
-              {formatLiveElapsed(liveBroadcast.startedAt)}
-            </small>
-          </div>
-          <button type="button" className="reels-live-btn">
-            Watch Live
-          </button>
-        </div>
-      )}
-      <div className="reels-gesture-toggle">
-        <button
-          type="button"
-          className={`reels-gesture-btn ${gestureEnabled ? "is-active" : ""}`}
-          onClick={() => setGestureEnabled((prev) => !prev)}
-          title={`${gestureEnabled ? "Disable hand signals" : "Enable hand signals"} - ${gestureStatus}`}
-          aria-label={gestureEnabled ? "Disable hand signals" : "Enable hand signals"}
-        >
-          <svg
-            className="reels-gesture-icon"
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-          >
-            <path
-              d="M7.5 11.5V5a1.5 1.5 0 0 1 3 0v6.5M11 11.5V4.5a1.5 1.5 0 0 1 3 0v7M14.5 11.5V7a1.5 1.5 0 0 1 3 0v7.5M6.5 11.5v4.5c0 2.5 2 4.5 4.5 4.5h2.5c2.76 0 5-2.24 5-5v-1.5"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.8"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        </button>
-        {gestureError && <p className="reels-gesture-error">{gestureError}</p>}
-      </div>
       <div
         className={`reels-container ${error ? "has-error" : ""} ${!error && reels.length === 0 ? "is-empty" : ""}`}
         ref={containerRef}
@@ -1062,7 +1115,9 @@ export default function Reels() {
       >
         {error && <p className="reel-state is-error">{error}</p>}
         {!error && reels.length === 0 && (
-          <p className="reel-state">No reels yet (only videos up to 60 seconds are shown).</p>
+          <p className="reel-state">
+            No reels yet (only videos up to 60 seconds are shown).
+          </p>
         )}
 
         {reels.map((reel, idx) => {
@@ -1071,18 +1126,25 @@ export default function Reels() {
           if (!videoUrl) return null;
 
           const comments = commentsByPost[reel.id] || [];
-          const ownerNameRaw = reel?.user?.name || reel?.user?.email || reel?.username || "User";
-          const ownerName = ownerNameRaw.includes("@") ? emailToName(ownerNameRaw) : ownerNameRaw;
+          const ownerNameRaw =
+            reel?.user?.name || reel?.user?.email || reel?.username || "User";
+          const ownerName = ownerNameRaw.includes("@")
+            ? emailToName(ownerNameRaw)
+            : ownerNameRaw;
           const ownerKey = reelOwnerKey(reel);
           const ownerPic = reelOwnerProfilePic(reel);
           const isOwnReel = Number(reel?.user?.id) === myUserId;
           const isFollowing = !!followingByKey[ownerKey];
-          const caption = reel?.description || reel?.content || "Watch this reel";
+          const caption =
+            reel?.description || reel?.content || "Watch this reel";
 
           return (
             <section className="reel-item" key={reel.id} data-reel-idx={idx}>
               <div className="reel-stage">
-                <div className="reel-frame">
+                <div
+                  className="reel-frame"
+                  onClick={(event) => handleReelTap(reel, event)}
+                >
                   <video
                     ref={(el) => {
                       if (el) videoRefs.current[reel.id] = el;
@@ -1093,7 +1155,6 @@ export default function Reels() {
                     playsInline
                     controls={false}
                     className="reel-video"
-                    onClick={(event) => handleReelTap(reel, event)}
                   />
                   <div className="reel-gradient-top" />
                   <div className="reel-gradient-bottom" />
@@ -1103,7 +1164,9 @@ export default function Reels() {
                   </div>
                 </div>
 
-                {tapLikeBurstByPost[reel.id] && <div className="reel-like-burst">{"\u{1F44C}"}</div>}
+                {tapLikeBurstByPost[reel.id] && (
+                  <div className="reel-like-burst">{"\u{1F44C}"}</div>
+                )}
 
                 <aside className="reel-actions">
                   <button
@@ -1120,7 +1183,13 @@ export default function Reels() {
                     onClick={() => likeReel(reel.id)}
                     title="Like"
                   >
-                    <span>{likedPostIds[reel.id] ? <HiHandThumbUp /> : <HiOutlineHandThumbUp />}</span>
+                    <span>
+                      {likedPostIds[reel.id] ? (
+                        <HiHandThumbUp />
+                      ) : (
+                        <HiOutlineHandThumbUp />
+                      )}
+                    </span>
                     <small>{likeCounts[reel.id] || 0}</small>
                   </button>
                   <button
@@ -1129,11 +1198,20 @@ export default function Reels() {
                     onClick={() => toggleComments(reel.id)}
                     title="Comment"
                   >
-                    <span><FiMessageCircle /></span>
+                    <span>
+                      <FiMessageCircle />
+                    </span>
                     <small>{comments.length}</small>
                   </button>
-                  <button type="button" className="reel-action-btn" onClick={() => shareReel(reel)} title="Share">
-                    <span><FiSend /></span>
+                  <button
+                    type="button"
+                    className="reel-action-btn"
+                    onClick={() => shareReel(reel)}
+                    title="Share"
+                  >
+                    <span>
+                      <FiSend />
+                    </span>
                   </button>
                   <button
                     type="button"
@@ -1141,16 +1219,28 @@ export default function Reels() {
                     onClick={() => toggleSave(reel.id)}
                     title="Save"
                   >
-                    <span>{savedPostIds[reel.id] ? <BsBookmarkFill /> : <FiBookmark />}</span>
+                    <span>
+                      {savedPostIds[reel.id] ? (
+                        <BsBookmarkFill />
+                      ) : (
+                        <FiBookmark />
+                      )}
+                    </span>
                   </button>
                 </aside>
 
                 <div className="reel-bottom-meta">
                   <div className="reel-owner-row">
                     {ownerPic ? (
-                      <img src={ownerPic} alt={ownerName} className="reel-owner-avatar reel-owner-avatar-img" />
+                      <img
+                        src={ownerPic}
+                        alt={ownerName}
+                        className="reel-owner-avatar reel-owner-avatar-img"
+                      />
                     ) : (
-                      <span className="reel-owner-avatar">{ownerName.charAt(0).toUpperCase()}</span>
+                      <span className="reel-owner-avatar">
+                        {ownerName.charAt(0).toUpperCase()}
+                      </span>
                     )}
                     <Link
                       to={`/profile/${reel.user?.email || reel.user?.username || reel.username || "me"}`}
@@ -1172,7 +1262,11 @@ export default function Reels() {
                   <p className="reel-caption">{caption}</p>
                 </div>
 
-                {shareMessageByPost[reel.id] && <p className="reel-share-status">{shareMessageByPost[reel.id]}</p>}
+                {shareMessageByPost[reel.id] && (
+                  <p className="reel-share-status">
+                    {shareMessageByPost[reel.id]}
+                  </p>
+                )}
 
                 {commentsOpenByPost[reel.id] && (
                   <div className="reel-comments">
@@ -1182,14 +1276,25 @@ export default function Reels() {
                         placeholder="Write a comment..."
                         value={commentTextByPost[reel.id] || ""}
                         onChange={(e) =>
-                          setCommentTextByPost((prev) => ({ ...prev, [reel.id]: e.target.value }))
+                          setCommentTextByPost((prev) => ({
+                            ...prev,
+                            [reel.id]: e.target.value,
+                          }))
                         }
                       />
-                      <button type="button" onClick={() => submitComment(reel.id)}>Post</button>
+                      <button
+                        type="button"
+                        onClick={() => submitComment(reel.id)}
+                      >
+                        Post
+                      </button>
                     </div>
                     {comments.map((comment) => (
                       <div className="reel-comment-item" key={comment.id}>
-                        <strong>{comment.user?.name || comment.user?.email || "User"}:</strong> {comment.text}
+                        <strong>
+                          {comment.user?.name || comment.user?.email || "User"}:
+                        </strong>{" "}
+                        {comment.text}
                       </div>
                     ))}
                   </div>
@@ -1202,5 +1307,3 @@ export default function Reels() {
     </div>
   );
 }
-
-

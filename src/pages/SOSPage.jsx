@@ -22,6 +22,8 @@ const SOS_LIVE_RTC_OFFER_KEY_PREFIX = "socialsea_sos_live_rtc_offer_v1_";
 const SOS_LIVE_RTC_ANSWER_KEY_PREFIX = "socialsea_sos_live_rtc_answer_v1_";
 const SOS_ACTIVE_OWNER_KEY = "socialsea_sos_active_owner_v1";
 const HEARTBEAT_MS = 2000;
+const LIVE_STREAM_DISCONNECT_GRACE_MS = 3000;
+const LIVE_FRAME_STALE_MS = 8000;
 const RADIUS_METERS = 5000;
 const LOCAL_SIGNAL_REBROADCAST_MS = 4000;
 const LOCATION_STALE_MINUTES = Number(import.meta.env.VITE_EMERGENCY_LOCATION_STALE_MINUTES || 180);
@@ -377,6 +379,8 @@ export default function SOSPage() {
   const startTapRef = useRef({ count: 0, lastAt: 0 });
   const previewVideoRef = useRef(null);
   const liveRemoteVideoRef = useRef(null);
+  const liveStreamHoldTimerRef = useRef(null);
+  const liveStreamAvailableRef = useRef(false);
   const sosSignalChannelRef = useRef(null);
   const livePreviewChannelRef = useRef(null);
   const senderRtcPeerRef = useRef(null);
@@ -393,6 +397,10 @@ export default function SOSPage() {
     const current = readJson(SOS_SESSION_KEY, {});
     writeJson(SOS_SESSION_KEY, { ...current, ...patch });
   };
+
+  useEffect(() => {
+    liveStreamAvailableRef.current = liveStreamAvailable;
+  }, [liveStreamAvailable]);
 
   const appendHistory = (entry) => {
     const prev = readJson(SOS_HISTORY_KEY, []);
@@ -571,6 +579,10 @@ export default function SOSPage() {
       // ignore
     }
     viewerRtcPeerRef.current = null;
+    if (liveStreamHoldTimerRef.current) {
+      clearTimeout(liveStreamHoldTimerRef.current);
+      liveStreamHoldTimerRef.current = null;
+    }
     setLiveStreamAvailable(false);
     const node = liveRemoteVideoRef.current;
     if (node?.srcObject) {
@@ -1676,7 +1688,11 @@ export default function SOSPage() {
     window.addEventListener("storage", onStorage);
     const timer = setInterval(() => {
       readStorageFrame();
-      if (lastFrameAtRef.current && Date.now() - lastFrameAtRef.current > 2200) {
+      if (
+        !liveStreamAvailableRef.current &&
+        lastFrameAtRef.current &&
+        Date.now() - lastFrameAtRef.current > LIVE_FRAME_STALE_MS
+      ) {
         setLiveFrameUrl("");
       }
     }, 160);
@@ -1691,15 +1707,6 @@ export default function SOSPage() {
   useEffect(() => {
     const node = liveRemoteVideoRef.current;
     if (!isLiveView || !node) return undefined;
-    if (!liveStreamAvailable) {
-      try {
-        node.pause();
-        node.srcObject = null;
-      } catch {
-        // ignore
-      }
-      return undefined;
-    }
     node.muted = true;
     node.autoplay = true;
     node.playsInline = true;
@@ -1749,8 +1756,36 @@ export default function SOSPage() {
       };
       pc.onconnectionstatechange = () => {
         const state = String(pc.connectionState || "");
-        if (state === "failed" || state === "closed" || state === "disconnected") {
-          setLiveStreamAvailable(false);
+        if (state === "connected") {
+          if (liveStreamHoldTimerRef.current) {
+            clearTimeout(liveStreamHoldTimerRef.current);
+            liveStreamHoldTimerRef.current = null;
+          }
+          const node = liveRemoteVideoRef.current;
+          if (node?.srcObject) {
+            setLiveStreamAvailable(true);
+          }
+          return;
+        }
+        if (state === "failed" || state === "closed") {
+          closeViewerRtcPeer();
+          return;
+        }
+        if (state === "disconnected") {
+          if (liveStreamHoldTimerRef.current) return;
+          liveStreamHoldTimerRef.current = setTimeout(() => {
+            liveStreamHoldTimerRef.current = null;
+            if (pc.connectionState !== "disconnected") return;
+            const node = liveRemoteVideoRef.current;
+            const stream = node?.srcObject;
+            const hasLiveTrack =
+              stream && stream.getVideoTracks?.().some((t) => t && t.readyState === "live");
+            if (!hasLiveTrack) {
+              setLiveStreamAvailable(false);
+            } else if (!liveStreamAvailableRef.current) {
+              setLiveStreamAvailable(true);
+            }
+          }, LIVE_STREAM_DISCONNECT_GRACE_MS);
         }
       };
       return pc;

@@ -5,14 +5,16 @@ import { BsBookmarkFill } from "react-icons/bs";
 import api from "../api/axios";
 import { getApiBaseUrl, toApiUrl } from "../api/baseUrl";
 import { readLiveBroadcast, subscribeLiveBroadcast } from "../utils/liveBroadcast";
+import { CONTENT_TYPE_OPTIONS } from "../pages/contentPrefs";
 import "./Feed.css";
 
 const LONG_VIDEO_SECONDS = 90;
 const CHAT_SHARE_DRAFT_KEY = "socialsea_chat_share_draft_v1";
 const POST_GENRE_MAP_KEY = "socialsea_post_genre_map_v1";
 const FEED_CACHE_KEY = "socialsea_feed_cache_v1";
+const LIVE_PREVIEW_FRAME_KEY = "socialsea_live_preview_frame_v1";
 const FEED_YT_RAIL_ITEMS = ["Home", "Trending", "Subscriptions", "History", "Playlists", "Watch Later"];
-const FEED_YT_CATEGORIES = ["All", "Music", "Mixes", "News", "Live", "Comedy", "Movies", "Gaming", "Trending"];
+const FEED_CONTENT_TYPES = [{ value: "all", label: "All" }, ...CONTENT_TYPE_OPTIONS];
 const FEED_CATEGORY_KEYWORDS = {
   music: ["music", "song", "audio", "album", "lyrics", "singer", "melody"],
   mixes: ["mix", "mixes", "remix", "mashup", "medley", "dj"],
@@ -109,8 +111,11 @@ export default function Feed() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [feedMode, setFeedMode] = useState("long");
+  const [feedMenuOpen, setFeedMenuOpen] = useState(false);
+  const [contentTypeFilter, setContentTypeFilter] = useState("all");
   const [posts, setPosts] = useState(() => readCachedFeedPosts());
   const [liveBroadcast, setLiveBroadcast] = useState(() => readLiveBroadcast());
+  const [livePreviewFrame, setLivePreviewFrame] = useState("");
   const [likeCounts, setLikeCounts] = useState({});
   const [likedPostIds, setLikedPostIds] = useState({});
   const [commentsByPost, setCommentsByPost] = useState({});
@@ -121,7 +126,6 @@ export default function Feed() {
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(() => readCachedFeedPosts().length === 0);
   const [query, setQuery] = useState("");
-  const [longCategory, setLongCategory] = useState("All");
   const [localGenreMap, setLocalGenreMap] = useState({});
   const [activePostId, setActivePostId] = useState(null);
   const [videoDurationByPost, setVideoDurationByPost] = useState({});
@@ -138,6 +142,7 @@ export default function Feed() {
   const lastLoadAtRef = useRef(0);
   const postsCountRef = useRef(0);
   const menuRef = useRef(null);
+  const feedMenuRef = useRef(null);
   const postViewBackdropRef = useRef(null);
 
   const HIDDEN_POSTS_KEY = "feedHiddenPostIds";
@@ -156,12 +161,57 @@ export default function Feed() {
   }, []);
 
   useEffect(() => {
+    if (!liveBroadcast) {
+      setLivePreviewFrame("");
+      return undefined;
+    }
+    let disposed = false;
+    const readFrame = () => {
+      if (disposed) return;
+      try {
+        const raw = localStorage.getItem(LIVE_PREVIEW_FRAME_KEY);
+        if (!raw) {
+          setLivePreviewFrame((prev) => (prev ? "" : prev));
+          return;
+        }
+        const data = JSON.parse(raw);
+        const frame = String(data?.frame || "").trim();
+        setLivePreviewFrame((prev) => (prev === frame ? prev : frame));
+      } catch {
+        // ignore preview read failures
+      }
+    };
+    readFrame();
+    const timer = window.setInterval(readFrame, 700);
+    const onStorage = (event) => {
+      if (event?.key === LIVE_PREVIEW_FRAME_KEY) readFrame();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => {
+      disposed = true;
+      clearInterval(timer);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, [liveBroadcast]);
+
+  useEffect(() => {
     if (typeof document === "undefined") return undefined;
     document.body.classList.add("feed-no-swipe-back");
     return () => {
       document.body.classList.remove("feed-no-swipe-back");
     };
   }, []);
+
+  useEffect(() => {
+    if (!feedMenuOpen) return;
+    const handleClick = (event) => {
+      if (feedMenuRef.current && !feedMenuRef.current.contains(event.target)) {
+        setFeedMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [feedMenuOpen]);
 
   useEffect(() => {
     let mounted = true;
@@ -440,6 +490,11 @@ export default function Feed() {
     document.addEventListener("mousedown", onDocClick);
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [menuOpenPostId]);
+
+  const selectContentType = (value) => {
+    setContentTypeFilter(value);
+    setFeedMenuOpen(false);
+  };
 
   const resolveUrl = (url) => {
     if (!url) return "";
@@ -814,30 +869,29 @@ export default function Feed() {
     });
   }, [filteredPosts, hiddenPostIds, blockedOwnerKeys]);
 
+  const typeFilteredPosts = useMemo(() => {
+    if (!contentTypeFilter || contentTypeFilter === "all") return visiblePosts;
+    return visiblePosts.filter((post) => categoryMatchesPost(post, contentTypeFilter, localGenreMap));
+  }, [visiblePosts, contentTypeFilter, localGenreMap]);
+
   const longVideoPosts = useMemo(() => {
-    return visiblePosts.filter((post) => {
+    return typeFilteredPosts.filter((post) => {
       const isVideo = mediaTypeFor(post) === "VIDEO";
       const duration = Number(videoDurationByPost[post.id] || 0);
       // Keep videos visible until metadata is known, then keep only true long videos.
       return isVideo && (duration <= 0 || duration > LONG_VIDEO_SECONDS);
     });
-  }, [visiblePosts, videoDurationByPost]);
+  }, [typeFilteredPosts, videoDurationByPost]);
 
-  const longVideoFeedPosts = useMemo(() => {
-    return longVideoPosts.filter((post) => categoryMatchesPost(post, longCategory, localGenreMap));
-  }, [longVideoPosts, longCategory, localGenreMap]);
-
-  const gridPosts = useMemo(() => {
-    return visiblePosts.filter((post) => !longVideoPosts.some((lv) => lv.id === post.id));
-  }, [visiblePosts, longVideoPosts]);
+  const longVideoFeedPosts = useMemo(() => longVideoPosts, [longVideoPosts]);
 
   const shortVideoPosts = useMemo(() => {
-    return visiblePosts.filter((post) => {
+    return typeFilteredPosts.filter((post) => {
       if (mediaTypeFor(post) !== "VIDEO") return false;
       const duration = Number(videoDurationByPost[post.id] || 0);
       return duration <= 0 || duration <= LONG_VIDEO_SECONDS;
     });
-  }, [visiblePosts, videoDurationByPost]);
+  }, [typeFilteredPosts, videoDurationByPost]);
 
   const activeShortVideoIndex = useMemo(
     () => shortVideoPosts.findIndex((p) => p.id === activePostId),
@@ -909,13 +963,13 @@ export default function Feed() {
   const viewerPosts = useMemo(() => {
     if (!activePost) return [];
     const activeType = mediaTypeFor(activePost);
-    const videoPool = visiblePosts.filter((p) => mediaTypeFor(p) === "VIDEO");
+    const videoPool = typeFilteredPosts.filter((p) => mediaTypeFor(p) === "VIDEO");
     const pool = activeType === "VIDEO" ? videoPool : [activePost];
     const idx = pool.findIndex((p) => Number(p?.id) === Number(activePost.id));
     if (idx < 0) return [activePost];
     const ordered = [...pool.slice(idx), ...pool.slice(0, idx)];
     return ordered.length ? ordered : [activePost];
-  }, [activePost, visiblePosts]);
+  }, [activePost, typeFilteredPosts]);
 
   useEffect(() => {
     if (!activePostId) return undefined;
@@ -1087,6 +1141,23 @@ export default function Feed() {
     setMenuOpenPostId(null);
   };
 
+  const liveHostName = liveBroadcast?.hostName || "Creator";
+  const liveTitle = liveBroadcast?.title || `${liveHostName} is live`;
+  const liveSubtitle = liveBroadcast?.startedAt ? formatLiveElapsed(liveBroadcast.startedAt) : "Live now";
+  const hasLongContent = Boolean(liveBroadcast) || longVideoFeedPosts.length > 0;
+  const hasShortContent = Boolean(liveBroadcast) || shortVideoPosts.length > 0;
+
+  const renderLivePreview = (className) => {
+    if (livePreviewFrame) {
+      return <img src={livePreviewFrame} alt="Live preview" className={className} />;
+    }
+    return (
+      <div className={`${className} live-preview-fallback`}>
+        <span>Live</span>
+      </div>
+    );
+  };
+
   return (
     <div className="feed-page">
       <div className="feed-top-row">
@@ -1099,6 +1170,34 @@ export default function Feed() {
             onChange={(e) => setQuery(e.target.value)}
             className="explore-search-input"
           />
+          <div className="feed-filter-menu" ref={feedMenuRef}>
+            <button
+              type="button"
+              className="feed-filter-btn"
+              aria-haspopup="menu"
+              aria-expanded={feedMenuOpen}
+              aria-label="Feed options"
+              onClick={() => setFeedMenuOpen((prev) => !prev)}
+            >
+              ...
+            </button>
+            {feedMenuOpen && (
+              <div className="feed-filter-panel" role="menu">
+                {FEED_CONTENT_TYPES.map((item) => (
+                  <button
+                    key={`filter-${item.value}`}
+                    type="button"
+                    className={contentTypeFilter === item.value ? "is-active" : ""}
+                    role="menuitemradio"
+                    aria-checked={contentTypeFilter === item.value}
+                    onClick={() => selectContentType(item.value)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="feed-mode-switch" role="tablist" aria-label="Feed mode">
@@ -1123,35 +1222,18 @@ export default function Feed() {
         </div>
       </div>
 
-      {liveBroadcast && (
-        <div className="live-share-banner" role="button" tabIndex={0} onClick={() => navigate("/live/start")}>
-          <div className="live-share-left">
-            <span className="live-share-dot" />
-            <div>
-              <p className="live-share-title">Live now</p>
-              <p className="live-share-sub">
-                {liveBroadcast.title || `${liveBroadcast.hostName || "Creator"} is live`} •{" "}
-                {formatLiveElapsed(liveBroadcast.startedAt)}
-              </p>
-            </div>
-          </div>
-          <button type="button" className="live-share-btn">
-            Watch Live
-          </button>
-        </div>
-      )}
 
       {error && <p>{error}</p>}
       {!error && isLoading && <p className="feed-empty">Loading videos...</p>}
-      {!error && !isLoading && visiblePosts.length === 0 && <p className="feed-empty">No posts found</p>}
-      {!error && !isLoading && feedMode === "long" && !longVideoFeedPosts.length && (
+      {!error && !isLoading && typeFilteredPosts.length === 0 && <p className="feed-empty">No posts found</p>}
+      {!error && !isLoading && feedMode === "long" && !longVideoFeedPosts.length && !liveBroadcast && (
         <p className="feed-empty">No long videos found</p>
       )}
-      {!error && !isLoading && feedMode === "all" && !shortVideoPosts.length && (
+      {!error && !isLoading && feedMode === "all" && !shortVideoPosts.length && !liveBroadcast && (
         <p className="feed-empty">No short videos found</p>
       )}
 
-      {!!longVideoFeedPosts.length && feedMode === "long" && (
+      {hasLongContent && feedMode === "long" && (
         <section className="feed-yt-shell">
           <aside className="feed-yt-rail">
             {FEED_YT_RAIL_ITEMS.map((item, idx) => (
@@ -1163,19 +1245,51 @@ export default function Feed() {
 
           <div className="feed-yt-main">
             <div className="feed-yt-categories">
-              {FEED_YT_CATEGORIES.map((chip) => (
+              {FEED_CONTENT_TYPES.map((chip) => (
                 <button
-                  key={chip}
+                  key={`chip-${chip.value}`}
                   type="button"
-                  className={`feed-yt-chip ${longCategory === chip ? "is-active" : ""}`}
-                  onClick={() => setLongCategory(chip)}
+                  className={`feed-yt-chip ${contentTypeFilter === chip.value ? "is-active" : ""}`}
+                  onClick={() => setContentTypeFilter(chip.value)}
                 >
-                  {chip}
+                  {chip.label}
                 </button>
               ))}
             </div>
 
             <div className="long-video-feed">
+          {liveBroadcast && (
+            <article
+              className="long-feed-card live-feed-card"
+              onClick={() => navigate("/live/watch")}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  navigate("/live/watch");
+                }
+              }}
+              role="button"
+              tabIndex={0}
+              title={liveTitle}
+            >
+              <div className="long-feed-thumb-wrap live-feed-thumb-wrap">
+                {renderLivePreview("long-feed-thumb live-feed-thumb")}
+                <span className="live-badge">
+                  <span className="live-badge-dot" />
+                  LIVE
+                </span>
+              </div>
+              <div className="long-feed-meta">
+                <span className="long-feed-avatar live-feed-avatar">
+                  {liveHostName.charAt(0).toUpperCase()}
+                </span>
+                <div className="long-feed-text">
+                  <p className="long-feed-title">{liveTitle}</p>
+                  <p className="long-feed-sub">{liveHostName} • {liveSubtitle}</p>
+                </div>
+              </div>
+            </article>
+          )}
           {longVideoFeedPosts.map((post) => {
             const rawUrl = post.contentUrl || post.mediaUrl || "";
             const mediaUrl = rawUrl.trim() ? resolveUrl(rawUrl.trim()) : "";
@@ -1271,8 +1385,26 @@ export default function Feed() {
         </section>
       )}
 
-      {feedMode === "all" && (
+      {feedMode === "all" && hasShortContent && (
         <section className="explore-grid instagram-grid">
+        {liveBroadcast && (
+          <button
+            type="button"
+            className="explore-tile instagram-tile live-explore-tile"
+            onClick={() => navigate("/live/watch")}
+            title={liveTitle}
+          >
+            {renderLivePreview("explore-media live-explore-media")}
+            <span className="live-badge">
+              <span className="live-badge-dot" />
+              LIVE
+            </span>
+            <div className="explore-overlay live-explore-overlay">
+              <span>Watch Live</span>
+              <span>{liveSubtitle}</span>
+            </div>
+          </button>
+        )}
         {shortVideoPosts.map((post) => {
           const rawUrl = post.contentUrl || post.mediaUrl || "";
           const mediaUrl = rawUrl.trim() ? resolveUrl(rawUrl.trim()) : "";
