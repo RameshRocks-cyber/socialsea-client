@@ -122,8 +122,8 @@ export default function GestureCursor() {
       stop();
       return;
     }
-    start().catch(() => {
-      setEnabled(false);
+    start().catch((error) => {
+      console.error("Gesture cursor failed to start:", error);
       stop();
     });
     return () => {

@@ -3265,8 +3265,7 @@ export default function Chat() {
         avatar: (name[0] || "U").toUpperCase(),
         profilePic: "",
         lastMessage: String(last?.text || last?.message || ""),
-        lastActiveAt: String(last?.createdAt || ""),
-        online: false
+        lastActiveAt: String(last?.createdAt || "")
       });
     });
 
@@ -5673,14 +5672,19 @@ export default function Chat() {
       const visible = normalized.filter((m) => !parseDeleteTargetId(m?.text));
       const list = applyDeleteTargetsToList(visible, deleteTargets).filter((m) => !hiddenIds.has(String(m?.id || "")));
       localFallbackList = list;
-      setMessagesByContact((prev) => {
-        const threadKey = String(otherId);
-        const existing = Array.isArray(prev[threadKey]) ? prev[threadKey] : [];
-        if (areMessageListsEquivalent(existing, list)) return prev;
-        const next = { ...prev, [threadKey]: list };
-        messagesByContactRef.current = next;
-        return next;
-      });
+      const existingThread = Array.isArray(messagesByContactRef.current?.[String(otherId)])
+        ? messagesByContactRef.current[String(otherId)]
+        : [];
+      if (!existingThread.length) {
+        setMessagesByContact((prev) => {
+          const threadKey = String(otherId);
+          const existing = Array.isArray(prev[threadKey]) ? prev[threadKey] : [];
+          if (existing.length > 0 || areMessageListsEquivalent(existing, list)) return prev;
+          const next = { ...prev, [threadKey]: list };
+          messagesByContactRef.current = next;
+          return next;
+        });
+      }
     }
     if (isChatApiDisabled()) {
       setChatFallbackMode(true);
@@ -5752,23 +5756,6 @@ export default function Chat() {
           if (!Number.isFinite(createdAt)) return false;
           return Date.now() - createdAt < 10 * 60 * 1000;
         });
-        const oldIdSet = new Set(oldList.map((m) => String(m?.id || "")).filter(Boolean));
-        const oldFingerprintSet = new Set(oldList.map((m) => messageFingerprint(m)).filter(Boolean));
-        const newIncoming = list.filter((m) => {
-          if (m?.mine) return false;
-          const id = String(m?.id || "");
-          if (id && oldIdSet.has(id)) return false;
-          const fingerprint = messageFingerprint(m);
-          if (fingerprint && oldFingerprintSet.has(fingerprint)) return false;
-          return true;
-        });
-        const freshIncoming = newIncoming.filter((message) => shouldNotifyForMessage(message, key));
-        if (oldList.length > 0 && freshIncoming.length > 0) {
-          playMessageAlert();
-          const latest = freshIncoming[freshIncoming.length - 1];
-          const senderName = contacts.find((c) => c.id === key)?.name || "New message";
-          maybeShowBrowserNotification(senderName, String(latest?.text || "You have a new message"));
-        }
         const merged = [];
         const mergedIds = new Set();
         const pushUnique = (item) => {
