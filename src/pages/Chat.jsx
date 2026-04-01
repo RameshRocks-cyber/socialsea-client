@@ -3018,6 +3018,43 @@ export default function Chat() {
       const raw = String(value || "").trim().toLowerCase();
       return raw === "true" || raw === "1" || raw === "online" || raw === "active" || raw === "yes";
     };
+    const extractMessageMeta = (value) => {
+      if (!value) return { text: "", ts: "", senderId: "" };
+      if (typeof value === "string") {
+        return { text: value, ts: "", senderId: "" };
+      }
+      if (typeof value !== "object") {
+        return { text: String(value), ts: "", senderId: "" };
+      }
+      const text = String(
+        value.text ??
+          value.message ??
+          value.content ??
+          value.body ??
+          value.caption ??
+          ""
+      ).trim();
+      const ts =
+        value.createdAt ??
+        value.sentAt ??
+        value.timestamp ??
+        value.time ??
+        value.at ??
+        value.date ??
+        "";
+      const senderId = String(
+        value.senderId ??
+          value.fromUserId ??
+          value.fromId ??
+          value.userId ??
+          value.sender?.id ??
+          value.sender?.userId ??
+          value.ownerId ??
+          value.authorId ??
+          ""
+      ).trim();
+      return { text, ts, senderId };
+    };
     const me = String(myUserId || "").trim();
     const senderId = String(u?.senderId || userLike?.senderId || "").trim();
     const receiverId = String(u?.receiverId || userLike?.receiverId || "").trim();
@@ -3146,7 +3183,52 @@ export default function Chat() {
       u?.avatarUrl ||
       u?.avatar ||
       "";
-    const lastActiveAt =
+    const lastMessagePayload =
+      userLike?.latestMessage ||
+      userLike?.lastMessage ||
+      userLike?.message ||
+      u?.latestMessage ||
+      u?.lastMessage ||
+      u?.message ||
+      null;
+    const lastMessageMeta = extractMessageMeta(lastMessagePayload);
+    const lastMessageText = [
+      lastMessageMeta.text,
+      userLike?.lastMessageText,
+      userLike?.latestMessage?.text,
+      userLike?.message,
+      u?.lastMessageText,
+      u?.latestMessage?.text,
+      u?.message
+    ]
+      .map((value) => String(value || "").trim())
+      .find((value) => value) || "";
+    const lastMessageAt =
+      lastMessageMeta.ts ||
+      userLike?.lastMessageAt ||
+      userLike?.lastMessageTime ||
+      userLike?.lastMessageTimestamp ||
+      userLike?.latestMessageAt ||
+      userLike?.latestMessageTime ||
+      userLike?.latestMessageTimestamp ||
+      u?.lastMessageAt ||
+      u?.lastMessageTime ||
+      u?.lastMessageTimestamp ||
+      u?.latestMessageAt ||
+      u?.latestMessageTime ||
+      u?.latestMessageTimestamp ||
+      "";
+    const lastMessageSenderId = String(
+      lastMessageMeta.senderId ||
+        u?.lastMessageSenderId ||
+        u?.lastMessageFromId ||
+        u?.lastMessageUserId ||
+        userLike?.lastMessageSenderId ||
+        userLike?.lastMessageFromId ||
+        userLike?.lastMessageUserId ||
+        ""
+    ).trim();
+    const primaryLastActiveAt =
       userLike?.lastActiveAt ||
       userLike?.lastSeenAt ||
       userLike?.lastSeen ||
@@ -3168,6 +3250,21 @@ export default function Chat() {
       u?.updatedAt ||
       u?.timestamp ||
       "";
+    let resolvedLastActiveAt = primaryLastActiveAt;
+    if (lastMessageAt) {
+      const senderMatchesContact = lastMessageSenderId && lastMessageSenderId === id;
+      const senderUnknown = !lastMessageSenderId;
+      const primaryTs = toEpochMs(primaryLastActiveAt || 0);
+      const candidateTs = toEpochMs(lastMessageAt || 0);
+      if (
+        (senderMatchesContact || (!primaryTs && senderUnknown)) &&
+        Number.isFinite(candidateTs) &&
+        candidateTs > 0 &&
+        (!primaryTs || candidateTs > primaryTs)
+      ) {
+        resolvedLastActiveAt = lastMessageAt;
+      }
+    }
     const presenceValues = [
       userLike?.online,
       userLike?.isOnline,
@@ -3186,17 +3283,7 @@ export default function Chat() {
       return String(value).trim() !== "";
     });
     const online = hasPresenceSignal ? presenceValues.some((value) => toBool(value)) : undefined;
-    const lastMessage =
-      userLike?.lastMessage ||
-      userLike?.lastMessageText ||
-      userLike?.latestMessage?.text ||
-      userLike?.message ||
-      u?.lastMessage ||
-      u?.lastMessageText ||
-      u?.latestMessage?.text ||
-      u?.message ||
-      "";
-    const normalizedLastActiveAt = String(lastActiveAt || "").trim();
+    const normalizedLastActiveAt = String(resolvedLastActiveAt || "").trim();
     const contact = {
       id,
       name,
@@ -3204,7 +3291,7 @@ export default function Chat() {
       email: emailRaw,
       avatar: (name[0] || "U").toUpperCase(),
       profilePic: profilePicRaw ? toApiUrl(profilePicRaw) : "",
-      lastMessage,
+      lastMessage: lastMessageText,
       ...(normalizedLastActiveAt ? { lastActiveAt: normalizedLastActiveAt } : {}),
       ...(hasPresenceSignal ? { online: Boolean(online) } : {})
     };
@@ -5501,7 +5588,6 @@ export default function Chat() {
         params: { _: Date.now() },
         mapList: (items) =>
           items
-            .map((entry) => entry?.user || entry?.contact || entry?.friend || entry?.profile || entry)
             .map(mapUserToContact)
             .filter((contact) => String(contact?.id || "").trim()),
         timeoutMs: 4000,
