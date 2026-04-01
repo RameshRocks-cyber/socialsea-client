@@ -50,16 +50,11 @@ const STORY_STORAGE_KEY = "socialsea_stories_v1";
 const CALL_POLL_MS = 1200;
 const CALL_SIGNAL_MAX_AGE_MS = 45000;
 const CALL_REJOIN_KEY = "socialsea_call_rejoin_v1";
-const PRESENCE_PING_KEY = "socialsea_presence_ping_v1";
-const PRESENCE_CHANNEL = "socialsea-presence";
-const PRESENCE_TTL_MS = 60000;
-const PRESENCE_PING_MS = 20000;
 const CALL_REJOIN_MAX_AGE_MS = 10 * 60 * 1000;
 const CALL_REJOIN_RETRY_MS = 6000;
 const CALL_REJOIN_MAX_RETRIES = 2;
 const CALL_REFRESH_GRACE_MS = 20000;
 const CALL_REFRESH_GRACE_KEY = "socialsea_call_refresh_grace_v1";
-const CHAT_PRESENCE_HOLD_MS = 90000;
 const CHAT_CONVO_POLL_MS = 8000;
 const CHAT_THREAD_POLL_BACKGROUND_MS = 10000;
 const CHAT_MESSAGE_ALERT_DEDUPE_MS = 10 * 60 * 1000;
@@ -1140,7 +1135,6 @@ export default function Chat() {
   const groupStreamsRef = useRef(new Map());
   const groupActiveRef = useRef(false);
   const rejoinAttemptedRef = useRef(false);
-  const presenceHoldRef = useRef(new Map());
   const localVideoDragRef = useRef({ active: false, offsetX: 0, offsetY: 0 });
 
   const isScreenShareStream = useCallback((stream) => {
@@ -1290,7 +1284,6 @@ export default function Chat() {
   const touchSwipeReplyRef = useRef({ triggered: false });
   const tabIdRef = useRef(`${Date.now()}_${Math.random().toString(36).slice(2, 7)}`);
   const callChannelRef = useRef(null);
-  const presencePulseRef = useRef(new Map());
   const readReceiptChannelRef = useRef(null);
   const messageChannelRef = useRef(null);
   const seenReadReceiptsRef = useRef(new Set());
@@ -4674,12 +4667,7 @@ export default function Chat() {
         c.id === contactIdForThread
           ? {
               ...c,
-              lastMessage: preview || c.lastMessage,
-              ...(nextMessage.mine
-                ? {}
-                : {
-                    lastActiveAt: new Date().toISOString()
-                  })
+              lastMessage: preview || c.lastMessage
             }
           : c
       );
@@ -5905,79 +5893,6 @@ export default function Chat() {
   }, [myUserId, myEmail]);
 
   useEffect(() => {
-    if (!myUserId) return undefined;
-    const recordPresence = (payload) => {
-      const userId = String(payload?.userId || "").trim();
-      if (!userId || userId === String(myUserId || "").trim()) return;
-      const at = Number(payload?.at || 0);
-      presencePulseRef.current.set(userId, Number.isFinite(at) && at > 0 ? at : Date.now());
-    };
-
-    const broadcastPresence = () => {
-      const payload = {
-        userId: String(myUserId),
-        at: Date.now(),
-        fromTab: tabIdRef.current
-      };
-      try {
-        presenceChannel?.postMessage({ kind: "presence-ping", payload });
-      } catch {
-        // ignore channel failures
-      }
-      try {
-        localStorage.setItem(PRESENCE_PING_KEY, JSON.stringify(payload));
-      } catch {
-        // ignore storage failures
-      }
-    };
-
-    let presenceChannel = null;
-    if (typeof BroadcastChannel !== "undefined") {
-      try {
-        presenceChannel = new BroadcastChannel(PRESENCE_CHANNEL);
-        presenceChannel.addEventListener("message", (event) => {
-          const packet = event?.data;
-          if (!packet || packet.kind !== "presence-ping") return;
-          if (packet?.payload?.fromTab === tabIdRef.current) return;
-          recordPresence(packet.payload);
-        });
-      } catch {
-        presenceChannel = null;
-      }
-    }
-
-    const onStorage = (event) => {
-      if (event.key !== PRESENCE_PING_KEY || !event.newValue) return;
-      try {
-        const payload = JSON.parse(event.newValue);
-        if (payload?.fromTab === tabIdRef.current) return;
-        recordPresence(payload);
-      } catch {
-        // ignore malformed payload
-      }
-    };
-
-    const onVisibility = () => {
-      if (document.visibilityState === "visible") {
-        broadcastPresence();
-      }
-    };
-
-    window.addEventListener("storage", onStorage);
-    document.addEventListener("visibilitychange", onVisibility);
-    broadcastPresence();
-    const timer = setInterval(broadcastPresence, PRESENCE_PING_MS);
-    return () => {
-      window.removeEventListener("storage", onStorage);
-      document.removeEventListener("visibilitychange", onVisibility);
-      clearInterval(timer);
-      if (presenceChannel) {
-        presenceChannel.close();
-      }
-    };
-  }, [myUserId]);
-
-  useEffect(() => {
     const onBeforeUnload = () => {
       const current = callStateRef.current;
       if (!current?.peerId || current.peerId === "group") return;
@@ -7001,43 +6916,10 @@ export default function Chat() {
     return Number.isFinite(profileTs) ? profileTs : 0;
   };
 
-  const resolveStableOnline = (contactId, computedOnline, allowHold = true) => {
-    if (!contactId) return computedOnline;
-    const now = nowTick;
-    const key = String(contactId);
-    if (computedOnline) {
-      presenceHoldRef.current.set(key, now);
-      return true;
-    }
-    if (!allowHold) {
-      presenceHoldRef.current.delete(key);
-      return false;
-    }
-    const last = presenceHoldRef.current.get(key);
-    if (last && now - last < CHAT_PRESENCE_HOLD_MS) return true;
-    return false;
-  };
-
-  const resolveImplicitOnline = (contactId) => {
-    const now = nowTick;
-    if (contactId) {
-      const localPing = presencePulseRef.current.get(String(contactId));
-      if (localPing && now - localPing <= PRESENCE_TTL_MS) return true;
-    }
-    return false;
-  };
-
   const getContactPresence = (contact) => {
     if (!contact) return { online: false, text: "lastseen at --" };
     const latest = getContactActivityTs(contact);
-    const explicitOnline = getExplicitOnlineValue(contact);
-    const implicitOnline = explicitOnline == null ? resolveImplicitOnline(contact?.id) : false;
-    const isOnline =
-      explicitOnline === true
-        ? resolveStableOnline(contact?.id, true, true)
-        : explicitOnline === false
-          ? resolveStableOnline(contact?.id, false, false)
-          : resolveStableOnline(contact?.id, implicitOnline, true);
+    const isOnline = Boolean(getExplicitOnlineValue(contact));
     if (isOnline) return { online: true, text: "online" };
     return {
       online: false,
@@ -7894,32 +7776,8 @@ export default function Chat() {
     const t = toEpochMs(c?.at || 0);
     return Number.isFinite(t) && t > max ? t : max;
   }, 0);
-  const threadLatestTs = activeMessages.reduce((max, m) => {
-    const t = toEpochMs(m?.createdAt || 0);
-    return Number.isFinite(t) && t > max ? t : max;
-  }, 0);
   const peerLatestProfileTs = clampFutureTimestamp(toEpochMs(activeContact?.lastActiveAt || 0));
-  const peerLatestActivityTs = Math.max(
-    peerLatestMessageTs,
-    peerLatestCallTs,
-    Number.isFinite(peerLatestProfileTs) ? peerLatestProfileTs : 0,
-    threadLatestTs
-  );
-  const explicitPeerOnline = getExplicitOnlineValue(activeContact);
-  if (explicitPeerOnline === false && activeContactId) {
-    presenceHoldRef.current.delete(String(activeContactId));
-  }
-  const isPeerOnline =
-    explicitPeerOnline === true
-      ? resolveStableOnline(activeContactId, true)
-      : explicitPeerOnline == null
-        ? resolveImplicitOnline(activeContactId)
-        : false;
-  const headerPresenceText = isPeerOnline
-    ? "online"
-    : peerLatestActivityTs > 0
-      ? formatLastSeen(peerLatestActivityTs)
-      : "lastseen at --";
+  const headerPresenceText = getContactPresence(activeContact).text;
 
   const sendTextPayload = async (text, options = {}) => {
     const cleanText = String(text || "").trim();
