@@ -2192,19 +2192,57 @@ export default function Chat() {
 
   const localThreadKey = (a, b) => [String(a || ""), String(b || "")].sort().join(":");
 
+  const localChatStorageKey = () => {
+    const id = String(myUserId || safeGetItem("userId") || "").trim();
+    const email = String(myEmail || safeGetItem("email") || "").trim().toLowerCase();
+    const hint = id || email || "guest";
+    return `${LOCAL_CHAT_KEY}_${hint}`;
+  };
+
+  const filterLocalChatForUser = (data, idHint) => {
+    if (!data || typeof data !== "object") return {};
+    const me = String(idHint || "").trim();
+    if (!me) return data;
+    const entries = Object.entries(data).filter(([key]) => {
+      const parts = String(key || "")
+        .split(":")
+        .map((value) => String(value || "").trim())
+        .filter(Boolean);
+      return parts.includes(me);
+    });
+    return Object.fromEntries(entries);
+  };
+
   const readLocalChat = () => {
+    const key = localChatStorageKey();
     try {
-      const raw = safeGetItem(LOCAL_CHAT_KEY);
-      if (!raw) return {};
-      const parsed = JSON.parse(raw);
-      return parsed && typeof parsed === "object" ? parsed : {};
+      const raw = safeGetItem(key);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === "object" ? parsed : {};
+      }
     } catch {
-      return {};
+      // ignore parsing errors
     }
+
+    // Legacy migration (non-user-scoped key).
+    try {
+      const legacyRaw = safeGetItem(LOCAL_CHAT_KEY);
+      if (!legacyRaw) return {};
+      const parsed = JSON.parse(legacyRaw);
+      const filtered = filterLocalChatForUser(parsed, myUserId || safeGetItem("userId"));
+      if (filtered && typeof filtered === "object" && Object.keys(filtered).length > 0) {
+        safeSetItem(key, JSON.stringify(filtered));
+        return filtered;
+      }
+    } catch {
+      // ignore legacy failures
+    }
+    return {};
   };
 
   const writeLocalChat = (data) => {
-    safeSetItem(LOCAL_CHAT_KEY, JSON.stringify(data));
+    safeSetItem(localChatStorageKey(), JSON.stringify(data));
   };
 
   const readFollowingCache = () => {
@@ -5372,10 +5410,17 @@ export default function Chat() {
     };
     try {
       if (!localHydratedRef.current) {
-        const fromLocalEarly = extractContactsFromLocalHistory();
-        if (fromLocalEarly.length) {
-          setContacts((prev) => mergeContacts(prev, fromLocalEarly));
-          localHydratedRef.current = true;
+        const shouldHydrateLocalEarly =
+          (typeof navigator !== "undefined" && navigator.onLine === false) ||
+          isChatApiDisabled() ||
+          chatFallbackMode ||
+          isLocalRuntime();
+        if (shouldHydrateLocalEarly) {
+          const fromLocalEarly = extractContactsFromLocalHistory();
+          if (fromLocalEarly.length) {
+            setContacts((prev) => mergeContacts(prev, fromLocalEarly));
+            localHydratedRef.current = true;
+          }
         }
       }
       if (!discoveryHydratedRef.current) {
