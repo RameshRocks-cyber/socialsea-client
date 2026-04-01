@@ -55,18 +55,24 @@ const SCREEN_VIDEO_HIGH = {
   frameRate: { ideal: 60, max: 60 }
 };
 const LIVEKIT_DEFAULT_URL = "wss://socialsea-mb50m9kr.livekit.cloud";
+const isLocalLikeHost = (host) => {
+  const value = String(host || "").trim().toLowerCase();
+  if (!value) return true;
+  if (value === "localhost" || value === "127.0.0.1") return true;
+  if (/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(value)) return true;
+  return false;
+};
 const resolveLivekitUrl = () => {
   const envUrl = String(import.meta.env.VITE_LIVEKIT_URL || "").trim();
   if (envUrl) return envUrl;
   if (typeof window !== "undefined") {
     const host = String(window.location.hostname || "").trim().toLowerCase();
-    if (host === "socialsea.co.in" || host === "www.socialsea.co.in") {
+    if (!isLocalLikeHost(host)) {
       return LIVEKIT_DEFAULT_URL;
     }
   }
   return "";
 };
-const LIVEKIT_URL = resolveLivekitUrl();
 const LIVE_CONTENT_TYPE_KEY = "socialsea_live_content_type_v1";
 const LIVE_VIEW_RATIO_KEY = "socialsea_live_view_ratio_v1";
 const LIVE_VIEW_MIRROR_KEY = "socialsea_live_view_mirror_v1";
@@ -106,7 +112,8 @@ const readStoredLiveContentType = (allowed, fallback) => {
 export default function LiveStart({ mode = "host" }) {
   const navigate = useNavigate();
   const isViewerMode = mode === "watch";
-  const livekitEnabled = Boolean(LIVEKIT_URL);
+  const [livekitUrl, setLivekitUrl] = useState(() => resolveLivekitUrl());
+  const livekitEnabled = Boolean(livekitUrl);
   const initialContentTypeConfig = readContentTypeConfig();
   const [liveState, setLiveState] = useState(() => readLiveBroadcast());
   const [liveSyncError, setLiveSyncError] = useState("");
@@ -750,9 +757,13 @@ export default function LiveStart({ mode = "host" }) {
 
   const startLive = async () => {
     setLiveSyncError("");
-    if (!livekitEnabled) {
+    const resolvedLivekitUrl = resolveLivekitUrl();
+    if (!resolvedLivekitUrl) {
       setLiveSyncError("LiveKit is not configured. Set VITE_LIVEKIT_URL and backend LIVEKIT keys.");
       return;
+    }
+    if (resolvedLivekitUrl !== livekitUrl) {
+      setLivekitUrl(resolvedLivekitUrl);
     }
     const now = Date.now();
     const ok = await writeLiveBroadcast(buildLivePayload({ id: now, startedAt: now }));
@@ -905,7 +916,7 @@ export default function LiveStart({ mode = "host" }) {
         if (!previewReady) {
           await ensureCameraPreview();
         }
-        if (!LIVEKIT_URL) {
+        if (!livekitUrl) {
           setMediaError("LiveKit URL is missing.");
           stopLivekitRoom("error");
           return;
@@ -922,7 +933,7 @@ export default function LiveStart({ mode = "host" }) {
         room.on(RoomEvent.Disconnected, () => {
           setLivekitStatus("disconnected");
         });
-        await room.connect(LIVEKIT_URL, token);
+        await room.connect(livekitUrl, token);
         if (cancelled) {
           room.disconnect();
           return;
@@ -989,7 +1000,7 @@ export default function LiveStart({ mode = "host" }) {
       setLivekitStatus("connecting");
       setMediaError("");
       try {
-        if (!LIVEKIT_URL) {
+        if (!livekitUrl) {
           setMediaError("LiveKit URL is missing.");
           stopLivekitRoom("error");
           return;
@@ -1087,7 +1098,7 @@ export default function LiveStart({ mode = "host" }) {
             attachViewerVideoStream();
           }
         });
-        await room.connect(LIVEKIT_URL, token);
+        await room.connect(livekitUrl, token);
         if (cancelled) {
           room.disconnect();
           return;
@@ -1901,3 +1912,15 @@ export default function LiveStart({ mode = "host" }) {
     </section>
   );
 }
+  useEffect(() => {
+    setLivekitUrl(resolveLivekitUrl());
+  }, []);
+
+  useEffect(() => {
+    setLivekitStatus((prev) => {
+      if (livekitEnabled) {
+        return prev === "disabled" ? "idle" : prev;
+      }
+      return "disabled";
+    });
+  }, [livekitEnabled]);

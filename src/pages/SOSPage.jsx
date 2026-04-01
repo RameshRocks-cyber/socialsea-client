@@ -172,6 +172,30 @@ const emergencyBaseCandidates = () => {
   return list.filter((base) => !(isHttpsPage && /^http:\/\//i.test(String(base || ""))));
 };
 
+const normalizeSocketBase = (rawBase) => {
+  const base = String(rawBase || "").trim().replace(/\/+$/, "");
+  if (!base) return "";
+  if (base === "/api") return "";
+  if (base.startsWith("/")) return base.replace(/\/api$/i, "") || base;
+  if (/\/api$/i.test(base)) return base.replace(/\/api$/i, "");
+  return base;
+};
+
+const sosSocketBaseCandidates = () => {
+  const storedBase =
+    typeof window !== "undefined"
+      ? localStorage.getItem("socialsea_auth_base_url") || sessionStorage.getItem("socialsea_auth_base_url")
+      : "";
+  const raw = uniqueNonEmpty([
+    getApiBaseUrl(),
+    api.defaults.baseURL,
+    storedBase,
+    import.meta.env.VITE_API_URL,
+    "https://api.socialsea.co.in"
+  ]);
+  return uniqueNonEmpty(raw.map(normalizeSocketBase).filter(Boolean));
+};
+
 const buildEmergencyUrls = (suffix) => {
   const path = String(suffix || "").replace(/^\/+/, "");
   const urls = [`/api/emergency/${path}`];
@@ -217,6 +241,35 @@ const writeJson = (key, value) => {
 const looksLikeHtmlPayload = (value) =>
   typeof value === "string" &&
   (/^\s*<!doctype html/i.test(value) || /<html[\s>]/i.test(value));
+
+const requestLivekitToken = async ({ room, mode, identity }) => {
+  const bases = emergencyBaseCandidates();
+  let lastErr = null;
+  for (const baseURL of bases) {
+    try {
+      const res = await api.request({
+        method: "POST",
+        url: "/api/livekit/token",
+        data: { room, mode, identity },
+        baseURL,
+        timeout: 9000,
+        allowCrossOriginAuth: true,
+        suppressAuthRedirect: true
+      });
+      if (looksLikeHtmlPayload(res?.data)) {
+        const htmlErr = new Error("Received HTML instead of API JSON");
+        htmlErr.response = { status: 404, data: res?.data };
+        throw htmlErr;
+      }
+      const token = res?.data?.token;
+      if (token) return token;
+      lastErr = new Error("missing-token");
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr || new Error("LiveKit token request failed");
+};
 
 const setSosActiveOwner = (isOwner) => {
   try {
@@ -471,55 +524,83 @@ export default function SOSPage() {
         ]);
         if (disposed) return;
         const SockJS = sockjsModule?.default || sockjsModule;
-        const base = getApiBaseUrl().replace(/\/+$/, "");
+        const candidates = sosSocketBaseCandidates();
+        let candidateIndex = 0;
+        let activeClient = null;
 
-        client = new Client({
-          webSocketFactory: () => new SockJS(`${base}/ws?token=${encodeURIComponent(token)}`),
-          connectHeaders: { Authorization: `Bearer ${token}` },
-          reconnectDelay: 2000,
-          debug: () => {}
-        });
-
-        client.onConnect = () => {
+        const connectNext = () => {
           if (disposed) return;
-          sosStompRef.current = client;
-          setSosSocketStatus("connected");
-          const alertId = String(sosStompAlertRef.current || "").trim();
-          if (alertId) {
-            try {
-              sosStompSubRef.current?.unsubscribe();
-            } catch {
-              // ignore
-            }
-            sosStompSubRef.current = client.subscribe(`/topic/sos/${encodeURIComponent(alertId)}`, (frame) => {
+          if (candidateIndex >= candidates.length) {
+            setSosSocketStatus("disconnected");
+            return;
+          }
+          const base = candidates[candidateIndex++];
+          if (!base) {
+            connectNext();
+            return;
+          }
+          try {
+            activeClient?.deactivate?.();
+          } catch {
+            // ignore
+          }
+          client = new Client({
+            webSocketFactory: () => new SockJS(`${base}/ws?token=${encodeURIComponent(token)}`),
+            connectHeaders: { Authorization: `Bearer ${token}` },
+            reconnectDelay: 0,
+            debug: () => {}
+          });
+          activeClient = client;
+
+          client.onConnect = () => {
+            if (disposed) return;
+            sosStompRef.current = client;
+            setSosSocketStatus("connected");
+            const alertId = String(sosStompAlertRef.current || "").trim();
+            if (alertId) {
               try {
-                const payload = JSON.parse(frame.body || "{}");
-                const handler = sosStompHandlerRef.current;
-                if (handler) {
-                  handler(payload);
-                } else {
-                  const queue = sosStompQueueRef.current;
-                  queue.push(payload);
-                  if (queue.length > 50) queue.shift();
-                }
+                sosStompSubRef.current?.unsubscribe();
               } catch {
                 // ignore
               }
-            });
-          }
-        };
-        client.onStompError = () => {
-          setSosSocketStatus("error");
-        };
-        client.onWebSocketError = () => {
-          setSosSocketStatus("error");
-        };
-        client.onWebSocketClose = () => {
-          setSosSocketStatus("disconnected");
+              sosStompSubRef.current = client.subscribe(`/topic/sos/${encodeURIComponent(alertId)}`, (frame) => {
+                try {
+                  const payload = JSON.parse(frame.body || "{}");
+                  const handler = sosStompHandlerRef.current;
+                  if (handler) {
+                    handler(payload);
+                  } else {
+                    const queue = sosStompQueueRef.current;
+                    queue.push(payload);
+                    if (queue.length > 50) queue.shift();
+                  }
+                } catch {
+                  // ignore
+                }
+              });
+            }
+          };
+          client.onStompError = () => {
+            setSosSocketStatus("error");
+            connectNext();
+          };
+          client.onWebSocketError = () => {
+            setSosSocketStatus("error");
+            connectNext();
+          };
+          client.onWebSocketClose = () => {
+            if (disposed) return;
+            if (!client?.connected) {
+              setSosSocketStatus("disconnected");
+              connectNext();
+            }
+          };
+
+          setSosSocketStatus("connecting");
+          client.activate();
         };
 
-        setSosSocketStatus("connecting");
-        client.activate();
+        connectNext();
       } catch {
         // ignore stomp init errors
       }
@@ -1814,13 +1895,11 @@ export default function SOSPage() {
         sosLivekitConnectingRef.current = true;
         setSosLivekitStatus("connecting");
         const roomId = `sos_${activeId}`;
-        const tokenRes = await api.post("/api/livekit/token", {
+        const token = await requestLivekitToken({
           room: roomId,
           mode: "host",
           identity: getSosLivekitIdentity("sender")
         });
-        const token = tokenRes?.data?.token;
-        if (!token) throw new Error("missing-token");
         const room = new Room({ adaptiveStream: true, dynacast: true });
         room.on(RoomEvent.Disconnected, () => {
           setSosLivekitStatus("disconnected");
@@ -1872,13 +1951,11 @@ export default function SOSPage() {
         sosLivekitConnectingRef.current = true;
         setSosLivekitStatus("connecting");
         const roomId = `sos_${routeId}`;
-        const tokenRes = await api.post("/api/livekit/token", {
+        const token = await requestLivekitToken({
           room: roomId,
           mode: "viewer",
           identity: getSosLivekitIdentity("viewer")
         });
-        const token = tokenRes?.data?.token;
-        if (!token) throw new Error("missing-token");
         const room = new Room({ adaptiveStream: true, dynacast: true });
         room.on(RoomEvent.Disconnected, () => {
           setSosLivekitStatus("disconnected");

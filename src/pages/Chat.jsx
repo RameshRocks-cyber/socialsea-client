@@ -58,6 +58,7 @@ const CALL_REFRESH_GRACE_KEY = "socialsea_call_refresh_grace_v1";
 const CHAT_CONVO_POLL_MS = 8000;
 const CHAT_THREAD_POLL_BACKGROUND_MS = 10000;
 const CHAT_MESSAGE_ALERT_DEDUPE_MS = 10 * 60 * 1000;
+const ONLINE_WINDOW_MS = Number(import.meta.env.VITE_ONLINE_WINDOW_MS || 2 * 60 * 1000);
 const CHAT_REMOTE_DISABLE_MS = 5 * 60 * 1000;
 const STORY_FEED_DISABLE_MS = 5 * 60 * 1000;
 const STORY_IMAGE_DURATION_MS = 6500;
@@ -126,12 +127,19 @@ const getStoryGroupKey = (story, index = 0) => {
   return `idx:${index}`;
 };
 const LIVEKIT_DEFAULT_URL = "wss://socialsea-mb50m9kr.livekit.cloud";
+const isLocalLikeHost = (host) => {
+  const value = String(host || "").trim().toLowerCase();
+  if (!value) return true;
+  if (value === "localhost" || value === "127.0.0.1") return true;
+  if (/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(value)) return true;
+  return false;
+};
 const resolveLivekitUrl = () => {
   const envUrl = String(import.meta.env.VITE_LIVEKIT_URL || "").trim();
   if (envUrl) return envUrl;
   if (typeof window !== "undefined") {
     const host = String(window.location.hostname || "").trim().toLowerCase();
-    if (host === "socialsea.co.in" || host === "www.socialsea.co.in") {
+    if (!isLocalLikeHost(host)) {
       return LIVEKIT_DEFAULT_URL;
     }
   }
@@ -173,6 +181,7 @@ const RTC_CONFIG = {
 const CHAT_FAVORITES_KEY = "socialsea_chat_favorites_v1";
 const CHAT_CUSTOM_STICKERS_KEY = "socialsea_chat_custom_stickers_v1";
 const CHAT_TRANSLATOR_KEY = "socialsea_chat_translator_v1";
+const CHAT_AUTOSPEAK_KEY = "socialsea_chat_autospeak_v1";
 const CHAT_WALLPAPER_KEY = "socialsea_chat_wallpaper_v1";
 const BLOCKED_USERS_KEY = "socialsea_blocked_users_v1";
 const CHAT_SHARE_DRAFT_KEY = "socialsea_chat_share_draft_v1";
@@ -1170,7 +1179,21 @@ export default function Chat() {
   const [signAssistEnabled, setSignAssistEnabled] = useState(false);
   const [signAssistText, setSignAssistText] = useState("");
   const [signAssistVoiceGender, setSignAssistVoiceGender] = useState("female");
-  const [signAssistAutoSpeak, setSignAssistAutoSpeak] = useState(true);
+  const readAutoSpeakPrefs = () => {
+    try {
+      const raw = localStorage.getItem(CHAT_AUTOSPEAK_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      return {
+        enabled: Boolean(parsed?.enabled),
+        enabledAt: Number(parsed?.enabledAt || 0)
+      };
+    } catch {
+      return { enabled: false, enabledAt: 0 };
+    }
+  };
+  const autoSpeakPrefsRef = useRef(readAutoSpeakPrefs());
+  const autoSpeakEnabledAtRef = useRef(autoSpeakPrefsRef.current.enabledAt || 0);
+  const [signAssistAutoSpeak, setSignAssistAutoSpeak] = useState(() => autoSpeakPrefsRef.current.enabled);
   const [signAssistContinuousMode, setSignAssistContinuousMode] = useState(false);
   const [signAssistBusy, setSignAssistBusy] = useState(false);
   const [signAssistStatus, setSignAssistStatus] = useState("");
@@ -1183,6 +1206,20 @@ export default function Chat() {
       setIsCameraOff(false);
     }
   }, [signAssistEnabled, callState.mode, callState.phase]);
+  useEffect(() => {
+    if (!signAssistAutoSpeak) return;
+    if (!autoSpeakEnabledAtRef.current) {
+      autoSpeakEnabledAtRef.current = Date.now();
+      try {
+        localStorage.setItem(CHAT_AUTOSPEAK_KEY, JSON.stringify({
+          enabled: true,
+          enabledAt: autoSpeakEnabledAtRef.current
+        }));
+      } catch {
+        // ignore storage failures
+      }
+    }
+  }, [signAssistAutoSpeak]);
   const [blockedUsers, setBlockedUsers] = useState(() => {
     try {
       const raw = localStorage.getItem(BLOCKED_USERS_KEY);
@@ -7013,8 +7050,9 @@ export default function Chat() {
     if (!contact) return { online: false, text: "lastseen at --" };
     const latest = getContactActivityTs(contact);
     const explicitOnline = getExplicitOnlineValue(contact);
-    const inferredOnline = latest > 0 && nowTick - latest <= 2 * 60 * 1000;
-    const isOnline = explicitOnline === null ? inferredOnline : Boolean(explicitOnline);
+    const windowMs = Number.isFinite(ONLINE_WINDOW_MS) && ONLINE_WINDOW_MS > 0 ? ONLINE_WINDOW_MS : 2 * 60 * 1000;
+    const inferredOnline = latest > 0 && nowTick - latest <= windowMs;
+    const isOnline = explicitOnline === true ? true : inferredOnline;
     if (isOnline) return { online: true, text: "online" };
     return {
       online: false,
@@ -8425,6 +8463,16 @@ export default function Chat() {
   const setAutoSpeakEnabled = (nextValue) => {
     const next = Boolean(nextValue);
     setSignAssistAutoSpeak(next);
+    const enabledAt = next ? Date.now() : 0;
+    autoSpeakEnabledAtRef.current = enabledAt;
+    try {
+      localStorage.setItem(CHAT_AUTOSPEAK_KEY, JSON.stringify({
+        enabled: next,
+        enabledAt
+      }));
+    } catch {
+      // ignore storage failures
+    }
     if (next) {
       const contactKey = String(activeContactId || "");
       if (contactKey) {
@@ -8451,6 +8499,12 @@ export default function Chat() {
     if (!signAssistAutoSpeak || !activeContactId) return;
     const contactKey = String(activeContactId || "");
     const visibleIds = getVisibleThreadMessageIds();
+    const enabledAt = autoSpeakEnabledAtRef.current || 0;
+    const shouldSpeakMessage = (msg) => {
+      const createdAtMs = toEpochMs(msg?.createdAt || 0);
+      if (enabledAt && createdAtMs && createdAtMs < enabledAt) return false;
+      return true;
+    };
     if (!autoSpeakBootstrappedByContactRef.current[contactKey]) {
       const visibleQueue = [];
       activeMessages.forEach((msg) => {
@@ -8458,6 +8512,7 @@ export default function Chat() {
         const msgId = String(msg?.id || "");
         const payload = getSpeakableIncomingPayload(msg);
         if (!msgId || !payload?.text) return;
+        if (!shouldSpeakMessage(msg)) return;
         if (visibleIds.has(msgId)) {
           visibleQueue.push({ msgId, payload });
         }
@@ -8477,6 +8532,7 @@ export default function Chat() {
       if (!msgId || spokenSignMessageIdsRef.current.has(msgId)) return;
       const payload = getSpeakableIncomingPayload(msg);
       if (!payload?.text) return;
+      if (!shouldSpeakMessage(msg)) return;
 
       spokenSignMessageIdsRef.current.add(msgId);
       if (visibleIds.has(msgId)) {
@@ -8497,11 +8553,14 @@ export default function Chat() {
     if (!signAssistAutoSpeak || !activeContactId) return;
     const visibleIds = getVisibleThreadMessageIds();
     if (!visibleIds.size) return;
+    const enabledAt = autoSpeakEnabledAtRef.current || 0;
     activeMessages.forEach((msg) => {
       if (!msg || msg.mine) return;
       const msgId = String(msg?.id || "");
       if (!msgId || spokenSignMessageIdsRef.current.has(msgId)) return;
       if (!visibleIds.has(msgId)) return;
+      const createdAtMs = toEpochMs(msg?.createdAt || 0);
+      if (enabledAt && createdAtMs && createdAtMs < enabledAt) return;
       const payload = getSpeakableIncomingPayload(msg);
       if (!payload?.text) return;
       spokenSignMessageIdsRef.current.add(msgId);
