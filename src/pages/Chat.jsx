@@ -4678,8 +4678,7 @@ export default function Chat() {
               ...(nextMessage.mine
                 ? {}
                 : {
-                    lastActiveAt: new Date().toISOString(),
-                    online: true
+                    lastActiveAt: new Date().toISOString()
                   })
             }
           : c
@@ -6998,28 +6997,11 @@ export default function Chat() {
     hasExplicitOnlineFlag(contact) ? Boolean(contact?.online) : null;
 
   const getContactActivityTs = (contact) => {
-    if (!contact?.id) return 0;
-    const msgList = messagesByContact[contact.id] || [];
-    const callList = Array.isArray(callHistoryByContact[contact.id]) ? callHistoryByContact[contact.id] : [];
-    const msgTs = msgList.reduce((max, m) => {
-      if (m?.mine) return max;
-      const t = toEpochMs(m?.createdAt || 0);
-      return Number.isFinite(t) && t > max ? t : max;
-    }, 0);
-    const callTs = callList.reduce((max, c) => {
-      if (String(c?.direction || "").toLowerCase() !== "incoming") return max;
-      const t = toEpochMs(c?.at || 0);
-      return Number.isFinite(t) && t > max ? t : max;
-    }, 0);
     const profileTs = clampFutureTimestamp(toEpochMs(contact?.lastActiveAt || 0));
-    return Math.max(
-      msgTs,
-      callTs,
-      Number.isFinite(profileTs) ? profileTs : 0
-    );
+    return Number.isFinite(profileTs) ? profileTs : 0;
   };
 
-  const resolveStableOnline = (contactId, computedOnline) => {
+  const resolveStableOnline = (contactId, computedOnline, allowHold = true) => {
     if (!contactId) return computedOnline;
     const now = nowTick;
     const key = String(contactId);
@@ -7027,32 +7009,35 @@ export default function Chat() {
       presenceHoldRef.current.set(key, now);
       return true;
     }
+    if (!allowHold) {
+      presenceHoldRef.current.delete(key);
+      return false;
+    }
     const last = presenceHoldRef.current.get(key);
     if (last && now - last < CHAT_PRESENCE_HOLD_MS) return true;
     return false;
   };
 
-  const resolveImplicitOnline = (lastActiveTs, contactId) => {
+  const resolveImplicitOnline = (contactId) => {
     const now = nowTick;
     if (contactId) {
       const localPing = presencePulseRef.current.get(String(contactId));
       if (localPing && now - localPing <= PRESENCE_TTL_MS) return true;
     }
-    if (!Number.isFinite(lastActiveTs) || lastActiveTs <= 0) return false;
-    return now - lastActiveTs <= CHAT_PRESENCE_HOLD_MS;
+    return false;
   };
 
   const getContactPresence = (contact) => {
     if (!contact) return { online: false, text: "lastseen at --" };
     const latest = getContactActivityTs(contact);
     const explicitOnline = getExplicitOnlineValue(contact);
-    const implicitOnline = resolveImplicitOnline(latest, contact?.id);
+    const implicitOnline = explicitOnline == null ? resolveImplicitOnline(contact?.id) : false;
     const isOnline =
       explicitOnline === true
-        ? resolveStableOnline(contact?.id, true)
+        ? resolveStableOnline(contact?.id, true, true)
         : explicitOnline === false
-          ? resolveStableOnline(contact?.id, implicitOnline)
-          : resolveStableOnline(contact?.id, implicitOnline);
+          ? resolveStableOnline(contact?.id, false, false)
+          : resolveStableOnline(contact?.id, implicitOnline, true);
     if (isOnline) return { online: true, text: "online" };
     return {
       online: false,
@@ -7928,7 +7913,7 @@ export default function Chat() {
     explicitPeerOnline === true
       ? resolveStableOnline(activeContactId, true)
       : explicitPeerOnline == null
-        ? resolveImplicitOnline(peerLatestActivityTs, activeContactId)
+        ? resolveImplicitOnline(activeContactId)
         : false;
   const headerPresenceText = isPeerOnline
     ? "online"

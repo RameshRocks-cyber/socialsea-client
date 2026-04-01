@@ -93,6 +93,7 @@ const SWIPE_TABS = [
 const SWIPE_MIN_DISTANCE_PX = 72;
 const SWIPE_MAX_DURATION_MS = 700;
 const SWIPE_DOMINANCE_RATIO = 1.2;
+const PRESENCE_HEARTBEAT_MS = 20000;
 
 const getSwipeTabIndex = (pathname) => SWIPE_TABS.findIndex((tab) => tab.match(pathname));
 
@@ -283,6 +284,42 @@ function AppRoutes() {
         navigator.geolocation.clearWatch(watchId);
       }
       if (intervalId) clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [authed, isAuthScreen]);
+
+  useEffect(() => {
+    if (!authed || isAuthScreen) return undefined;
+    let active = true;
+
+    const sendPresenceHeartbeat = () => {
+      if (!active) return;
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      api
+        .request({
+          method: "POST",
+          url: "/api/chat/presence",
+          timeout: 6000,
+          suppressAuthRedirect: true
+        })
+        .catch(() => {
+          // Presence heartbeat should stay silent on transient network issues.
+        });
+    };
+
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") {
+        sendPresenceHeartbeat();
+      }
+    };
+
+    sendPresenceHeartbeat();
+    document.addEventListener("visibilitychange", onVisibility);
+    const timer = setInterval(sendPresenceHeartbeat, PRESENCE_HEARTBEAT_MS);
+
+    return () => {
+      active = false;
+      clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [authed, isAuthScreen]);

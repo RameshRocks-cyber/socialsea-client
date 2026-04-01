@@ -69,8 +69,8 @@ const CHARACTER_SHEETS = {
   "Anime Hero": { src: "/shimeji/hero-sheet.png", frameWidth: 128, frameHeight: 128, frames: 6, fps: 10 },
   "Robot Cat": { src: "/shimeji/robot-sheet.png", frameWidth: 128, frameHeight: 128, frames: 6, fps: 10 },
   "Cartoon Kid": { src: "/shimeji/kid-sheet.png", frameWidth: 128, frameHeight: 128, frames: 6, fps: 10 },
-  "Brave Soldier": { src: "/shimeji/soldier-sheet.png", frameWidth: 90, frameHeight: 110, frames: 8, rows: 3, row: 0, fps: 12, scale: 1.56 },
-  "Adventure Hunter": { src: "/shimeji/hunter-sheet.png", frameWidth: 90, frameHeight: 110, frames: 8, rows: 3, row: 0, fps: 12, scale: 1.56 }
+  "Brave Soldier": { src: "/shimeji/soldier-sheet.png", frameWidth: 90, frameHeight: 110, frames: 8, rows: 3, row: 0, fps: 12, scale: 1.24 },
+  "Adventure Hunter": { src: "/shimeji/hunter-sheet.png", frameWidth: 90, frameHeight: 110, frames: 8, rows: 3, row: 0, fps: 12, scale: 1.24 }
 };
 
 const normalizeKey = (value) => String(value || "").trim().toLowerCase();
@@ -254,12 +254,10 @@ const getBounds = (node) => {
   const bottomPad = width <= 768 ? 60 : 48;
   const scaledWidth = BASE_WIDTH * SHIMEJI_SCALE;
   const scaledHeight = BASE_HEIGHT * SHIMEJI_SCALE;
-  const dx = (BASE_WIDTH - scaledWidth) / 2;
-  const dy = BASE_HEIGHT - scaledHeight;
-  const minX = EDGE_PAD - dx;
-  const minY = -dy;
-  const maxX = Math.max(minX, width - EDGE_PAD - dx - scaledWidth);
-  const maxY = Math.max(minY, height - bottomPad - BASE_HEIGHT);
+  const minX = EDGE_PAD;
+  const minY = 0;
+  const maxX = Math.max(minX, width - EDGE_PAD - scaledWidth);
+  const maxY = Math.max(minY, height - bottomPad - scaledHeight);
   return { width, height, minX, minY, maxX, maxY };
 };
 
@@ -836,9 +834,12 @@ export default function NotificationBuddy({ enabled = true }) {
     const rect = target.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
+    const insetX = Math.min(HITBOX_INSET_X, rect.width * 0.14);
+    const insetTop = Math.min(HITBOX_INSET_TOP, rect.height * 0.14);
+    const insetBottom = Math.min(HITBOX_INSET_BOTTOM, rect.height * 0.08);
     if (x < 0 || y < 0 || x > rect.width || y > rect.height) return false;
-    if (x < HITBOX_INSET_X || x > rect.width - HITBOX_INSET_X) return false;
-    if (y < HITBOX_INSET_TOP || y > rect.height - HITBOX_INSET_BOTTOM) return false;
+    if (x < insetX || x > rect.width - insetX) return false;
+    if (y < insetTop || y > rect.height - insetBottom) return false;
     return true;
   };
 
@@ -1181,7 +1182,9 @@ export default function NotificationBuddy({ enabled = true }) {
     "--hair-color": characterStyle.hairColor || "#1f2937",
     "--cheek-color": characterStyle.cheekColor || "#f9a8d4",
     "--accent-color": characterStyle.accentColor || "#f59e0b",
-    "--accent-strong": characterStyle.accentStrong || "#f97316"
+    "--accent-strong": characterStyle.accentStrong || "#f97316",
+    "--ss-buddy-scale": SHIMEJI_SCALE,
+    "--ss-buddy-direction": direction
   };
   const sheetConfig = CHARACTER_SHEETS[character];
   const characterAsset = CHARACTER_ASSETS[character];
@@ -1227,11 +1230,13 @@ export default function NotificationBuddy({ enabled = true }) {
         : { stepDuration: "0.66s", idleDuration: "1.5s" };
 
   const actorStyle = {
-    transform: `scaleX(${direction}) scale(${SHIMEJI_SCALE})`,
     "--ss-step-duration": motionProfile.stepDuration,
     "--ss-idle-duration": motionProfile.idleDuration
   };
-  const counterFlipStyle = { transform: `scaleX(${direction})` };
+  const triggerStyle = {
+    width: `${Math.round(BASE_WIDTH * SHIMEJI_SCALE)}px`,
+    height: `${Math.round(BASE_HEIGHT * SHIMEJI_SCALE)}px`
+  };
   const panelTitle =
     panelMode === "types"
       ? unreadCount > 0
@@ -1290,6 +1295,7 @@ export default function NotificationBuddy({ enabled = true }) {
         <button
           type="button"
           className={`ss-shimeji-trigger ${isHoldingNotice ? "is-holding" : ""} ${dragging ? "is-dragging" : ""}`}
+          style={triggerStyle}
           aria-label="Notification buddy"
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
