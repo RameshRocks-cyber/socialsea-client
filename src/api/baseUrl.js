@@ -133,14 +133,23 @@ export function toApiUrl(path = "") {
   if (/^https?:\/\//i.test(path)) {
     try {
       const url = new URL(path);
-      if (url.pathname.startsWith("/api/uploads/")) {
+      const host = url.hostname.toLowerCase();
+      const shouldRebase =
+        isLoopbackHost(host) ||
+        isPrivateIpHost(host) ||
+        isFrontendLikeHost(host);
+      if (shouldRebase) {
+        const rebased = `${url.pathname}${url.search}${url.hash}`;
+        path = rebased;
+      } else if (url.pathname.startsWith("/api/uploads/")) {
         url.pathname = url.pathname.replace("/api/uploads/", "/uploads/");
         return url.toString();
+      } else {
+        return path;
       }
     } catch {
-      // ignore url parse errors
+      return path;
     }
-    return path;
   }
   const baseTrimmed = String(base || "").replace(/\/+$/, "");
   let normalizedPath = path.startsWith("/") ? path : `/${path}`;
