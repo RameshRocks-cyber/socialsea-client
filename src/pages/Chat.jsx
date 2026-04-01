@@ -125,7 +125,20 @@ const getStoryGroupKey = (story, index = 0) => {
   if (storyId) return `story:${storyId}`;
   return `idx:${index}`;
 };
-const LIVEKIT_URL = import.meta.env.VITE_LIVEKIT_URL || "";
+const LIVEKIT_DEFAULT_URL = "wss://socialsea-mb50m9kr.livekit.cloud";
+const resolveLivekitUrl = () => {
+  const envUrl = String(import.meta.env.VITE_LIVEKIT_URL || "").trim();
+  if (envUrl) return envUrl;
+  if (typeof window !== "undefined") {
+    const host = String(window.location.hostname || "").trim().toLowerCase();
+    if (host === "socialsea.co.in" || host === "www.socialsea.co.in") {
+      return LIVEKIT_DEFAULT_URL;
+    }
+  }
+  return "";
+};
+const LIVEKIT_URL = resolveLivekitUrl();
+const ASSUME_UTC_TS = String(import.meta.env.VITE_ASSUME_UTC_TS || "").trim().toLowerCase() === "true";
 const TURN_URLS = String(import.meta.env.VITE_TURN_URLS || "")
   .split(",")
   .map((v) => v.trim())
@@ -2426,8 +2439,12 @@ export default function Chat() {
       const raw = value.trim();
       if (!raw) return "";
       // Backend may send ISO-like time without timezone; treat it as local time.
-      const noZoneIso = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(raw);
-      if (noZoneIso) return new Date(raw).toISOString();
+      const noZoneIso = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(raw);
+      if (noZoneIso) {
+        const normalized = raw.replace(" ", "T");
+        const candidate = ASSUME_UTC_TS ? `${normalized}Z` : normalized;
+        return new Date(candidate).toISOString();
+      }
     }
     const parsed = new Date(value);
     if (Number.isFinite(parsed.getTime())) return parsed.toISOString();
@@ -2446,7 +2463,10 @@ export default function Chat() {
     }
     const raw = String(value || "").trim();
     if (!raw) return 0;
-    const parsed = new Date(raw).getTime();
+    const noZoneIso = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(raw);
+    const normalized = noZoneIso ? raw.replace(" ", "T") : raw;
+    const candidate = noZoneIso && ASSUME_UTC_TS ? `${normalized}Z` : normalized;
+    const parsed = new Date(candidate).getTime();
     return Number.isFinite(parsed) ? parsed : 0;
   };
 
@@ -6956,15 +6976,45 @@ export default function Chat() {
   const getExplicitOnlineValue = (contact) =>
     hasExplicitOnlineFlag(contact) ? Boolean(contact?.online) : null;
 
+  const getPeerMessageActivityTs = (contactId) => {
+    if (!contactId) return 0;
+    const list = Array.isArray(messagesByContact?.[contactId]) ? messagesByContact[contactId] : [];
+    return list.reduce((max, msg) => {
+      if (!msg || msg.mine) return max;
+      const t = toEpochMs(msg?.createdAt || 0);
+      return Number.isFinite(t) && t > max ? t : max;
+    }, 0);
+  };
+
+  const getPeerCallActivityTs = (contactId) => {
+    if (!contactId) return 0;
+    const list = Array.isArray(callHistoryByContact?.[contactId]) ? callHistoryByContact[contactId] : [];
+    return list.reduce((max, entry) => {
+      const status = String(entry?.status || "").toLowerCase();
+      const direction = String(entry?.direction || "").toLowerCase();
+      const meaningful = direction === "incoming" || status === "connected" || status === "accepted";
+      if (!meaningful) return max;
+      const t = toEpochMs(entry?.at || 0);
+      return Number.isFinite(t) && t > max ? t : max;
+    }, 0);
+  };
+
   const getContactActivityTs = (contact) => {
     const profileTs = clampFutureTimestamp(toEpochMs(contact?.lastActiveAt || 0));
-    return Number.isFinite(profileTs) ? profileTs : 0;
+    const contactId = String(contact?.id || "").trim();
+    const peerMsgTs = getPeerMessageActivityTs(contactId);
+    const peerCallTs = getPeerCallActivityTs(contactId);
+    const fallbackTs = Math.max(peerMsgTs, peerCallTs);
+    const latest = Math.max(Number.isFinite(profileTs) ? profileTs : 0, Number.isFinite(fallbackTs) ? fallbackTs : 0);
+    return Number.isFinite(latest) ? latest : 0;
   };
 
   const getContactPresence = (contact) => {
     if (!contact) return { online: false, text: "lastseen at --" };
     const latest = getContactActivityTs(contact);
-    const isOnline = Boolean(getExplicitOnlineValue(contact));
+    const explicitOnline = getExplicitOnlineValue(contact);
+    const inferredOnline = latest > 0 && nowTick - latest <= 2 * 60 * 1000;
+    const isOnline = explicitOnline === null ? inferredOnline : Boolean(explicitOnline);
     if (isOnline) return { online: true, text: "online" };
     return {
       online: false,
@@ -7823,6 +7873,7 @@ export default function Chat() {
   }, 0);
   const peerLatestProfileTs = clampFutureTimestamp(toEpochMs(activeContact?.lastActiveAt || 0));
   const headerPresenceText = getContactPresence(activeContact).text;
+  const tsModeLabel = ASSUME_UTC_TS ? "UTC" : "Local";
 
   const sendTextPayload = async (text, options = {}) => {
     const cleanText = String(text || "").trim();
@@ -10759,7 +10810,12 @@ export default function Chat() {
                 </span>
                 <span className="wa-header-meta">
                   <h3>{activeContact.name}</h3>
-                  <small>{headerPresenceText}</small>
+                  <small>
+                    {headerPresenceText}
+                    <span className="chat-ts-mode-badge" title={`Timestamp mode: ${tsModeLabel}`}>
+                      {tsModeLabel}
+                    </span>
+                  </small>
                 </span>
                 </button>
               </div>

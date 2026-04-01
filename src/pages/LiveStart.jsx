@@ -54,7 +54,19 @@ const SCREEN_VIDEO_HIGH = {
   height: { ideal: 1080, max: 1080 },
   frameRate: { ideal: 60, max: 60 }
 };
-const LIVEKIT_URL = import.meta.env.VITE_LIVEKIT_URL || "";
+const LIVEKIT_DEFAULT_URL = "wss://socialsea-mb50m9kr.livekit.cloud";
+const resolveLivekitUrl = () => {
+  const envUrl = String(import.meta.env.VITE_LIVEKIT_URL || "").trim();
+  if (envUrl) return envUrl;
+  if (typeof window !== "undefined") {
+    const host = String(window.location.hostname || "").trim().toLowerCase();
+    if (host === "socialsea.co.in" || host === "www.socialsea.co.in") {
+      return LIVEKIT_DEFAULT_URL;
+    }
+  }
+  return "";
+};
+const LIVEKIT_URL = resolveLivekitUrl();
 const LIVE_CONTENT_TYPE_KEY = "socialsea_live_content_type_v1";
 const LIVE_VIEW_RATIO_KEY = "socialsea_live_view_ratio_v1";
 const LIVE_VIEW_MIRROR_KEY = "socialsea_live_view_mirror_v1";

@@ -129,6 +129,21 @@
   box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.24);
 }
 
+.chat-ts-mode-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid rgba(120, 120, 120, 0.4);
+  background: rgba(18, 18, 18, 0.6);
+  color: rgba(235, 235, 235, 0.75);
+  font-size: 0.6rem;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
 .chat-requests-link {
   border: 1px solid rgba(72, 72, 72, 0.72);
   background: rgba(14, 16, 20, 0.9);

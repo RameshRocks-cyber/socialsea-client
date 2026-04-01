@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { Room, RoomEvent } from "livekit-client";
 import api from "../api/axios";
 import { getApiBaseUrl } from "../api/baseUrl";
 import {
@@ -21,6 +22,19 @@ const SOS_LIVE_RTC_SIGNAL_KEY = "socialsea_sos_live_rtc_signal_v1";
 const SOS_LIVE_RTC_OFFER_KEY_PREFIX = "socialsea_sos_live_rtc_offer_v1_";
 const SOS_LIVE_RTC_ANSWER_KEY_PREFIX = "socialsea_sos_live_rtc_answer_v1_";
 const SOS_ACTIVE_OWNER_KEY = "socialsea_sos_active_owner_v1";
+const LIVEKIT_DEFAULT_URL = "wss://socialsea-mb50m9kr.livekit.cloud";
+const resolveLivekitUrl = () => {
+  const envUrl = String(import.meta.env.VITE_LIVEKIT_URL || "").trim();
+  if (envUrl) return envUrl;
+  if (typeof window !== "undefined") {
+    const host = String(window.location.hostname || "").trim().toLowerCase();
+    if (host === "socialsea.co.in" || host === "www.socialsea.co.in") {
+      return LIVEKIT_DEFAULT_URL;
+    }
+  }
+  return "";
+};
+const LIVEKIT_URL = resolveLivekitUrl();
 const HEARTBEAT_MS = 2000;
 const LIVE_STREAM_DISCONNECT_GRACE_MS = 3000;
 const LIVE_FRAME_STALE_MS = 8000;
@@ -200,6 +214,10 @@ const writeJson = (key, value) => {
   }
 };
 
+const looksLikeHtmlPayload = (value) =>
+  typeof value === "string" &&
+  (/^\s*<!doctype html/i.test(value) || /<html[\s>]/i.test(value));
+
 const setSosActiveOwner = (isOwner) => {
   try {
     if (isOwner) {
@@ -355,6 +373,7 @@ export default function SOSPage() {
     users: [],
     staleMinutes: LOCATION_STALE_MINUTES
   });
+  const [sosSocketStatus, setSosSocketStatus] = useState("disconnected");
   const [recordingInfo, setRecordingInfo] = useState({
     audio: false,
     video: false,
@@ -362,6 +381,8 @@ export default function SOSPage() {
     bytes: 0
   });
   const [backendStatus, setBackendStatus] = useState("Not sent yet");
+  const livekitEnabled = Boolean(LIVEKIT_URL);
+  const [sosLivekitStatus, setSosLivekitStatus] = useState(livekitEnabled ? "idle" : "disabled");
   const [liveFrameUrl, setLiveFrameUrl] = useState("");
   const [liveStreamAvailable, setLiveStreamAvailable] = useState(false);
   const [cameraFacing, setCameraFacing] = useState("user");
@@ -385,6 +406,9 @@ export default function SOSPage() {
   const livePreviewChannelRef = useRef(null);
   const senderRtcPeerRef = useRef(null);
   const viewerRtcPeerRef = useRef(null);
+  const sosLivekitRoomRef = useRef(null);
+  const sosLivekitConnectingRef = useRef(false);
+  const sosLivekitRemoteStreamRef = useRef(null);
   const sosStompRef = useRef(null);
   const sosStompSubRef = useRef(null);
   const sosStompHandlerRef = useRef(null);
@@ -451,6 +475,7 @@ export default function SOSPage() {
 
         client = new Client({
           webSocketFactory: () => new SockJS(`${base}/ws?token=${encodeURIComponent(token)}`),
+          connectHeaders: { Authorization: `Bearer ${token}` },
           reconnectDelay: 2000,
           debug: () => {}
         });
@@ -458,6 +483,7 @@ export default function SOSPage() {
         client.onConnect = () => {
           if (disposed) return;
           sosStompRef.current = client;
+          setSosSocketStatus("connected");
           const alertId = String(sosStompAlertRef.current || "").trim();
           if (alertId) {
             try {
@@ -482,10 +508,17 @@ export default function SOSPage() {
             });
           }
         };
-        client.onStompError = () => {};
-        client.onWebSocketError = () => {};
-        client.onWebSocketClose = () => {};
+        client.onStompError = () => {
+          setSosSocketStatus("error");
+        };
+        client.onWebSocketError = () => {
+          setSosSocketStatus("error");
+        };
+        client.onWebSocketClose = () => {
+          setSosSocketStatus("disconnected");
+        };
 
+        setSosSocketStatus("connecting");
         client.activate();
       } catch {
         // ignore stomp init errors
@@ -503,6 +536,7 @@ export default function SOSPage() {
       }
       sosStompSubRef.current = null;
       sosStompRef.current = null;
+      setSosSocketStatus("disconnected");
       if (client) {
         try {
           client.deactivate();
@@ -595,6 +629,35 @@ export default function SOSPage() {
     }
   };
 
+  const stopSosLivekit = (nextStatus = "idle") => {
+    try {
+      sosLivekitRoomRef.current?.disconnect();
+    } catch {
+      // ignore
+    }
+    sosLivekitRoomRef.current = null;
+    sosLivekitConnectingRef.current = false;
+    if (sosLivekitRemoteStreamRef.current) {
+      try {
+        sosLivekitRemoteStreamRef.current.getTracks?.().forEach((t) => t.stop());
+      } catch {
+        // ignore
+      }
+      sosLivekitRemoteStreamRef.current = null;
+    }
+    const node = liveRemoteVideoRef.current;
+    if (node?.srcObject) {
+      try {
+        node.pause();
+        node.srcObject = null;
+      } catch {
+        // ignore
+      }
+    }
+    setLiveStreamAvailable(false);
+    setSosLivekitStatus(nextStatus);
+  };
+
   const publishSosSignal = (packet) => {
     const client = sosStompRef.current;
     const alertLikeId = normalizeAlertId(packet?.alertId);
@@ -624,6 +687,13 @@ export default function SOSPage() {
       // ignore storage issues
     }
     publishSosSignal(packet);
+  };
+
+  const getSosLivekitIdentity = (role) => {
+    const id =
+      String(localStorage.getItem("userId") || sessionStorage.getItem("userId") || "").trim() ||
+      `guest-${Math.random().toString(36).slice(2, 7)}`;
+    return `sos-${role}-${id}`;
   };
 
   const getLocationOnce = () =>
@@ -657,13 +727,19 @@ export default function SOSPage() {
     let lastErr = null;
     for (const url of urls) {
       try {
-        return await api.request({
+        const res = await api.request({
           method,
           url,
           data,
           timeout: 9000,
           ...extraConfig
         });
+        if (looksLikeHtmlPayload(res?.data)) {
+          const htmlErr = new Error("Received HTML instead of API JSON");
+          htmlErr.response = { status: 404, data: res?.data };
+          throw htmlErr;
+        }
+        return res;
       } catch (err) {
         lastErr = err;
         const status = Number(err?.response?.status || 0);
@@ -1492,8 +1568,10 @@ export default function SOSPage() {
     };
   }, [isLiveView, status, recordingInfo.video, alertId, alertDisplayId]);
 
+  const useRtcFallback = !livekitEnabled || sosLivekitStatus === "disabled" || sosLivekitStatus === "error";
+
   useEffect(() => {
-    if (isLiveView || status !== "active") {
+    if (isLiveView || status !== "active" || !useRtcFallback) {
       closeSenderRtcPeer();
       return undefined;
     }
@@ -1612,10 +1690,10 @@ export default function SOSPage() {
       }
       closeSenderRtcPeer();
     };
-  }, [isLiveView, status, alertId, alertDisplayId, recordingInfo.audio, recordingInfo.video]);
+  }, [isLiveView, status, alertId, alertDisplayId, recordingInfo.audio, recordingInfo.video, useRtcFallback]);
 
   useEffect(() => {
-    if (!isLiveView) return undefined;
+    if (!isLiveView || !useRtcFallback) return undefined;
     const routeId = normalizeAlertId(routeAlertId);
     if (!routeId) return undefined;
     hasMatchedLiveFrameRef.current = false;
@@ -1702,7 +1780,7 @@ export default function SOSPage() {
       window.removeEventListener("storage", onStorage);
       clearInterval(timer);
     };
-  }, [isLiveView, routeAlertId]);
+  }, [isLiveView, routeAlertId, useRtcFallback]);
 
   useEffect(() => {
     const node = liveRemoteVideoRef.current;
@@ -1713,6 +1791,140 @@ export default function SOSPage() {
     node.play().catch(() => {});
     return undefined;
   }, [isLiveView, liveStreamAvailable]);
+
+  useEffect(() => {
+    if (!livekitEnabled) return undefined;
+    if (isLiveView || status !== "active") {
+      stopSosLivekit("idle");
+      return undefined;
+    }
+    const activeId = String(alertId || alertDisplayId || "").trim();
+    const stream = mediaStreamRef.current;
+    if (!activeId || !stream) return undefined;
+    if (sosLivekitRoomRef.current || sosLivekitConnectingRef.current) return undefined;
+
+    let cancelled = false;
+
+    const connectSender = async () => {
+      try {
+        if (!LIVEKIT_URL) {
+          setSosLivekitStatus("disabled");
+          return;
+        }
+        sosLivekitConnectingRef.current = true;
+        setSosLivekitStatus("connecting");
+        const roomId = `sos_${activeId}`;
+        const tokenRes = await api.post("/api/livekit/token", {
+          room: roomId,
+          mode: "host",
+          identity: getSosLivekitIdentity("sender")
+        });
+        const token = tokenRes?.data?.token;
+        if (!token) throw new Error("missing-token");
+        const room = new Room({ adaptiveStream: true, dynacast: true });
+        room.on(RoomEvent.Disconnected, () => {
+          setSosLivekitStatus("disconnected");
+        });
+        await room.connect(LIVEKIT_URL, token);
+        if (cancelled) {
+          room.disconnect();
+          return;
+        }
+        sosLivekitRoomRef.current = room;
+
+        const tracks = stream.getTracks();
+        const results = await Promise.allSettled(
+          tracks.map((track) => room.localParticipant.publishTrack(track))
+        );
+        if (tracks.length && !results.some((r) => r.status === "fulfilled")) {
+          const firstFailure = results.find((r) => r.status === "rejected");
+          throw firstFailure?.reason || new Error("publish-failed");
+        }
+        setSosLivekitStatus("connected");
+      } catch {
+        stopSosLivekit("error");
+      } finally {
+        sosLivekitConnectingRef.current = false;
+      }
+    };
+
+    void connectSender();
+    return () => {
+      cancelled = true;
+    };
+  }, [livekitEnabled, isLiveView, status, alertId, alertDisplayId, recordingInfo.audio, recordingInfo.video]);
+
+  useEffect(() => {
+    if (!livekitEnabled) return undefined;
+    if (!isLiveView) return undefined;
+    const routeId = normalizeAlertId(routeAlertId);
+    if (!routeId) return undefined;
+    if (sosLivekitRoomRef.current || sosLivekitConnectingRef.current) return undefined;
+
+    let cancelled = false;
+
+    const connectViewer = async () => {
+      try {
+        if (!LIVEKIT_URL) {
+          setSosLivekitStatus("disabled");
+          return;
+        }
+        sosLivekitConnectingRef.current = true;
+        setSosLivekitStatus("connecting");
+        const roomId = `sos_${routeId}`;
+        const tokenRes = await api.post("/api/livekit/token", {
+          room: roomId,
+          mode: "viewer",
+          identity: getSosLivekitIdentity("viewer")
+        });
+        const token = tokenRes?.data?.token;
+        if (!token) throw new Error("missing-token");
+        const room = new Room({ adaptiveStream: true, dynacast: true });
+        room.on(RoomEvent.Disconnected, () => {
+          setSosLivekitStatus("disconnected");
+          setLiveStreamAvailable(false);
+        });
+        room.on(RoomEvent.TrackSubscribed, (track) => {
+          if (!track) return;
+          let stream = sosLivekitRemoteStreamRef.current;
+          if (!stream) {
+            stream = new MediaStream();
+            sosLivekitRemoteStreamRef.current = stream;
+          }
+          try {
+            stream.addTrack(track.mediaStreamTrack);
+          } catch {
+            // ignore duplicate tracks
+          }
+          const node = liveRemoteVideoRef.current;
+          if (node) {
+            node.srcObject = stream;
+            node.muted = true;
+            node.autoplay = true;
+            node.playsInline = true;
+            node.play().catch(() => {});
+          }
+          setLiveStreamAvailable(true);
+          setSosLivekitStatus("connected");
+        });
+        await room.connect(LIVEKIT_URL, token);
+        if (cancelled) {
+          room.disconnect();
+          return;
+        }
+        sosLivekitRoomRef.current = room;
+      } catch {
+        stopSosLivekit("error");
+      } finally {
+        sosLivekitConnectingRef.current = false;
+      }
+    };
+
+    void connectViewer();
+    return () => {
+      cancelled = true;
+    };
+  }, [livekitEnabled, isLiveView, routeAlertId]);
 
   useEffect(() => {
     if (!isLiveView) {
@@ -2120,6 +2332,8 @@ export default function SOSPage() {
           <p>Alert Id: {alertDisplayId || alertId || "-"}</p>
           <p>Radius: {RADIUS_METERS / 1000} km</p>
           <p>Backend: {backendStatus}</p>
+          <p>Signal: {sosSocketStatus}</p>
+          <p>LiveKit: {sosLivekitStatus}</p>
         </div>
 
         <div className="sos-preview-card">
