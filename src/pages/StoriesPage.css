@@ -1,6 +1,6 @@
 .stories-page {
   min-height: 100vh;
-  padding: 24px 18px 90px;
+  padding: 16px 14px 78px;
   background: radial-gradient(circle at top, rgba(22, 35, 48, 0.35), transparent 45%), #05070b;
   color: #e7eefb;
 }
@@ -10,18 +10,18 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 18px;
+  margin-bottom: 12px;
 }
 
 .stories-title-wrap h2 {
   margin: 0;
-  font-size: 1.3rem;
+  font-size: 1.1rem;
 }
 
 .stories-title-wrap p {
   margin: 4px 0 0;
   color: rgba(200, 214, 238, 0.7);
-  font-size: 0.88rem;
+  font-size: 0.8rem;
 }
 
 .stories-back,
@@ -30,8 +30,8 @@
   background: rgba(12, 18, 26, 0.9);
   color: #e7eefb;
   border-radius: 999px;
-  padding: 8px 14px;
-  font-size: 0.85rem;
+  padding: 6px 12px;
+  font-size: 0.78rem;
 }
 
 .stories-create {
@@ -41,37 +41,37 @@
 .stories-error,
 .stories-loading,
 .stories-empty {
-  margin: 10px 0 18px;
+  margin: 8px 0 14px;
   color: rgba(222, 232, 249, 0.75);
 }
 
 .stories-summary {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 18px;
+  gap: 10px;
+  margin-bottom: 14px;
 }
 
 .stories-summary-card {
   border: 1px solid rgba(110, 160, 220, 0.2);
   background: rgba(10, 16, 24, 0.92);
-  border-radius: 16px;
-  padding: 14px;
+  border-radius: 14px;
+  padding: 10px;
   display: grid;
-  gap: 4px;
+  gap: 3px;
 }
 
 .stories-summary-card strong {
-  font-size: 1.2rem;
+  font-size: 1.05rem;
 }
 
 .stories-summary-card span {
   color: rgba(200, 214, 238, 0.7);
-  font-size: 0.85rem;
+  font-size: 0.78rem;
 }
 
 .stories-section {
-  margin-bottom: 18px;
+  margin-bottom: 14px;
 }
 
 .stories-section-head {
@@ -79,43 +79,43 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
 .stories-section-head h3 {
   margin: 0;
-  font-size: 1rem;
+  font-size: 0.95rem;
 }
 
 .stories-section-head p {
   margin: 4px 0 0;
   color: rgba(200, 214, 238, 0.7);
-  font-size: 0.84rem;
+  font-size: 0.78rem;
 }
 
 .stories-count {
-  min-width: 34px;
-  height: 34px;
+  min-width: 28px;
+  height: 28px;
   border-radius: 999px;
   border: 1px solid rgba(120, 170, 230, 0.25);
   background: rgba(12, 18, 26, 0.82);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.82rem;
+  font-size: 0.74rem;
 }
 
 .stories-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
 }
 
 .stories-card {
   text-align: left;
   border: 1px solid rgba(110, 160, 220, 0.2);
   background: rgba(12, 16, 24, 0.92);
-  border-radius: 16px;
+  border-radius: 14px;
   overflow: hidden;
   color: inherit;
   padding: 0;
@@ -144,9 +144,9 @@
 
 .stories-badge-row {
   position: absolute;
-  top: 10px;
-  left: 10px;
-  right: 10px;
+  top: 8px;
+  left: 8px;
+  right: 8px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -163,22 +163,22 @@
 
 .stories-thumb-empty {
   color: rgba(210, 220, 240, 0.6);
-  font-size: 0.9rem;
+  font-size: 0.82rem;
 }
 
 .stories-expired-badge {
-  padding: 2px 10px;
+  padding: 2px 8px;
   border-radius: 999px;
-  font-size: 0.65rem;
+  font-size: 0.6rem;
   color: #ffc6c6;
   background: rgba(10, 8, 8, 0.65);
   border: 1px solid rgba(255, 140, 140, 0.4);
 }
 
 .stories-type-badge {
-  padding: 2px 10px;
+  padding: 2px 8px;
   border-radius: 999px;
-  font-size: 0.65rem;
+  font-size: 0.6rem;
   color: #dbe8ff;
   background: rgba(5, 10, 18, 0.72);
   border: 1px solid rgba(120, 170, 230, 0.35);
@@ -191,18 +191,18 @@
 }
 
 .stories-meta {
-  padding: 10px 12px 12px;
+  padding: 8px 10px 10px;
 }
 
 .stories-meta p {
   margin: 0 0 6px;
   font-weight: 600;
-  font-size: 0.92rem;
+  font-size: 0.84rem;
 }
 
 .stories-meta small {
   color: rgba(200, 214, 238, 0.7);
-  font-size: 0.76rem;
+  font-size: 0.7rem;
 }
 
 .stories-viewer-backdrop {
@@ -219,8 +219,8 @@
 .stories-viewer {
   background: rgba(12, 16, 24, 0.96);
   border: 1px solid rgba(120, 170, 230, 0.35);
-  border-radius: 18px;
-  width: min(520px, 92vw);
+  border-radius: 16px;
+  width: min(480px, 92vw);
   max-height: 90vh;
   overflow: hidden;
   position: relative;
@@ -234,15 +234,15 @@
 
 .stories-viewer-close {
   position: absolute;
-  top: 10px;
-  right: 10px;
+  top: 8px;
+  right: 8px;
   border: none;
   background: rgba(0, 0, 0, 0.5);
   color: #f5f7ff;
-  width: 30px;
-  height: 30px;
+  width: 28px;
+  height: 28px;
   border-radius: 999px;
-  font-size: 1.1rem;
+  font-size: 1rem;
   cursor: pointer;
   z-index: 2;
 }
@@ -265,30 +265,30 @@
 
 .stories-viewer-caption {
   margin: 0;
-  padding: 12px 16px 16px;
+  padding: 10px 14px 14px;
   color: rgba(225, 235, 255, 0.88);
-  font-size: 0.9rem;
+  font-size: 0.82rem;
 }
 
 .stories-viewer-meta {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 14px 16px 0;
+  padding: 12px 14px 0;
 }
 
 .stories-viewer-meta strong {
-  font-size: 0.98rem;
+  font-size: 0.9rem;
 }
 
 .stories-viewer-meta span {
   color: rgba(200, 214, 238, 0.7);
-  font-size: 0.82rem;
+  font-size: 0.76rem;
 }
 
 @media (max-width: 600px) {
   .stories-page {
-    padding: 18px 12px 80px;
+    padding: 12px 10px 72px;
   }
 
   .stories-summary {
@@ -302,5 +302,10 @@
 
   .stories-create {
     align-self: flex-end;
+  }
+
+  .stories-grid {
+    grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+    gap: 8px;
   }
 }

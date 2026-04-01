@@ -23,15 +23,23 @@ const SOS_LIVE_RTC_OFFER_KEY_PREFIX = "socialsea_sos_live_rtc_offer_v1_";
 const SOS_LIVE_RTC_ANSWER_KEY_PREFIX = "socialsea_sos_live_rtc_answer_v1_";
 const SOS_ACTIVE_OWNER_KEY = "socialsea_sos_active_owner_v1";
 const LIVEKIT_DEFAULT_URL = "wss://socialsea-mb50m9kr.livekit.cloud";
+const isLocalLikeHost = (host) => {
+  const value = String(host || "").trim().toLowerCase();
+  if (!value) return true;
+  if (value === "localhost" || value === "127.0.0.1") return true;
+  if (/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(value)) return true;
+  return false;
+};
 const resolveLivekitUrl = () => {
   const envUrl = String(import.meta.env.VITE_LIVEKIT_URL || "").trim();
   if (envUrl) return envUrl;
   if (typeof window !== "undefined") {
     const host = String(window.location.hostname || "").trim().toLowerCase();
-    if (host === "socialsea.co.in" || host === "www.socialsea.co.in") {
+    if (!isLocalLikeHost(host)) {
       return LIVEKIT_DEFAULT_URL;
     }
   }
+  if (import.meta.env.PROD) return LIVEKIT_DEFAULT_URL;
   return "";
 };
 const LIVEKIT_URL = resolveLivekitUrl();

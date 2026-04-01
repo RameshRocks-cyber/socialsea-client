@@ -1449,9 +1449,14 @@ export default function Navbar() {
       const suffixText = String(suffix || "").toLowerCase();
       const isPublicEmergencyEndpoint = suffixText === "active";
       const params = buildEmergencyQueryParams();
-      const mergedParams = params
-        ? { ...params, includeReporter: true, includeNearby: true }
-        : { includeReporter: true, includeNearby: true };
+      const mergedParams = params ? { ...params, includeReporter: true, includeNearby: true } : { includeReporter: true };
+      const authToken =
+        sessionStorage.getItem("accessToken") ||
+        sessionStorage.getItem("token") ||
+        localStorage.getItem("accessToken") ||
+        localStorage.getItem("token") ||
+        "";
+      const hasAuthToken = Boolean(authToken && authToken !== "null" && authToken !== "undefined");
       for (const url of urls) {
         const baseURL = /^https?:\/\//i.test(url) ? undefined : api.defaults.baseURL;
         const path = /^https?:\/\//i.test(url) ? url : url;
@@ -1459,7 +1464,6 @@ export default function Navbar() {
           res = await api.get(path, {
             baseURL,
             suppressAuthRedirect: true,
-            skipAuth: isPublicEmergencyEndpoint,
             skipRefresh: isPublicEmergencyEndpoint,
             params: mergedParams,
             timeout: 4500
@@ -1468,7 +1472,7 @@ export default function Navbar() {
         } catch (err) {
           lastError = err;
           const status = Number(err?.response?.status || 0);
-          if ((status === 401 || status === 403) && isPublicEmergencyEndpoint) {
+          if ((status === 401 || status === 403) && isPublicEmergencyEndpoint && hasAuthToken) {
             try {
               res = await api.get(path, {
                 baseURL,

@@ -63,15 +63,18 @@ const isLocalLikeHost = (host) => {
   return false;
 };
 const resolveLivekitUrl = () => {
-  const envUrl = String(import.meta.env.VITE_LIVEKIT_URL || "").trim();
-  if (envUrl) return envUrl;
+  const rawEnv = String(import.meta.env.VITE_LIVEKIT_URL || "").trim();
+  const envLower = rawEnv.toLowerCase();
+  const envDisabled = envLower === "false" || envLower === "0" || envLower === "off" || envLower === "disabled";
+  if (envDisabled) return "";
+  if (rawEnv) return rawEnv;
   if (typeof window !== "undefined") {
     const host = String(window.location.hostname || "").trim().toLowerCase();
-    if (!isLocalLikeHost(host)) {
-      return LIVEKIT_DEFAULT_URL;
+    if (isLocalLikeHost(host) && import.meta.env.DEV) {
+      return "";
     }
   }
-  return "";
+  return LIVEKIT_DEFAULT_URL;
 };
 const LIVE_CONTENT_TYPE_KEY = "socialsea_live_content_type_v1";
 const LIVE_VIEW_RATIO_KEY = "socialsea_live_view_ratio_v1";

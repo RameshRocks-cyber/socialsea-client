@@ -143,6 +143,7 @@ const resolveLivekitUrl = () => {
       return LIVEKIT_DEFAULT_URL;
     }
   }
+  if (import.meta.env.PROD) return LIVEKIT_DEFAULT_URL;
   return "";
 };
 const LIVEKIT_URL = resolveLivekitUrl();
@@ -7997,7 +7998,6 @@ export default function Chat() {
   }, 0);
   const peerLatestProfileTs = clampFutureTimestamp(toEpochMs(activeContact?.lastActiveAt || 0));
   const headerPresenceText = getContactPresence(activeContact).text;
-  const tsModeLabel = ASSUME_UTC_TS ? "UTC" : "Local";
 
   const sendTextPayload = async (text, options = {}) => {
     const cleanText = String(text || "").trim();
@@ -10955,12 +10955,7 @@ export default function Chat() {
                 </span>
                 <span className="wa-header-meta">
                   <h3>{activeContact.name}</h3>
-                  <small>
-                    {headerPresenceText}
-                    <span className="chat-ts-mode-badge" title={`Timestamp mode: ${tsModeLabel}`}>
-                      {tsModeLabel}
-                    </span>
-                  </small>
+                  <small>{headerPresenceText}</small>
                 </span>
                 </button>
               </div>
