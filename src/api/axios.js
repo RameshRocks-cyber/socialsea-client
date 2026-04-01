@@ -1,6 +1,13 @@
 import axios from "axios";
 import { getApiBaseUrl } from "./baseUrl";
 import { clearAuthStorage } from "../auth";
+import {
+  buildGuardedResponse,
+  clearEndpointGuard,
+  getEndpointGuardKey,
+  markEndpointDown,
+  shouldSkipEndpoint
+} from "./endpointGuard";
 
 const normalizeBase = (value) => String(value || "").trim().replace(/\/+$/, "");
 const readStoredBase = () => {
@@ -74,6 +81,19 @@ function normalizeApiPath(config) {
 
 // 🔹 Attach Access Token Automatically
 api.interceptors.request.use((config) => {
+  const guardKey = getEndpointGuardKey(config);
+  if (guardKey && shouldSkipEndpoint(guardKey)) {
+    const data = buildGuardedResponse(guardKey);
+    config.adapter = async () => ({
+      data,
+      status: 204,
+      statusText: "No Content",
+      headers: {},
+      config
+    });
+    return config;
+  }
+
   normalizeApiPath(config);
   const requestOrigin = resolveRequestOrigin(config);
   const allowCrossOriginAuth = config?.allowCrossOriginAuth === true;
@@ -112,10 +132,26 @@ refreshClient.interceptors.request.use((config) => normalizeApiPath(config));
 
 // 🔹 Handle Expired Token (401 ONLY)
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    const guardKey = getEndpointGuardKey(response?.config);
+    if (guardKey) clearEndpointGuard(guardKey);
+    return response;
+  },
   async (error) => {
     const originalRequest = error.config;
     const status = error?.response?.status;
+    const guardKey = getEndpointGuardKey(originalRequest);
+
+    if (guardKey) {
+      if (status === 404) {
+        markEndpointDown(guardKey, { status, reason: "not-found" });
+      } else if (status === 405) {
+        markEndpointDown(guardKey, { status, reason: "method-not-allowed" });
+      } else if (!status && error?.message === "Network Error") {
+        markEndpointDown(guardKey, { status: 0, reason: "network-error" });
+      }
+    }
+
     if (originalRequest?.skipAuth) {
       return Promise.reject(error);
     }
