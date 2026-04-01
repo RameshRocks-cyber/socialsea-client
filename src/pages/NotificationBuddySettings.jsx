@@ -1,20 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import {
+  getNotificationBuddyLabel,
+  normalizeNotificationBuddyCharacter,
+  NOTIFICATION_BUDDY_CHARACTERS
+} from "../components/notificationBuddyConfig";
 import { SETTINGS_KEY } from "./soundPrefs";
 import "./Settings.css";
-
-const NOTIFICATION_CHARACTERS = [
-  "Lion",
-  "Dog",
-  "Puppy",
-  "Cat",
-  "Panda",
-  "Bunny",
-  "Penguin",
-  "Anime Hero",
-  "Robot Cat",
-  "Cartoon Kid"
-];
 
 const VOICE_RATE_OPTIONS = [
   { value: 0.85, label: "Slow" },
@@ -49,7 +41,11 @@ const readPrefs = () => {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
     const parsed = raw ? JSON.parse(raw) : {};
-    return { ...DEFAULT_PREFS, ...(parsed || {}) };
+    const merged = { ...DEFAULT_PREFS, ...(parsed || {}) };
+    return {
+      ...merged,
+      notificationBuddyCharacter: normalizeNotificationBuddyCharacter(merged.notificationBuddyCharacter)
+    };
   } catch {
     return { ...DEFAULT_PREFS };
   }
@@ -60,7 +56,13 @@ const writePrefs = (next) => {
     const raw = localStorage.getItem(SETTINGS_KEY);
     const parsed = raw ? JSON.parse(raw) : {};
     const base = parsed && typeof parsed === "object" ? parsed : {};
-    const merged = { ...base, ...(next || {}) };
+    const merged = {
+      ...base,
+      ...(next || {}),
+      notificationBuddyCharacter: normalizeNotificationBuddyCharacter(
+        next?.notificationBuddyCharacter ?? base?.notificationBuddyCharacter
+      )
+    };
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(merged));
   } catch {
     // ignore storage issues
@@ -195,14 +197,14 @@ export default function NotificationBuddySettings() {
             <h3>Choose Character</h3>
           </header>
           <div className="settings-select-grid">
-            {NOTIFICATION_CHARACTERS.map((opt) => (
+            {NOTIFICATION_BUDDY_CHARACTERS.map((opt) => (
               <button
                 key={opt}
                 type="button"
                 className={prefs.notificationBuddyCharacter === opt ? "active" : ""}
                 onClick={() => setPrefs((prev) => ({ ...prev, notificationBuddyCharacter: opt }))}
               >
-                {opt}
+                {getNotificationBuddyLabel(opt)}
               </button>
             ))}
           </div>

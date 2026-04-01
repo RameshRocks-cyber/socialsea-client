@@ -18,6 +18,27 @@ const readStoredBase = () => {
 const previousBase = readStoredBase();
 const BASE_URL = getApiBaseUrl();
 const nextBase = readStoredBase() || normalizeBase(BASE_URL);
+const APP_ORIGIN = typeof window !== "undefined" ? String(window.location.origin || "").trim() : "";
+
+const resolveRequestOrigin = (config) => {
+  const rawUrl = String(config?.url || "").trim();
+  const base = String(config?.baseURL || BASE_URL || "").trim();
+  const baseForRelative = base || APP_ORIGIN || "http://localhost";
+  try {
+    const resolved = new URL(rawUrl || "/", baseForRelative);
+    return String(resolved.origin || "").trim();
+  } catch {
+    return "";
+  }
+};
+
+const TRUSTED_API_ORIGIN = (() => {
+  try {
+    return String(new URL(BASE_URL || "/api", APP_ORIGIN || "http://localhost").origin || "").trim();
+  } catch {
+    return "";
+  }
+})();
 
 if (previousBase && nextBase && previousBase !== nextBase) {
   clearAuthStorage();
@@ -54,6 +75,20 @@ function normalizeApiPath(config) {
 // 🔹 Attach Access Token Automatically
 api.interceptors.request.use((config) => {
   normalizeApiPath(config);
+  const requestOrigin = resolveRequestOrigin(config);
+  const allowCrossOriginAuth = config?.allowCrossOriginAuth === true;
+  const isCrossOrigin =
+    !!requestOrigin &&
+    !!TRUSTED_API_ORIGIN &&
+    requestOrigin !== TRUSTED_API_ORIGIN &&
+    requestOrigin !== APP_ORIGIN;
+
+  // Security hardening:
+  // never attach bearer token to unexpected cross-origin requests unless explicitly allowed.
+  if (isCrossOrigin && !allowCrossOriginAuth) {
+    if (config.headers?.Authorization) delete config.headers.Authorization;
+    return config;
+  }
   if (config?.skipAuth) {
     if (config.headers?.Authorization) {
       delete config.headers.Authorization;

@@ -2,9 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { FiCamera } from "react-icons/fi";
 import api from "../api/axios";
+import { addStoryEntry } from "../services/storyStorage";
 import "./StoryCreate.css";
 
-const STORY_STORAGE_KEY = "socialsea_stories_v1";
 const MAX_STORY_FILE_SIZE_BYTES = 80 * 1024 * 1024;
 
 const TEXT_STYLES = [
@@ -96,18 +96,6 @@ export default function StoryCreate() {
     setTextBg(style === "background" ? !isActive : false);
   };
 
-  const addStoryToLocalCache = (entry) => {
-    try {
-      const raw = localStorage.getItem(STORY_STORAGE_KEY);
-      const parsed = raw ? JSON.parse(raw) : [];
-      const next = Array.isArray(parsed) ? parsed.slice() : [];
-      next.unshift(entry);
-      localStorage.setItem(STORY_STORAGE_KEY, JSON.stringify(next.slice(0, 50)));
-    } catch {
-      // ignore caching errors
-    }
-  };
-
   const toEpochMs = (value) => {
     if (value == null || value === "") return null;
     if (typeof value === "number" && Number.isFinite(value)) {
@@ -187,7 +175,7 @@ export default function StoryCreate() {
           typeof res?.data?.isVideo === "boolean" ? res.data.isVideo : !!isVideo;
         const resolvedMediaType =
           res?.data?.mediaType || file?.type || (resolvedIsVideo ? "video" : "image");
-        addStoryToLocalCache({
+        addStoryEntry({
           id: res?.data?.id || res?.data?.postId || Date.now(),
           mediaUrl,
           mediaType: resolvedMediaType,

@@ -6,7 +6,6 @@ import { readLiveBroadcast, subscribeLiveBroadcast } from "../utils/liveBroadcas
 import "./LongVideos.css";
 
 const LONG_VIDEO_SECONDS = 90;
-const QUALITY_OPTIONS = ["auto", "1080", "720", "480", "360"];
 const MIN_LONG_VIDEO_FALLBACK_SECONDS = 45;
 const LONG_WATCH_CACHE_KEY = "socialsea_long_watch_cache_v1";
 const FEED_CACHE_KEY = "socialsea_feed_cache_v1";
@@ -74,15 +73,14 @@ export default function LongVideos() {
     startedAt: 0
   });
   const lastTapRef = useRef({ at: 0, x: 0, y: 0 });
-  const seekHudRef = useRef({ direction: "", totalSeconds: 0, lastAt: 0 });
+  const seekHudRef = useRef({ direction: "", totalSeconds: 0, lastAt: 0, targetTime: 0 });
   const gestureHudTimerRef = useRef(0);
   const controlsHideTimerRef = useRef(0);
   const [allPosts, setAllPosts] = useState(() => readCachedWatchPosts());
   const [videoDurationByPost, setVideoDurationByPost] = useState({});
   const [isLoading, setIsLoading] = useState(() => readCachedWatchPosts().length === 0);
-  const [selectedQuality, setSelectedQuality] = useState("auto");
   const [showQualityMenu, setShowQualityMenu] = useState(false);
-  const [showQualityOptions, setShowQualityOptions] = useState(false);
+  const [isSettingsAdjusting, setIsSettingsAdjusting] = useState(false);
   const [likeCounts, setLikeCounts] = useState({});
   const [likedPostIds, setLikedPostIds] = useState({});
   const [dislikedPostIds, setDislikedPostIds] = useState({});
@@ -706,8 +704,8 @@ export default function LongVideos() {
 
   const activeVideoUrl = useMemo(() => {
     const url = resolveUrl(mediaUrlFor(activeVideo));
-    return withCloudinaryQuality(url, selectedQuality);
-  }, [activeVideo, selectedQuality]);
+    return withCloudinaryQuality(url, "auto");
+  }, [activeVideo]);
 
   useEffect(() => {    if (!activeVideo?.id) return;
     api.get(`/api/comments/${activeVideo.id}`)
@@ -951,6 +949,53 @@ export default function LongVideos() {
     video.currentTime = next;
   };
 
+  const handleDoubleTapSeek = (clientX) => {
+    const video = playerRef.current;
+    const wrap = playerWrapRef.current;
+    if (!video || !wrap) return false;
+
+    const rect = wrap.getBoundingClientRect();
+    const leftZoneEdge = rect.left + rect.width * 0.34;
+    const rightZoneEdge = rect.left + rect.width * 0.66;
+
+    let deltaSeconds = 0;
+    let direction = "";
+    let hudPosition = "bottom";
+
+    if (clientX <= leftZoneEdge) {
+      deltaSeconds = -10;
+      direction = "left";
+      hudPosition = "side-left";
+    } else if (clientX >= rightZoneEdge) {
+      deltaSeconds = 10;
+      direction = "right";
+      hudPosition = "side-right";
+    } else {
+      return false;
+    }
+
+    const now = Date.now();
+    const duration = Number(video.duration) || 0;
+    const currentTime = Number(video.currentTime) || 0;
+    const canStack = seekHudRef.current.direction === direction && now - seekHudRef.current.lastAt < 850;
+    const baseTime = canStack ? Number(seekHudRef.current.targetTime || currentTime) : currentTime;
+    const nextTime = clamp(baseTime + deltaSeconds, 0, duration > 0 ? duration : Number.MAX_SAFE_INTEGER);
+    const totalSeconds = canStack ? seekHudRef.current.totalSeconds + 10 : 10;
+
+    video.currentTime = nextTime;
+    setPlayerCurrentTime(nextTime);
+    if (duration > 0) setPlayerDuration(duration);
+    seekHudRef.current = { direction, totalSeconds, lastAt: now, targetTime: nextTime };
+    showPlayerControls(true);
+    showGestureHud(`${direction === "left" ? "-" : "+"}${totalSeconds}s`, hudPosition, 780);
+
+    window.requestAnimationFrame(() => {
+      syncPlayerTime();
+    });
+
+    return true;
+  };
+
   const handleVolumeChange = (rawValue) => {
     const next = clamp((Number(rawValue) || 0) / 100, 0, 1);
     const video = playerRef.current;
@@ -961,11 +1006,27 @@ export default function LongVideos() {
     setPlayerVolume(next);
   };
 
-  const showPlayerControls = (autoHide = true) => {
-    setControlsVisible(true);    if (controlsHideTimerRef.current) {
+  const clearControlsHideTimer = () => {
+    if (controlsHideTimerRef.current) {
       clearTimeout(controlsHideTimerRef.current);
       controlsHideTimerRef.current = 0;
-    }    if (!autoHide || isPlayerPaused || isPlayerFullscreen) return;
+    }
+  };
+
+  const startSettingsAdjust = () => {
+    setIsSettingsAdjusting(true);
+    setControlsVisible(true);
+    clearControlsHideTimer();
+  };
+
+  const stopSettingsAdjust = () => {
+    setIsSettingsAdjusting(false);
+  };
+
+  const showPlayerControls = (autoHide = true) => {
+    setControlsVisible(true);
+    clearControlsHideTimer();
+    if (!autoHide || isPlayerPaused || isPlayerFullscreen || showQualityMenu || isSettingsAdjusting) return;
     controlsHideTimerRef.current = window.setTimeout(() => {
       setControlsVisible(false);
       controlsHideTimerRef.current = 0;
@@ -1045,6 +1106,8 @@ export default function LongVideos() {
   };
 
   const handlePlayerPointerDown = (event) => {
+    if (event.pointerType === "touch") return;
+    if (event.pointerType === "mouse" && event.button !== 0) return;
     if (pinchRef.current.active || pinchRef.current.panActive) return;    if (
       event.target?.closest?.(".watch-overlay-controls") ||
       event.target?.closest?.(".watch-corner-fullscreen") ||
@@ -1086,6 +1149,7 @@ export default function LongVideos() {
   };
 
   const handlePlayerPointerMove = (event) => {
+    if (event.pointerType === "touch") return;
     if (pinchRef.current.active || pinchRef.current.panActive) return;    if (
       event.target?.closest?.(".watch-overlay-controls") ||
       event.target?.closest?.(".watch-corner-fullscreen") ||
@@ -1111,6 +1175,7 @@ export default function LongVideos() {
   };
 
   const handlePlayerPointerUp = (event) => {
+    if (event.pointerType === "touch") return;
     if (pinchRef.current.active || pinchRef.current.panActive) return;    if (
       event.target?.closest?.(".watch-overlay-controls") ||
       event.target?.closest?.(".watch-corner-fullscreen") ||
@@ -1119,7 +1184,6 @@ export default function LongVideos() {
       event.target?.closest?.(".watch-progress-wrap")
     ) return;    const meta = gestureRef.current;
     const wrap = playerWrapRef.current;
-    const rect = wrap?.getBoundingClientRect();
     const dy = event.clientY - (meta.startY || event.clientY);
     const dx = event.clientX - (meta.startX || event.clientX);
     const elapsedMs = Date.now() - (meta.startedAt || Date.now());
@@ -1136,22 +1200,7 @@ export default function LongVideos() {
         Math.abs(event.clientX - prev.x) < 28 &&
         Math.abs(event.clientY - prev.y) < 28
       ) {
-        const video = playerRef.current;    if (video && rect) {
-          const isLeftSide = event.clientX < rect.left + rect.width / 2;
-          const delta = isLeftSide ? -10 : 10;
-          const nextTime = clamp((video.currentTime || 0) + delta, 0, Number(video.duration) || Number.MAX_SAFE_INTEGER);
-          video.currentTime = nextTime;
-          const now = Date.now();
-          const direction = isLeftSide ? "left" : "right";
-          const canStack = seekHudRef.current.direction === direction && now - seekHudRef.current.lastAt < 700;
-          const totalSeconds = canStack ? seekHudRef.current.totalSeconds + 10 : 10;
-          seekHudRef.current = { direction, totalSeconds, lastAt: now };
-          showGestureHud(
-            `${totalSeconds}s`,
-            isLeftSide ? "side-left" : "side-right",
-            720
-          );
-        }
+        handleDoubleTapSeek(event.clientX);
         lastTapRef.current = { at: 0, x: 0, y: 0 };
       } else {
         lastTapRef.current = { at: Date.now(), x: event.clientX, y: event.clientY };
@@ -1337,7 +1386,7 @@ export default function LongVideos() {
         Math.abs(touch.clientX - prev.x) < 28 &&
         Math.abs(touch.clientY - prev.y) < 28
       ) {
-        cyclePlayerZoomMode();
+        handleDoubleTapSeek(touch.clientX);
         lastTapRef.current = { at: 0, x: 0, y: 0 };
       } else {
         lastTapRef.current = { at: now, x: touch.clientX, y: touch.clientY };
@@ -1371,9 +1420,18 @@ export default function LongVideos() {
     return () => {
       document.removeEventListener("fullscreenchange", onFullscreenChange);
       if (gestureHudTimerRef.current) clearTimeout(gestureHudTimerRef.current);
-      if (controlsHideTimerRef.current) clearTimeout(controlsHideTimerRef.current);
+      clearControlsHideTimer();
     };
   }, []);
+
+  useEffect(() => {
+    if (showQualityMenu || isSettingsAdjusting) {
+      setControlsVisible(true);
+      clearControlsHideTimer();
+      return;
+    }
+    showPlayerControls(true);
+  }, [showQualityMenu, isSettingsAdjusting]);
 
   useEffect(() => {
     const video = playerRef.current;
@@ -1409,7 +1467,7 @@ export default function LongVideos() {
   }, [isWatchMode, activeVideo?.id, isPlayerPaused]);
 
   useEffect(() => {
-    seekHudRef.current = { direction: "", totalSeconds: 0, lastAt: 0 };
+    seekHudRef.current = { direction: "", totalSeconds: 0, lastAt: 0, targetTime: 0 };
   }, [activeVideo?.id]);
 
   useEffect(() => {
@@ -1573,13 +1631,17 @@ export default function LongVideos() {
                   className={`watch-player-wrap${isPlayerMinimized ? " is-minimized" : ""}${isPlayerInPip ? " is-pip" : ""}`}
                   ref={playerWrapRef}
                   onMouseMove={() => showPlayerControls(true)}
+                  onPointerDown={handlePlayerPointerDown}
+                  onPointerMove={handlePlayerPointerMove}
+                  onPointerUp={handlePlayerPointerUp}
+                  onPointerCancel={handlePlayerPointerUp}
                   onTouchStart={handlePlayerTouchStart}
                   onTouchMove={handlePlayerTouchMove}
                   onTouchEnd={handlePlayerTouchEnd}
                   onTouchCancel={handlePlayerTouchEnd}
                 >
                   <video
-                    key={`${activeVideo.id}-${selectedQuality}`}
+                    key={activeVideo.id}
                     ref={playerRef}
                     src={activeVideoUrl}
                     controls={false}
@@ -1588,7 +1650,7 @@ export default function LongVideos() {
                     playsInline
                     className="watch-player"
                     style={{
-                      filter: `brightness(${playerBrightness})`,
+                      "--watch-player-brightness": playerBrightness,
                       transform: `translate3d(${playerZoom.x}px, ${playerZoom.y}px, 0) scale(${playerZoom.scale})`,
                       transformOrigin: "center center",
                       objectFit: playerZoomMode === "fit" ? "contain" : "cover"
@@ -1673,33 +1735,10 @@ export default function LongVideos() {
                   </button>
                   {showQualityMenu && controlsVisible && (
                     <div
-                      className="watch-quality-menu"
+                      className={`watch-quality-menu${isSettingsAdjusting ? " is-adjusting" : ""}`}
                       onPointerDown={(e) => e.stopPropagation()}
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <div className="watch-settings-section">
-                        <button
-                          type="button"
-                          className="watch-settings-toggle"
-                          onPointerDown={(e) => e.stopPropagation()}
-                          onClick={() => setShowQualityOptions((s) => !s)}
-                          aria-expanded={showQualityOptions}
-                        >
-                          <span>Quality</span>
-                          <span>{showQualityOptions ? "−" : "+"}</span>
-                        </button>
-                        {showQualityOptions && QUALITY_OPTIONS.map((q) => (
-                          <button
-                            key={q}
-                            type="button"
-                            className={selectedQuality === q ? "is-active" : ""}
-                            onPointerDown={(e) => e.stopPropagation()}
-                            onClick={() => setSelectedQuality(q)}
-                          >
-                            {q === "auto" ? "Auto" : `${q}p`}
-                          </button>
-                        ))}
-                      </div>
                       <div className="watch-settings-section">
                         <p className="watch-settings-title">Brightness</p>
                         <input
@@ -1709,6 +1748,11 @@ export default function LongVideos() {
                           step="1"
                           value={Math.round(playerBrightness * 100)}
                           className="watch-settings-range"
+                          onPointerDown={startSettingsAdjust}
+                          onPointerUp={stopSettingsAdjust}
+                          onPointerCancel={stopSettingsAdjust}
+                          onBlur={stopSettingsAdjust}
+                          onFocus={startSettingsAdjust}
                           onChange={(e) => setPlayerBrightness(clamp((Number(e.target.value) || 100) / 100, 0.5, 1.7))}
                         />
                       </div>
@@ -1721,6 +1765,11 @@ export default function LongVideos() {
                           step="1"
                           value={Math.round(playerVolume * 100)}
                           className="watch-settings-range"
+                          onPointerDown={startSettingsAdjust}
+                          onPointerUp={stopSettingsAdjust}
+                          onPointerCancel={stopSettingsAdjust}
+                          onBlur={stopSettingsAdjust}
+                          onFocus={startSettingsAdjust}
                           onChange={(e) => handleVolumeChange(e.target.value)}
                         />
                       </div>

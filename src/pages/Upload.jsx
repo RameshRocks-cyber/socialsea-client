@@ -1,5 +1,28 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { FiCamera } from "react-icons/fi";
+import {
+  FiCamera,
+  FiCrop,
+  FiDroplet,
+  FiEye,
+  FiFilm,
+  FiFilter,
+  FiHeart,
+  FiImage,
+  FiLayers,
+  FiMaximize2,
+  FiMessageSquare,
+  FiMic,
+  FiMove,
+  FiMusic,
+  FiRotateCcw,
+  FiRotateCw,
+  FiScissors,
+  FiSliders,
+  FiSmile,
+  FiSun,
+  FiType,
+  FiZap
+} from "react-icons/fi";
 import { useLocation } from "react-router-dom";
 import api from "../api/axios";
 import { CONTENT_TYPE_OPTIONS, readContentTypePrefs } from "./contentPrefs";
@@ -26,8 +49,10 @@ const defaultEdits = {
   contrast: 100,
   saturation: 100,
   warmth: 0,
+  hue: 0,
   blur: 0,
   grayscale: 0,
+  vignette: 0,
   panX: 0,
   panY: 0
 };
@@ -37,21 +62,104 @@ const PRESETS = {
   vibrant: { label: "Vibrant", brightness: 104, contrast: 108, saturation: 130, warmth: 8, blur: 0, grayscale: 0 },
   vintage: { label: "Vintage", brightness: 96, contrast: 92, saturation: 85, warmth: 22, blur: 0, grayscale: 8 },
   mono: { label: "Mono", brightness: 102, contrast: 115, saturation: 0, warmth: 0, blur: 0, grayscale: 100 },
-  soft: { label: "Soft", brightness: 106, contrast: 94, saturation: 92, warmth: 10, blur: 1, grayscale: 0 }
+  soft: { label: "Soft", brightness: 106, contrast: 94, saturation: 92, warmth: 10, blur: 1, grayscale: 0 },
+  sunrise: { label: "Sunrise", brightness: 108, contrast: 96, saturation: 116, warmth: 18, hue: -6, vignette: 10 },
+  urban: { label: "Urban", brightness: 98, contrast: 118, saturation: 106, warmth: -4, hue: 8, vignette: 16 },
+  pearl: { label: "Pearl", brightness: 110, contrast: 92, saturation: 86, warmth: 6, blur: 0.4, vignette: 8 }
 };
 
-const VIDEO_TOOL_OPTIONS = [
-  { key: "edit", label: "Edit", symbol: "✂" },
-  { key: "add-clips", label: "Add clips", symbol: "+" },
-  { key: "audio", label: "Audio", symbol: "♪" },
-  { key: "text", label: "Text", symbol: "Aa" },
-  { key: "overlay", label: "Overlay", symbol: "◫" },
-  { key: "stickers", label: "Stickers", symbol: "★" },
-  { key: "captions", label: "Captions", symbol: "CC" },
-  { key: "voiceover", label: "Voiceover", symbol: "◉" },
-  { key: "filters", label: "Filters", symbol: "◎" },
-  { key: "import-audio", label: "Import audio", symbol: "♫" }
+const IMAGE_TOOL_OPTIONS = [
+  { key: "looks", label: "Looks", Icon: FiSun },
+  { key: "frame", label: "Frame", Icon: FiCrop },
+  { key: "move", label: "Move", Icon: FiMove },
+  { key: "shape", label: "Shape", Icon: FiSliders }
 ];
+
+const VIDEO_TOOL_OPTIONS = [
+  { key: "edit", label: "Edit", Icon: FiScissors },
+  { key: "add-clips", label: "Clips", Icon: FiFilm },
+  { key: "audio", label: "Audio", Icon: FiMusic },
+  { key: "text", label: "Text", Icon: FiType },
+  { key: "overlay", label: "Blend", Icon: FiLayers },
+  { key: "stickers", label: "Stickers", Icon: FiSmile },
+  { key: "captions", label: "Captions", Icon: FiMessageSquare },
+  { key: "voiceover", label: "Voice", Icon: FiMic },
+  { key: "filters", label: "Filters", Icon: FiFilter },
+  { key: "import-audio", label: "Import", Icon: FiDroplet }
+];
+
+const PLAYBACK_SPEED_OPTIONS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+const QUALITY_TARGET_OPTIONS = ["144p", "240p", "360p", "480p", "720p", "1080p", "1440p", "2160p"];
+const COVER_MODE_OPTIONS = [
+  { value: "auto", label: "Auto" },
+  { value: "fit", label: "Fit" },
+  { value: "fill", label: "Fill" }
+];
+const POSITION_OPTIONS = [
+  { value: "top-left", label: "Top left" },
+  { value: "top-right", label: "Top right" },
+  { value: "center", label: "Center" },
+  { value: "bottom-left", label: "Bottom left" },
+  { value: "bottom-center", label: "Bottom center" },
+  { value: "bottom-right", label: "Bottom right" }
+];
+const VIDEO_FILTER_OPTIONS = ["normal", "cinematic", "vivid", "mono", "vintage", "clean", "sunset"];
+const STICKER_OPTIONS = [
+  { value: "none", label: "Off", Icon: null },
+  { value: "spark", label: "Spark", Icon: FiZap },
+  { value: "love", label: "Love", Icon: FiHeart },
+  { value: "glow", label: "Glow", Icon: FiSun },
+  { value: "frame", label: "Frame", Icon: FiImage },
+  { value: "chat", label: "Chat", Icon: FiMessageSquare }
+];
+
+const defaultVideoEdits = {
+  trimStart: 0,
+  trimEnd: 0,
+  playbackSpeed: 1,
+  volume: 100,
+  muted: false,
+  brightness: 100,
+  contrast: 100,
+  saturation: 100,
+  warmth: 0,
+  hue: 0,
+  softness: 0,
+  vignette: 0,
+  filterPreset: "normal",
+  overlayText: "",
+  overlayOpacity: 70,
+  overlayMode: "screen",
+  textSize: 34,
+  textPosition: "bottom-center",
+  sticker: "none",
+  stickerSize: 72,
+  stickerPosition: "top-right",
+  captionsStyle: "classic",
+  voiceoverGain: 100,
+  importedAudioName: "",
+  extraClipCount: 0,
+  qualityTarget: "1080p",
+  coverMode: "auto"
+};
+
+const getOverlayPlacementStyle = (position) => {
+  switch (position) {
+    case "top-left":
+      return { top: "7%", left: "6%" };
+    case "top-right":
+      return { top: "7%", right: "6%" };
+    case "bottom-left":
+      return { bottom: "9%", left: "6%" };
+    case "bottom-right":
+      return { bottom: "9%", right: "6%" };
+    case "center":
+      return { top: "50%", left: "50%", transform: "translate(-50%, -50%)" };
+    case "bottom-center":
+    default:
+      return { bottom: "9%", left: "50%", transform: "translateX(-50%)" };
+  }
+};
 
 function parseUploadError(err) {
   const data = err?.response?.data;
@@ -101,29 +209,10 @@ export default function Upload() {
   const [msg, setMsg] = useState("");
   const [loading, setLoading] = useState(false);
   const [edits, setEdits] = useState(defaultEdits);
+  const [activeImageTool, setActiveImageTool] = useState("looks");
   const [previewOriginal, setPreviewOriginal] = useState(false);
   const [videoMeta, setVideoMeta] = useState({ duration: 0, width: 0, height: 0 });
-  const [videoEdits, setVideoEdits] = useState({
-    trimStart: 0,
-    trimEnd: 0,
-    playbackSpeed: 1,
-    volume: 100,
-    muted: false,
-    brightness: 100,
-    contrast: 100,
-    saturation: 100,
-    filterPreset: "normal",
-    overlayText: "",
-    overlayOpacity: 70,
-    overlayMode: "screen",
-    sticker: "none",
-    captionsStyle: "classic",
-    voiceoverGain: 100,
-    importedAudioName: "",
-    extraClipCount: 0,
-    qualityTarget: "1080p",
-    coverMode: "auto"
-  });
+  const [videoEdits, setVideoEdits] = useState(defaultVideoEdits);
   const [activeVideoTool, setActiveVideoTool] = useState("edit");
   const [extraClips, setExtraClips] = useState([]);
   const [creatorSettings, setCreatorSettings] = useState({
@@ -188,7 +277,7 @@ export default function Upload() {
 
   const filterStyle = useMemo(() => {
     const warmSepia = Math.max(0, edits.warmth);
-    const warmHueRotate = -Math.round(edits.warmth / 2);
+    const warmHueRotate = -Math.round(edits.warmth / 2) + Number(edits.hue || 0);
     return `brightness(${edits.brightness}%) contrast(${edits.contrast}%) saturate(${edits.saturation}%) sepia(${warmSepia}%) hue-rotate(${warmHueRotate}deg) blur(${edits.blur}px) grayscale(${edits.grayscale}%)`;
   }, [edits]);
 
@@ -200,14 +289,19 @@ export default function Upload() {
 
   const videoFilterStyle = useMemo(() => {
     const presetTuning = {
-      normal: { b: 1, c: 1, s: 1 },
-      cinematic: { b: 0.96, c: 1.18, s: 0.9 },
-      vivid: { b: 1.05, c: 1.08, s: 1.24 },
-      mono: { b: 1, c: 1.1, s: 0.01 },
-      vintage: { b: 1.04, c: 0.94, s: 0.84 }
+      normal: { b: 1, c: 1, s: 1, sepia: 0, hue: 0 },
+      cinematic: { b: 0.96, c: 1.18, s: 0.9, sepia: 8, hue: -4 },
+      vivid: { b: 1.05, c: 1.08, s: 1.24, sepia: 0, hue: 4 },
+      mono: { b: 1, c: 1.1, s: 0.01, sepia: 0, hue: 0 },
+      vintage: { b: 1.04, c: 0.94, s: 0.84, sepia: 18, hue: -6 },
+      clean: { b: 1.06, c: 1.02, s: 1.08, sepia: 0, hue: 0 },
+      sunset: { b: 1.02, c: 0.98, s: 1.12, sepia: 20, hue: -10 }
     };
     const tuning = presetTuning[videoEdits.filterPreset] || presetTuning.normal;
-    return `brightness(${Math.round(videoEdits.brightness * tuning.b)}%) contrast(${Math.round(videoEdits.contrast * tuning.c)}%) saturate(${Math.round(videoEdits.saturation * tuning.s)}%)`;
+    const warmthSepia = Math.max(0, Number(videoEdits.warmth || 0) * 0.55 + tuning.sepia);
+    const hueRotate = Number(videoEdits.hue || 0) + tuning.hue;
+    const blurPx = Math.max(0, Number(videoEdits.softness || 0) / 30);
+    return `brightness(${Math.round(videoEdits.brightness * tuning.b)}%) contrast(${Math.round(videoEdits.contrast * tuning.c)}%) saturate(${Math.round(videoEdits.saturation * tuning.s)}%) sepia(${warmthSepia}%) hue-rotate(${hueRotate}deg) blur(${blurPx.toFixed(2)}px)`;
   }, [videoEdits]);
 
   const videoTrimSummary = useMemo(() => {
@@ -222,6 +316,73 @@ export default function Upload() {
       clipLen: clipLen.toFixed(1)
     };
   }, [videoEdits, videoMeta]);
+
+  const imageVignetteStyle = useMemo(() => {
+    const amount = Math.max(0, Number(edits.vignette || 0));
+    if (!amount) return null;
+    const alpha = Math.min(0.82, amount / 110);
+    return {
+      background: `radial-gradient(circle at center, rgba(0,0,0,0) 42%, rgba(0,0,0,0) 62%, rgba(0,0,0,${alpha}) 100%)`
+    };
+  }, [edits.vignette]);
+
+  const videoVignetteStyle = useMemo(() => {
+    const amount = Math.max(0, Number(videoEdits.vignette || 0));
+    if (!amount) return null;
+    const alpha = Math.min(0.78, amount / 120);
+    return {
+      background: `radial-gradient(circle at center, rgba(0,0,0,0) 40%, rgba(0,0,0,0.04) 58%, rgba(0,0,0,${alpha}) 100%)`
+    };
+  }, [videoEdits.vignette]);
+
+  const selectedSticker = useMemo(
+    () => STICKER_OPTIONS.find((item) => item.value === videoEdits.sticker) || STICKER_OPTIONS[0],
+    [videoEdits.sticker]
+  );
+  const StickerPreviewIcon = selectedSticker?.Icon || null;
+
+  const videoObjectFit =
+    videoEdits.coverMode === "fill" ? "cover" : videoEdits.coverMode === "fit" ? "contain" : "contain";
+
+  const renderStudioSlider = ({ key, label, value, min, max, step = 1, onChange, suffix = "" }) => (
+    <label key={key} className="studio-slider">
+      <div className="studio-slider-head">
+        <span>{label}</span>
+        <strong>{`${value}${suffix}`}</strong>
+      </div>
+      <input type="range" min={min} max={max} step={step} value={value} onChange={onChange} />
+    </label>
+  );
+
+  const imageLookControls = [
+    { key: "brightness", label: "Brightness", value: edits.brightness, min: 60, max: 150, suffix: "%", onChange: (e) => setEdit("brightness", Number(e.target.value)) },
+    { key: "contrast", label: "Contrast", value: edits.contrast, min: 70, max: 150, suffix: "%", onChange: (e) => setEdit("contrast", Number(e.target.value)) },
+    { key: "saturation", label: "Saturation", value: edits.saturation, min: 0, max: 180, suffix: "%", onChange: (e) => setEdit("saturation", Number(e.target.value)) },
+    { key: "warmth", label: "Warmth", value: edits.warmth, min: 0, max: 50, onChange: (e) => setEdit("warmth", Number(e.target.value)) },
+    { key: "hue", label: "Hue", value: edits.hue, min: -30, max: 30, onChange: (e) => setEdit("hue", Number(e.target.value)) },
+    { key: "blur", label: "Softness", value: edits.blur, min: 0, max: 4, step: 0.1, onChange: (e) => setEdit("blur", Number(e.target.value)) },
+    { key: "grayscale", label: "Fade to mono", value: edits.grayscale, min: 0, max: 100, suffix: "%", onChange: (e) => setEdit("grayscale", Number(e.target.value)) },
+    { key: "vignette", label: "Vignette", value: edits.vignette, min: 0, max: 60, onChange: (e) => setEdit("vignette", Number(e.target.value)) }
+  ];
+
+  const imageFrameControls = [
+    { key: "zoom", label: "Zoom", value: Number(edits.zoom.toFixed(2)), min: 1, max: 2.2, step: 0.01, onChange: (e) => setEdit("zoom", Number(e.target.value)) }
+  ];
+
+  const imageMoveControls = [
+    { key: "panX", label: "Pan X", value: edits.panX, min: -140, max: 140, onChange: (e) => setEdit("panX", Number(e.target.value)) },
+    { key: "panY", label: "Pan Y", value: edits.panY, min: -140, max: 140, onChange: (e) => setEdit("panY", Number(e.target.value)) }
+  ];
+
+  const videoLookControls = [
+    { key: "brightness", label: "Brightness", value: videoEdits.brightness, min: 60, max: 150, suffix: "%", onChange: (e) => setVideoEdit("brightness", Number(e.target.value)) },
+    { key: "contrast", label: "Contrast", value: videoEdits.contrast, min: 70, max: 150, suffix: "%", onChange: (e) => setVideoEdit("contrast", Number(e.target.value)) },
+    { key: "saturation", label: "Saturation", value: videoEdits.saturation, min: 0, max: 180, suffix: "%", onChange: (e) => setVideoEdit("saturation", Number(e.target.value)) },
+    { key: "warmth", label: "Warmth", value: videoEdits.warmth, min: 0, max: 50, onChange: (e) => setVideoEdit("warmth", Number(e.target.value)) },
+    { key: "hue", label: "Hue", value: videoEdits.hue, min: -30, max: 30, onChange: (e) => setVideoEdit("hue", Number(e.target.value)) },
+    { key: "softness", label: "Softness", value: videoEdits.softness, min: 0, max: 60, onChange: (e) => setVideoEdit("softness", Number(e.target.value)) },
+    { key: "vignette", label: "Vignette", value: videoEdits.vignette, min: 0, max: 60, onChange: (e) => setVideoEdit("vignette", Number(e.target.value)) }
+  ];
 
   useEffect(() => {
     if (!isVideo) return;
@@ -246,8 +407,10 @@ export default function Upload() {
       contrast: preset.contrast ?? prev.contrast,
       saturation: preset.saturation ?? prev.saturation,
       warmth: preset.warmth ?? prev.warmth,
+      hue: preset.hue ?? prev.hue,
       blur: preset.blur ?? prev.blur,
-      grayscale: preset.grayscale ?? prev.grayscale
+      grayscale: preset.grayscale ?? prev.grayscale,
+      vignette: preset.vignette ?? prev.vignette
     }));
   };
 
@@ -296,6 +459,23 @@ export default function Upload() {
     ctx.drawImage(bitmap, -drawW / 2, -drawH / 2, drawW, drawH);
     ctx.restore();
 
+    if (Number(edits.vignette || 0) > 0) {
+      const alpha = Math.min(0.78, Number(edits.vignette || 0) / 120);
+      const gradient = ctx.createRadialGradient(
+        canvas.width / 2,
+        canvas.height / 2,
+        Math.min(canvas.width, canvas.height) * 0.18,
+        canvas.width / 2,
+        canvas.height / 2,
+        Math.max(canvas.width, canvas.height) * 0.68
+      );
+      gradient.addColorStop(0, "rgba(0,0,0,0)");
+      gradient.addColorStop(0.62, "rgba(0,0,0,0)");
+      gradient.addColorStop(1, `rgba(0,0,0,${alpha})`);
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+
     const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
     if (!blob) return sourceFile;
     return new File([blob], `edited_${Date.now()}.jpg`, { type: "image/jpeg" });
@@ -307,30 +487,12 @@ export default function Upload() {
     setActiveFileIndex(0);
     setCaption("");
     setEdits(defaultEdits);
+    setActiveImageTool("looks");
+    setPreviewOriginal(false);
     setVideoMeta({ duration: 0, width: 0, height: 0 });
     setActiveVideoTool("edit");
     setExtraClips([]);
-    setVideoEdits({
-      trimStart: 0,
-      trimEnd: 0,
-      playbackSpeed: 1,
-      volume: 100,
-      muted: false,
-      brightness: 100,
-      contrast: 100,
-      saturation: 100,
-      filterPreset: "normal",
-      overlayText: "",
-      overlayOpacity: 70,
-      overlayMode: "screen",
-      sticker: "none",
-      captionsStyle: "classic",
-      voiceoverGain: 100,
-      importedAudioName: "",
-      extraClipCount: 0,
-      qualityTarget: "1080p",
-      coverMode: "auto"
-    });
+    setVideoEdits(defaultVideoEdits);
     setCreatorSettings({
       audience: "public",
       allowComments: true,
@@ -350,9 +512,12 @@ export default function Upload() {
     setFile(nextFiles[0] || null);
     setMsg("");
     setEdits(defaultEdits);
+    setActiveImageTool("looks");
+    setPreviewOriginal(false);
     setActiveVideoTool("edit");
     setExtraClips([]);
     setVideoMeta({ duration: 0, width: 0, height: 0 });
+    setVideoEdits(defaultVideoEdits);
   };
 
   const openCameraStudio = () => {
@@ -544,7 +709,7 @@ export default function Upload() {
           onChange={(e) => setCaption(e.target.value)}
         />
 
-        <div className="video-tool-panel creator-settings-grid">
+        <div className="studio-panel-block creator-settings-grid studio-content-type">
           <label>
             Content type
             <select
@@ -573,41 +738,77 @@ export default function Upload() {
                     transform: `translate(${edits.panX}px, ${edits.panY}px) rotate(${edits.rotate}deg) scale(${edits.zoom}) scaleX(${edits.flipH ? -1 : 1}) scaleY(${edits.flipV ? -1 : 1})`
                   }}
                 />
+                {!previewOriginal && imageVignetteStyle && (
+                  <div className="upload-preview-vignette" style={imageVignetteStyle} />
+                )}
               </div>
             )}
 
             {isVideo && (
               <div className="upload-preview-video-wrap">
-                <video
-                  ref={videoRef}
-                  src={previewUrl}
-                  className="upload-preview-video"
-                  controls
-                  style={{ filter: videoFilterStyle }}
-                  onLoadedMetadata={(e) => {
-                    const v = e.currentTarget;
-                    const duration = Number(v.duration || 0);
-                    setVideoMeta({
-                      duration,
-                      width: Number(v.videoWidth || 0),
-                      height: Number(v.videoHeight || 0)
-                    });
-                    setVideoEdits((prev) => ({
-                      ...prev,
-                      trimStart: 0,
-                      trimEnd: duration
-                    }));
-                  }}
-                  onTimeUpdate={(e) => {
-                    const v = e.currentTarget;
-                    const trimStart = Number(videoEdits.trimStart || 0);
-                    const trimEnd = Number(videoEdits.trimEnd || 0);
-                    if (trimEnd > trimStart && v.currentTime > trimEnd) {
-                      v.currentTime = trimStart;
-                      v.play().catch(() => {});
-                    }
-                  }}
-                />
+                <div className="upload-preview-video-stage">
+                  <video
+                    ref={videoRef}
+                    src={previewUrl}
+                    className="upload-preview-video"
+                    controls
+                    style={{
+                      filter: previewOriginal ? "none" : videoFilterStyle,
+                      objectFit: videoObjectFit
+                    }}
+                    onLoadedMetadata={(e) => {
+                      const v = e.currentTarget;
+                      const duration = Number(v.duration || 0);
+                      setVideoMeta({
+                        duration,
+                        width: Number(v.videoWidth || 0),
+                        height: Number(v.videoHeight || 0)
+                      });
+                      setVideoEdits((prev) => ({
+                        ...prev,
+                        trimStart: 0,
+                        trimEnd: duration
+                      }));
+                    }}
+                    onTimeUpdate={(e) => {
+                      const v = e.currentTarget;
+                      const trimStart = Number(videoEdits.trimStart || 0);
+                      const trimEnd = Number(videoEdits.trimEnd || 0);
+                      if (trimEnd > trimStart && v.currentTime > trimEnd) {
+                        v.currentTime = trimStart;
+                        v.play().catch(() => {});
+                      }
+                    }}
+                  />
+                  {!previewOriginal && videoEdits.overlayText && (
+                    <div
+                      className="upload-preview-overlay-text"
+                      style={{
+                        ...getOverlayPlacementStyle(videoEdits.textPosition),
+                        opacity: Math.max(0.1, Number(videoEdits.overlayOpacity || 0) / 100),
+                        fontSize: `${Math.max(18, Number(videoEdits.textSize || 34))}px`,
+                        mixBlendMode: videoEdits.overlayMode
+                      }}
+                    >
+                      {videoEdits.overlayText}
+                    </div>
+                  )}
+                  {!previewOriginal && StickerPreviewIcon && (
+                    <div
+                      className="upload-preview-overlay-sticker"
+                      style={{
+                        ...getOverlayPlacementStyle(videoEdits.stickerPosition),
+                        fontSize: `${Math.max(34, Number(videoEdits.stickerSize || 72))}px`,
+                        mixBlendMode: videoEdits.overlayMode
+                      }}
+                    >
+                      <StickerPreviewIcon />
+                    </div>
+                  )}
+                  {!previewOriginal && videoVignetteStyle && (
+                    <div className="upload-preview-vignette" style={videoVignetteStyle} />
+                  )}
+                </div>
                 <p className="video-meta-line">
                   {videoMeta.width > 0 && videoMeta.height > 0
                     ? `${videoMeta.width}x${videoMeta.height}`
@@ -620,185 +821,264 @@ export default function Upload() {
         )}
 
         {isImage && (
-          <div className="upload-tools">
-            <div className="tool-row">
-              <span>Presets</span>
-              <div className="pill-group">
-                {Object.entries(PRESETS).map(([key, value]) => (
-                  <button
-                    key={key}
-                    type="button"
-                    className={edits.preset === key ? "active" : ""}
-                    onClick={() => applyPreset(key)}
-                  >
-                    {value.label}
-                  </button>
-                ))}
+          <div className="upload-tools media-studio image-studio">
+            <div className="studio-heading">
+              <div>
+                <h3>Photo Studio</h3>
+                <p>Give the image a warmer, softer, or more focused feel without the chunky boxes.</p>
               </div>
-            </div>
-
-            <div className="tool-row">
-              <span>Aspect</span>
-              <div className="pill-group">
-                {ASPECT_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    className={edits.aspect === opt.value ? "active" : ""}
-                    onClick={() => setEdit("aspect", opt.value)}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="tool-row">
-              <span>Transform</span>
-              <div className="pill-group">
-                <button type="button" onClick={() => setEdit("rotate", (edits.rotate - 90 + 360) % 360)}>Rotate Left</button>
-                <button type="button" onClick={() => setEdit("rotate", (edits.rotate + 90) % 360)}>Rotate Right</button>
-                <button type="button" onClick={() => setEdit("flipH", !edits.flipH)}>Flip H</button>
-                <button type="button" onClick={() => setEdit("flipV", !edits.flipV)}>Flip V</button>
-              </div>
-            </div>
-
-            <div className="tool-row">
-              <span>Preview</span>
-              <div className="pill-group">
+              <div className="studio-heading-actions">
                 <button
                   type="button"
+                  className="studio-soft-btn"
                   onMouseDown={() => setPreviewOriginal(true)}
                   onMouseUp={() => setPreviewOriginal(false)}
                   onMouseLeave={() => setPreviewOriginal(false)}
                   onTouchStart={() => setPreviewOriginal(true)}
                   onTouchEnd={() => setPreviewOriginal(false)}
                 >
-                  Hold for Original
+                  <FiEye />
+                  <span>Hold to compare</span>
+                </button>
+                <button type="button" className="studio-soft-btn" onClick={resetEdits}>
+                  <FiRotateCcw />
+                  <span>Reset</span>
                 </button>
               </div>
             </div>
 
-            <div className="slider-grid">
-              <label>Zoom <input type="range" min="1" max="2.2" step="0.01" value={edits.zoom} onChange={(e) => setEdit("zoom", Number(e.target.value))} /></label>
-              <label>Brightness <input type="range" min="60" max="150" value={edits.brightness} onChange={(e) => setEdit("brightness", Number(e.target.value))} /></label>
-              <label>Contrast <input type="range" min="70" max="150" value={edits.contrast} onChange={(e) => setEdit("contrast", Number(e.target.value))} /></label>
-              <label>Saturation <input type="range" min="0" max="180" value={edits.saturation} onChange={(e) => setEdit("saturation", Number(e.target.value))} /></label>
-              <label>Warmth <input type="range" min="0" max="50" value={edits.warmth} onChange={(e) => setEdit("warmth", Number(e.target.value))} /></label>
-              <label>Blur <input type="range" min="0" max="4" step="0.1" value={edits.blur} onChange={(e) => setEdit("blur", Number(e.target.value))} /></label>
-              <label>Grayscale <input type="range" min="0" max="100" value={edits.grayscale} onChange={(e) => setEdit("grayscale", Number(e.target.value))} /></label>
-              <label>Pan X <input type="range" min="-140" max="140" value={edits.panX} onChange={(e) => setEdit("panX", Number(e.target.value))} /></label>
-              <label>Pan Y <input type="range" min="-140" max="140" value={edits.panY} onChange={(e) => setEdit("panY", Number(e.target.value))} /></label>
+            <div className="studio-tool-strip">
+              {IMAGE_TOOL_OPTIONS.map(({ key, label, Icon }) => (
+                <button
+                  key={key}
+                  type="button"
+                  className={`studio-tool-btn ${activeImageTool === key ? "active" : ""}`}
+                  onClick={() => setActiveImageTool(key)}
+                >
+                  <Icon />
+                  <span>{label}</span>
+                </button>
+              ))}
             </div>
 
-            <button type="button" className="reset-btn" onClick={resetEdits}>Reset Edits</button>
+            {activeImageTool === "looks" && (
+              <>
+                <div className="studio-inline-row">
+                  <span className="studio-inline-label">Mood</span>
+                  <div className="pill-group studio-chip-row">
+                    {Object.entries(PRESETS).map(([key, value]) => (
+                      <button
+                        key={key}
+                        type="button"
+                        className={edits.preset === key ? "active" : ""}
+                        onClick={() => applyPreset(key)}
+                      >
+                        {value.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="studio-slider-grid">
+                  {imageLookControls.map(renderStudioSlider)}
+                </div>
+              </>
+            )}
+
+            {activeImageTool === "frame" && (
+              <>
+                <div className="studio-inline-row">
+                  <span className="studio-inline-label">Aspect</span>
+                  <div className="pill-group studio-chip-row">
+                    {ASPECT_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        className={edits.aspect === opt.value ? "active" : ""}
+                        onClick={() => setEdit("aspect", opt.value)}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="studio-slider-grid">
+                  {imageFrameControls.map(renderStudioSlider)}
+                </div>
+                <button
+                  type="button"
+                  className="studio-soft-btn studio-soft-btn-inline"
+                  onClick={() => {
+                    setEdit("aspect", "orig");
+                    setEdit("zoom", 1);
+                  }}
+                >
+                  <FiMaximize2 />
+                  <span>Reset frame</span>
+                </button>
+              </>
+            )}
+
+            {activeImageTool === "move" && (
+              <>
+                <p className="studio-helper">Slide the subject into place after you zoom or crop.</p>
+                <div className="studio-slider-grid">
+                  {imageMoveControls.map(renderStudioSlider)}
+                </div>
+              </>
+            )}
+
+            {activeImageTool === "shape" && (
+              <>
+                <div className="studio-inline-row">
+                  <span className="studio-inline-label">Quick actions</span>
+                  <div className="pill-group studio-chip-row studio-action-row">
+                    <button type="button" onClick={() => setEdit("rotate", (edits.rotate - 90 + 360) % 360)}>
+                      <FiRotateCcw />
+                      <span>Left</span>
+                    </button>
+                    <button type="button" onClick={() => setEdit("rotate", (edits.rotate + 90) % 360)}>
+                      <FiRotateCw />
+                      <span>Right</span>
+                    </button>
+                    <button type="button" onClick={() => setEdit("flipH", !edits.flipH)}>
+                      <FiMove />
+                      <span>Flip H</span>
+                    </button>
+                    <button type="button" onClick={() => setEdit("flipV", !edits.flipV)}>
+                      <FiSliders />
+                      <span>Flip V</span>
+                    </button>
+                  </div>
+                </div>
+                <p className="studio-helper">Use smaller moves here so the photo still feels natural and human.</p>
+              </>
+            )}
           </div>
         )}
 
         {isVideo && (
-          <div className="upload-tools video-tools">
-            <h3>Creator Video Studio</h3>
-
-            <div className="video-action-bar">
-              {VIDEO_TOOL_OPTIONS.map((tool) => (
+          <div className="upload-tools video-tools media-studio">
+            <div className="studio-heading">
+              <div>
+                <h3>Creator Video Studio</h3>
+                <p>Shape the pace, look, audio, and story with a softer creator flow.</p>
+              </div>
+              <div className="studio-heading-actions">
                 <button
-                  key={tool.key}
                   type="button"
-                  className={activeVideoTool === tool.key ? "active" : ""}
-                  onClick={() => setActiveVideoTool(tool.key)}
-                  aria-label={tool.label}
-                  title={tool.label}
+                  className="studio-soft-btn"
+                  onMouseDown={() => setPreviewOriginal(true)}
+                  onMouseUp={() => setPreviewOriginal(false)}
+                  onMouseLeave={() => setPreviewOriginal(false)}
+                  onTouchStart={() => setPreviewOriginal(true)}
+                  onTouchEnd={() => setPreviewOriginal(false)}
                 >
-                  <span className="video-action-symbol">{tool.symbol}</span>
+                  <FiEye />
+                  <span>Hold to compare</span>
+                </button>
+                <button
+                  type="button"
+                  className="studio-soft-btn"
+                  onClick={() => {
+                    setVideoEdits((prev) => ({ ...defaultVideoEdits, trimEnd: videoMeta.duration || prev.trimEnd || 0 }));
+                    setExtraClips([]);
+                  }}
+                >
+                  <FiRotateCcw />
+                  <span>Reset</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="studio-tool-strip">
+              {VIDEO_TOOL_OPTIONS.map(({ key, label, Icon }) => (
+                <button
+                  key={key}
+                  type="button"
+                  className={`studio-tool-btn ${activeVideoTool === key ? "active" : ""}`}
+                  onClick={() => setActiveVideoTool(key)}
+                  aria-label={label}
+                  title={label}
+                >
+                  <Icon />
+                  <span>{label}</span>
                 </button>
               ))}
             </div>
 
             {activeVideoTool === "edit" && (
               <>
-                <div className="tool-row">
-                  <span>Trim</span>
-                  <div className="slider-grid">
-                    <label>
-                      Start: {videoTrimSummary.start}s
-                      <input
-                        type="range"
-                        min="0"
-                        max={trimStartMax || 0}
-                        step="0.1"
-                        value={videoEdits.trimStart}
-                        onChange={(e) => setVideoEdit("trimStart", Number(e.target.value))}
-                      />
-                    </label>
-                    <label>
-                      End: {videoTrimSummary.end}s
-                      <input
-                        type="range"
-                        min={Math.min(videoEdits.trimStart + 0.2, trimEndMax || 0)}
-                        max={trimEndMax || 0}
-                        step="0.1"
-                        value={videoEdits.trimEnd}
-                        onChange={(e) => setVideoEdit("trimEnd", Number(e.target.value))}
-                      />
-                    </label>
+                <div className="studio-section-split">
+                  <div>
+                    <div className="studio-inline-row">
+                      <span className="studio-inline-label">Trim</span>
+                      <span className="studio-inline-value">{videoTrimSummary.clipLen}s clip</span>
+                    </div>
+                    <div className="studio-slider-grid">
+                      {renderStudioSlider({
+                        key: "trimStart",
+                        label: "Start",
+                        value: videoTrimSummary.start,
+                        min: 0,
+                        max: trimStartMax || 0,
+                        step: 0.1,
+                        suffix: "s",
+                        onChange: (e) => setVideoEdit("trimStart", Number(e.target.value))
+                      })}
+                      {renderStudioSlider({
+                        key: "trimEnd",
+                        label: "End",
+                        value: videoTrimSummary.end,
+                        min: Math.min(videoEdits.trimStart + 0.2, trimEndMax || 0),
+                        max: trimEndMax || 0,
+                        step: 0.1,
+                        suffix: "s",
+                        onChange: (e) => setVideoEdit("trimEnd", Number(e.target.value))
+                      })}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="studio-inline-row">
+                      <span className="studio-inline-label">Playback</span>
+                      <div className="pill-group studio-chip-row">
+                        {PLAYBACK_SPEED_OPTIONS.map((speed) => (
+                          <button
+                            key={speed}
+                            type="button"
+                            className={Number(videoEdits.playbackSpeed) === speed ? "active" : ""}
+                            onClick={() => setVideoEdit("playbackSpeed", speed)}
+                          >
+                            {speed}x
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="studio-inline-row">
+                      <span className="studio-inline-label">Frame</span>
+                      <div className="pill-group studio-chip-row">
+                        {COVER_MODE_OPTIONS.map((option) => (
+                          <button
+                            key={option.value}
+                            type="button"
+                            className={videoEdits.coverMode === option.value ? "active" : ""}
+                            onClick={() => setVideoEdit("coverMode", option.value)}
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   </div>
                 </div>
 
-                <p className="video-note">Clip length: {videoTrimSummary.clipLen}s</p>
-
-                <div className="tool-row">
-                  <span>Playback</span>
-                  <div className="pill-group">
-                    {[0.5, 0.75, 1, 1.25, 1.5, 2].map((speed) => (
-                      <button
-                        key={speed}
-                        type="button"
-                        className={Number(videoEdits.playbackSpeed) === speed ? "active" : ""}
-                        onClick={() => setVideoEdit("playbackSpeed", speed)}
-                      >
-                        {speed}x
-                      </button>
-                    ))}
-                  </div>
+                <div className="studio-slider-grid">
+                  {videoLookControls.map(renderStudioSlider)}
                 </div>
 
-                <div className="slider-grid">
-                  <label>
-                    Brightness
-                    <input
-                      type="range"
-                      min="60"
-                      max="150"
-                      value={videoEdits.brightness}
-                      onChange={(e) => setVideoEdit("brightness", Number(e.target.value))}
-                    />
-                  </label>
-                  <label>
-                    Contrast
-                    <input
-                      type="range"
-                      min="70"
-                      max="150"
-                      value={videoEdits.contrast}
-                      onChange={(e) => setVideoEdit("contrast", Number(e.target.value))}
-                    />
-                  </label>
-                  <label>
-                    Saturation
-                    <input
-                      type="range"
-                      min="0"
-                      max="180"
-                      value={videoEdits.saturation}
-                      onChange={(e) => setVideoEdit("saturation", Number(e.target.value))}
-                    />
-                  </label>
-                </div>
-
-                <div className="tool-row">
-                  <span>Output</span>
-                  <div className="pill-group">
-                    {["144p", "240p", "360p", "480p", "720p", "1080p", "1440p", "2160p"].map((q) => (
+                <div className="studio-inline-row">
+                  <span className="studio-inline-label">Output</span>
+                  <div className="pill-group studio-chip-row">
+                    {QUALITY_TARGET_OPTIONS.map((q) => (
                       <button
                         key={q}
                         type="button"
@@ -814,9 +1094,10 @@ export default function Upload() {
             )}
 
             {activeVideoTool === "add-clips" && (
-              <div className="video-tool-panel">
-                <label className="upload-file-pick">
-                  Add clips
+              <div className="studio-panel-block">
+                <label className="upload-file-pick studio-upload-inline">
+                  <FiFilm />
+                  <span>Add supporting clips</span>
                   <input
                     type="file"
                     accept="video/*"
@@ -828,63 +1109,97 @@ export default function Upload() {
                     }}
                   />
                 </label>
-                <p className="video-note">{extraClips.length} extra clip(s) selected.</p>
+                <p className="studio-helper">{extraClips.length} extra clip(s) selected. You can use these later for a richer reel cut.</p>
               </div>
             )}
 
             {activeVideoTool === "audio" && (
-              <div className="video-tool-panel slider-grid">
-                <label>
-                  Volume: {videoEdits.volume}%
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    value={videoEdits.volume}
-                    onChange={(e) => setVideoEdit("volume", Number(e.target.value))}
-                  />
-                </label>
-                <label>
-                  <span>Audio Mode</span>
+              <div className="studio-panel-block">
+                <div className="studio-slider-grid">
+                  {renderStudioSlider({
+                    key: "volume",
+                    label: "Volume",
+                    value: videoEdits.volume,
+                    min: 0,
+                    max: 100,
+                    suffix: "%",
+                    onChange: (e) => setVideoEdit("volume", Number(e.target.value))
+                  })}
+                  {renderStudioSlider({
+                    key: "voiceoverGain",
+                    label: "Voice boost",
+                    value: videoEdits.voiceoverGain,
+                    min: 0,
+                    max: 200,
+                    suffix: "%",
+                    onChange: (e) => setVideoEdit("voiceoverGain", Number(e.target.value))
+                  })}
+                </div>
+                <div className="pill-group studio-chip-row studio-action-row">
                   <button
                     type="button"
-                    className={videoEdits.muted ? "toggle-btn active" : "toggle-btn"}
+                    className={videoEdits.muted ? "active" : ""}
                     onClick={() => setVideoEdit("muted", !videoEdits.muted)}
                   >
-                    {videoEdits.muted ? "Muted" : "Audio On"}
+                    {videoEdits.muted ? "Muted" : "Audio on"}
                   </button>
-                </label>
+                </div>
               </div>
             )}
 
             {activeVideoTool === "text" && (
-              <div className="video-tool-panel slider-grid">
-                <label>
-                  Overlay text
+              <div className="studio-panel-block">
+                <label className="studio-input-field">
+                  <span>Overlay text</span>
                   <input
                     type="text"
                     value={videoEdits.overlayText}
-                    placeholder="Add text"
+                    placeholder="Say something real..."
                     onChange={(e) => setVideoEdit("overlayText", e.target.value)}
                   />
                 </label>
-                <label>
-                  Text opacity: {videoEdits.overlayOpacity}%
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    value={videoEdits.overlayOpacity}
-                    onChange={(e) => setVideoEdit("overlayOpacity", Number(e.target.value))}
-                  />
-                </label>
+                <div className="studio-slider-grid">
+                  {renderStudioSlider({
+                    key: "textSize",
+                    label: "Text size",
+                    value: videoEdits.textSize,
+                    min: 18,
+                    max: 72,
+                    suffix: "px",
+                    onChange: (e) => setVideoEdit("textSize", Number(e.target.value))
+                  })}
+                  {renderStudioSlider({
+                    key: "overlayOpacity",
+                    label: "Text opacity",
+                    value: videoEdits.overlayOpacity,
+                    min: 0,
+                    max: 100,
+                    suffix: "%",
+                    onChange: (e) => setVideoEdit("overlayOpacity", Number(e.target.value))
+                  })}
+                </div>
+                <div className="studio-inline-row">
+                  <span className="studio-inline-label">Placement</span>
+                  <div className="pill-group studio-chip-row">
+                    {POSITION_OPTIONS.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        className={videoEdits.textPosition === option.value ? "active" : ""}
+                        onClick={() => setVideoEdit("textPosition", option.value)}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
 
             {activeVideoTool === "overlay" && (
-              <div className="video-tool-panel creator-settings-grid">
+              <div className="studio-panel-block creator-settings-grid">
                 <label>
-                  Overlay blend
+                  Blend mode
                   <select
                     value={videoEdits.overlayMode}
                     onChange={(e) => setVideoEdit("overlayMode", e.target.value)}
@@ -892,41 +1207,69 @@ export default function Upload() {
                     <option value="screen">Screen</option>
                     <option value="overlay">Overlay</option>
                     <option value="multiply">Multiply</option>
-                    <option value="soft-light">Soft Light</option>
+                    <option value="soft-light">Soft light</option>
                   </select>
                 </label>
                 <label>
-                  Overlay opacity: {videoEdits.overlayOpacity}%
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    value={videoEdits.overlayOpacity}
-                    onChange={(e) => setVideoEdit("overlayOpacity", Number(e.target.value))}
-                  />
+                  Preview framing
+                  <select
+                    value={videoEdits.coverMode}
+                    onChange={(e) => setVideoEdit("coverMode", e.target.value)}
+                  >
+                    {COVER_MODE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
                 </label>
               </div>
             )}
 
             {activeVideoTool === "stickers" && (
-              <div className="video-tool-panel">
-                <div className="pill-group">
-                  {["none", "fire", "heart", "star", "wow", "party"].map((sticker) => (
+              <div className="studio-panel-block">
+                <div className="pill-group studio-chip-row studio-icon-chip-row">
+                  {STICKER_OPTIONS.map(({ value, label, Icon }) => (
                     <button
-                      key={sticker}
+                      key={value}
                       type="button"
-                      className={videoEdits.sticker === sticker ? "active" : ""}
-                      onClick={() => setVideoEdit("sticker", sticker)}
+                      className={videoEdits.sticker === value ? "active" : ""}
+                      onClick={() => setVideoEdit("sticker", value)}
                     >
-                      {sticker}
+                      {Icon ? <Icon /> : <FiEye />}
+                      <span>{label}</span>
                     </button>
                   ))}
+                </div>
+                <div className="studio-slider-grid">
+                  {renderStudioSlider({
+                    key: "stickerSize",
+                    label: "Sticker size",
+                    value: videoEdits.stickerSize,
+                    min: 34,
+                    max: 120,
+                    suffix: "px",
+                    onChange: (e) => setVideoEdit("stickerSize", Number(e.target.value))
+                  })}
+                </div>
+                <div className="studio-inline-row">
+                  <span className="studio-inline-label">Placement</span>
+                  <div className="pill-group studio-chip-row">
+                    {POSITION_OPTIONS.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        className={videoEdits.stickerPosition === option.value ? "active" : ""}
+                        onClick={() => setVideoEdit("stickerPosition", option.value)}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
             )}
 
             {activeVideoTool === "captions" && (
-              <div className="video-tool-panel creator-settings-grid">
+              <div className="studio-panel-block creator-settings-grid">
                 <label>
                   Captions style
                   <select
@@ -952,24 +1295,25 @@ export default function Upload() {
             )}
 
             {activeVideoTool === "voiceover" && (
-              <div className="video-tool-panel slider-grid">
-                <label>
-                  Voiceover gain: {videoEdits.voiceoverGain}%
-                  <input
-                    type="range"
-                    min="0"
-                    max="200"
-                    value={videoEdits.voiceoverGain}
-                    onChange={(e) => setVideoEdit("voiceoverGain", Number(e.target.value))}
-                  />
-                </label>
+              <div className="studio-panel-block">
+                <div className="studio-slider-grid">
+                  {renderStudioSlider({
+                    key: "voiceoverGainOnly",
+                    label: "Voice presence",
+                    value: videoEdits.voiceoverGain,
+                    min: 0,
+                    max: 200,
+                    suffix: "%",
+                    onChange: (e) => setVideoEdit("voiceoverGain", Number(e.target.value))
+                  })}
+                </div>
               </div>
             )}
 
             {activeVideoTool === "filters" && (
-              <div className="video-tool-panel">
-                <div className="pill-group">
-                  {["normal", "cinematic", "vivid", "mono", "vintage"].map((preset) => (
+              <div className="studio-panel-block">
+                <div className="pill-group studio-chip-row">
+                  {VIDEO_FILTER_OPTIONS.map((preset) => (
                     <button
                       key={preset}
                       type="button"
@@ -984,9 +1328,10 @@ export default function Upload() {
             )}
 
             {activeVideoTool === "import-audio" && (
-              <div className="video-tool-panel">
-                <label className="upload-file-pick">
-                  Import audio
+              <div className="studio-panel-block">
+                <label className="upload-file-pick studio-upload-inline">
+                  <FiMusic />
+                  <span>Import soundtrack</span>
                   <input
                     type="file"
                     accept="audio/*"
@@ -996,15 +1341,21 @@ export default function Upload() {
                     }}
                   />
                 </label>
-                <p className="video-note">
+                <p className="studio-helper">
                   {videoEdits.importedAudioName
                     ? `Imported: ${videoEdits.importedAudioName}`
-                    : "No audio selected yet."}
+                    : "No soundtrack selected yet."}
                 </p>
               </div>
             )}
 
-            <h3>Creator Publish Settings</h3>
+            <div className="studio-heading studio-heading-secondary">
+              <div>
+                <h3>Publish Settings</h3>
+                <p>Set who can watch, comment, remix, or download before you publish.</p>
+              </div>
+            </div>
+
             <div className="creator-settings-grid">
               <label>
                 Audience
@@ -1019,7 +1370,7 @@ export default function Upload() {
               </label>
 
               <label>
-                Age Restriction
+                Age restriction
                 <select
                   value={creatorSettings.ageRestriction}
                   onChange={(e) => setCreatorSetting("ageRestriction", e.target.value)}
@@ -1040,7 +1391,7 @@ export default function Upload() {
               </label>
             </div>
 
-            <div className="pill-group">
+            <div className="pill-group studio-chip-row studio-action-row">
               <button
                 type="button"
                 className={creatorSettings.allowComments ? "active" : ""}
@@ -1067,7 +1418,7 @@ export default function Upload() {
                 className={creatorSettings.autoCaptions ? "active" : ""}
                 onClick={() => setCreatorSetting("autoCaptions", !creatorSettings.autoCaptions)}
               >
-                Auto Captions {creatorSettings.autoCaptions ? "On" : "Off"}
+                Auto captions {creatorSettings.autoCaptions ? "On" : "Off"}
               </button>
             </div>
           </div>

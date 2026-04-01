@@ -6,13 +6,13 @@ import { getApiBaseUrl, toApiUrl } from "../api/baseUrl";
 import { clearAuthStorage } from "../auth";
 import { SETTINGS_KEY } from "./soundPrefs";
 import { getJobsByOwner, removeCompanyJob } from "../data/jobStore";
+import { readActiveStories, syncStoryCaches } from "../services/storyStorage";
 import { getVaultCount } from "../services/vaultStorage";
 import { buildProfilePath, getProfileIdentifier, persistProfileIdentity } from "../utils/profileRoute";
 import "./Profile.css";
 
 const FOLLOWING_CACHE_KEY = "socialsea_following_cache_v1";
 const HIDDEN_PROFILE_POSTS_KEY = "socialsea_hidden_profile_posts_v1";
-const STORY_STORAGE_KEY = "socialsea_stories_v1";
 const PROFILE_CACHE_KEY = "socialsea_profile_cache_v1";
 const HIGHLIGHTS_STORAGE_KEY = "socialsea_highlights_v1";
 const PROFILE_REQ_TIMEOUT_MS = 2500;
@@ -147,13 +147,7 @@ const buildStoryMediaSet = (stories) => {
 };
 
 const readLocalStoryMediaSet = () => {
-  try {
-    const raw = localStorage.getItem(STORY_STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    return buildStoryMediaSet(parsed);
-  } catch {
-    return new Set();
-  }
+  return buildStoryMediaSet(readActiveStories());
 };
 
 const isStoryMediaMatch = (mediaUrl, storySet) => {
@@ -490,11 +484,7 @@ export default function Profile() {
           );
           const set = buildStoryMediaSet(res?.data);
           if (Array.isArray(res?.data)) {
-            try {
-              localStorage.setItem(STORY_STORAGE_KEY, JSON.stringify(res.data.slice(0, 120)));
-            } catch {
-              // ignore storage errors
-            }
+            syncStoryCaches(res.data.slice(0, 120));
           }
           if (set.size) return set;
         } catch {

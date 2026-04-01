@@ -204,6 +204,80 @@
   font-size: 12px;
 }
 
+.job-pill-accent {
+  border-color: rgba(45, 123, 255, 0.45);
+  background: rgba(45, 123, 255, 0.14);
+  color: #b8d4ff;
+}
+
+.job-pill-success {
+  border-color: rgba(62, 181, 122, 0.38);
+  background: rgba(62, 181, 122, 0.12);
+  color: #bdf1d0;
+}
+
+.job-pill-muted {
+  border-color: rgba(255, 193, 94, 0.28);
+  background: rgba(255, 193, 94, 0.1);
+  color: #f2d7a1;
+}
+
+.job-match-card {
+  display: grid;
+  gap: 12px;
+}
+
+.job-match-head {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.job-match-score-stack {
+  display: grid;
+  gap: 8px;
+  justify-items: end;
+  flex: 0 0 auto;
+}
+
+.job-match-meter-group {
+  display: grid;
+  gap: 8px;
+}
+
+.job-match-meter {
+  width: 100%;
+  height: 8px;
+  border-radius: 999px;
+  background: #181818;
+  border: 1px solid #242424;
+  overflow: hidden;
+}
+
+.job-match-meter-fill {
+  height: 100%;
+  border-radius: inherit;
+}
+
+.job-match-meter-fill.match {
+  background: linear-gradient(90deg, #2d7bff, #55a9ff);
+}
+
+.job-match-meter-fill.chance {
+  background: linear-gradient(90deg, #2ab39b, #6fe1cf);
+}
+
+.job-match-footer {
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: #9aa1a8;
+}
+
 .applicant-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -379,6 +453,14 @@
 @media (max-width: 860px) {
   .resume-grid {
     grid-template-columns: 1fr;
+  }
+
+  .job-match-head {
+    flex-direction: column;
+  }
+
+  .job-match-score-stack {
+    justify-items: start;
   }
 }
 

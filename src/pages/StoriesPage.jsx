@@ -2,88 +2,16 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../api/axios";
 import { toApiUrl } from "../api/baseUrl";
+import {
+  STORY_ACTIVE_STORAGE_KEY,
+  STORY_ARCHIVE_STORAGE_KEY,
+  isStoryExpired,
+  readStoriesForIdentity,
+  readStoryIdentity,
+  syncStoryCaches,
+  toStoryEpochMs
+} from "../services/storyStorage";
 import "./StoriesPage.css";
-
-const STORY_STORAGE_KEY = "socialsea_stories_v1";
-
-const readIdentity = () => {
-  const userId = sessionStorage.getItem("userId") || localStorage.getItem("userId") || "";
-  const email = sessionStorage.getItem("email") || localStorage.getItem("email") || "";
-  const username = sessionStorage.getItem("username") || localStorage.getItem("username") || "";
-  const name = sessionStorage.getItem("name") || localStorage.getItem("name") || "";
-  return {
-    userId: String(userId || "").trim(),
-    email: String(email || "").trim().toLowerCase(),
-    username: String(username || "").trim().toLowerCase(),
-    name: String(name || "").trim().toLowerCase()
-  };
-};
-
-const isStoryMine = (story, identity) => {
-  if (!story || !identity) return false;
-  if (story?.createdLocally === true) return true;
-  const idCandidates = [
-    story?.userId,
-    story?.ownerId,
-    story?.authorId,
-    story?.profileId,
-    story?.user?.id,
-    story?.owner?.id
-  ]
-    .map((v) => String(v || "").trim())
-    .filter(Boolean);
-  if (identity.userId && idCandidates.includes(identity.userId)) return true;
-
-  const emailCandidates = [
-    story?.email,
-    story?.userEmail,
-    story?.ownerEmail,
-    story?.user?.email,
-    story?.username
-  ]
-    .map((v) => String(v || "").trim().toLowerCase())
-    .filter(Boolean);
-  if (identity.email && emailCandidates.includes(identity.email)) return true;
-
-  const nameCandidates = [
-    story?.username,
-    story?.userName,
-    story?.ownerName,
-    story?.name,
-    story?.user?.name
-  ]
-    .map((v) => String(v || "").trim().toLowerCase())
-    .filter(Boolean);
-  if (identity.username && nameCandidates.includes(identity.username)) return true;
-  if (identity.name && nameCandidates.includes(identity.name)) return true;
-  return false;
-};
-
-const readLocalStories = () => {
-  try {
-    const raw = localStorage.getItem(STORY_STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-};
-
-const normalizeStories = (list, identity) => {
-  if (!Array.isArray(list)) return [];
-  return list
-    .filter(Boolean)
-    .filter((story) => (identity ? isStoryMine(story, identity) : true))
-    .map((story) => ({
-      id: story?.id ?? story?.storyId ?? story?.postId ?? story?.mediaId ?? `${Date.now()}-${Math.random()}`,
-      mediaUrl: story?.mediaUrl || story?.url || story?.fileUrl || "",
-      caption: story?.caption || "",
-      storyText: story?.storyText || "",
-      privacy: story?.privacy || "public",
-      createdAt: story?.createdAt || story?.created || "",
-      expiresAt: story?.expiresAt || story?.expires || ""
-    }));
-};
 
 const resolveMediaUrl = (raw) => {
   if (!raw) return "";
@@ -100,58 +28,159 @@ const formatDateTime = (value) => {
   return d.toLocaleString();
 };
 
-const isExpired = (expiresAt) => {
-  if (!expiresAt) return false;
-  const ts = new Date(expiresAt).getTime();
-  if (Number.isNaN(ts)) return false;
-  return ts <= Date.now();
+const formatStatus = (story) => {
+  const expiresAt = toStoryEpochMs(story?.expiresAt || 0);
+  if (story?.sourceType === "reel-share") {
+    return isStoryExpired(story)
+      ? `Saved reel - expired ${formatDateTime(expiresAt)}`
+      : `Saved reel - active until ${formatDateTime(expiresAt)}`;
+  }
+  return isStoryExpired(story)
+    ? `Expired ${formatDateTime(expiresAt)}`
+    : `Active until ${formatDateTime(expiresAt)}`;
 };
+
+const getStoryLabel = (story) => {
+  const label = String(story?.storyText || story?.caption || "").trim();
+  if (label) return label;
+  return story?.sourceType === "reel-share" ? "Shared reel" : "Story";
+};
+
+const StorySection = ({ title, subtitle, emptyText, items, onOpen }) => (
+  <section className="stories-section">
+    <div className="stories-section-head">
+      <div>
+        <h3>{title}</h3>
+        <p>{subtitle}</p>
+      </div>
+      <span className="stories-count">{items.length}</span>
+    </div>
+
+    {items.length === 0 ? (
+      <p className="stories-empty">{emptyText}</p>
+    ) : (
+      <div className="stories-grid">
+        {items.map((story) => {
+          const mediaUrl = resolveMediaUrl(story.mediaUrl);
+          const caption = getStoryLabel(story);
+          const expired = isStoryExpired(story);
+          const video = isVideoUrl(mediaUrl) || story?.isVideo === true;
+          const isReelShare = story?.sourceType === "reel-share";
+
+          return (
+            <button
+              key={String(story.archiveId || story.id)}
+              type="button"
+              className={`stories-card ${expired ? "is-expired" : ""}`.trim()}
+              onClick={() => onOpen({ ...story, mediaUrl })}
+            >
+              <div className="stories-thumb">
+                <div className="stories-badge-row">
+                  {isReelShare && <span className="stories-type-badge reel">Shared reel</span>}
+                  {expired && <span className="stories-expired-badge">Expired</span>}
+                </div>
+                {mediaUrl ? (
+                  video ? (
+                    <video src={mediaUrl} muted playsInline preload="metadata" />
+                  ) : (
+                    <img src={mediaUrl} alt={caption || "Story"} />
+                  )
+                ) : (
+                  <div className="stories-thumb-empty">{isReelShare ? "Reel" : "Story"}</div>
+                )}
+              </div>
+              <div className="stories-meta">
+                <p>{caption}</p>
+                <small>{formatStatus(story)}</small>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    )}
+  </section>
+);
 
 export default function StoriesPage() {
   const navigate = useNavigate();
-  const identityRef = useMemo(() => readIdentity(), []);
-  const [stories, setStories] = useState(() => normalizeStories(readLocalStories(), identityRef));
-  const [loading, setLoading] = useState(() => readLocalStories().length === 0);
+  const identity = useMemo(() => readStoryIdentity(), []);
+  const [stories, setStories] = useState(() => readStoriesForIdentity(identity));
+  const [loading, setLoading] = useState(() => stories.length === 0);
   const [error, setError] = useState("");
   const [activeStory, setActiveStory] = useState(null);
 
   useEffect(() => {
     let mounted = true;
+
+    const refreshLocal = () => {
+      if (!mounted) return;
+      setStories(readStoriesForIdentity(identity));
+    };
+
     const load = async () => {
       setLoading(true);
       setError("");
+      refreshLocal();
       try {
         const res = await api.get("/api/stories/mine", { timeout: 12000 });
         if (!mounted) return;
-        const next = normalizeStories(res?.data || [], identityRef);
-        setStories(next);
-      } catch (err) {
+        syncStoryCaches(Array.isArray(res?.data) ? res.data : []);
+        refreshLocal();
+      } catch {
         if (!mounted) return;
-        const fallback = normalizeStories(readLocalStories(), identityRef);
-        setStories(fallback);
+        refreshLocal();
         setError("Unable to load stories from server. Showing saved stories on this device.");
       } finally {
         if (mounted) setLoading(false);
       }
     };
+
+    const onStorage = (event) => {
+      if (
+        !event ||
+        event.key === STORY_ACTIVE_STORAGE_KEY ||
+        event.key === STORY_ARCHIVE_STORAGE_KEY
+      ) {
+        refreshLocal();
+      }
+    };
+
     void load();
+    window.addEventListener("storage", onStorage);
+
     return () => {
       mounted = false;
+      window.removeEventListener("storage", onStorage);
     };
-  }, []);
+  }, [identity]);
 
   const sortedStories = useMemo(() => {
     const list = Array.isArray(stories) ? stories.slice() : [];
-    return list.sort((a, b) => new Date(b?.createdAt || 0) - new Date(a?.createdAt || 0));
+    return list.sort(
+      (a, b) => toStoryEpochMs(b?.createdAt || 0) - toStoryEpochMs(a?.createdAt || 0)
+    );
   }, [stories]);
 
-  const openStory = (story) => {
-    setActiveStory(story);
-  };
+  const activeStories = useMemo(
+    () =>
+      sortedStories.filter(
+        (story) => story?.sourceType !== "reel-share" && !isStoryExpired(story)
+      ),
+    [sortedStories]
+  );
 
-  const closeStory = () => {
-    setActiveStory(null);
-  };
+  const sharedReels = useMemo(
+    () => sortedStories.filter((story) => story?.sourceType === "reel-share"),
+    [sortedStories]
+  );
+
+  const pastStories = useMemo(
+    () =>
+      sortedStories.filter(
+        (story) => story?.sourceType !== "reel-share" && isStoryExpired(story)
+      ),
+    [sortedStories]
+  );
 
   return (
     <div className="stories-page">
@@ -161,7 +190,7 @@ export default function StoriesPage() {
         </button>
         <div className="stories-title-wrap">
           <h2>My Stories</h2>
-          <p>All your stories in one place.</p>
+          <p>Active stories, expired stories, and shared reels in one place.</p>
         </div>
         <button type="button" className="stories-create" onClick={() => navigate("/story/create")}>
           + Create
@@ -169,59 +198,78 @@ export default function StoriesPage() {
       </header>
 
       {error && <p className="stories-error">{error}</p>}
-      {loading && <p className="stories-loading">Loading stories...</p>}
-      {!loading && sortedStories.length === 0 && <p className="stories-empty">No stories yet.</p>}
+      {loading && stories.length === 0 && <p className="stories-loading">Loading stories...</p>}
 
-      <div className="stories-grid">
-        {sortedStories.map((story) => {
-          const mediaUrl = resolveMediaUrl(story.mediaUrl);
-          const caption = String(story.storyText || story.caption || "Story").trim();
-          const expired = isExpired(story.expiresAt);
-          const video = isVideoUrl(mediaUrl);
-          return (
-            <button
-              key={String(story.id)}
-              type="button"
-              className={`stories-card ${expired ? "is-expired" : ""}`}
-              onClick={() => openStory({ ...story, mediaUrl })}
-            >
-              <div className="stories-thumb">
-                {expired && <span className="stories-expired-badge">Expired</span>}
-                {mediaUrl ? (
-                  video ? (
-                    <video src={mediaUrl} muted playsInline preload="metadata" />
-                  ) : (
-                    <img src={mediaUrl} alt={caption || "Story"} />
-                  )
-                ) : (
-                  <div className="stories-thumb-empty">Story</div>
-                )}
-              </div>
-              <div className="stories-meta">
-                <p>{caption || "Story"}</p>
-                <small>{formatDateTime(story.createdAt)}</small>
-              </div>
-            </button>
-          );
-        })}
+      <div className="stories-summary">
+        <div className="stories-summary-card">
+          <strong>{activeStories.length}</strong>
+          <span>Active stories</span>
+        </div>
+        <div className="stories-summary-card">
+          <strong>{pastStories.length}</strong>
+          <span>Past stories</span>
+        </div>
+        <div className="stories-summary-card">
+          <strong>{sharedReels.length}</strong>
+          <span>Shared reels</span>
+        </div>
       </div>
 
+      <StorySection
+        title="Active Stories"
+        subtitle="Stories that are still live right now."
+        emptyText="No active stories yet."
+        items={activeStories}
+        onOpen={setActiveStory}
+      />
+
+      <StorySection
+        title="Shared Reels"
+        subtitle="Reels you shared are saved here even after the story duration ends."
+        emptyText="No shared reels yet."
+        items={sharedReels}
+        onOpen={setActiveStory}
+      />
+
+      <StorySection
+        title="Past Stories"
+        subtitle="Expired stories stay here as your story archive."
+        emptyText="No past stories yet."
+        items={pastStories}
+        onOpen={setActiveStory}
+      />
+
       {activeStory && (
-        <div className="stories-viewer-backdrop" onClick={closeStory}>
+        <div className="stories-viewer-backdrop" onClick={() => setActiveStory(null)}>
           <div className="stories-viewer" onClick={(event) => event.stopPropagation()}>
-            <button type="button" className="stories-viewer-close" onClick={closeStory}>
-              ×
+            <button
+              type="button"
+              className="stories-viewer-close"
+              onClick={() => setActiveStory(null)}
+            >
+              x
             </button>
-            <div className="stories-viewer-media">
-              {isVideoUrl(activeStory.mediaUrl) ? (
-                <video src={activeStory.mediaUrl} autoPlay playsInline controls />
-              ) : (
-                <img src={activeStory.mediaUrl} alt={activeStory.storyText || activeStory.caption || "Story"} />
+            <div className="stories-viewer-body">
+              <div className="stories-viewer-media">
+                {isVideoUrl(activeStory.mediaUrl) || activeStory?.isVideo === true ? (
+                  <video src={activeStory.mediaUrl} autoPlay playsInline controls />
+                ) : (
+                  <img
+                    src={activeStory.mediaUrl}
+                    alt={activeStory.storyText || activeStory.caption || "Story"}
+                  />
+                )}
+              </div>
+              <div className="stories-viewer-meta">
+                <strong>{getStoryLabel(activeStory)}</strong>
+                <span>{formatStatus(activeStory)}</span>
+              </div>
+              {(activeStory.storyText || activeStory.caption) && (
+                <p className="stories-viewer-caption">
+                  {activeStory.storyText || activeStory.caption}
+                </p>
               )}
             </div>
-            {(activeStory.storyText || activeStory.caption) && (
-              <p className="stories-viewer-caption">{activeStory.storyText || activeStory.caption}</p>
-            )}
           </div>
         </div>
       )}

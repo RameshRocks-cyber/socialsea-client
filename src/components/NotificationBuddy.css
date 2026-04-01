@@ -49,7 +49,7 @@
   left: 0;
   top: 0;
   pointer-events: none;
-  transition: transform 0.2s linear;
+  transition: transform var(--ss-travel-duration, 220ms) linear;
   will-change: transform;
 }
 
@@ -70,6 +70,7 @@
 
 .ss-shimeji-actor {
   transform-origin: center bottom;
+  will-change: transform;
 }
 
 .ss-shimeji-figure {
@@ -88,21 +89,27 @@
 }
 
 .ss-shimeji-figure.has-sprite {
-  width: 160px;
-  height: 200px;
+  width: 132px;
+  height: 168px;
+  display: grid;
+  place-items: end center;
+  filter: drop-shadow(0 14px 18px rgba(0, 0, 0, 0.3));
 }
 
 .ss-shimeji-sprite {
   position: absolute;
   left: 50%;
-  bottom: 0;
+  bottom: 2px;
   transform: translateX(-50%);
-  width: 120px;
+  width: min(104px, 88%);
   height: auto;
   max-height: 100%;
-  animation: ssSpriteBob 0.85s ease-in-out infinite;
+  object-fit: contain;
+  object-position: center bottom;
   user-select: none;
   pointer-events: none;
+  will-change: transform;
+  filter: drop-shadow(0 6px 14px rgba(12, 18, 38, 0.18));
 }
 
 .ss-shimeji-sprite-sheet {
@@ -113,9 +120,9 @@
   background-repeat: no-repeat;
   background-position-x: 0;
   background-position-y: var(--sheet-row, 0px);
-  animation: ssSheetWalk var(--sheet-speed) steps(var(--sheet-steps)) infinite;
   image-rendering: auto;
   pointer-events: none;
+  will-change: background-position, transform;
 }
 
 .ss-shimeji-notice {
@@ -178,7 +185,6 @@
   box-shadow:
     inset 0 -6px 10px rgba(0, 0, 0, 0.08),
     0 0 0 2px rgba(15, 23, 42, 0.12);
-  animation: ssHeadBob 0.6s ease-in-out infinite;
   z-index: 3;
 }
 
@@ -416,7 +422,6 @@
   );
   box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.12);
   transform-origin: top center;
-  animation: ssArmSwing 0.8s ease-in-out infinite;
   z-index: 2;
 }
 
@@ -551,12 +556,10 @@
 
 .ss-shimeji-leg.left {
   left: 58px;
-  animation: ssLegSwingLeft 0.6s linear infinite;
 }
 
 .ss-shimeji-leg.right {
   right: 58px;
-  animation: ssLegSwingRight 0.6s linear infinite;
 }
 
 .ss-shimeji-tail {
@@ -569,7 +572,6 @@
   background: var(--tail-color);
   box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.12);
   transform-origin: top center;
-  animation: ssTailWag 0.8s ease-in-out infinite;
   z-index: 0;
 }
 
@@ -759,7 +761,6 @@
   width: 36px;
   height: 80px;
   background: transparent;
-  animation: ssTailWag 0.7s ease-in-out infinite;
 }
 
 .ss-shimeji-tail.lightning .seg {
@@ -802,7 +803,6 @@
   height: 64px;
   border-radius: 999px;
   background: rgba(110, 231, 183, 0.7);
-  animation: ssWingFlap 0.8s ease-in-out infinite;
 }
 
 .ss-shimeji-wing.left {
@@ -813,6 +813,105 @@
 .ss-shimeji-wing.right {
   right: 18px;
   transform-origin: left center;
+}
+
+.ss-shimeji-walker.is-walking .ss-shimeji-actor {
+  animation: ssWalkerBounce var(--ss-step-duration, 0.66s) linear infinite;
+}
+
+.ss-shimeji-walker.is-idle .ss-shimeji-actor {
+  animation: ssWalkerIdle var(--ss-idle-duration, 1.5s) ease-in-out infinite;
+}
+
+.ss-shimeji-walker.is-walking .ss-shimeji-head {
+  animation: ssWalkHead var(--ss-step-duration, 0.66s) ease-in-out infinite;
+}
+
+.ss-shimeji-walker.is-idle .ss-shimeji-head {
+  animation: ssIdleHead var(--ss-idle-duration, 1.5s) ease-in-out infinite;
+}
+
+.ss-shimeji-walker.is-walking .ss-shimeji-body {
+  animation: ssWalkBody var(--ss-step-duration, 0.66s) ease-in-out infinite;
+}
+
+.ss-shimeji-walker.is-idle .ss-shimeji-body {
+  animation: ssIdleBody var(--ss-idle-duration, 1.5s) ease-in-out infinite;
+}
+
+.ss-shimeji-walker.is-walking .ss-shimeji-arm.left {
+  animation: ssWalkArmLeft var(--ss-step-duration, 0.66s) cubic-bezier(0.42, 0, 0.58, 1) infinite;
+}
+
+.ss-shimeji-walker.is-walking .ss-shimeji-arm.right:not(.is-raised) {
+  animation: ssWalkArmRight var(--ss-step-duration, 0.66s) cubic-bezier(0.42, 0, 0.58, 1) infinite;
+}
+
+.ss-shimeji-walker.is-idle .ss-shimeji-arm.left {
+  animation: ssIdleArmLeft var(--ss-idle-duration, 1.5s) ease-in-out infinite;
+}
+
+.ss-shimeji-walker.is-idle .ss-shimeji-arm.right:not(.is-raised) {
+  animation: ssIdleArmRight var(--ss-idle-duration, 1.5s) ease-in-out infinite;
+}
+
+.ss-shimeji-walker.is-walking .ss-shimeji-leg.left {
+  animation: ssWalkLegLeft var(--ss-step-duration, 0.66s) linear infinite;
+}
+
+.ss-shimeji-walker.is-walking .ss-shimeji-leg.right {
+  animation: ssWalkLegRight var(--ss-step-duration, 0.66s) linear infinite;
+}
+
+.ss-shimeji-walker.is-idle .ss-shimeji-leg.left {
+  animation: ssIdleLegLeft var(--ss-idle-duration, 1.5s) ease-in-out infinite;
+}
+
+.ss-shimeji-walker.is-idle .ss-shimeji-leg.right {
+  animation: ssIdleLegRight var(--ss-idle-duration, 1.5s) ease-in-out infinite;
+}
+
+.ss-shimeji-walker.is-walking .ss-shimeji-tail,
+.ss-shimeji-walker.is-walking .ss-shimeji-tail.lightning {
+  animation: ssWalkTail calc(var(--ss-step-duration, 0.66s) * 1.12) ease-in-out infinite;
+}
+
+.ss-shimeji-walker.is-idle .ss-shimeji-tail,
+.ss-shimeji-walker.is-idle .ss-shimeji-tail.lightning {
+  animation: ssIdleTail calc(var(--ss-idle-duration, 1.5s) * 1.06) ease-in-out infinite;
+}
+
+.ss-shimeji-walker.is-walking .ss-shimeji-wing.left {
+  animation: ssWalkWingLeft calc(var(--ss-step-duration, 0.66s) * 0.94) ease-in-out infinite;
+}
+
+.ss-shimeji-walker.is-walking .ss-shimeji-wing.right {
+  animation: ssWalkWingRight calc(var(--ss-step-duration, 0.66s) * 0.94) ease-in-out infinite;
+}
+
+.ss-shimeji-walker.is-idle .ss-shimeji-wing.left {
+  animation: ssIdleWingLeft calc(var(--ss-idle-duration, 1.5s) * 0.94) ease-in-out infinite;
+}
+
+.ss-shimeji-walker.is-idle .ss-shimeji-wing.right {
+  animation: ssIdleWingRight calc(var(--ss-idle-duration, 1.5s) * 0.94) ease-in-out infinite;
+}
+
+.ss-shimeji-walker.is-walking .ss-shimeji-sprite {
+  animation: ssSpriteStride var(--ss-step-duration, 0.66s) ease-in-out infinite;
+}
+
+.ss-shimeji-walker.is-idle .ss-shimeji-sprite {
+  animation: ssSpriteBob var(--ss-idle-duration, 1.5s) ease-in-out infinite;
+}
+
+.ss-shimeji-walker.is-walking .ss-shimeji-sprite-sheet {
+  animation: ssSheetWalk var(--sheet-speed, 0.66s) steps(var(--sheet-steps)) infinite;
+}
+
+.ss-shimeji-walker.is-idle .ss-shimeji-sprite-sheet {
+  animation: ssSheetWalk var(--sheet-speed, 0.66s) steps(var(--sheet-steps)) infinite;
+  animation-play-state: paused;
 }
 
 .ss-shimeji-badge {
@@ -999,75 +1098,221 @@
   box-shadow: 0 0 0 4px rgba(181, 193, 216, 0.18);
 }
 
-@keyframes ssHeadBob {
-  0% {
-    transform: translateX(-50%) translateY(0);
+@keyframes ssWalkerBounce {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  25% {
+    transform: translateY(-3px);
   }
   50% {
-    transform: translateX(-50%) translateY(-4px);
+    transform: translateY(-7px);
   }
+  75% {
+    transform: translateY(-2px);
+  }
+}
+
+@keyframes ssWalkerIdle {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-2px);
+  }
+}
+
+@keyframes ssWalkHead {
+  0%,
+  100% {
+    transform: translateX(-50%) translateY(0) rotate(0deg);
+  }
+  25% {
+    transform: translateX(-50%) translateY(-2px) rotate(-2deg);
+  }
+  50% {
+    transform: translateX(-50%) translateY(-5px) rotate(0deg);
+  }
+  75% {
+    transform: translateX(-50%) translateY(-2px) rotate(2deg);
+  }
+}
+
+@keyframes ssIdleHead {
+  0%,
   100% {
     transform: translateX(-50%) translateY(0);
   }
-}
-
-@keyframes ssArmSwing {
-  0% {
-    transform: rotate(25deg);
-  }
   50% {
-    transform: rotate(45deg);
-  }
-  100% {
-    transform: rotate(25deg);
+    transform: translateX(-50%) translateY(-3px);
   }
 }
 
-@keyframes ssLegSwingLeft {
-  0% {
-    transform: rotate(18deg);
+@keyframes ssWalkBody {
+  0%,
+  100% {
+    transform: translateX(-50%) rotate(0deg);
+  }
+  25% {
+    transform: translateX(-50%) rotate(2deg);
   }
   50% {
-    transform: rotate(-8deg);
+    transform: translateX(-50%) translateY(-3px) rotate(0deg);
   }
-  100% {
-    transform: rotate(18deg);
+  75% {
+    transform: translateX(-50%) rotate(-2deg);
   }
 }
 
-@keyframes ssLegSwingRight {
-  0% {
-    transform: rotate(-18deg);
+@keyframes ssIdleBody {
+  0%,
+  100% {
+    transform: translateX(-50%);
   }
   50% {
-    transform: rotate(8deg);
-  }
-  100% {
-    transform: rotate(-18deg);
+    transform: translateX(-50%) translateY(-1px);
   }
 }
 
-@keyframes ssTailWag {
-  0% {
-    transform: rotate(-12deg);
+@keyframes ssWalkArmLeft {
+  0%,
+  100% {
+    transform: rotate(42deg);
   }
   50% {
-    transform: rotate(18deg);
-  }
-  100% {
     transform: rotate(-12deg);
   }
 }
 
-@keyframes ssWingFlap {
-  0% {
-    transform: rotate(-12deg);
+@keyframes ssWalkArmRight {
+  0%,
+  100% {
+    transform: rotate(-42deg);
+  }
+  50% {
+    transform: rotate(12deg);
+  }
+}
+
+@keyframes ssIdleArmLeft {
+  0%,
+  100% {
+    transform: rotate(22deg);
+  }
+  50% {
+    transform: rotate(30deg);
+  }
+}
+
+@keyframes ssIdleArmRight {
+  0%,
+  100% {
+    transform: rotate(-22deg);
+  }
+  50% {
+    transform: rotate(-30deg);
+  }
+}
+
+@keyframes ssWalkLegLeft {
+  0%,
+  100% {
+    transform: rotate(26deg) translateY(0);
+  }
+  50% {
+    transform: rotate(-18deg) translateY(2px);
+  }
+}
+
+@keyframes ssWalkLegRight {
+  0%,
+  100% {
+    transform: rotate(-26deg) translateY(2px);
+  }
+  50% {
+    transform: rotate(18deg) translateY(0);
+  }
+}
+
+@keyframes ssIdleLegLeft {
+  0%,
+  100% {
+    transform: rotate(6deg);
+  }
+  50% {
+    transform: rotate(-2deg);
+  }
+}
+
+@keyframes ssIdleLegRight {
+  0%,
+  100% {
+    transform: rotate(-6deg);
+  }
+  50% {
+    transform: rotate(2deg);
+  }
+}
+
+@keyframes ssWalkTail {
+  0%,
+  100% {
+    transform: rotate(-16deg);
+  }
+  50% {
+    transform: rotate(22deg);
+  }
+}
+
+@keyframes ssIdleTail {
+  0%,
+  100% {
+    transform: rotate(-6deg);
   }
   50% {
     transform: rotate(10deg);
   }
+}
+
+@keyframes ssWalkWingLeft {
+  0%,
   100% {
-    transform: rotate(-12deg);
+    transform: rotate(-22deg);
+  }
+  50% {
+    transform: rotate(4deg);
+  }
+}
+
+@keyframes ssWalkWingRight {
+  0%,
+  100% {
+    transform: rotate(22deg);
+  }
+  50% {
+    transform: rotate(-4deg);
+  }
+}
+
+@keyframes ssIdleWingLeft {
+  0%,
+  100% {
+    transform: rotate(-10deg);
+  }
+  50% {
+    transform: rotate(-2deg);
+  }
+}
+
+@keyframes ssIdleWingRight {
+  0%,
+  100% {
+    transform: rotate(10deg);
+  }
+  50% {
+    transform: rotate(2deg);
   }
 }
 
@@ -1092,6 +1337,22 @@
   }
   100% {
     transform: translateX(-50%) translateY(0);
+  }
+}
+
+@keyframes ssSpriteStride {
+  0%,
+  100% {
+    transform: translateX(-50%) translateY(0) rotate(-2deg);
+  }
+  25% {
+    transform: translateX(-50%) translateY(-3px) rotate(1deg);
+  }
+  50% {
+    transform: translateX(-50%) translateY(-7px) rotate(-1deg);
+  }
+  75% {
+    transform: translateX(-50%) translateY(-3px) rotate(2deg);
   }
 }
 

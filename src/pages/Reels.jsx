@@ -11,6 +11,7 @@ import { BsBookmarkFill } from "react-icons/bs";
 import { HiHandThumbUp, HiOutlineHandThumbUp } from "react-icons/hi2";
 import api from "../api/axios";
 import { getApiBaseUrl, toApiUrl } from "../api/baseUrl";
+import { addStoryEntry, readStoryIdentity } from "../services/storyStorage";
 import StudyMode from "./StudyMode";
 import "./Reels.css";
 
@@ -54,6 +55,7 @@ function loadScript(src, id) {
 
 export default function Reels() {
   const navigate = useNavigate();
+  const viewerIdentity = useMemo(() => readStoryIdentity(), []);
   const [reels, setReels] = useState([]);
   const [error, setError] = useState("");
   const [studyModeReels, setStudyModeReels] = useState(readStudyModeReels);
@@ -200,39 +202,10 @@ export default function Reels() {
       if (lastErr) throw lastErr;
       return [];
     };
-    const fetchOne = async (endpoints) => {
-      const bases = buildBaseCandidates();
-      let lastErr = null;
-      for (const baseURL of bases) {
-        for (const url of endpoints) {
-          try {
-            const res = await api.request({
-              method: "GET",
-              url,
-              baseURL,
-              timeout: 10000,
-              suppressAuthRedirect: true,
-            });
-            const body =
-              res?.data?.post ||
-              res?.data?.item ||
-              res?.data?.data ||
-              res?.data;
-            if (body && typeof body === "object" && !Array.isArray(body))
-              return body;
-          } catch (err) {
-            lastErr = err;
-          }
-        }
-      }
-      if (lastErr) throw lastErr;
-      return null;
-    };
-
     const loadShortVideos = async () => {
       try {
         const [fromFeed, fromReels] = await Promise.all([
-          fetchAny(["/api/feed", "/feed", "/api/posts", "/posts"]),
+          fetchAny(["/api/feed", "/feed"]),
           fetchAny(["/api/reels", "/reels"]),
         ]);
 
@@ -248,13 +221,10 @@ export default function Reels() {
         fromFeed.forEach((item) => pushItem(item, "feed"));
         fromReels.forEach((item) => pushItem(item, "reels"));
         if (targetPostId) {
-          const directItem = await fetchOne([
-            `/api/posts/${encodeURIComponent(targetPostId)}`,
-            `/posts/${encodeURIComponent(targetPostId)}`,
-            `/api/feed/${encodeURIComponent(targetPostId)}`,
-            `/feed/${encodeURIComponent(targetPostId)}`,
-          ]).catch(() => null);
-          if (directItem) pushItem(directItem, "target");
+          const fallbackMatch =
+            fromFeed.find((item) => String(item?.id || "").trim() === targetPostId) ||
+            fromReels.find((item) => String(item?.id || "").trim() === targetPostId);
+          if (fallbackMatch) pushItem(fallbackMatch, "target");
         }
 
         const merged = Array.from(byKey.values());
@@ -770,6 +740,28 @@ export default function Reels() {
     const shareUrl = `${window.location.origin}/reels?post=${reel.id}`;
     const shareText = `${reel.description || reel.content || "Check this reel"} ${shareUrl}`;
     try {
+      addStoryEntry(
+        {
+          id: reel?.id || `reel-share-${Date.now()}`,
+          reelId: reel?.id || "",
+          mediaUrl: reel?.contentUrl || reel?.mediaUrl || reel?.videoUrl || "",
+          mediaType: reel?.contentType || reel?.mediaType || "video/mp4",
+          type: "VIDEO",
+          isVideo: true,
+          caption: reel?.description || reel?.content || "",
+          storyText: reel?.description || reel?.content || "",
+          createdAt: new Date().toISOString(),
+          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+          privacy: "public",
+          userId: viewerIdentity.userId || reel?.user?.id || "",
+          email: viewerIdentity.email || reel?.user?.email || "",
+          username: viewerIdentity.username || reel?.user?.username || reel?.username || "",
+          name: viewerIdentity.name || reel?.user?.name || reel?.name || "",
+          sourceType: "reel-share",
+          createdLocally: true
+        },
+        { active: false, archive: true }
+      );
       try {
         sessionStorage.setItem(CHAT_SHARE_DRAFT_KEY, shareText);
       } catch {
@@ -778,7 +770,7 @@ export default function Reels() {
       navigate(`/chat?share=${encodeURIComponent(shareText)}`);
       setShareMessageByPost((prev) => ({
         ...prev,
-        [reel.id]: "Sharing to chat...",
+        [reel.id]: "Saved to My Stories and sharing to chat...",
       }));
     } catch {
       setShareMessageByPost((prev) => ({ ...prev, [reel.id]: "Share failed" }));

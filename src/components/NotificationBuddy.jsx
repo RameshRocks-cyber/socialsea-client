@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { FiBell } from "react-icons/fi";
 import api from "../api/axios";
+import { NOTIFICATION_BUDDY_CHARACTERS, normalizeNotificationBuddyCharacter } from "./notificationBuddyConfig";
 import "./NotificationBuddy.css";
 
 
@@ -26,7 +27,7 @@ const DISMISS_ZONE_MIN_HEIGHT = 88;
 const DISMISS_ZONE_MAX_HEIGHT = 140;
 const DISMISS_ZONE_BOTTOM_PAD = 64;
 const DISMISS_ZONE_MOBILE_PAD = 78;
-const SHIMEJI_SCALE = 0.52;
+const SHIMEJI_SCALE = 0.46;
 const BASE_WIDTH = 160;
 const BASE_HEIGHT = 208;
 const EDGE_EPS = 0.75;
@@ -42,18 +43,7 @@ const BUDDY_SPEED_MULTIPLIERS = {
   fast: 1.35
 };
 
-const CHARACTER_OPTIONS = [
-  "Lion",
-  "Dog",
-  "Puppy",
-  "Cat",
-  "Panda",
-  "Bunny",
-  "Penguin",
-  "Anime Hero",
-  "Robot Cat",
-  "Cartoon Kid"
-];
+const CHARACTER_OPTIONS = NOTIFICATION_BUDDY_CHARACTERS;
 
 const CHARACTER_ASSETS = {
   Lion: "/shimeji/lion.png",
@@ -63,6 +53,8 @@ const CHARACTER_ASSETS = {
   Panda: "/shimeji/panda.png",
   Bunny: "/shimeji/bunny.png",
   Penguin: "/shimeji/penguin.png",
+  Mouse: "/shimeji/mouse.png",
+  Dragon: "/shimeji/dragon.png",
   "Anime Hero": "/shimeji/hero.png",
   "Robot Cat": "/shimeji/robot.png",
   "Cartoon Kid": "/shimeji/kid.png"
@@ -72,9 +64,13 @@ const CHARACTER_SHEETS = {
   Lion: { src: "/shimeji/lion-sheet.png", frameWidth: 128, frameHeight: 128, frames: 6, fps: 10 },
   Dog: { src: "/shimeji/dog-sheet.png", frameWidth: 128, frameHeight: 128, frames: 6, fps: 10 },
   Cat: { src: "/shimeji/cat-sheet.png", frameWidth: 128, frameHeight: 128, frames: 6, fps: 10 },
+  Mouse: { src: "/shimeji/mouse-sheet.png", frameWidth: 128, frameHeight: 128, frames: 6, fps: 10 },
+  Dragon: { src: "/shimeji/dragon-sheet.png", frameWidth: 128, frameHeight: 128, frames: 6, fps: 10 },
   "Anime Hero": { src: "/shimeji/hero-sheet.png", frameWidth: 128, frameHeight: 128, frames: 6, fps: 10 },
   "Robot Cat": { src: "/shimeji/robot-sheet.png", frameWidth: 128, frameHeight: 128, frames: 6, fps: 10 },
-  "Cartoon Kid": { src: "/shimeji/kid-sheet.png", frameWidth: 128, frameHeight: 128, frames: 6, fps: 10 }
+  "Cartoon Kid": { src: "/shimeji/kid-sheet.png", frameWidth: 128, frameHeight: 128, frames: 6, fps: 10 },
+  "Brave Soldier": { src: "/shimeji/soldier-sheet.png", frameWidth: 90, frameHeight: 110, frames: 8, rows: 3, row: 0, fps: 12, scale: 1.56 },
+  "Adventure Hunter": { src: "/shimeji/hunter-sheet.png", frameWidth: 90, frameHeight: 110, frames: 8, rows: 3, row: 0, fps: 12, scale: 1.56 }
 };
 
 const normalizeKey = (value) => String(value || "").trim().toLowerCase();
@@ -138,14 +134,14 @@ const readStoredCharacter = () => {
   try {
     const rawSettings = localStorage.getItem(SETTINGS_STORAGE_KEY);
     const parsedSettings = rawSettings ? JSON.parse(rawSettings) : {};
-    const fromSettings = String(parsedSettings?.notificationBuddyCharacter || "").trim();
-    if (fromSettings && CHARACTER_OPTIONS.includes(fromSettings)) return fromSettings;
+    const fromSettings = normalizeNotificationBuddyCharacter(parsedSettings?.notificationBuddyCharacter);
+    if (fromSettings) return fromSettings;
   } catch {
     // ignore storage issues
   }
   try {
-    const stored = localStorage.getItem(CHARACTER_STORAGE_KEY);
-    if (stored && CHARACTER_OPTIONS.includes(stored)) return stored;
+    const stored = normalizeNotificationBuddyCharacter(localStorage.getItem(CHARACTER_STORAGE_KEY));
+    if (stored) return stored;
   } catch {
     // ignore storage issues
   }
@@ -153,7 +149,7 @@ const readStoredCharacter = () => {
 };
 
 const writeStoredCharacter = (value) => {
-  const safe = CHARACTER_OPTIONS.includes(value) ? value : "Cat";
+  const safe = normalizeNotificationBuddyCharacter(value);
   try {
     const rawSettings = localStorage.getItem(SETTINGS_STORAGE_KEY);
     const parsedSettings = rawSettings ? JSON.parse(rawSettings) : {};
@@ -373,9 +369,19 @@ const buildSpeechText = (name, count) => {
 };
 
 const getCharacterStyle = (character) => {
+  const base = {
+    renderMode: CHARACTER_ASSETS[character] ? "sprite" : "rig",
+    headColor: "#f1f5ff",
+    bodyColor: "#8ea4d5",
+    tailTipColor: "#b8c6ec",
+    accentColor: "#93c5fd",
+    accentStrong: "#60a5fa",
+    label: "Cat"
+  };
   switch (character) {
     case "Lion":
       return {
+        ...base,
         headColor: "#ffe8b8",
         bodyColor: "#f8b34c",
         tailTipColor: "#d97706",
@@ -388,6 +394,7 @@ const getCharacterStyle = (character) => {
       };
     case "Dog":
       return {
+        ...base,
         headColor: "#ffd9ba",
         bodyColor: "#f5a56b",
         tail: "dog",
@@ -400,6 +407,7 @@ const getCharacterStyle = (character) => {
       };
     case "Cat":
       return {
+        ...base,
         headColor: "#f1f5ff",
         bodyColor: "#8ea4d5",
         tailTipColor: "#b8c6ec",
@@ -412,6 +420,7 @@ const getCharacterStyle = (character) => {
       };
     case "Puppy":
       return {
+        ...base,
         headColor: "#ffe0c7",
         bodyColor: "#f3a86f",
         tail: "dog",
@@ -424,6 +433,7 @@ const getCharacterStyle = (character) => {
       };
     case "Panda":
       return {
+        ...base,
         headColor: "#f5f5f5",
         bodyColor: "#9ca3af",
         tailTipColor: "#d1d5db",
@@ -435,6 +445,7 @@ const getCharacterStyle = (character) => {
       };
     case "Bunny":
       return {
+        ...base,
         headColor: "#fef3c7",
         bodyColor: "#f9a8d4",
         tail: "dog",
@@ -446,6 +457,7 @@ const getCharacterStyle = (character) => {
       };
     case "Penguin":
       return {
+        ...base,
         headColor: "#dbeafe",
         bodyColor: "#111827",
         cheekColor: "#bfdbfe",
@@ -454,8 +466,52 @@ const getCharacterStyle = (character) => {
         accentStrong: "#2563eb",
         label: "Penguin"
       };
+    case "Mouse":
+      return {
+        ...base,
+        headColor: "#fde8d7",
+        bodyColor: "#7fb4db",
+        tailTipColor: "#c7ddf1",
+        tail: "cat",
+        mouseEars: true,
+        whiskers: true,
+        cheeks: true,
+        accentColor: "#7dd3fc",
+        accentStrong: "#38bdf8",
+        label: "Mouse"
+      };
+    case "Fox":
+      return {
+        ...base,
+        headColor: "#ffe1c2",
+        bodyColor: "#fb923c",
+        tailTipColor: "#fff7ed",
+        tail: "cat",
+        catEars: true,
+        cheeks: true,
+        stripes: true,
+        accentColor: "#fdba74",
+        accentStrong: "#f97316",
+        label: "Fox"
+      };
+    case "Dragon":
+      return {
+        ...base,
+        headColor: "#dcfce7",
+        bodyColor: "#34d399",
+        tailColor: "#10b981",
+        tailTipColor: "#a7f3d0",
+        tail: "dragon",
+        dragonEars: true,
+        wings: true,
+        dragonScales: true,
+        accentColor: "#6ee7b7",
+        accentStrong: "#10b981",
+        label: "Dragon"
+      };
     case "Anime Hero":
       return {
+        ...base,
         headColor: "#ffe8c4",
         bodyColor: "#6aa9ff",
         hairColor: "#1f2937",
@@ -468,6 +524,7 @@ const getCharacterStyle = (character) => {
       };
     case "Robot Cat":
       return {
+        ...base,
         headColor: "#d5f3ff",
         bodyColor: "#6acbff",
         robotBell: true,
@@ -480,6 +537,7 @@ const getCharacterStyle = (character) => {
       };
     case "Cartoon Kid":
       return {
+        ...base,
         headColor: "#ffe3ba",
         bodyColor: "#ff7f7f",
         cheekColor: "#ffc0d8",
@@ -492,16 +550,41 @@ const getCharacterStyle = (character) => {
         accentStrong: "#f43f5e",
         label: "Cartoon Kid"
       };
+    case "Brave Soldier":
+      return {
+        ...base,
+        renderMode: "sheet",
+        headColor: "#f3d0a8",
+        bodyColor: "#7a8764",
+        hairColor: "#5b4639",
+        brows: true,
+        belt: true,
+        buckle: true,
+        accentColor: "#c2a469",
+        accentStrong: "#7c5a36",
+        label: "Brave Soldier"
+      };
+    case "Adventure Hunter":
+      return {
+        ...base,
+        renderMode: "sheet",
+        headColor: "#ffe2bb",
+        bodyColor: "#7ca8c9",
+        hairColor: "#3f4148",
+        hair: "spiky",
+        belt: true,
+        buckle: true,
+        brows: true,
+        accentColor: "#93c5fd",
+        accentStrong: "#3b82f6",
+        label: "Adventure Hunter"
+      };
     default:
       return {
-        headColor: "#f1f5ff",
-        bodyColor: "#8ea4d5",
-        tailTipColor: "#b8c6ec",
+        ...base,
         tail: "cat",
         catEars: true,
         stripes: true,
-        accentColor: "#93c5fd",
-        accentStrong: "#60a5fa",
         label: "Cat"
       };
   }
@@ -1013,7 +1096,11 @@ export default function NotificationBuddy({ enabled = true }) {
     setDragging(false);
     startLongPress();
     if (event.currentTarget.setPointerCapture) {
-      event.currentTarget.setPointerCapture(event.pointerId);
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      } catch {
+        // ignore pointer capture failures
+      }
     }
   };
 
@@ -1086,6 +1173,7 @@ export default function NotificationBuddy({ enabled = true }) {
 
   const badgeText = unreadCount > 99 ? "99+" : String(unreadCount || "");
   const isHoldingNotice = unreadCount > 0 || speechVisible || alerting;
+  const isWalking = isEnabled && !panelOpen && !dragging;
 
   const characterStyle = useMemo(() => getCharacterStyle(character), [character]);
   const characterVars = {
@@ -1100,20 +1188,23 @@ export default function NotificationBuddy({ enabled = true }) {
   };
   const sheetConfig = CHARACTER_SHEETS[character];
   const characterAsset = CHARACTER_ASSETS[character];
+  const renderMode = characterStyle.renderMode || "rig";
   const sheetReady = sheetConfig && sheetStatus?.[character] === "loaded";
-  const canUseSheet = Boolean(sheetConfig?.src) && sheetReady;
-  const canUseSprite = !canUseSheet && Boolean(characterAsset) && !spriteErrors?.[character];
+  const canUseSheet = renderMode === "sheet" && Boolean(sheetConfig?.src) && sheetReady;
+  const canUseSprite = renderMode === "sprite" && !canUseSheet && Boolean(characterAsset) && !spriteErrors?.[character];
   const handleSpriteError = () => {
     setSpriteErrors((prev) => ({ ...prev, [character]: true }));
   };
+  const sheetRows = Math.max(1, Number(sheetConfig?.rows) || 1);
+  const sheetRowIndex = clampValue(Number(sheetConfig?.row) || 0, 0, sheetRows - 1);
   const sheetScale = sheetConfig?.scale ?? 1;
   const sheetStyle = sheetConfig
     ? {
         width: `${sheetConfig.frameWidth}px`,
         height: `${sheetConfig.frameHeight}px`,
         backgroundImage: `url(${sheetConfig.src})`,
-        backgroundSize: `${sheetConfig.frameWidth * sheetConfig.frames}px ${sheetConfig.frameHeight}px`,
-        backgroundPositionY: "0px",
+        backgroundSize: `${sheetConfig.frameWidth * sheetConfig.frames}px ${sheetConfig.frameHeight * sheetRows}px`,
+        backgroundPositionY: `${-1 * sheetConfig.frameHeight * sheetRowIndex}px`,
         transform: `translateX(-50%) scale(${sheetScale})`,
         transformOrigin: "center bottom",
         "--sheet-steps": sheetConfig.frames,
@@ -1131,7 +1222,18 @@ export default function NotificationBuddy({ enabled = true }) {
     { key: "system", label: "Other", count: kindCounts.system, tone: "system" }
   ];
 
-  const actorStyle = { transform: `scaleX(${direction}) scale(${SHIMEJI_SCALE})` };
+  const motionProfile =
+    buddySpeed === "fast"
+      ? { stepDuration: "0.5s", idleDuration: "1.25s" }
+      : buddySpeed === "slow"
+        ? { stepDuration: "0.86s", idleDuration: "1.8s" }
+        : { stepDuration: "0.66s", idleDuration: "1.5s" };
+
+  const actorStyle = {
+    transform: `scaleX(${direction}) scale(${SHIMEJI_SCALE})`,
+    "--ss-step-duration": motionProfile.stepDuration,
+    "--ss-idle-duration": motionProfile.idleDuration
+  };
   const counterFlipStyle = { transform: `scaleX(${direction})` };
   const panelTitle =
     panelMode === "types"
@@ -1180,8 +1282,11 @@ export default function NotificationBuddy({ enabled = true }) {
       )}
       <div
         ref={rootRef}
-        className={`ss-shimeji-walker ${alerting ? "is-alerting" : ""}`}
-        style={{ transform: `translate3d(${position.x}px, ${position.y}px, 0)` }}
+        className={`ss-shimeji-walker ${alerting ? "is-alerting" : ""} ${isWalking ? "is-walking" : "is-idle"}`}
+        style={{
+          transform: `translate3d(${position.x}px, ${position.y}px, 0)`,
+          "--ss-travel-duration": `${WALK_INTERVAL_MS}ms`
+        }}
       >
         <button
           type="button"

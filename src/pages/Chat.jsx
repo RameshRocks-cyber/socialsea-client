@@ -30,10 +30,11 @@ import api from "../api/axios";
 import { buildProfilePath } from "../utils/profileRoute";
 import { getApiBaseUrl, toApiUrl } from "../api/baseUrl";
 import { clearAuthStorage } from "../auth";
+import { readActiveStories, syncStoryCaches } from "../services/storyStorage";
 import { SETTINGS_KEY, readSoundPrefs } from "./soundPrefs";
 import "./Chat.css";
 
-const POLL_MS = 1200;
+const POLL_MS = 3000;
 const LOCAL_CHAT_KEY = "socialsea_chat_fallback_v1";
 const CHAT_SERVER_BASE_KEY = "socialsea_chat_server_base_v1";
 const HIDDEN_CHAT_MSG_IDS_KEY = "socialsea_hidden_msg_ids_v1";
@@ -60,6 +61,8 @@ const CALL_REFRESH_GRACE_MS = 20000;
 const CALL_REFRESH_GRACE_KEY = "socialsea_call_refresh_grace_v1";
 const CHAT_PRESENCE_HOLD_MS = 90000;
 const CHAT_CONVO_POLL_MS = 8000;
+const CHAT_THREAD_POLL_BACKGROUND_MS = 10000;
+const CHAT_MESSAGE_ALERT_DEDUPE_MS = 10 * 60 * 1000;
 const CHAT_REMOTE_DISABLE_MS = 5 * 60 * 1000;
 const STORY_FEED_DISABLE_MS = 5 * 60 * 1000;
 const STORY_IMAGE_DURATION_MS = 6500;
@@ -505,7 +508,15 @@ const pickReelPreviewFields = (value) => {
     candidate?.thumbUrl,
     candidate?.previewUrl,
     candidate?.coverUrl,
+    candidate?.coverImageUrl,
+    candidate?.coverImage,
     candidate?.imageUrl,
+    candidate?.previewImageUrl,
+    candidate?.previewImage,
+    candidate?.thumbnailImage,
+    candidate?.thumbnailSrc,
+    candidate?.screenshotUrl,
+    candidate?.stillUrl,
     candidate?.posterUrl,
     candidate?.frameUrl,
     candidate?.poster,
@@ -513,6 +524,87 @@ const pickReelPreviewFields = (value) => {
   );
   return { video, poster };
 };
+
+const createVideoPosterDataUrl = (src) =>
+  new Promise((resolve) => {
+    if (typeof document === "undefined") {
+      resolve("");
+      return;
+    }
+    const cleanSrc = String(src || "").trim();
+    if (!cleanSrc) {
+      resolve("");
+      return;
+    }
+
+    const video = document.createElement("video");
+    let done = false;
+    let timer = 0;
+
+    const finish = (value = "") => {
+      if (done) return;
+      done = true;
+      if (timer) window.clearTimeout(timer);
+      video.pause();
+      video.removeAttribute("src");
+      try {
+        video.load();
+      } catch {
+        // ignore cleanup failures
+      }
+      resolve(String(value || ""));
+    };
+
+    const capture = () => {
+      if (!video.videoWidth || !video.videoHeight) {
+        finish("");
+        return;
+      }
+      try {
+        const canvas = document.createElement("canvas");
+        const targetWidth = Math.max(180, Math.min(480, video.videoWidth));
+        const scale = targetWidth / Math.max(1, video.videoWidth);
+        canvas.width = targetWidth;
+        canvas.height = Math.max(100, Math.round(video.videoHeight * scale));
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          finish("");
+          return;
+        }
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        finish(canvas.toDataURL("image/jpeg", 0.82));
+      } catch {
+        finish("");
+      }
+    };
+
+    video.preload = "auto";
+    video.muted = true;
+    video.playsInline = true;
+    video.crossOrigin = "anonymous";
+    video.addEventListener("loadeddata", () => {
+      const duration = Number(video.duration) || 0;
+      const targetTime = duration > 0.18 ? Math.min(0.18, Math.max(0.06, duration / 8)) : 0;
+      if (targetTime > 0 && Math.abs((video.currentTime || 0) - targetTime) > 0.01) {
+        try {
+          video.currentTime = targetTime;
+          return;
+        } catch {
+          // fall through to first frame capture
+        }
+      }
+      capture();
+    });
+    video.addEventListener("seeked", capture);
+    video.addEventListener("error", () => finish(""));
+    timer = window.setTimeout(() => finish(""), 7000);
+    video.src = cleanSrc;
+    try {
+      video.load();
+    } catch {
+      finish("");
+    }
+  });
 
 const parseReplyEnvelope = (rawText) => {
   const raw = String(rawText || "");
@@ -586,14 +678,7 @@ export default function Chat() {
   };
 
   const readStoryCache = () => {
-    try {
-      const raw = safeGetItem(STORY_STORAGE_KEY);
-      if (!raw) return [];
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
+    return readActiveStories();
   };
 
   const normalizeStoryList = (list) => {
@@ -628,7 +713,7 @@ export default function Chat() {
   };
 
   const writeStoryCache = (list) => {
-    safeSetItem(STORY_STORAGE_KEY, JSON.stringify(list));
+    syncStoryCaches(list);
   };
 
   const isStoryFeedDisabled = () => {
@@ -770,6 +855,7 @@ export default function Chat() {
   const [pendingShareDraft, setPendingShareDraft] = useState("");
   const [shareHint, setShareHint] = useState("");
   const [reelPreviewById, setReelPreviewById] = useState({});
+  const [reelPosterBySrc, setReelPosterBySrc] = useState({});
 
   const [incomingCall, setIncomingCall] = useState(null);
   const [callState, setCallState] = useState({
@@ -899,6 +985,7 @@ export default function Chat() {
   const storyUsernamesRef = useRef({ byId: {}, byEmail: {} });
   const storyProfileLookupRef = useRef(new Set());
   const reelPreviewLoadingRef = useRef(new Set());
+  const reelPosterLoadingRef = useRef(new Set());
   useEffect(() => {
     storyUsernamesRef.current = { byId: storyUsernamesById, byEmail: storyUsernamesByEmail };
   }, [storyUsernamesById, storyUsernamesByEmail]);
@@ -1208,6 +1295,8 @@ export default function Chat() {
   const messageChannelRef = useRef(null);
   const seenReadReceiptsRef = useRef(new Set());
   const lastReadReceiptSentByContactRef = useRef({});
+  const notifiedMessageKeysRef = useRef(new Map());
+  const messagesByContactRef = useRef(messagesByContact);
   const composerInputRef = useRef(null);
   const attachInputRef = useRef(null);
   const cameraInputRef = useRef(null);
@@ -1256,8 +1345,13 @@ export default function Chat() {
   const resolvingContactProfilesRef = useRef(new Set());
   const convoLoadingRef = useRef(false);
   const lastConvoPollRef = useRef(0);
+  const lastThreadPollRef = useRef(0);
   const discoveryHydratedRef = useRef(false);
   const localHydratedRef = useRef(false);
+
+  useEffect(() => {
+    messagesByContactRef.current = messagesByContact;
+  }, [messagesByContact]);
 
   const TRANSLATE_LANG_OPTIONS = [
     { value: "en", label: "English" },
@@ -2386,6 +2480,94 @@ export default function Chat() {
     return `${sender}|${receiver}|${text}|${mediaType}|${mediaUrl}|${bucket}`;
   };
 
+  const buildMessageAlertKey = (message, contactId = "") => {
+    if (!message) return "";
+    const stableId = String(message?.id || "").trim();
+    if (stableId) return `${String(contactId || "")}|${stableId}`;
+    const sender = String(message?.senderId || "").trim();
+    const receiver = String(message?.receiverId || "").trim();
+    const text = String(message?.text || "").trim();
+    const mediaUrl = String(message?.mediaUrl || message?.audioUrl || "").trim();
+    const mediaType = String(message?.mediaType || (message?.audioUrl ? "audio" : "")).trim();
+    return `${String(contactId || "")}|${sender}|${receiver}|${text}|${mediaType}|${mediaUrl}`;
+  };
+
+  const shouldNotifyForMessage = (message, contactId = "") => {
+    const key = buildMessageAlertKey(message, contactId);
+    if (!key) return true;
+    const now = Date.now();
+    const seen = notifiedMessageKeysRef.current;
+    for (const [entryKey, at] of seen.entries()) {
+      if (!Number.isFinite(at) || now - at > CHAT_MESSAGE_ALERT_DEDUPE_MS) {
+        seen.delete(entryKey);
+      }
+    }
+    const lastAt = seen.get(key);
+    if (Number.isFinite(lastAt) && now - lastAt < CHAT_MESSAGE_ALERT_DEDUPE_MS) {
+      return false;
+    }
+    seen.set(key, now);
+    if (seen.size > 1600) {
+      const recentEntries = Array.from(seen.entries()).slice(-800);
+      notifiedMessageKeysRef.current = new Map(recentEntries);
+    }
+    return true;
+  };
+
+  const getMessageListItemSignature = (message) => [
+    String(message?.id || ""),
+    String(message?.senderId || ""),
+    String(message?.receiverId || ""),
+    String(message?.text || ""),
+    String(message?.audioUrl || ""),
+    String(message?.mediaUrl || ""),
+    String(message?.mediaType || ""),
+    String(message?.fileName || ""),
+    String(message?.createdAt || ""),
+    message?.mine ? "1" : "0",
+    message?.read ? "1" : "0",
+    message?.seen ? "1" : "0",
+    String(message?.status || ""),
+    String(message?.deliveryStatus || ""),
+    String(message?.replyTo?.id || message?.replyTo?.messageId || message?.replyTo || "")
+  ].join("|");
+
+  const areMessageListsEquivalent = (left, right) => {
+    if (left === right) return true;
+    if (!Array.isArray(left) || !Array.isArray(right)) return false;
+    if (left.length !== right.length) return false;
+    for (let i = 0; i < left.length; i += 1) {
+      if (getMessageListItemSignature(left[i]) !== getMessageListItemSignature(right[i])) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const getContactSignature = (contact) => [
+    String(contact?.id || ""),
+    String(contact?.name || ""),
+    String(contact?.username || ""),
+    String(contact?.email || ""),
+    String(contact?.avatar || ""),
+    String(contact?.profilePic || ""),
+    String(contact?.lastMessage || ""),
+    String(contact?.lastActiveAt || ""),
+    Object.prototype.hasOwnProperty.call(contact || {}, "online") ? (contact?.online ? "1" : "0") : ""
+  ].join("|");
+
+  const areContactListsEquivalent = (left, right) => {
+    if (left === right) return true;
+    if (!Array.isArray(left) || !Array.isArray(right)) return false;
+    if (left.length !== right.length) return false;
+    for (let i = 0; i < left.length; i += 1) {
+      if (getContactSignature(left[i]) !== getContactSignature(right[i])) {
+        return false;
+      }
+    }
+    return true;
+  };
+
   const scrollThreadToBottom = (behavior = "auto") => {
     const el = threadRef.current;
     if (!el) return;
@@ -2982,7 +3164,8 @@ export default function Chat() {
       }
       byId.set(id, merged);
     });
-    return Array.from(byId.values());
+    const mergedList = Array.from(byId.values());
+    return areContactListsEquivalent(base, mergedList) ? base : mergedList;
   };
 
   const extractContactsFromLocalHistory = () => {
@@ -4390,18 +4573,27 @@ export default function Chat() {
     }
     const nextMessage = normalizeMessage({
       id: payload?.id || `${payload?.createdAt || Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-      senderId: Number(senderId || contactIdForThread),
-      receiverId: Number(myUserId) || null,
+      senderId: senderId || contactIdForThread,
+      receiverId: receiverId || String(myUserId || ""),
       text,
       audioUrl: payload?.audioUrl || "",
       mediaUrl: payload?.mediaUrl || "",
       mediaType: payload?.mediaType || "",
       fileName: payload?.fileName || "",
-      createdAt: payload?.createdAt || new Date().toISOString(),
-      mine: false
+      createdAt: payload?.createdAt || new Date().toISOString()
     }, contactIdForThread);
     const hiddenIds = getHiddenMessageSetForContact(contactIdForThread);
     if (hiddenIds.has(String(nextMessage.id || ""))) return;
+    const existingMessages = Array.isArray(messagesByContactRef.current?.[contactIdForThread])
+      ? messagesByContactRef.current[contactIdForThread]
+      : [];
+    const nextSig = messageFingerprint(nextMessage);
+    const alreadyPresent = existingMessages.some((message) => {
+      if (String(message?.id || "") === String(nextMessage?.id || "")) return true;
+      if (nextSig && messageFingerprint(message) === nextSig) return true;
+      return false;
+    });
+    if (alreadyPresent) return;
     const preview =
       nextMessage.audioUrl
         ? "?? Voice message"
@@ -4417,14 +4609,9 @@ export default function Chat() {
 
     setMessagesByContact((prev) => {
       const existing = Array.isArray(prev[contactIdForThread]) ? prev[contactIdForThread] : [];
-      const nextSig = messageFingerprint(nextMessage);
-      const exists = existing.some((m) => {
-        if (String(m?.id || "") === String(nextMessage.id)) return true;
-        if (nextSig && messageFingerprint(m) === nextSig) return true;
-        return false;
-      });
-      if (exists) return prev;
-      return { ...prev, [contactIdForThread]: [...existing, nextMessage] };
+      const next = { ...prev, [contactIdForThread]: [...existing, nextMessage] };
+      messagesByContactRef.current = next;
+      return next;
     });
 
     setContacts((prev) => {
@@ -4449,16 +4636,22 @@ export default function Chat() {
           ? {
               ...c,
               lastMessage: preview || c.lastMessage,
-              lastActiveAt: new Date().toISOString(),
-              online: true
+              ...(nextMessage.mine
+                ? {}
+                : {
+                    lastActiveAt: new Date().toISOString(),
+                    online: true
+                  })
             }
           : c
       );
     });
 
-    playMessageAlert();
-    const senderName = normalizeDisplayName(payload?.senderName || payload?.senderEmail || "New message");
-    maybeShowBrowserNotification(senderName, preview || "You have a new message");
+    if (!nextMessage.mine && shouldNotifyForMessage(nextMessage, contactIdForThread)) {
+      playMessageAlert();
+      const senderName = normalizeDisplayName(payload?.senderName || payload?.senderEmail || "New message");
+      maybeShowBrowserNotification(senderName, preview || "You have a new message");
+    }
     shouldStickToBottomRef.current = true;
     setTimeout(() => scrollThreadToBottom("smooth"), 50);
     if (contactIdForThread === String(activeContactId)) {
@@ -5446,7 +5639,14 @@ export default function Chat() {
       const visible = normalized.filter((m) => !parseDeleteTargetId(m?.text));
       const list = applyDeleteTargetsToList(visible, deleteTargets).filter((m) => !hiddenIds.has(String(m?.id || "")));
       localFallbackList = list;
-      setMessagesByContact((prev) => ({ ...prev, [String(otherId)]: list }));
+      setMessagesByContact((prev) => {
+        const threadKey = String(otherId);
+        const existing = Array.isArray(prev[threadKey]) ? prev[threadKey] : [];
+        if (areMessageListsEquivalent(existing, list)) return prev;
+        const next = { ...prev, [threadKey]: list };
+        messagesByContactRef.current = next;
+        return next;
+      });
     }
     if (isChatApiDisabled()) {
       setChatFallbackMode(true);
@@ -5518,17 +5718,20 @@ export default function Chat() {
           if (!Number.isFinite(createdAt)) return false;
           return Date.now() - createdAt < 10 * 60 * 1000;
         });
-        const oldSignatureSet = new Set(
-          oldList.map((m) => `${m?.id || ""}_${m?.createdAt || ""}_${m?.text || ""}`)
-        );
+        const oldIdSet = new Set(oldList.map((m) => String(m?.id || "")).filter(Boolean));
+        const oldFingerprintSet = new Set(oldList.map((m) => messageFingerprint(m)).filter(Boolean));
         const newIncoming = list.filter((m) => {
           if (m?.mine) return false;
-          const sig = `${m?.id || ""}_${m?.createdAt || ""}_${m?.text || ""}`;
-          return !oldSignatureSet.has(sig);
+          const id = String(m?.id || "");
+          if (id && oldIdSet.has(id)) return false;
+          const fingerprint = messageFingerprint(m);
+          if (fingerprint && oldFingerprintSet.has(fingerprint)) return false;
+          return true;
         });
-        if (oldList.length > 0 && newIncoming.length > 0) {
+        const freshIncoming = newIncoming.filter((message) => shouldNotifyForMessage(message, key));
+        if (oldList.length > 0 && freshIncoming.length > 0) {
           playMessageAlert();
-          const latest = newIncoming[newIncoming.length - 1];
+          const latest = freshIncoming[freshIncoming.length - 1];
           const senderName = contacts.find((c) => c.id === key)?.name || "New message";
           maybeShowBrowserNotification(senderName, String(latest?.text || "You have a new message"));
         }
@@ -5549,7 +5752,12 @@ export default function Chat() {
           const bt = new Date(normalizeTimestamp(b?.createdAt || 0)).getTime();
           return at - bt;
         });
-        return { ...prev, [key]: merged };
+        if (areMessageListsEquivalent(oldList, merged)) {
+          return prev;
+        }
+        const next = { ...prev, [key]: merged };
+        messagesByContactRef.current = next;
+        return next;
       });
       setChatFallbackMode(false);
     } catch (err) {
@@ -5564,7 +5772,14 @@ export default function Chat() {
           const deleteTargets = new Set(normalized.map((m) => parseDeleteTargetId(m?.text)).filter(Boolean).map(String));
           const visible = normalized.filter((m) => !parseDeleteTargetId(m?.text));
           const list = applyDeleteTargetsToList(visible, deleteTargets).filter((m) => !hiddenIds.has(String(m?.id || "")));
-          setMessagesByContact((prev) => ({ ...prev, [String(otherId)]: list }));
+          setMessagesByContact((prev) => {
+            const threadKey = String(otherId);
+            const existing = Array.isArray(prev[threadKey]) ? prev[threadKey] : [];
+            if (areMessageListsEquivalent(existing, list)) return prev;
+            const next = { ...prev, [threadKey]: list };
+            messagesByContactRef.current = next;
+            return next;
+          });
         }
         return;
       }
@@ -6048,7 +6263,13 @@ export default function Chat() {
         lastConvoPollRef.current = now;
         loadConversations().catch(() => {});
       }
-      if (activeContactId) loadThread(activeContactId).catch(() => {});
+      if (activeContactId) {
+        const minThreadPollGap = document.hidden ? CHAT_THREAD_POLL_BACKGROUND_MS : POLL_MS;
+        if (now - lastThreadPollRef.current >= minThreadPollGap) {
+          lastThreadPollRef.current = now;
+          loadThread(activeContactId).catch(() => {});
+        }
+      }
     }, POLL_MS);
     return () => clearInterval(timer);
   }, [activeContactId, contactId, myUserId, myEmail, chatFallbackMode]);
@@ -6075,7 +6296,7 @@ export default function Chat() {
 
         const wsOrigin = wsBase.startsWith("ws") ? wsBase : wsBase.replace(/^http/i, "ws");
         const transport = String(import.meta.env?.VITE_WS_TRANSPORT || "").toLowerCase();
-        const useSockJS = transport === "sockjs";
+        const useSockJS = transport === "sockjs" || (!transport && !isLocalRuntime());
         const client = new Client({
           ...(useSockJS
             ? { webSocketFactory: () => new SockJS(`${wsBase}/ws?token=${encodeURIComponent(token)}`) }
@@ -6760,10 +6981,12 @@ export default function Chat() {
     const msgList = messagesByContact[contact.id] || [];
     const callList = Array.isArray(callHistoryByContact[contact.id]) ? callHistoryByContact[contact.id] : [];
     const msgTs = msgList.reduce((max, m) => {
+      if (m?.mine) return max;
       const t = toEpochMs(m?.createdAt || 0);
       return Number.isFinite(t) && t > max ? t : max;
     }, 0);
     const callTs = callList.reduce((max, c) => {
+      if (String(c?.direction || "").toLowerCase() !== "incoming") return max;
       const t = toEpochMs(c?.at || 0);
       return Number.isFinite(t) && t > max ? t : max;
     }, 0);
@@ -6802,15 +7025,13 @@ export default function Chat() {
     if (!contact) return { online: false, text: "lastseen at --" };
     const latest = getContactActivityTs(contact);
     const explicitOnline = getExplicitOnlineValue(contact);
-    if (explicitOnline === false && contact?.id) {
-      presenceHoldRef.current.delete(String(contact.id));
-    }
+    const implicitOnline = resolveImplicitOnline(latest, contact?.id);
     const isOnline =
       explicitOnline === true
         ? resolveStableOnline(contact?.id, true)
-        : explicitOnline == null
-          ? resolveImplicitOnline(latest, contact?.id)
-          : false;
+        : explicitOnline === false
+          ? resolveStableOnline(contact?.id, implicitOnline)
+          : resolveStableOnline(contact?.id, implicitOnline);
     if (isOnline) return { online: true, text: "online" };
     return {
       online: false,
@@ -9318,13 +9539,38 @@ export default function Chat() {
     const messages = Array.isArray(activeMessages) ? activeMessages : [];
     if (!messages.length) return undefined;
     const pendingIds = new Set();
+    const directPreviewById = {};
     messages.forEach((msg) => {
-      const share = extractReelShare(msg?.text || "");
+      const share = extractReelShare(msg?.raw?.text || msg?.text || "");
       const id = String(share?.id || "").trim();
       if (!id) return;
+      const directFields = pickReelPreviewFields(msg?.raw || msg);
+      const directSrc = resolveMediaUrl(directFields.video);
+      const directPoster = resolveMediaUrl(directFields.poster);
+      if (directSrc || directPoster) {
+        directPreviewById[id] = { src: directSrc, poster: directPoster };
+      }
       if (Object.prototype.hasOwnProperty.call(reelPreviewById, id)) return;
       pendingIds.add(id);
     });
+    if (Object.keys(directPreviewById).length) {
+      setReelPreviewById((prev) => {
+        let changed = false;
+        const next = { ...prev };
+        Object.entries(directPreviewById).forEach(([id, preview]) => {
+          const current = prev[id];
+          const merged = {
+            src: preview?.src || current?.src || "",
+            poster: preview?.poster || current?.poster || ""
+          };
+          if (!current || current.src !== merged.src || current.poster !== merged.poster) {
+            next[id] = merged;
+            changed = true;
+          }
+        });
+        return changed ? next : prev;
+      });
+    }
     if (!pendingIds.size) return undefined;
 
     let cancelled = false;
@@ -9348,32 +9594,32 @@ export default function Chat() {
       );
     };
     const fetchReelById = async (id) => {
-      const safeId = encodeURIComponent(id);
       try {
-        const res = await requestChatObject({
+        const direct = await requestChatObject({
           endpoints: [
-            `/api/reels/${safeId}`,
-            `/reels/${safeId}`,
-            `/api/posts/${safeId}`,
-            `/posts/${safeId}`,
-            `/api/feed/${safeId}`,
-            `/feed/${safeId}`
-          ],
-          params: { _: Date.now() }
+            `/api/reels/${encodeURIComponent(id)}`,
+            `/reels/${encodeURIComponent(id)}`,
+            `/api/feed/${encodeURIComponent(id)}`,
+            `/feed/${encodeURIComponent(id)}`
+          ]
         });
-        if (res?.data) return res.data;
+        if (direct && getReelIdValue(direct) === id) return direct;
       } catch {
         // ignore direct lookup failures
       }
+
       const listEndpoints = [
         ["/api/reels", "/reels"],
-        ["/api/feed", "/feed", "/api/posts", "/posts"]
+        ["/api/feed", "/feed"],
+        ["/api/profile/me/posts"],
+        ["/api/profile/posts"]
       ];
       for (const endpoints of listEndpoints) {
         try {
           const res = await requestChatArray({
             endpoints,
-            params: { _: Date.now() }
+            params: { _: Date.now() },
+            maxAttempts: 2
           });
           const match = findReelInList(res?.list || [], id);
           if (match) return match;
@@ -9414,6 +9660,53 @@ export default function Chat() {
       cancelled = true;
     };
   }, [activeMessages, reelPreviewById]);
+
+  useEffect(() => {
+    const messages = Array.isArray(activeMessages) ? activeMessages : [];
+    if (!messages.length) return undefined;
+    const pendingSrcs = new Set();
+
+    messages.forEach((msg) => {
+      const share = extractReelShare(msg?.raw?.text || msg?.text || "");
+      if (!share) return;
+      const id = String(share?.id || "").trim();
+      const directFields = pickReelPreviewFields(msg?.raw || msg);
+      const directSrc = resolveMediaUrl(directFields.video);
+      const directPoster = resolveMediaUrl(directFields.poster);
+      const preview = id ? reelPreviewById[id] : null;
+      const src = directSrc || preview?.src || "";
+      const poster = directPoster || preview?.poster || "";
+      if (!src || poster) return;
+      if (Object.prototype.hasOwnProperty.call(reelPosterBySrc, src)) return;
+      pendingSrcs.add(src);
+    });
+
+    if (!pendingSrcs.size) return undefined;
+
+    let cancelled = false;
+    const run = async () => {
+      for (const src of pendingSrcs) {
+        if (cancelled) return;
+        if (reelPosterLoadingRef.current.has(src)) continue;
+        reelPosterLoadingRef.current.add(src);
+        try {
+          const poster = await createVideoPosterDataUrl(src);
+          if (cancelled) return;
+          setReelPosterBySrc((prev) => {
+            if (Object.prototype.hasOwnProperty.call(prev, src)) return prev;
+            return { ...prev, [src]: poster || null };
+          });
+        } finally {
+          reelPosterLoadingRef.current.delete(src);
+        }
+      }
+    };
+
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeMessages, reelPreviewById, reelPosterBySrc]);
 
   useEffect(() => {
     if (!translatorEnabled) return;
@@ -10884,19 +11177,19 @@ export default function Chat() {
                   };
                   const preview = reelShare?.id ? reelPreviewById[reelShare.id] : null;
                   const previewSrc = mediaUrl || preview?.src || "";
-                  const previewPoster = preview?.poster || "";
+                  const previewPoster = preview?.poster || reelPosterBySrc[previewSrc] || "";
                   return (
                     <div className="chat-reel-wrap">
                       <div className={`chat-reel-card ${item.mine ? "mine" : "their"}`}>
                         <button type="button" className="chat-reel-media" onClick={openReel}>
-                          {previewSrc ? (
+                          {previewSrc && previewPoster ? (
                             <video
                               className="chat-reel-video"
                               src={previewSrc}
                               poster={previewPoster || undefined}
                               muted
                               playsInline
-                              preload={previewPoster ? "metadata" : "auto"}
+                              preload="metadata"
                             />
                           ) : previewPoster ? (
                             <img
@@ -10905,8 +11198,10 @@ export default function Chat() {
                               alt="Reel preview"
                               loading="lazy"
                             />
+                          ) : previewSrc ? (
+                            <div className="chat-reel-video chat-reel-placeholder">Loading...</div>
                           ) : (
-                            <div className="chat-reel-video chat-reel-placeholder" />
+                            <div className="chat-reel-video chat-reel-placeholder">REEL</div>
                           )}
                           <div className="chat-reel-overlay">
                             <span className="chat-reel-play">▶</span>

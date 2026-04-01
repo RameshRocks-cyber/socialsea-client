@@ -16,6 +16,7 @@ const GESTURE_FINGER_SMOOTH_MAX = 0.55;
 const GESTURE_FINGER_SMOOTH_DIST = 90;
 const GESTURE_DEADZONE_PX = 1.5;
 const GESTURE_CLICK_PINCH_RATIO = 0.22;
+const GESTURE_GRAB_PINCH_RATIO = 0.2;
 const GESTURE_FINGER_EXTEND_MARGIN = 0.08;
 const GESTURE_SCROLL_PX_PER_SEC = 900;
 
@@ -49,6 +50,59 @@ export default function GestureCursor() {
   const cursorFlashTimerRef = useRef(0);
   const smoothFingerRef = useRef({ x: 0, y: 0, active: false });
   const lastScrollAtRef = useRef(0);
+  const grabActiveRef = useRef(false);
+  const grabTargetRef = useRef(null);
+  const grabPointerIdRef = useRef(10);
+
+  const resolveSafeScreenPos = (screenPos) => {
+    const fallbackX = cursorPosRef.current?.active ? cursorPosRef.current.x : screenPos?.x;
+    const fallbackY = cursorPosRef.current?.active ? cursorPosRef.current.y : screenPos?.y;
+    if (!Number.isFinite(fallbackX) || !Number.isFinite(fallbackY)) return null;
+    return {
+      x: clamp(Number(fallbackX), 0, window.innerWidth),
+      y: clamp(Number(fallbackY), 0, window.innerHeight)
+    };
+  };
+
+  const dispatchPointerEvent = (el, type, screenPos, extra = {}) => {
+    if (!el) return false;
+    const pos = resolveSafeScreenPos(screenPos);
+    if (!pos) return false;
+    const payload = {
+      bubbles: true,
+      cancelable: true,
+      clientX: pos.x,
+      clientY: pos.y,
+      button: 0,
+      buttons: type === "pointerdown" || type === "pointermove" || type === "mousedown" ? 1 : 0,
+      ...extra
+    };
+    try {
+      if (typeof PointerEvent !== "undefined" && type.startsWith("pointer")) {
+        return el.dispatchEvent(new PointerEvent(type, { pointerType: "mouse", ...payload }));
+      }
+      if (type.startsWith("mouse") || type === "click" || type === "dblclick" || type === "auxclick") {
+        return el.dispatchEvent(new MouseEvent(type, payload));
+      }
+      return el.dispatchEvent(new Event(type, payload));
+    } catch {
+      return false;
+    }
+  };
+
+  const findBuddyTarget = (screenPos) => {
+    const pos = resolveSafeScreenPos(screenPos);
+    if (!pos) return null;
+    const elements = typeof document.elementsFromPoint === "function"
+      ? document.elementsFromPoint(pos.x, pos.y)
+      : [document.elementFromPoint(pos.x, pos.y)];
+    for (const el of elements || []) {
+      if (!el || !(el instanceof Element)) continue;
+      const target = el.closest(".ss-shimeji-trigger");
+      if (target) return target;
+    }
+    return null;
+  };
 
   useEffect(() => {
     const refresh = () => setEnabled(readGestureEnabled());
@@ -203,7 +257,7 @@ export default function GestureCursor() {
         if (typeof PointerEvent !== "undefined" && type.startsWith("pointer")) {
           return el.dispatchEvent(new PointerEvent(type, { pointerType: "mouse", ...payload }));
         }
-        if (type.startsWith("mouse")) {
+        if (type.startsWith("mouse") || type === "click" || type === "dblclick" || type === "auxclick") {
           return el.dispatchEvent(new MouseEvent(type, payload));
         }
         return el.dispatchEvent(new Event(type, payload));
@@ -220,7 +274,8 @@ export default function GestureCursor() {
       dispatchPointer(el, "pointerup");
       dispatchPointer(el, "mouseup");
       const clickOk = dispatchPointer(el, "click");
-      if (!clickOk && typeof el.click === "function") {
+      const dispatched = clickOk || mouseDownOk || downOk;
+      if (!dispatched && typeof el.click === "function") {
         try {
           el.click();
           return true;
@@ -228,7 +283,7 @@ export default function GestureCursor() {
           // ignore
         }
       }
-      return clickOk || mouseDownOk || downOk;
+      return dispatched;
     };
     const isReelsRoute = typeof window !== "undefined" && window.location?.pathname === "/reels";
     if (isReelsRoute) {
@@ -253,18 +308,28 @@ export default function GestureCursor() {
         }
       }
     }
+    const interactiveSelector = "button, a, [role=\"button\"], [role=\"link\"], input, textarea, select, label, video";
     for (const el of candidates || []) {
       if (!el || !(el instanceof Element)) continue;
       const style = window.getComputedStyle(el);
       if (style?.pointerEvents === "none" || style?.visibility === "hidden" || style?.display === "none") {
         continue;
       }
-      const clickable =
-        el.closest("button, a, [role=\"button\"], input, textarea, select, label, video") || null;
+      const clickable = el.closest(interactiveSelector) || null;
       if (clickable) {
         if (tryDispatch(clickable)) return true;
+        continue;
       }
-      if (tryDispatch(el)) return true;
+      const cursor = String(style?.cursor || "").toLowerCase();
+      const looksInteractive =
+        cursor === "pointer" ||
+        cursor === "zoom-in" ||
+        cursor === "zoom-out" ||
+        cursor === "grab" ||
+        cursor === "grabbing" ||
+        el.getAttribute?.("onclick") != null ||
+        (Number.isFinite(el.tabIndex) && el.tabIndex >= 0);
+      if (looksInteractive && tryDispatch(el)) return true;
     }
     return false;
   };
@@ -297,6 +362,9 @@ export default function GestureCursor() {
     const thumbMiddleDist = Math.hypot(thumbTip[0] - middleTip[0], thumbTip[1] - middleTip[1]);
     const okMove = thumbIndexDist < handSize * 0.26;
     const clickPinch = thumbMiddleDist < handSize * GESTURE_CLICK_PINCH_RATIO;
+    const grabPinch =
+      thumbIndexDist < handSize * GESTURE_GRAB_PINCH_RATIO &&
+      thumbMiddleDist < handSize * GESTURE_GRAB_PINCH_RATIO;
     const extendMargin = handSize * GESTURE_FINGER_EXTEND_MARGIN;
     const isExtended = (tip, pip, mcp) =>
       tip[1] < pip[1] - extendMargin && pip[1] < mcp[1] - extendMargin * 0.5;
@@ -307,6 +375,7 @@ export default function GestureCursor() {
     return {
       okMove,
       clickPinch,
+      grabPinch,
       indexExtended,
       middleExtended,
       ringExtended,
@@ -391,6 +460,8 @@ export default function GestureCursor() {
     clickHoldFramesRef.current = 0;
     smoothFingerRef.current = { x: 0, y: 0, active: false };
     lastScrollAtRef.current = 0;
+    grabActiveRef.current = false;
+    grabTargetRef.current = null;
     hideCursor();
     if (detectFrameRef.current) {
       cancelAnimationFrame(detectFrameRef.current);
@@ -515,7 +586,40 @@ export default function GestureCursor() {
             lastScrollAtRef.current = 0;
           }
           const now = Date.now();
-          if (handState?.clickPinch && !handState?.okMove && !wantsScrollDown && !wantsScrollUp) {
+          const grabPinch = Boolean(handState?.grabPinch);
+          if (grabPinch) {
+            clickHoldFramesRef.current = 0;
+            prevClickPinchRef.current = false;
+            const activePos = resolveSafeScreenPos(screenPos);
+            if (!grabActiveRef.current) {
+              const target = findBuddyTarget(activePos);
+              if (target) {
+                grabActiveRef.current = true;
+                grabTargetRef.current = target;
+                grabPointerIdRef.current += 1;
+                const pointerId = grabPointerIdRef.current;
+                dispatchPointerEvent(target, "pointerdown", activePos, { pointerId, buttons: 1 });
+                dispatchPointerEvent(target, "mousedown", activePos, { pointerId, buttons: 1 });
+              }
+            } else if (grabTargetRef.current) {
+              const target = grabTargetRef.current;
+              const pointerId = grabPointerIdRef.current;
+              dispatchPointerEvent(target, "pointermove", activePos, { pointerId, buttons: 1 });
+              dispatchPointerEvent(target, "mousemove", activePos, { pointerId, buttons: 1 });
+            }
+          } else if (grabActiveRef.current) {
+            const target = grabTargetRef.current;
+            if (target) {
+              const pointerId = grabPointerIdRef.current;
+              const activePos = resolveSafeScreenPos(screenPos);
+              dispatchPointerEvent(target, "pointerup", activePos, { pointerId, buttons: 0 });
+              dispatchPointerEvent(target, "mouseup", activePos, { pointerId, buttons: 0 });
+            }
+            grabActiveRef.current = false;
+            grabTargetRef.current = null;
+          }
+
+          if (!grabPinch && !grabActiveRef.current && handState?.clickPinch && !handState?.okMove && !wantsScrollDown && !wantsScrollUp) {
             clickHoldFramesRef.current += 1;
             if (
               !prevClickPinchRef.current &&
@@ -535,6 +639,16 @@ export default function GestureCursor() {
             cursorRef.current.classList.add("is-active");
           } else {
             hideCursor();
+          }
+          if (grabActiveRef.current) {
+            const target = grabTargetRef.current;
+            if (target) {
+              const pointerId = grabPointerIdRef.current;
+              dispatchPointerEvent(target, "pointerup", null, { pointerId, buttons: 0 });
+              dispatchPointerEvent(target, "mouseup", null, { pointerId, buttons: 0 });
+            }
+            grabActiveRef.current = false;
+            grabTargetRef.current = null;
           }
           okMoveActiveRef.current = false;
           prevClickPinchRef.current = false;
