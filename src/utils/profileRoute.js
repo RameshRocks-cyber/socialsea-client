@@ -11,20 +11,23 @@ export const getProfileIdentifier = (...sources) => {
     if (typeof source !== "object") continue;
 
     const candidates = [
-      source.name,
-      source.username,
+      source.id,
+      source.userId,
       source.email,
+      source.username,
+      source.user?.id,
+      source.user?.email,
+      source.actorId,
+      source.actorEmail,
+      source.profile?.id,
+      source.profile?.email,
+      source.name,
       source.user?.name,
       source.user?.username,
-      source.user?.email,
       source.actorName,
       source.actorUsername,
-      source.actorEmail,
       source.profile?.name,
-      source.profile?.username,
-      source.profile?.email,
-      source.id,
-      source.userId
+      source.profile?.username
     ];
 
     for (const candidate of candidates) {

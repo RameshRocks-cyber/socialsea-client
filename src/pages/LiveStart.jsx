@@ -326,11 +326,13 @@ export default function LiveStart({ mode = "host" }) {
     setLivekitStatus(nextStatus);
   };
 
-  const sanitizeIdentity = (value) =>
+  const sanitizeIdentity = (value, maxLength = 24) =>
     String(value || "")
       .trim()
-      .replace(/[^a-zA-Z0-9_-]/g, "")
-      .slice(0, 40);
+      .replace(/[^a-zA-Z0-9_-]/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, maxLength);
 
   const getLivekitIdentity = (role) => {
     const key = role === "viewer" ? "viewer" : "host";
@@ -340,8 +342,8 @@ export default function LiveStart({ mode = "host" }) {
       localStorage.getItem("name") ||
       localStorage.getItem("email") ||
       "user";
-    const base = sanitizeIdentity(String(baseRaw).split("@")[0]) || "user";
-    const roomHint = sanitizeIdentity(liveRoomId || "live");
+    const base = sanitizeIdentity(String(baseRaw).split("@")[0], 18) || "user";
+    const roomHint = sanitizeIdentity(liveRoomId || "live", 20);
     const random = Math.random().toString(36).slice(2, 8);
     const identity = `${base}-${roomHint}-${key}-${random}`;
     livekitIdentityRef.current[key] = identity;
@@ -926,7 +928,6 @@ export default function LiveStart({ mode = "host" }) {
           setPreviewReady(true);
         }
         tracks.forEach((track) => {
-          room.localParticipant.publishTrack(track).catch(() => {});
           if (track?.mediaStreamTrack?.kind === "audio") {
             track.setEnabled?.(audioEnabled);
             track.mediaStreamTrack.enabled = audioEnabled;
@@ -936,6 +937,13 @@ export default function LiveStart({ mode = "host" }) {
             track.mediaStreamTrack.enabled = videoEnabled;
           }
         });
+        const publishResults = await Promise.allSettled(
+          tracks.map((track) => room.localParticipant.publishTrack(track))
+        );
+        if (tracks.length && !publishResults.some((result) => result.status === "fulfilled")) {
+          const firstFailure = publishResults.find((result) => result.status === "rejected");
+          throw firstFailure?.reason || new Error("LiveKit could not publish local media.");
+        }
         setLivekitStatus("connected");
       } catch (err) {
         setMediaError(resolveLivekitError(err, "LiveKit connection failed."));

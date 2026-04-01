@@ -3520,11 +3520,44 @@ export default function Chat() {
           dynacast: true
         });
 
-        const markLivekitInCall = () => {
-          setCallPhaseNote("");
+        const syncLivekitInCall = () => {
+          clearCallTimer();
+          clearDisconnectGuardTimer();
+          stopOutgoingRing();
           setCallState((prev) =>
             prev.phase === "idle" ? prev : { ...prev, phase: "in-call", provider: "livekit" }
           );
+          setCallPhaseNote("Connected");
+        };
+
+        const markLivekitConnected = () => {
+          const current = callStateRef.current;
+          if (current.peerId && !callConnectedLoggedRef.current) {
+            callConnectedLoggedRef.current = true;
+            pushCallHistory(current.peerId, {
+              direction: current.initiatedByMe ? "outgoing" : "incoming",
+              mode: current.mode || mode,
+              status: "connected",
+              peerName: current.peerName
+            });
+            if (current.peerId !== "group") {
+              sendSignal(current.peerId, {
+                type: "connected",
+                mode: current.mode || mode,
+                provider: "livekit"
+              });
+            }
+          }
+          if (current.peerId && current.peerId !== "group") {
+            persistCallRejoin({
+              peerId: String(current.peerId),
+              peerName: current.peerName || "User",
+              mode: current.mode || mode,
+              provider: "livekit",
+              roomId
+            });
+          }
+          syncLivekitInCall();
         };
 
         room.on(RoomEvent.Disconnected, () => {
@@ -3541,8 +3574,16 @@ export default function Chat() {
           }, 30000);
         });
 
+        room.on(RoomEvent.ParticipantConnected, () => {
+          markLivekitConnected();
+        });
+
         room.on(RoomEvent.Reconnected, () => {
-          markLivekitInCall();
+          if (room.remoteParticipants.size > 0) {
+            markLivekitConnected();
+            return;
+          }
+          setCallPhaseNote("Connecting media...");
         });
 
         room.on(RoomEvent.TrackSubscribed, (track) => {
@@ -3568,7 +3609,7 @@ export default function Chat() {
           updateRemoteMediaFlags(stream);
           setupRemoteAudioPipeline(stream);
           kickstartRemotePlayback();
-          markLivekitInCall();
+          markLivekitConnected();
         });
 
         room.on(RoomEvent.TrackUnsubscribed, (track) => {
@@ -3602,11 +3643,10 @@ export default function Chat() {
           localVideoRef.current.play?.().catch(() => {});
         }
         updateRemoteMediaFlags(remoteStreamRef.current);
-        clearDisconnectGuardTimer();
-        setCallState((prev) => (prev.phase === "idle" ? prev : { ...prev, phase: "in-call", provider: "livekit" }));
-        setCallPhaseNote("");
-        if (callStateRef.current.peerId && callStateRef.current.peerId !== "group") {
-          sendSignal(callStateRef.current.peerId, { type: "connected", mode, provider: "livekit" });
+        if (room.remoteParticipants.size > 0) {
+          markLivekitConnected();
+        } else if (callStateRef.current.phase === "connecting") {
+          setCallPhaseNote("Connecting media...");
         }
         livekitConnectingRef.current = false;
         return true;
@@ -4915,12 +4955,6 @@ export default function Chat() {
     try {
       clearCallTimer();
       stopRingtone();
-      pushCallHistory(call.fromUserId, {
-        direction: "incoming",
-        mode: call.mode,
-        status: "accepted",
-        peerName: call.fromName
-      });
       setCallError("");
       setIsMuted(false);
       setIsSpeakerOn(true);
@@ -9142,7 +9176,7 @@ export default function Chat() {
       busy: "busy",
       ended: "ended"
     };
-    return `${mode} ? ${suffixMap[status] || status}`;
+    return `${mode} - ${suffixMap[status] || status}`;
   };
 
   const formatCallCard = (entry) => {
@@ -9168,10 +9202,18 @@ export default function Chat() {
         icon: "off"
       };
     }
-    if (status === "connected" || status === "accepted") {
+    if (status === "connected") {
       return {
         title,
         subtitle: "Connected",
+        tone: "info",
+        icon: isVideo ? "video" : "phone"
+      };
+    }
+    if (status === "accepted") {
+      return {
+        title,
+        subtitle: "Accepted",
         tone: "info",
         icon: isVideo ? "video" : "phone"
       };
@@ -10521,7 +10563,7 @@ export default function Chat() {
               {callState.mode === "video" ? "Video call" : "Audio call"} with {callState.peerName || "User"}
             </p>
             <p className="active-call-popup-subtitle">
-              {callStatusText} ? Total {formatCallDuration(callDurationSec)}
+              {callStatusText} - Total {formatCallDuration(callDurationSec)}
             </p>
               <div className="active-call-popup-actions">
                 <button type="button" className="call-ring-toggle" onClick={toggleMute}>
@@ -10678,7 +10720,7 @@ export default function Chat() {
               </button>
               <p className="wa-video-peer">{callState.peerName || "User"}</p>
               <p className="wa-video-state">
-                {callStatusText} ? {formatCallDuration(callDurationSec)}
+                {callStatusText} - {formatCallDuration(callDurationSec)}
               </p>
             </div>
             {signAssistEnabled && (

@@ -60,9 +60,10 @@ import { getUserRole, isAuthenticated } from "./auth";
 import { getApiBaseUrl } from "./api/baseUrl";
 import api from "./api/axios";
 import PageErrorBoundary from "./components/PageErrorBoundary";
+import { lazyWithRetry } from "./utils/lazyWithRetry";
 import "./App.css";
 
-const Chat = lazy(() => import("./pages/Chat"));
+const Chat = lazy(lazyWithRetry(() => import("./pages/Chat"), "chat-page"));
 
 const isLoopbackHost = (host) => {
   const value = String(host || "").trim().toLowerCase();

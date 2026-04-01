@@ -215,11 +215,52 @@ const getConnectionIdentityKeys = (entry) => {
   return keys;
 };
 
-const requestWithTimeout = (path, config = {}, timeoutMs = 4500) =>
-  Promise.race([
-    api.get(path, config),
-    new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), timeoutMs))
+const requestWithTimeout = (path, config = {}, timeoutMs = 4500) => {
+  const requestConfig = config && typeof config === "object" ? { ...config } : {};
+  const method = String(requestConfig.method || "GET").trim().toUpperCase();
+  delete requestConfig.method;
+
+  return Promise.race([
+    api.request({
+      url: path,
+      method,
+      ...requestConfig
+    }),
+    new Promise((_, reject) => {
+      const timeoutError = new Error("timeout");
+      timeoutError.code = "ERR_REQUEST_TIMEOUT";
+      setTimeout(() => reject(timeoutError), timeoutMs);
+    })
   ]);
+};
+
+const getRequestStatus = (error) => Number(error?.response?.status || 0);
+
+const isAuthRequestError = (error) => {
+  const status = getRequestStatus(error);
+  return status === 401 || status === 403;
+};
+
+const isNotFoundRequestError = (error) => getRequestStatus(error) === 404;
+
+const isTransientRequestError = (error) => {
+  const status = getRequestStatus(error);
+  if (status >= 500 || status === 429) return true;
+  if (status > 0) return false;
+
+  const message = String(error?.message || "").trim().toLowerCase();
+  const code = String(error?.code || "").trim().toLowerCase();
+  return (
+    code === "err_network" ||
+    code === "err_request_timeout" ||
+    code === "econnaborted" ||
+    message.includes("network error") ||
+    message.includes("network changed") ||
+    message.includes("connection closed") ||
+    message.includes("failed to fetch") ||
+    message.includes("timeout")
+  );
+};
 
 const extractFollowingFlag = (response, profileData) => {
   const booleanCandidates = [
@@ -629,13 +670,13 @@ export default function Profile() {
         };
       }
 
-      if (lastError?.response?.status === 401) {
+      if (isAuthRequestError(lastError)) {
         navigate("/login");
         return null;
       }
       // Cached/stale numeric profile ids can break after backend/db switch.
       // Fallback to current logged-in profile so app remains usable.
-      if (String(username || "").toLowerCase() !== "me") {
+      if (isNotFoundRequestError(lastError) && String(username || "").toLowerCase() !== "me") {
         try {
           const meRes = await requestWithTimeout(
             "/api/profile/me",
@@ -662,7 +703,17 @@ export default function Profile() {
           // continue to existing not-found flow
         }
       }
-      if (!cancelled) setError("User not found");
+      if (!cancelled) {
+        if (isNotFoundRequestError(lastError)) {
+          setError("User not found");
+        } else if (!cached) {
+          setError(
+            isTransientRequestError(lastError)
+              ? "Could not load profile. Check your connection and retry."
+              : "Could not load profile right now."
+          );
+        }
+      }
       return null;
     };
 

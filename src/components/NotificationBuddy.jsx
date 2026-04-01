@@ -27,7 +27,7 @@ const DISMISS_ZONE_MIN_HEIGHT = 88;
 const DISMISS_ZONE_MAX_HEIGHT = 140;
 const DISMISS_ZONE_BOTTOM_PAD = 64;
 const DISMISS_ZONE_MOBILE_PAD = 78;
-const SHIMEJI_SCALE = 0.46;
+const SHIMEJI_SCALE = 0.38;
 const BASE_WIDTH = 160;
 const BASE_HEIGHT = 208;
 const EDGE_EPS = 0.75;
@@ -1023,10 +1023,7 @@ export default function NotificationBuddy({ enabled = true }) {
       if (longPressRef.current?.timer) window.clearTimeout(longPressRef.current.timer);
     };
   }, []);
-
-  if (!isEnabled) return null;
-  if (softHidden) return null;
-  if (hideWhenEmpty && unreadCount === 0) return null;
+  const shouldRenderBuddy = isEnabled && !softHidden && !(hideWhenEmpty && unreadCount === 0);
 
   const getDismissZone = () => {
     const bounds = getBounds(walkAreaRef.current);
@@ -1272,6 +1269,8 @@ export default function NotificationBuddy({ enabled = true }) {
       aboveOffset
     };
   }, [position.x, position.y, panelMode]);
+
+  if (!shouldRenderBuddy) return null;
 
   return (
     <div ref={walkAreaRef} className="ss-shimeji-area">
