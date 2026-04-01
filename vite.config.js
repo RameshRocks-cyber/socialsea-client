@@ -57,9 +57,11 @@ export default defineConfig(({ mode }) => {
       alias: {
         'livekit-client': livekitEntry,
       },
+      // Ensure a single React instance across all chunks (prevents hook dispatcher null errors)
+      dedupe: ['react', 'react-dom', 'react/jsx-runtime'],
     },
     optimizeDeps: {
-      include: ['livekit-client'],
+      include: ['livekit-client', 'react', 'react-dom', 'react/jsx-runtime'],
     },
     server: {
       host: 'localhost',

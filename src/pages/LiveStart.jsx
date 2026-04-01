@@ -158,6 +158,19 @@ export default function LiveStart({ mode = "host" }) {
   const livekitRoomRef = useRef(null);
   const livekitConnectingRef = useRef(false);
   const livekitLocalTracksRef = useRef([]);
+
+  useEffect(() => {
+    setLivekitUrl(resolveLivekitUrl());
+  }, []);
+
+  useEffect(() => {
+    setLivekitStatus((prev) => {
+      if (livekitEnabled) {
+        return prev === "disabled" ? "idle" : prev;
+      }
+      return "disabled";
+    });
+  }, [livekitEnabled]);
   const livekitRemoteStreamRef = useRef(null);
   const livekitRemoteScreenStreamRef = useRef(null);
   const livekitRemoteAudioStreamRef = useRef(null);
@@ -1912,15 +1925,3 @@ export default function LiveStart({ mode = "host" }) {
     </section>
   );
 }
-  useEffect(() => {
-    setLivekitUrl(resolveLivekitUrl());
-  }, []);
-
-  useEffect(() => {
-    setLivekitStatus((prev) => {
-      if (livekitEnabled) {
-        return prev === "disabled" ? "idle" : prev;
-      }
-      return "disabled";
-    });
-  }, [livekitEnabled]);
