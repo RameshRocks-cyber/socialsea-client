@@ -23,6 +23,12 @@ const SOS_LIVE_RTC_OFFER_KEY_PREFIX = "socialsea_sos_live_rtc_offer_v1_";
 const SOS_LIVE_RTC_ANSWER_KEY_PREFIX = "socialsea_sos_live_rtc_answer_v1_";
 const SOS_ACTIVE_OWNER_KEY = "socialsea_sos_active_owner_v1";
 const LIVEKIT_DEFAULT_URL = "wss://socialsea-mb50m9kr.livekit.cloud";
+const isMobileDevice = () => {
+  if (typeof navigator === "undefined") return false;
+  if (typeof navigator.userAgentData?.mobile === "boolean") return navigator.userAgentData.mobile;
+  const ua = String(navigator.userAgent || "").toLowerCase();
+  return /android|iphone|ipad|ipod|mobile|opera mini|iemobile/.test(ua);
+};
 const isLocalLikeHost = (host) => {
   const value = String(host || "").trim().toLowerCase();
   if (!value) return true;
@@ -439,7 +445,8 @@ export default function SOSPage() {
     audio: false,
     video: false,
     chunks: 0,
-    bytes: 0
+    bytes: 0,
+    cameraMode: "single"
   });
   const [backendStatus, setBackendStatus] = useState("Not sent yet");
   const livekitEnabled = Boolean(LIVEKIT_URL);
@@ -455,6 +462,7 @@ export default function SOSPage() {
   const watchIdRef = useRef(null);
   const mediaStreamRef = useRef(null);
   const mediaRecorderRef = useRef(null);
+  const dualCameraRef = useRef(null);
   const chunksRef = useRef([]);
   const tickTimerRef = useRef(null);
   const heartbeatTimerRef = useRef(null);
@@ -924,9 +932,11 @@ export default function SOSPage() {
         longitude: forcedLocation?.longitude ?? lastLocation?.longitude ?? null,
         audioActive: recordingInfo.audio,
         videoActive: recordingInfo.video,
-        frontCameraEnabled: recordingInfo.video && cameraFacing === "user",
-        backCameraEnabled: recordingInfo.video && cameraFacing === "environment",
-        cameraFacing,
+        frontCameraEnabled:
+          recordingInfo.video && (recordingInfo.cameraMode === "dual" || cameraFacing === "user"),
+        backCameraEnabled:
+          recordingInfo.video && (recordingInfo.cameraMode === "dual" || cameraFacing === "environment"),
+        cameraFacing: recordingInfo.cameraMode === "dual" ? "dual" : cameraFacing,
         // Backend fallback channel for cross-browser/profile live preview.
         previewFrame: latestFrame || null,
         previewFrameAt: latestFrameAt || null
@@ -1100,18 +1110,137 @@ export default function SOSPage() {
     setCameraFacing((prev) => (prev === "user" ? "environment" : "user"));
   };
 
-  const getCameraStream = async (facingMode) => {
+  const getCameraStream = async (facingMode, withAudio = true) => {
     const preferred = String(facingMode || "user");
-    const baseConstraints = { audio: true, video: { facingMode: { exact: preferred } } };
+    const audio = Boolean(withAudio);
+    const baseConstraints = { audio, video: { facingMode: { exact: preferred } } };
     try {
       return await navigator.mediaDevices.getUserMedia(baseConstraints);
     } catch {
       try {
-        return await navigator.mediaDevices.getUserMedia({ audio: true, video: { facingMode: preferred } });
+        return await navigator.mediaDevices.getUserMedia({ audio, video: { facingMode: preferred } });
       } catch {
-        return await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+        return await navigator.mediaDevices.getUserMedia({ audio, video: true });
       }
     }
+  };
+
+  const createDualCameraStream = async () => {
+    if (!navigator.mediaDevices?.getUserMedia || typeof document === "undefined") return null;
+    const canvasProto = typeof HTMLCanvasElement !== "undefined" ? HTMLCanvasElement.prototype : null;
+    if (!canvasProto || typeof canvasProto.captureStream !== "function") return null;
+
+    let frontStream = null;
+    let backStream = null;
+    try {
+      frontStream = await getCameraStream("user", true);
+      backStream = await getCameraStream("environment", false);
+    } catch {
+      if (frontStream) frontStream.getTracks().forEach((t) => t.stop());
+      if (backStream) backStream.getTracks().forEach((t) => t.stop());
+      return null;
+    }
+
+    const frontVideo = document.createElement("video");
+    const backVideo = document.createElement("video");
+    frontVideo.playsInline = true;
+    backVideo.playsInline = true;
+    frontVideo.muted = true;
+    backVideo.muted = true;
+    frontVideo.srcObject = frontStream;
+    backVideo.srcObject = backStream;
+
+    const waitForVideo = (video) =>
+      new Promise((resolve) => {
+        if ((video.readyState || 0) >= 2) {
+          resolve();
+          return;
+        }
+        const onReady = () => {
+          video.removeEventListener("loadedmetadata", onReady);
+          resolve();
+        };
+        video.addEventListener("loadedmetadata", onReady);
+        setTimeout(resolve, 1200);
+      });
+
+    try {
+      await frontVideo.play();
+    } catch {
+      // ignore autoplay issues
+    }
+    try {
+      await backVideo.play();
+    } catch {
+      // ignore autoplay issues
+    }
+
+    await Promise.all([waitForVideo(frontVideo), waitForVideo(backVideo)]);
+
+    const frontW = frontVideo.videoWidth || 640;
+    const frontH = frontVideo.videoHeight || 360;
+    const backW = backVideo.videoWidth || 640;
+    const backH = backVideo.videoHeight || 360;
+    const baseW = Math.max(frontW, backW, 640);
+    const baseH = Math.max(frontH, backH, 360);
+    const perWidth = Math.min(baseW, 640);
+    const perHeight = Math.max(1, Math.round((perWidth * baseH) / baseW));
+
+    const canvas = document.createElement("canvas");
+    canvas.width = perWidth * 2;
+    canvas.height = perHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      frontStream.getTracks().forEach((t) => t.stop());
+      backStream.getTracks().forEach((t) => t.stop());
+      return null;
+    }
+
+    let running = true;
+    let rafId = 0;
+    const draw = () => {
+      if (!running) return;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      try {
+        ctx.drawImage(frontVideo, 0, 0, perWidth, perHeight);
+      } catch {
+        // ignore draw errors
+      }
+      try {
+        ctx.drawImage(backVideo, perWidth, 0, perWidth, perHeight);
+      } catch {
+        // ignore draw errors
+      }
+      rafId = requestAnimationFrame(draw);
+    };
+    draw();
+
+    const combinedStream = canvas.captureStream(24);
+    const audioTrack =
+      frontStream.getAudioTracks?.()[0] || backStream.getAudioTracks?.()[0] || null;
+    if (audioTrack) {
+      try {
+        combinedStream.addTrack(audioTrack);
+      } catch {
+        // ignore track attach errors
+      }
+    }
+
+    const stop = () => {
+      running = false;
+      if (rafId) cancelAnimationFrame(rafId);
+      try {
+        frontVideo.srcObject = null;
+        backVideo.srcObject = null;
+      } catch {
+        // ignore cleanup errors
+      }
+      frontStream.getTracks().forEach((t) => t.stop());
+      backStream.getTracks().forEach((t) => t.stop());
+      combinedStream.getTracks().forEach((t) => t.stop());
+    };
+
+    return { stream: combinedStream, stop, mode: "dual" };
   };
 
   const startRecorder = async () => {
@@ -1120,7 +1249,19 @@ export default function SOSPage() {
       return { audio: false, video: false };
     }
 
-    const stream = await getCameraStream(cameraFacing);
+    if (dualCameraRef.current?.stop) {
+      dualCameraRef.current.stop();
+      dualCameraRef.current = null;
+    }
+    let dualInfo = null;
+    if (isMobileDevice()) {
+      try {
+        dualInfo = await createDualCameraStream();
+      } catch {
+        dualInfo = null;
+      }
+    }
+    const stream = dualInfo?.stream || (await getCameraStream(cameraFacing));
     mediaStreamRef.current = stream;
     const recorder = new MediaRecorder(stream);
     mediaRecorderRef.current = recorder;
@@ -1128,8 +1269,12 @@ export default function SOSPage() {
 
     const audio = stream.getAudioTracks().length > 0;
     const video = stream.getVideoTracks().length > 0;
-    setRecordingInfo({ audio, video, chunks: 0, bytes: 0 });
-    persistSession({ recordingInfo: { audio, video, chunks: 0, bytes: 0 } });
+    const cameraMode = dualInfo?.mode || "single";
+    if (dualInfo) {
+      dualCameraRef.current = dualInfo;
+    }
+    setRecordingInfo({ audio, video, chunks: 0, bytes: 0, cameraMode });
+    persistSession({ recordingInfo: { audio, video, chunks: 0, bytes: 0, cameraMode } });
 
     recorder.ondataavailable = (event) => {
       if (!event.data || event.data.size <= 0) return;
@@ -1168,6 +1313,10 @@ export default function SOSPage() {
     });
 
   const cleanupMedia = () => {
+    if (dualCameraRef.current?.stop) {
+      dualCameraRef.current.stop();
+      dualCameraRef.current = null;
+    }
     if (mediaStreamRef.current) {
       mediaStreamRef.current.getTracks().forEach((t) => t.stop());
       mediaStreamRef.current = null;
@@ -1238,7 +1387,7 @@ export default function SOSPage() {
         media = await startRecorder();
       } catch (err) {
         mediaError = err;
-        const fallbackRecording = { audio: false, video: false, chunks: 0, bytes: 0 };
+        const fallbackRecording = { audio: false, video: false, chunks: 0, bytes: 0, cameraMode: "single" };
         setRecordingInfo(fallbackRecording);
         persistSession({ recordingInfo: fallbackRecording, updatedAt: nowIso() });
       }
@@ -2298,7 +2447,9 @@ export default function SOSPage() {
       setAlertDisplayId(session.alertDisplayId || (session.alertId ? String(session.alertId) : null));
       setLastLocation(session.lastLocation || null);
       setLocationCount(session.locationCount || 0);
-      setRecordingInfo(session.recordingInfo || { audio: false, video: false, chunks: 0, bytes: 0 });
+      setRecordingInfo(
+        session.recordingInfo || { audio: false, video: false, chunks: 0, bytes: 0, cameraMode: "single" }
+      );
       setBackendStatus(session.backendStatus || "Local SOS active");
       if (session.nearbyCount != null) {
         setNearbyCount(Number.isFinite(Number(session.nearbyCount)) ? Number(session.nearbyCount) : null);
@@ -2405,7 +2556,14 @@ export default function SOSPage() {
             <h3>Live Audio/Video</h3>
             <p>Audio: {recordingInfo.audio ? "Live" : "Off"}</p>
             <p>Video: {recordingInfo.video ? "Live" : "Off"}</p>
-            <p>Camera: {cameraFacing === "user" ? "Front" : "Back"}</p>
+            <p>
+              Camera:{" "}
+              {recordingInfo.cameraMode === "dual"
+                ? "Front + Back"
+                : cameraFacing === "user"
+                ? "Front"
+                : "Back"}
+            </p>
             <p>Chunks: {recordingInfo.chunks}</p>
             <p>Bytes: {recordingInfo.bytes}</p>
           </div>

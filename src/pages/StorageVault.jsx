@@ -40,6 +40,47 @@ const formatDate = (value) => {
   }
 };
 
+const formatDuration = (seconds) => {
+  const safe = Math.max(0, Number(seconds || 0));
+  const mins = Math.floor(safe / 60);
+  const secs = Math.floor(safe % 60);
+  return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+};
+
+const pickRecorderMimeType = () => {
+  if (typeof MediaRecorder === "undefined") return "";
+  const options = [
+    "video/webm;codecs=vp9,opus",
+    "video/webm;codecs=vp8,opus",
+    "video/webm",
+    "video/mp4"
+  ];
+  return options.find((type) => MediaRecorder.isTypeSupported(type)) || "";
+};
+
+const buildDocumentaryBaseName = (title) => {
+  const rawTitle = String(title || "").trim();
+  const safeTitle = rawTitle
+    .replace(/[^a-z0-9 _-]/gi, "")
+    .replace(/\s+/g, "_")
+    .slice(0, 48);
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  return safeTitle ? `${safeTitle}_${stamp}` : `documentary_${stamp}`;
+};
+
+const buildDocumentaryNotes = (title, notes) => {
+  const trimmed = String(notes || "").trim();
+  const lines = [
+    "# Documentary Notes",
+    title ? `Title: ${title}` : "Title:",
+    `Recorded at: ${new Date().toLocaleString()}`,
+    "",
+    "Notes:",
+    trimmed || "-"
+  ];
+  return `${lines.join("\n")}\n`;
+};
+
 const FREE_CLOUD_GB = 2;
 const PRICE_PER_GB = 10;
 const CURRENCY_LABEL = "INR";
@@ -54,6 +95,14 @@ const BANK_DETAILS = [
 export default function StorageVault() {
   const navigate = useNavigate();
   const inputRef = useRef(null);
+  const docVideoRef = useRef(null);
+  const docStreamRef = useRef(null);
+  const docRecorderRef = useRef(null);
+  const docChunksRef = useRef([]);
+  const docTimerRef = useRef(null);
+  const docStartAtRef = useRef(0);
+  const docSpeechRef = useRef(null);
+  const docSpeechWantedRef = useRef(false);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -67,6 +116,20 @@ export default function StorageVault() {
   const [paymentRef, setPaymentRef] = useState("");
   const [paymentNote, setPaymentNote] = useState("");
   const [paymentStatus, setPaymentStatus] = useState("");
+  const [docOpen, setDocOpen] = useState(false);
+  const [docTitle, setDocTitle] = useState("");
+  const [docNotes, setDocNotes] = useState("");
+  const [docInterim, setDocInterim] = useState("");
+  const [docRecording, setDocRecording] = useState(false);
+  const [docDuration, setDocDuration] = useState(0);
+  const [docBlob, setDocBlob] = useState(null);
+  const [docMime, setDocMime] = useState("");
+  const [docPreviewUrl, setDocPreviewUrl] = useState("");
+  const [docSpeechActive, setDocSpeechActive] = useState(false);
+  const [docSpeechSupported, setDocSpeechSupported] = useState(false);
+  const [docStatus, setDocStatus] = useState("");
+  const [docError, setDocError] = useState("");
+  const [docSaving, setDocSaving] = useState(false);
 
   const isVaultOpen = Boolean(lock && unlocked);
 
@@ -123,6 +186,28 @@ export default function StorageVault() {
       });
     };
   }, [items]);
+
+  useEffect(() => {
+    if (!docBlob) {
+      setDocPreviewUrl("");
+      return;
+    }
+    const nextUrl = URL.createObjectURL(docBlob);
+    setDocPreviewUrl(nextUrl);
+    return () => {
+      try {
+        URL.revokeObjectURL(nextUrl);
+      } catch {
+        // ignore revoke errors
+      }
+    };
+  }, [docBlob]);
+
+  useEffect(() => {
+    if (!docRecording && docPreviewUrl && docVideoRef.current) {
+      docVideoRef.current.play().catch(() => {});
+    }
+  }, [docPreviewUrl, docRecording]);
 
   const handlePick = () => {
     if (inputRef.current) {
@@ -214,6 +299,264 @@ export default function StorageVault() {
     }
     setPaymentStatus("Payment submitted. We will verify and activate extra storage soon.");
   };
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setDocSpeechSupported(Boolean(window.SpeechRecognition || window.webkitSpeechRecognition));
+  }, []);
+
+  const stopDocTimer = useCallback(() => {
+    if (docTimerRef.current) {
+      clearInterval(docTimerRef.current);
+      docTimerRef.current = null;
+    }
+  }, []);
+
+  const stopDocStream = useCallback(() => {
+    if (docStreamRef.current) {
+      docStreamRef.current.getTracks().forEach((track) => track.stop());
+      docStreamRef.current = null;
+    }
+    if (docVideoRef.current) {
+      docVideoRef.current.srcObject = null;
+    }
+  }, []);
+
+  const stopDocSpeech = useCallback(() => {
+    docSpeechWantedRef.current = false;
+    setDocSpeechActive(false);
+    setDocInterim("");
+    const recognition = docSpeechRef.current;
+    if (recognition) {
+      try {
+        recognition.stop();
+      } catch {
+        // ignore stop errors
+      }
+    }
+  }, []);
+
+  const stopDocumentary = useCallback(() => {
+    const recorder = docRecorderRef.current;
+    if (recorder && recorder.state !== "inactive") {
+      try {
+        recorder.stop();
+      } catch {
+        // ignore stop errors
+      }
+    } else {
+      stopDocTimer();
+      stopDocStream();
+    }
+    setDocRecording(false);
+  }, [stopDocStream, stopDocTimer]);
+
+  const startDocumentary = useCallback(async () => {
+    if (docRecording) return;
+    setDocError("");
+    setDocStatus("");
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+      setDocError("Camera access is not supported in this browser.");
+      return;
+    }
+    if (typeof MediaRecorder === "undefined") {
+      setDocError("Recording is not supported in this browser.");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      docStreamRef.current = stream;
+      if (docVideoRef.current) {
+        docVideoRef.current.srcObject = stream;
+        docVideoRef.current.muted = true;
+        docVideoRef.current.play().catch(() => {});
+      }
+      const mimeType = pickRecorderMimeType();
+      let recorder;
+      try {
+        recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      } catch {
+        recorder = new MediaRecorder(stream);
+      }
+      docRecorderRef.current = recorder;
+      docChunksRef.current = [];
+      setDocBlob(null);
+      setDocMime(recorder.mimeType || mimeType || "");
+      recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          docChunksRef.current.push(event.data);
+        }
+      };
+      recorder.onstop = () => {
+        stopDocTimer();
+        stopDocStream();
+        const finalType =
+          recorder.mimeType || mimeType || docChunksRef.current[0]?.type || "video/webm";
+        const blob = new Blob(docChunksRef.current, { type: finalType });
+        if (blob.size > 0) {
+          setDocBlob(blob);
+          setDocMime(finalType);
+          setDocStatus("Recording ready. Save it to your vault.");
+        } else {
+          setDocError("Recording failed to capture video.");
+        }
+        setDocRecording(false);
+      };
+      recorder.onerror = () => {
+        setDocError("Recording error. Try again.");
+        setDocRecording(false);
+      };
+      recorder.start(1000);
+      docStartAtRef.current = Date.now();
+      setDocDuration(0);
+      if (docTimerRef.current) clearInterval(docTimerRef.current);
+      docTimerRef.current = setInterval(() => {
+        setDocDuration(Math.floor((Date.now() - docStartAtRef.current) / 1000));
+      }, 500);
+      setDocRecording(true);
+    } catch (err) {
+      stopDocStream();
+      setDocError(err?.message || "Unable to access camera or microphone.");
+    }
+  }, [docRecording, stopDocStream, stopDocTimer]);
+
+  const startDocSpeech = useCallback(() => {
+    if (docSpeechActive) return;
+    setDocError("");
+    setDocStatus("");
+    if (!docSpeechSupported) {
+      setDocError("Speech-to-text is not supported in this browser.");
+      return;
+    }
+    const SpeechRecognitionCtor =
+      typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition);
+    if (!SpeechRecognitionCtor) {
+      setDocError("Speech-to-text is not supported in this browser.");
+      return;
+    }
+    docSpeechWantedRef.current = true;
+    let recognition = docSpeechRef.current;
+    if (!recognition) {
+      recognition = new SpeechRecognitionCtor();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = navigator.language || "en-IN";
+      recognition.onresult = (event) => {
+        let interim = "";
+        let finalChunk = "";
+        for (let idx = event.resultIndex; idx < event.results.length; idx += 1) {
+          const result = event.results[idx];
+          const text = result[0]?.transcript || "";
+          if (result.isFinal) {
+            finalChunk += `${text} `;
+          } else {
+            interim += `${text} `;
+          }
+        }
+        const trimmedInterim = interim.trim();
+        if (trimmedInterim) setDocInterim(trimmedInterim);
+        const trimmedFinal = finalChunk.trim();
+        if (trimmedFinal) {
+          setDocNotes((prev) => {
+            const spacer = prev && !prev.endsWith("\n") ? "\n" : "";
+            return `${prev}${spacer}${trimmedFinal}`;
+          });
+          setDocInterim("");
+        }
+      };
+      recognition.onerror = (event) => {
+        docSpeechWantedRef.current = false;
+        setDocSpeechActive(false);
+        setDocError(event?.error ? `Speech error: ${event.error}` : "Speech-to-text error.");
+      };
+      recognition.onend = () => {
+        if (docSpeechWantedRef.current) {
+          setTimeout(() => {
+            try {
+              recognition.start();
+            } catch {
+              // ignore restart errors
+            }
+          }, 260);
+        }
+      };
+      docSpeechRef.current = recognition;
+    }
+    try {
+      recognition.start();
+      setDocSpeechActive(true);
+    } catch (err) {
+      setDocSpeechActive(false);
+      setDocError("Unable to start speech-to-text.");
+    }
+  }, [docSpeechActive, docSpeechSupported]);
+
+  const handleSaveDocumentary = useCallback(async () => {
+    if (docRecording) {
+      setDocError("Stop recording before saving.");
+      return;
+    }
+    setDocError("");
+    setDocStatus("");
+    const files = [];
+    const baseName = buildDocumentaryBaseName(docTitle);
+    if (docBlob && docBlob.size > 0) {
+      const extension = docMime.includes("mp4") ? "mp4" : "webm";
+      files.push(new File([docBlob], `${baseName}.${extension}`, { type: docMime || "video/webm" }));
+    }
+    if (docNotes.trim()) {
+      const notePayload = buildDocumentaryNotes(docTitle, docNotes);
+      files.push(new File([notePayload], `${baseName}_notes.txt`, { type: "text/plain" }));
+    }
+    if (!files.length) {
+      setDocError("Record a video or add notes first.");
+      return;
+    }
+    setDocSaving(true);
+    try {
+      await addVaultFiles(files);
+      await loadItems();
+      setDocStatus("Saved to Storage Vault.");
+      setDocBlob(null);
+      setDocNotes("");
+      setDocInterim("");
+      setDocTitle("");
+    } catch (err) {
+      setDocError(err?.message || "Failed to save documentary.");
+    } finally {
+      setDocSaving(false);
+    }
+  }, [docBlob, docMime, docNotes, docRecording, docTitle, loadItems]);
+
+  const handleClearDocumentary = useCallback(() => {
+    if (docRecording) return;
+    setDocBlob(null);
+    setDocNotes("");
+    setDocInterim("");
+    setDocTitle("");
+    setDocStatus("");
+    setDocError("");
+  }, [docRecording]);
+
+  const handleToggleDocumentary = useCallback(() => {
+    setDocOpen((prev) => {
+      const next = !prev;
+      if (!next) {
+        stopDocumentary();
+        stopDocSpeech();
+      }
+      return next;
+    });
+  }, [stopDocumentary, stopDocSpeech]);
+
+  useEffect(() => {
+    return () => {
+      stopDocSpeech();
+      stopDocumentary();
+      stopDocTimer();
+      stopDocStream();
+    };
+  }, [stopDocSpeech, stopDocumentary, stopDocTimer, stopDocStream]);
 
   if (!lock || !unlocked) {
     return <Navigate to="/storage/unlock" replace />;
@@ -387,6 +730,106 @@ export default function StorageVault() {
             </div>
           </section>
         )}
+
+        <section className="storage-doc">
+          <div className="storage-doc-header">
+            <div>
+              <h2>Documentary Recorder</h2>
+              <p>Record a private documentary with live speech-to-text notes.</p>
+            </div>
+            <button type="button" className="storage-doc-toggle" onClick={handleToggleDocumentary}>
+              {docOpen ? "Close" : "Open"}
+            </button>
+          </div>
+          {docOpen && (
+            <div className="storage-doc-body">
+              <div className="storage-doc-panel">
+                <div className="storage-doc-preview">
+                  <video
+                    ref={docVideoRef}
+                    src={docPreviewUrl || undefined}
+                    muted
+                    playsInline
+                    controls={Boolean(docPreviewUrl)}
+                  />
+                  {!docRecording && !docPreviewUrl && (
+                    <span className="storage-doc-overlay">Camera is off</span>
+                  )}
+                </div>
+                <div className="storage-doc-pills">
+                  <span className={`storage-doc-pill ${docRecording ? "live" : ""}`}>
+                    {docRecording ? `Recording ${formatDuration(docDuration)}` : "Ready"}
+                  </span>
+                  {docSpeechActive && <span className="storage-doc-pill speech">Speech on</span>}
+                  {docBlob && !docRecording && (
+                    <span className="storage-doc-pill ready">Clip ready</span>
+                  )}
+                </div>
+                <div className="storage-doc-actions">
+                  <button
+                    type="button"
+                    className="storage-doc-btn"
+                    onClick={docRecording ? stopDocumentary : startDocumentary}
+                  >
+                    {docRecording ? "Stop recording" : "Start recording"}
+                  </button>
+                  <button
+                    type="button"
+                    className="storage-doc-btn secondary"
+                    onClick={docSpeechActive ? stopDocSpeech : startDocSpeech}
+                    disabled={!docSpeechSupported}
+                  >
+                    {docSpeechActive ? "Stop notes" : "Start notes"}
+                  </button>
+                  <button
+                    type="button"
+                    className="storage-doc-btn"
+                    onClick={handleSaveDocumentary}
+                    disabled={docSaving || docRecording || (!docBlob && !docNotes.trim())}
+                  >
+                    {docSaving ? "Saving..." : "Save documentary"}
+                  </button>
+                  <button
+                    type="button"
+                    className="storage-doc-btn secondary"
+                    onClick={handleClearDocumentary}
+                    disabled={docRecording}
+                  >
+                    Clear
+                  </button>
+                </div>
+                {docStatus && <p className="storage-doc-status">{docStatus}</p>}
+                {docError && <p className="storage-doc-error">{docError}</p>}
+              </div>
+              <div className="storage-doc-notes">
+                <label htmlFor="doc-title-input">Documentary title</label>
+                <input
+                  id="doc-title-input"
+                  type="text"
+                  value={docTitle}
+                  onChange={(event) => setDocTitle(event.target.value)}
+                  placeholder="Add a title for this documentary"
+                />
+                <label htmlFor="doc-notes-input">Notes</label>
+                <textarea
+                  id="doc-notes-input"
+                  rows={7}
+                  value={docNotes}
+                  onChange={(event) => setDocNotes(event.target.value)}
+                  placeholder="Speak to add notes or type them here."
+                />
+                {docInterim && (
+                  <p className="storage-doc-interim">Listening: {docInterim}</p>
+                )}
+                {!docSpeechSupported && (
+                  <p className="storage-doc-hint">
+                    Speech-to-text works in Chrome/Edge. You can still type notes.
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+        </section>
 
         <section className="storage-uploader">
           <div className="storage-upload-row">

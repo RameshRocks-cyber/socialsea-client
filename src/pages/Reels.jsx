@@ -28,6 +28,11 @@ const GESTURE_SCRIPT_HANDPOSE =
   "https://cdn.jsdelivr.net/npm/@tensorflow-models/handpose@0.0.7/dist/handpose.min.js";
 const CHAT_SHARE_DRAFT_KEY = "socialsea_chat_share_draft_v1";
 const SETTINGS_KEY = "socialsea_settings_v1";
+const REELS_CACHE_KEY = "socialsea_reels_cache_v1";
+const REELS_CACHE_TTL_MS = 3 * 60 * 1000;
+const MAX_REELS_DEFAULT = 40;
+const MAX_DURATION_PROBES = 24;
+const REELS_LIMIT = Number(import.meta.env.VITE_REELS_LIMIT || MAX_REELS_DEFAULT);
 
 const readStudyModeReels = () => {
   try {
@@ -37,6 +42,31 @@ const readStudyModeReels = () => {
     return Boolean(parsed?.studyModeReels);
   } catch {
     return false;
+  }
+};
+
+const readReelsCache = () => {
+  try {
+    const raw = localStorage.getItem(REELS_CACHE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    const at = Number(parsed?.at || 0);
+    const items = Array.isArray(parsed?.items) ? parsed.items : [];
+    if (!Number.isFinite(at) || Date.now() - at > REELS_CACHE_TTL_MS) return [];
+    return items;
+  } catch {
+    return [];
+  }
+};
+
+const writeReelsCache = (items) => {
+  try {
+    localStorage.setItem(
+      REELS_CACHE_KEY,
+      JSON.stringify({ at: Date.now(), items: Array.isArray(items) ? items : [] })
+    );
+  } catch {
+    // ignore storage errors
   }
 };
 
@@ -105,6 +135,7 @@ export default function Reels() {
   const scrollRafRef = useRef(0);
   const likedPostIdsRef = useRef({});
   const likeBusyByPostRef = useRef({});
+  const likeCountLoadedRef = useRef(new Set());
   const location = useLocation();
   const targetPostId = useMemo(() => {
     const params = new URLSearchParams(location.search);
@@ -135,6 +166,11 @@ export default function Reels() {
   useEffect(() => {
     if (studyModeReels) return undefined;
     let cancelled = false;
+    const cached = readReelsCache();
+    if (cached.length) {
+      setReels(cached);
+      setError("");
+    }
     const buildBaseCandidates = () => {
       const storedBase =
         typeof window !== "undefined"
@@ -165,7 +201,7 @@ export default function Reels() {
             : Array.isArray(payload?.content)
               ? payload.content
               : [];
-    const fetchAny = async (endpoints) => {
+    const fetchAny = async (endpoints, params = {}) => {
       const bases = buildBaseCandidates();
       let lastErr = null;
       let fallbackList = null;
@@ -178,6 +214,7 @@ export default function Reels() {
               baseURL,
               timeout: 10000,
               suppressAuthRedirect: true,
+              params,
             });
             const body = res?.data;
             const looksLikeHtml =
@@ -204,9 +241,10 @@ export default function Reels() {
     };
     const loadShortVideos = async () => {
       try {
+        const limitParam = Number.isFinite(REELS_LIMIT) && REELS_LIMIT > 0 ? Math.max(REELS_LIMIT, 30) : 60;
         const [fromFeed, fromReels] = await Promise.all([
-          fetchAny(["/api/feed", "/feed"]),
-          fetchAny(["/api/reels", "/reels"]),
+          fetchAny(["/api/feed", "/feed"], { limit: limitParam }),
+          fetchAny(["/api/reels", "/reels"], { limit: limitParam }),
         ]);
 
         const byKey = new Map();
@@ -228,6 +266,7 @@ export default function Reels() {
         }
 
         const merged = Array.from(byKey.values());
+        let durationProbeCount = 0;
         const filtered = await Promise.all(
           merged.map(async ({ item }) => {
             if (getMediaType(item) !== "VIDEO") return null;
@@ -243,9 +282,12 @@ export default function Reels() {
               return knownDuration <= MAX_REEL_SECONDS ? item : null;
             }
 
-            const measuredDuration = await readVideoDuration(mediaUrl);
-            if (measuredDuration > 0) {
-              return measuredDuration <= MAX_REEL_SECONDS ? item : null;
+            if (durationProbeCount < MAX_DURATION_PROBES) {
+              durationProbeCount += 1;
+              const measuredDuration = await readVideoDuration(mediaUrl);
+              if (measuredDuration > 0) {
+                return measuredDuration <= MAX_REEL_SECONDS ? item : null;
+              }
             }
 
             // Keep only explicit reels when metadata is unavailable.
@@ -255,7 +297,22 @@ export default function Reels() {
 
         if (!cancelled) {
           setError("");
-          const nextReels = filtered.filter(Boolean);
+          let nextReels = filtered.filter(Boolean);
+          if (Number.isFinite(REELS_LIMIT) && REELS_LIMIT > 0) {
+            if (targetPostId) {
+              const targetIndex = nextReels.findIndex(
+                (item) => String(item?.id || "").trim() === targetPostId
+              );
+              if (targetIndex > -1 && targetIndex >= REELS_LIMIT) {
+                const picked = nextReels[targetIndex];
+                nextReels = [picked, ...nextReels.filter((_, idx) => idx !== targetIndex).slice(0, REELS_LIMIT - 1)];
+              } else {
+                nextReels = nextReels.slice(0, REELS_LIMIT);
+              }
+            } else {
+              nextReels = nextReels.slice(0, REELS_LIMIT);
+            }
+          }
           if (targetPostId) {
             const pickedIndex = nextReels.findIndex(
               (item) => String(item?.id || "").trim() === targetPostId,
@@ -267,6 +324,7 @@ export default function Reels() {
             }
           }
           setReels(nextReels);
+          writeReelsCache(nextReels);
         }
       } catch (err) {
         console.error(err);
@@ -282,16 +340,14 @@ export default function Reels() {
 
   useEffect(() => {
     if (!reels.length) return;
-    reels.forEach((reel) => {
-      api
-        .get(`/api/likes/${reel.id}/count`)
-        .then((res) => {
-          const count = Number(res.data) || 0;
-          setLikeCounts((prev) => ({ ...prev, [reel.id]: count }));
-        })
-        .catch(() => {});
-    });
-  }, [reels]);
+    const start = Math.max(0, currentIndex - 2);
+    const end = Math.min(reels.length, currentIndex + 4);
+    for (let idx = start; idx < end; idx += 1) {
+      const reel = reels[idx];
+      if (!reel) continue;
+      fetchLikeCount(reel.id);
+    }
+  }, [reels, currentIndex]);
 
   useEffect(() => {
     try {
@@ -372,7 +428,7 @@ export default function Reels() {
 
   useEffect(() => {
     reelsRef.current = reels;
-  }, [reels]);
+  }, [reels, currentIndex]);
 
   useEffect(() => {
     currentIndexRef.current = currentIndex;
@@ -399,6 +455,23 @@ export default function Reels() {
       stopGestureControl();
     });
   }, [gestureEnabled]);
+
+  const fetchLikeCount = (postId) => {
+    const idText = String(postId || "").trim();
+    if (!idText) return;
+    if (likeCountLoadedRef.current.has(idText)) return;
+    likeCountLoadedRef.current.add(idText);
+    api
+      .get(`/api/likes/${encodeURIComponent(idText)}/count`, {
+        suppressAuthRedirect: true,
+        timeout: 4000,
+      })
+      .then((res) => {
+        const count = Number(res.data) || 0;
+        setLikeCounts((prev) => ({ ...prev, [idText]: count }));
+      })
+      .catch(() => {});
+  };
 
   const resolveUrl = (url) => {
     if (!url) return "";
@@ -514,7 +587,9 @@ export default function Reels() {
     if (!reels.length) return;
     const targets = [];
     const seen = new Set();
-    reels.forEach((reel) => {
+    const start = Math.max(0, currentIndex - 4);
+    const end = Math.min(reels.length, currentIndex + 6);
+    reels.slice(start, end).forEach((reel) => {
       const ownerKey = reelOwnerKey(reel);
       if (!ownerKey || seen.has(ownerKey)) return;
       seen.add(ownerKey);
@@ -524,7 +599,7 @@ export default function Reels() {
     let cancelled = false;
     const run = async () => {
       const foundByOwner = {};
-      for (const reel of targets.slice(0, 40)) {
+      for (const reel of targets.slice(0, 12)) {
         const ownerKey = reelOwnerKey(reel);
         const candidates = reelOwnerCandidates(reel);
         if (!ownerKey || !candidates.length) continue;

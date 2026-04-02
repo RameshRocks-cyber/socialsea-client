@@ -49,6 +49,8 @@ const SOS_ALERT_STALE_MS =
   Number.isFinite(SOS_ALERT_STALE_MINUTES) && SOS_ALERT_STALE_MINUTES > 0
     ? SOS_ALERT_STALE_MINUTES * 60 * 1000
     : 0;
+const SOS_EMERGENCY_POLL_MS = Number(import.meta.env.VITE_SOS_EMERGENCY_POLL_MS || 2500);
+const SOS_NOTIFICATION_POLL_MS = Number(import.meta.env.VITE_SOS_NOTIFICATION_POLL_MS || 5000);
 const allowSelfEmergencyPopup = (() => {
   if (typeof window === "undefined") return false;
   const host = String(window.location.hostname || "").toLowerCase().trim();
@@ -679,6 +681,28 @@ export default function Navbar() {
       window.removeEventListener("storage", onStorage);
     };
   }, []);
+
+  useEffect(() => {
+    if (!myUserId && !myEmail) return undefined;
+    const pingPresence = async () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      try {
+        await api.post("/api/chat/presence", null, { suppressAuthRedirect: true, timeout: 4000 });
+      } catch {
+        // ignore presence ping failures
+      }
+    };
+    pingPresence();
+    const timer = setInterval(pingPresence, 60000);
+    const onFocus = () => pingPresence();
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+    };
+  }, [myUserId, myEmail]);
 
   useEffect(() => {
     cameraHighResRef.current = cameraHighRes;
@@ -1498,6 +1522,7 @@ export default function Navbar() {
 
     const pollEmergency = async () => {
       try {
+        if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
         if (isTriggeredByCurrentBrowser()) return;
         const payloads = [];
         try {
@@ -1590,7 +1615,7 @@ export default function Navbar() {
     };
 
     pollEmergency();
-    const timer = setInterval(pollEmergency, 800);
+    const timer = setInterval(pollEmergency, Math.max(1200, SOS_EMERGENCY_POLL_MS));
     return () => {
       disposed = true;
       clearInterval(timer);
@@ -1598,16 +1623,24 @@ export default function Navbar() {
   }, [myUserId, location.pathname]);
 
   useEffect(() => {
-    if (!myEmail && !myUserId) return undefined;
+    const authToken =
+      sessionStorage.getItem("accessToken") ||
+      sessionStorage.getItem("token") ||
+      localStorage.getItem("accessToken") ||
+      localStorage.getItem("token") ||
+      "";
+    if (!authToken || authToken === "null" || authToken === "undefined") return undefined;
     let disposed = false;
 
     const pollEmergencyNotifications = async () => {
       try {
+        if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
         if (isTriggeredByCurrentBrowser()) return;
         const res = await api.get("/api/notifications", {
           suppressAuthRedirect: true,
           skipAuth: false,
-          timeout: 4500
+          timeout: 4500,
+          params: { limit: 50 }
         });
         if (disposed) return;
         const list = Array.isArray(res?.data) ? res.data : [];
@@ -1631,25 +1664,20 @@ export default function Navbar() {
         }
         const notifId = String(emergency?.id || "").trim();
         const createdAtMs = new Date(emergency?.createdAt || 0).getTime();
-        const isRecent = !Number.isFinite(createdAtMs) || Date.now() - createdAtMs < 30000;
-        if (activeAlertIdsRef.current.size === 0 && !isRecent) {
-          return;
-        }
         let resolvedAlertId = resolveNotificationAlertId(emergency);
         if (!resolvedAlertId && activeAlertIdsRef.current.size === 1) {
           resolvedAlertId = Array.from(activeAlertIdsRef.current)[0] || "";
         }
         const notifAlertId = String(resolvedAlertId || emergency?.alertId || emergency?.id || "").trim();
         if (notifAlertId && activeAlertIdsRef.current.size > 0 && !activeAlertIdsRef.current.has(notifAlertId)) {
-          return;
+          if (Number.isFinite(createdAtMs) && Date.now() - createdAtMs > 2 * 60 * 1000) {
+            return;
+          }
         }
         if (isAlertSuppressed(notifAlertId) || isAlertSuppressed(notifId)) return;
         if (Boolean(emergency?.read)) return;
         if (notifId && notifId === lastEmergencyNotificationIdRef.current) return;
         if (Number.isFinite(createdAtMs) && Date.now() - createdAtMs > 30 * 60 * 1000) return;
-        if (activeAlertIdsRef.current.size === 0 && Number.isFinite(createdAtMs) && Date.now() - createdAtMs > 30 * 1000) {
-          return;
-        }
 
         lastEmergencyNotificationIdRef.current = notifId || "";
         try {
@@ -1674,7 +1702,7 @@ export default function Navbar() {
     };
 
     pollEmergencyNotifications();
-    const timer = setInterval(pollEmergencyNotifications, 1200);
+    const timer = setInterval(pollEmergencyNotifications, Math.max(2500, SOS_NOTIFICATION_POLL_MS));
     return () => {
       disposed = true;
       clearInterval(timer);
@@ -2449,12 +2477,20 @@ export default function Navbar() {
     const reporterEmail = String(options?.reporterEmail || "").trim().toLowerCase();
     const reporterUserId = String(options?.reporterUserId || "").trim();
     const popupAlertKey = normalizeAlertId(nextPopup?.alertId || nextPopup?.dedupeKey || popupAlertId);
+    const isOwnReporter =
+      (reporterEmail && myEmail && reporterEmail === myEmail.toLowerCase()) ||
+      (reporterUserId && myUserId && reporterUserId === myUserId);
     if (
       nextPopup?.isEmergency &&
       routeAlertId &&
       ((nextKey && routeAlertId === nextKey) || (popupAlertId && routeAlertId === popupAlertId))
     ) {
       suppressAlert(routeAlertId);
+      setSosPopup(null);
+      return;
+    }
+    if (nextPopup?.isEmergency && !allowSelfEmergencyPopup && isOwnReporter) {
+      if (popupAlertKey) suppressAlert(popupAlertKey);
       setSosPopup(null);
       return;
     }

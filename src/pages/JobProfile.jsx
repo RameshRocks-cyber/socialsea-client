@@ -37,6 +37,13 @@ const resolveMediaUrl = (value) => {
   return toApiUrl(raw);
 };
 
+const normalizeWebsite = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (/^https?:\/\//i.test(raw)) return raw;
+  return `https://${raw}`;
+};
+
 const formatRange = (start, end) => {
   const startText = String(start || "").trim();
   const endText = String(end || "").trim();
@@ -76,7 +83,39 @@ const JobProfile = () => {
   const education = resume.education?.filter(hasEntry) || [];
   const projects = resume.projects?.filter(hasEntry) || [];
   const skills = splitSkills(resume.skills);
-  const avatarUrl = resolveMediaUrl(resume.personal?.avatar);
+  const personal = resume.personal || {};
+  const avatarUrl = resolveMediaUrl(personal.avatar);
+  const fullName = String(personal.fullName || "").trim();
+  const title = String(personal.title || "").trim();
+  const location = String(personal.location || "").trim();
+  const headline = fullName || "Job Profile";
+  const headlineMeta = [title, location].filter(Boolean).join(" • ");
+  const contactItems = [
+    {
+      label: "Email",
+      value: String(personal.email || "").trim(),
+      href: String(personal.email || "").trim()
+        ? `mailto:${String(personal.email || "").trim()}`
+        : ""
+    },
+    {
+      label: "Phone",
+      value: String(personal.phone || "").trim(),
+      href: String(personal.phone || "").trim()
+        ? `tel:${String(personal.phone || "").trim()}`
+        : ""
+    },
+    {
+      label: "Location",
+      value: String(personal.location || "").trim(),
+      href: ""
+    },
+    {
+      label: "Website",
+      value: String(personal.website || "").trim(),
+      href: normalizeWebsite(personal.website)
+    }
+  ].filter((item) => item.value);
 
   return (
     <div className="job-page">
@@ -87,10 +126,53 @@ const JobProfile = () => {
               <img className="job-page-avatar" src={avatarUrl} alt="Profile" />
             ) : null}
             <div>
-              <h1 className="job-page-title">Job Profile</h1>
-              <p className="job-page-subtitle">
-                Resume-style view of studies, projects, skills, and experience.
-              </p>
+              <h1 className="job-page-title">{headline}</h1>
+              {headlineMeta ? (
+                <>
+                  <p className="job-page-subtitle">{headlineMeta}</p>
+                  <p className="job-page-subtitle job-page-subtitle-muted">
+                    Resume-style view of studies, projects, skills, and experience.
+                  </p>
+                </>
+              ) : (
+                <p className="job-page-subtitle">
+                  Resume-style view of studies, projects, skills, and experience.
+                </p>
+              )}
+              {contactItems.length > 0 ? (
+                <div className="job-page-contact">
+                  {contactItems.map((item) => {
+                    const content = (
+                      <>
+                        <span className="job-page-contact-label">{item.label}:</span>
+                        <span className="job-page-contact-value">{item.value}</span>
+                      </>
+                    );
+                    if (item.href) {
+                      return (
+                        <a
+                          key={`${item.label}-${item.value}`}
+                          className="job-page-contact-item"
+                          href={item.href}
+                          target={item.href.startsWith("http") ? "_blank" : undefined}
+                          rel={item.href.startsWith("http") ? "noreferrer" : undefined}
+                        >
+                          {content}
+                        </a>
+                      );
+                    }
+                    return (
+                      <div key={`${item.label}-${item.value}`} className="job-page-contact-item">
+                        {content}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="job-page-subtitle job-page-subtitle-muted">
+                  Add contact details in your resume to show email, phone, and location here.
+                </p>
+              )}
             </div>
           </div>
         </div>
@@ -99,7 +181,7 @@ const JobProfile = () => {
             Edit Resume
           </Link>
           <button type="button" className="job-page-download" onClick={handleDownload}>
-            Download PDF
+            Print / Save as PDF
           </button>
         </div>
       </header>
@@ -164,7 +246,12 @@ const JobProfile = () => {
                         return isVideoUrl(resolved) ? (
                           <video key={resolved} src={resolved} controls preload="metadata" />
                         ) : (
-                          <img key={resolved} src={resolved} alt="project" loading="lazy" />
+                          <img
+                            key={resolved}
+                            src={resolved}
+                            alt={item.name || "Project"}
+                            loading="lazy"
+                          />
                         );
                       })}
                     </div>

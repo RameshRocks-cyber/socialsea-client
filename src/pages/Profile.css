@@ -12,6 +12,117 @@
   font-family: "Sora", "Manrope", "Segoe UI", sans-serif;
 }
 
+body.ss-theme-white .profile-page {
+  --profile-bg: #ffffff;
+  --profile-surface: #ffffff;
+  --profile-surface-2: #f4f6f9;
+  --profile-border: rgba(159, 111, 74, 0.28);
+  --profile-text: #2b1d12;
+  --profile-muted: rgba(43, 29, 18, 0.6);
+  background: #ffffff;
+  color: #2b1d12;
+}
+
+body.ss-theme-white .profile-header,
+body.ss-theme-white .profile-meta,
+body.ss-theme-white .profile-stats,
+body.ss-theme-white .profile-stat-card,
+body.ss-theme-white .profile-actions,
+body.ss-theme-white .profile-actions-own,
+body.ss-theme-white .profile-create-card,
+body.ss-theme-white .profile-shortcut-card,
+body.ss-theme-white .profile-post-card,
+body.ss-theme-white .profile-highlight-card {
+  background: #ffffff !important;
+  border-color: rgba(159, 111, 74, 0.28) !important;
+  color: #2b1d12 !important;
+  box-shadow: 0 10px 20px rgba(130, 92, 58, 0.12) !important;
+}
+
+body.ss-theme-white .profile-action-panel,
+body.ss-theme-white .profile-hero,
+body.ss-theme-white .profile-cover,
+body.ss-theme-white .profile-cover-img {
+  background: #ffffff !important;
+  border-color: rgba(159, 111, 74, 0.28) !important;
+  box-shadow: 0 10px 20px rgba(130, 92, 58, 0.12) !important;
+}
+
+body.ss-theme-white .profile-avatar-wrap,
+body.ss-theme-white .profile-avatar {
+  background: #ffffff !important;
+  border-color: rgba(159, 111, 74, 0.28) !important;
+}
+
+body.ss-theme-white .profile-header {
+  background: #ffffff !important;
+}
+
+body.ss-theme-white .profile-identity h1,
+body.ss-theme-white .profile-identity h2,
+body.ss-theme-white .profile-identity h3,
+body.ss-theme-white .profile-identity p {
+  color: #2b1d12 !important;
+}
+
+body.ss-theme-white .profile-header::before {
+  background: radial-gradient(circle at center, rgba(196, 149, 91, 0.16), transparent 65%);
+  opacity: 0.45;
+}
+
+body.ss-theme-white .profile-pic {
+  border-color: rgba(159, 111, 74, 0.32);
+  background: #ffffff;
+}
+
+body.ss-theme-white .profile-stat-card b,
+body.ss-theme-white .profile-text strong,
+body.ss-theme-white .profile-text h1,
+body.ss-theme-white .profile-text h2,
+body.ss-theme-white .profile-text h3 {
+  color: #2b1d12;
+}
+
+body.ss-theme-white .profile-text span,
+body.ss-theme-white .profile-meta small,
+body.ss-theme-white .profile-shortcut-card p {
+  color: #7b5c44;
+}
+
+body.ss-theme-white .profile-action-primary,
+body.ss-theme-white .profile-action-secondary,
+body.ss-theme-white .profile-action-icon,
+body.ss-theme-white .profile-follow-btn {
+  background: #ffffff !important;
+  color: #2b1d12 !important;
+  border-color: rgba(159, 111, 74, 0.28) !important;
+  box-shadow: none !important;
+}
+
+body.ss-theme-white .profile-vault {
+  background: #ffffff !important;
+  border-color: rgba(159, 111, 74, 0.28) !important;
+}
+
+body.ss-theme-white .profile-vault-header h4 {
+  color: #2b1d12 !important;
+}
+
+body.ss-theme-white .profile-vault-header p,
+body.ss-theme-white .profile-vault-meta {
+  color: #7b5c44 !important;
+}
+
+body.ss-theme-white .profile-vault-button {
+  background: #ffffff !important;
+  color: #2b1d12 !important;
+  border-color: rgba(159, 111, 74, 0.28) !important;
+}
+
+body.ss-theme-white .profile-vault-link {
+  color: #9f6f4a !important;
+}
+
 .profile-header {
   position: relative;
   overflow: hidden;

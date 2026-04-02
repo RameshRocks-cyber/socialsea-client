@@ -34,7 +34,7 @@ import { readActiveStories, syncStoryCaches } from "../services/storyStorage";
 import { SETTINGS_KEY, readSoundPrefs } from "./soundPrefs";
 import "./Chat.css";
 
-const POLL_MS = 3000;
+const POLL_MS = 4000;
 const LOCAL_CHAT_KEY = "socialsea_chat_fallback_v1";
 const CHAT_SERVER_BASE_KEY = "socialsea_chat_server_base_v1";
 const HIDDEN_CHAT_MSG_IDS_KEY = "socialsea_hidden_msg_ids_v1";
@@ -47,7 +47,7 @@ const CHAT_MESSAGE_CHANNEL = "socialsea-chat-message";
 const CALL_ACCEPT_TARGET_KEY = "socialsea_call_accept_target_v1";
 const CALL_RING_MS = 30000;
 const STORY_STORAGE_KEY = "socialsea_stories_v1";
-const CALL_POLL_MS = 1200;
+const CALL_POLL_MS = 3000;
 const CALL_SIGNAL_MAX_AGE_MS = 45000;
 const CALL_REJOIN_KEY = "socialsea_call_rejoin_v1";
 const CALL_REJOIN_MAX_AGE_MS = 10 * 60 * 1000;
@@ -55,10 +55,10 @@ const CALL_REJOIN_RETRY_MS = 6000;
 const CALL_REJOIN_MAX_RETRIES = 2;
 const CALL_REFRESH_GRACE_MS = 20000;
 const CALL_REFRESH_GRACE_KEY = "socialsea_call_refresh_grace_v1";
-const CHAT_CONVO_POLL_MS = 8000;
-const CHAT_THREAD_POLL_BACKGROUND_MS = 10000;
+const CHAT_CONVO_POLL_MS = 10000;
+const CHAT_THREAD_POLL_BACKGROUND_MS = 15000;
 const CHAT_MESSAGE_ALERT_DEDUPE_MS = 10 * 60 * 1000;
-const ONLINE_WINDOW_MS = Number(import.meta.env.VITE_ONLINE_WINDOW_MS || 2 * 60 * 1000);
+const ONLINE_WINDOW_MS = Number(import.meta.env.VITE_ONLINE_WINDOW_MS || 5 * 60 * 1000);
 const CHAT_REMOTE_DISABLE_MS = 5 * 60 * 1000;
 const STORY_FEED_DISABLE_MS = 5 * 60 * 1000;
 const STORY_IMAGE_DURATION_MS = 6500;
@@ -2462,34 +2462,16 @@ export default function Chat() {
     return normalizeDisplayName(`User ${id || ""}`);
   };
 
-  const normalizeTimestamp = (value) => {
-    if (!value && value !== 0) return "";
-    if (value instanceof Date) {
-      const t = value.getTime();
-      return Number.isFinite(t) ? value.toISOString() : "";
-    }
-    const asNumber = Number(value);
-    if (Number.isFinite(asNumber) && asNumber > 0) {
-      const ms = asNumber < 1000000000000 ? asNumber * 1000 : asNumber;
-      return new Date(ms).toISOString();
-    }
-    if (typeof value === "string") {
-      const raw = value.trim();
-      if (!raw) return "";
-      // Backend may send ISO-like time without timezone; treat it as local time.
-      const noZoneIso = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(raw);
-      if (noZoneIso) {
-        const normalized = raw.replace(" ", "T");
-        const candidate = ASSUME_UTC_TS ? `${normalized}Z` : normalized;
-        return new Date(candidate).toISOString();
-      }
-    }
-    const parsed = new Date(value);
-    if (Number.isFinite(parsed.getTime())) return parsed.toISOString();
-    return String(value || "");
+  const pickClosestTimestamp = (candidates, now = Date.now()) => {
+    const finite = candidates.filter((ms) => Number.isFinite(ms) && ms > 0);
+    if (!finite.length) return 0;
+    const futureLimitMs = 2 * 60 * 1000;
+    const usable = finite.filter((ms) => ms <= now + futureLimitMs);
+    const pool = usable.length ? usable : finite;
+    return pool.reduce((best, ms) => (Math.abs(now - ms) < Math.abs(now - best) ? ms : best), pool[0]);
   };
 
-  const toEpochMs = (value) => {
+  const parseTimestampMs = (value) => {
     if (value == null || value === "") return 0;
     if (value instanceof Date) {
       const t = value.getTime();
@@ -2502,11 +2484,24 @@ export default function Chat() {
     const raw = String(value || "").trim();
     if (!raw) return 0;
     const noZoneIso = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(raw);
-    const normalized = noZoneIso ? raw.replace(" ", "T") : raw;
-    const candidate = noZoneIso && ASSUME_UTC_TS ? `${normalized}Z` : normalized;
-    const parsed = new Date(candidate).getTime();
+    if (noZoneIso) {
+      const normalized = raw.replace(" ", "T");
+      const localMs = new Date(normalized).getTime();
+      const utcMs = new Date(`${normalized}Z`).getTime();
+      if (ASSUME_UTC_TS && Number.isFinite(utcMs)) return utcMs;
+      return pickClosestTimestamp([localMs, utcMs]);
+    }
+    const parsed = new Date(raw).getTime();
     return Number.isFinite(parsed) ? parsed : 0;
   };
+
+  const normalizeTimestamp = (value) => {
+    const ms = parseTimestampMs(value);
+    if (!ms) return value instanceof Date ? "" : String(value || "").trim();
+    return new Date(ms).toISOString();
+  };
+
+  const toEpochMs = (value) => parseTimestampMs(value);
 
   const normalizeMessage = (message, otherId = "") => {
     const rawText = String(message?.text ?? message?.message ?? message?.content ?? "");
@@ -2642,6 +2637,7 @@ export default function Chat() {
     String(contact?.profilePic || ""),
     String(contact?.lastMessage || ""),
     String(contact?.lastActiveAt || ""),
+    String(contact?.presenceUpdatedAt || ""),
     Object.prototype.hasOwnProperty.call(contact || {}, "online") ? (contact?.online ? "1" : "0") : ""
   ].join("|");
 
@@ -3229,6 +3225,14 @@ export default function Chat() {
         userLike?.lastMessageUserId ||
         ""
     ).trim();
+    const presenceUpdatedAt =
+      userLike?.presenceUpdatedAt ||
+      userLike?.presenceAt ||
+      userLike?.lastPresenceAt ||
+      u?.presenceUpdatedAt ||
+      u?.presenceAt ||
+      u?.lastPresenceAt ||
+      "";
     const primaryLastActiveAt =
       userLike?.lastActiveAt ||
       userLike?.lastSeenAt ||
@@ -3294,7 +3298,8 @@ export default function Chat() {
       profilePic: profilePicRaw ? toApiUrl(profilePicRaw) : "",
       lastMessage: lastMessageText,
       ...(normalizedLastActiveAt ? { lastActiveAt: normalizedLastActiveAt } : {}),
-      ...(hasPresenceSignal ? { online: Boolean(online) } : {})
+      ...(hasPresenceSignal ? { online: Boolean(online) } : {}),
+      ...(String(presenceUpdatedAt || "").trim() ? { presenceUpdatedAt: String(presenceUpdatedAt).trim() } : {})
     };
     return contact;
   };
@@ -3313,6 +3318,8 @@ export default function Chat() {
       const nextName = getContactDisplayName(c);
       const prevTs = toEpochMs(prev?.lastActiveAt);
       const nextTs = toEpochMs(c?.lastActiveAt);
+      const prevPresenceTs = toEpochMs(prev?.presenceUpdatedAt);
+      const nextPresenceTs = toEpochMs(c?.presenceUpdatedAt);
       const mergedName = !isGenericUserLabel(nextName, id) ? nextName : prevName;
       const merged = {
         ...prev,
@@ -3330,6 +3337,14 @@ export default function Chat() {
       } else {
         const fallbackLast = String(c?.lastActiveAt || "").trim() || String(prev?.lastActiveAt || "").trim();
         if (fallbackLast) merged.lastActiveAt = fallbackLast;
+      }
+      if (prevPresenceTs || nextPresenceTs) {
+        merged.presenceUpdatedAt =
+          nextPresenceTs >= prevPresenceTs
+            ? (c?.presenceUpdatedAt || prev?.presenceUpdatedAt || "")
+            : (prev?.presenceUpdatedAt || c?.presenceUpdatedAt || "");
+      } else if (String(c?.presenceUpdatedAt || "").trim() || String(prev?.presenceUpdatedAt || "").trim()) {
+        merged.presenceUpdatedAt = String(c?.presenceUpdatedAt || "").trim() || String(prev?.presenceUpdatedAt || "").trim();
       }
       if (Object.prototype.hasOwnProperty.call(c || {}, "online")) {
         merged.online = Boolean(c?.online);
@@ -6383,7 +6398,8 @@ export default function Chat() {
   useEffect(() => {
     const timer = setInterval(() => {
       const now = Date.now();
-      if (now - lastConvoPollRef.current > CHAT_CONVO_POLL_MS) {
+      const isHidden = typeof document !== "undefined" && document.hidden;
+      if (!isHidden && now - lastConvoPollRef.current > CHAT_CONVO_POLL_MS) {
         lastConvoPollRef.current = now;
         loadConversations().catch(() => {});
       }
@@ -6397,6 +6413,45 @@ export default function Chat() {
     }, POLL_MS);
     return () => clearInterval(timer);
   }, [activeContactId, contactId, myUserId, myEmail, chatFallbackMode]);
+
+  useEffect(() => {
+    if (!myUserId) return undefined;
+    const pingPresence = async () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      try {
+        await api.post("/api/chat/presence", null, { suppressAuthRedirect: true, timeout: 4000 });
+      } catch {
+        // ignore presence ping failures
+      }
+    };
+    pingPresence();
+    const timer = setInterval(pingPresence, 45000);
+    const onFocus = () => pingPresence();
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+    };
+  }, [myUserId]);
+
+  useEffect(() => {
+    const refreshNow = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      loadConversations().catch(() => {});
+      if (activeContactId) {
+        loadThread(activeContactId).catch(() => {});
+      }
+    };
+    const onFocus = () => refreshNow();
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+    };
+  }, [activeContactId]);
 
   useEffect(() => {
     const token = getStoredToken();
@@ -7097,8 +7152,18 @@ export default function Chat() {
   const hasExplicitOnlineFlag = (contact) =>
     Boolean(contact && Object.prototype.hasOwnProperty.call(contact, "online"));
 
+  const normalizeOnlineValue = (value) => {
+    if (typeof value === "boolean") return value;
+    if (value == null) return null;
+    const raw = String(value).trim().toLowerCase();
+    if (!raw) return null;
+    if (["true", "1", "yes", "online", "active"].includes(raw)) return true;
+    if (["false", "0", "no", "offline", "inactive"].includes(raw)) return false;
+    return null;
+  };
+
   const getExplicitOnlineValue = (contact) =>
-    hasExplicitOnlineFlag(contact) ? Boolean(contact?.online) : null;
+    hasExplicitOnlineFlag(contact) ? normalizeOnlineValue(contact?.online) : null;
 
   const getPeerMessageActivityTs = (contactId) => {
     if (!contactId) return 0;
@@ -7133,13 +7198,25 @@ export default function Chat() {
     return Number.isFinite(latest) ? latest : 0;
   };
 
+  const getContactPresenceTs = (contact) => {
+    if (!contact) return 0;
+    const candidates = [
+      contact?.presenceUpdatedAt,
+      contact?.presenceAt,
+      contact?.lastPresenceAt
+    ];
+    const ts = clampFutureTimestamp(toEpochMs(candidates.find((value) => String(value || "").trim()) || 0));
+    return ts;
+  };
+
   const getContactPresence = (contact) => {
     if (!contact) return { online: false, text: "lastseen at --" };
     const latest = getContactActivityTs(contact);
+    const presenceTs = getContactPresenceTs(contact);
     const explicitOnline = getExplicitOnlineValue(contact);
     const windowMs = Number.isFinite(ONLINE_WINDOW_MS) && ONLINE_WINDOW_MS > 0 ? ONLINE_WINDOW_MS : 2 * 60 * 1000;
-    const inferredOnline = latest > 0 && nowTick - latest <= windowMs;
-    const isOnline = explicitOnline === true ? true : inferredOnline;
+    const inferredOnline = presenceTs > 0 && nowTick - presenceTs <= windowMs;
+    const isOnline = explicitOnline === true ? true : explicitOnline === false ? false : inferredOnline;
     if (isOnline) return { online: true, text: "online" };
     return {
       online: false,

@@ -2,13 +2,13 @@ export const COLOR_THEME_KEY = "socialsea_color_theme_v1";
 export const CUSTOM_THEME_KEY = "socialsea_custom_theme_v1";
 
 export const COLOR_THEME_OPTIONS = [
-  { id: "black", label: "Default" },
+  { id: "black", label: "Dark" },
   { id: "mankind", label: "Mankind" },
   { id: "ocean", label: "Ocean" },
   { id: "pink", label: "Pink" },
   { id: "yellow", label: "Yellow" },
   { id: "blue", label: "Blue" },
-  { id: "white", label: "White" },
+  { id: "white", label: "Light" },
   { id: "custom", label: "Custom" },
 ];
 

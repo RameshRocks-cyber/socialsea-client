@@ -681,8 +681,25 @@ export default function Settings() {
               <h3>Color Theme</h3>
               <button type="button" onClick={() => setActivePanel("")}>Close</button>
             </header>
+            <div className="settings-theme-mode">
+              <button
+                type="button"
+                className={colorTheme === "black" ? "active" : ""}
+                onClick={() => setColorTheme("black")}
+              >
+                Dark
+              </button>
+              <button
+                type="button"
+                className={colorTheme === "white" ? "active" : ""}
+                onClick={() => setColorTheme("white")}
+              >
+                Light
+              </button>
+            </div>
+            <p className="settings-theme-note">Switch between dark and light mode, then pick an accent below.</p>
             <div className="settings-select-grid">
-              {COLOR_THEME_OPTIONS.map((theme) => (
+              {COLOR_THEME_OPTIONS.filter((theme) => theme.id !== "black" && theme.id !== "white").map((theme) => (
                 <button
                   key={theme.id}
                   type="button"

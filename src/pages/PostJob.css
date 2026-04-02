@@ -199,6 +199,23 @@
   font-size: 0.85rem;
 }
 
+.company-manage-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.company-manage-required {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #b42318;
+  background: #ffe9e9;
+  border: 1px solid #f5b4b4;
+  border-radius: 999px;
+  padding: 2px 6px;
+}
+
 .company-manage-form-grid input[type="file"] {
   padding: 6px;
   background: #f6f6f6;
@@ -228,7 +245,7 @@
 
 .company-job-form-head p {
   margin: 4px 0 0;
-  color: #b8b8b8;
+  color: #6b7280;
 }
 
 .company-job-form-grid {
@@ -240,7 +257,7 @@
 .company-job-form-grid label {
   display: grid;
   gap: 6px;
-  color: #c9c9c9;
+  color: #4b5563;
   font-size: 0.85rem;
 }
 
@@ -265,10 +282,11 @@
 }
 
 .company-job-item {
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid #e6e6e6;
   border-radius: 14px;
   padding: 14px;
-  background: rgba(10, 10, 10, 0.9);
+  background: #ffffff;
+  box-shadow: 0 10px 24px rgba(16, 24, 40, 0.06);
   display: grid;
   gap: 10px;
 }
@@ -416,4 +434,36 @@
   .company-manage-header {
     grid-template-columns: 1fr;
   }
+}
+
+/* Light mode: Post job page */
+body.ss-theme-white .company-manage-page {
+  background: #ffffff;
+  color: #2b1d12;
+}
+
+body.ss-theme-white .company-manage-header,
+body.ss-theme-white .company-manage-card,
+body.ss-theme-white .company-manage-form,
+body.ss-theme-white .company-manage-section {
+  background: #ffffff;
+  border-color: rgba(159, 111, 74, 0.28);
+  box-shadow: 0 10px 20px rgba(130, 92, 58, 0.08);
+  color: #2b1d12;
+}
+
+body.ss-theme-white .company-manage-title p,
+body.ss-theme-white .company-manage-eyebrow,
+body.ss-theme-white .company-manage-muted,
+body.ss-theme-white .company-manage-subtitle {
+  color: #7b5c44;
+}
+
+body.ss-theme-white .company-manage-back,
+body.ss-theme-white .company-manage-tab,
+body.ss-theme-white .company-manage-ghost,
+body.ss-theme-white .company-manage-primary {
+  background: #ffffff;
+  color: #2b1d12;
+  border-color: rgba(159, 111, 74, 0.28);
 }

@@ -579,7 +579,9 @@ export default function PostJob() {
                 <div ref={detailsRef} className="company-manage-card company-manage-form-grid">
                   <h2>Company Details</h2>
                   <label>
-                    Company Name
+                    <span className="company-manage-label">
+                      Company Name <span className="company-manage-required">Required</span>
+                    </span>
                     <input
                       type="text"
                       value={draft.name}
@@ -630,7 +632,7 @@ export default function PostJob() {
                   <label>
                     Website
                     <input
-                      type="text"
+                      type="url"
                       value={draft.website}
                       onChange={(event) => setDraft((prev) => ({ ...prev, website: event.target.value }))}
                     />
@@ -672,7 +674,9 @@ export default function PostJob() {
 
               <div className="company-job-form-grid">
                 <label>
-                  Job Title
+                  <span className="company-manage-label">
+                    Job Title <span className="company-manage-required">Required</span>
+                  </span>
                   <input
                     type="text"
                     value={jobDraft.title}
@@ -726,7 +730,7 @@ export default function PostJob() {
                 <label>
                   Apply URL
                   <input
-                    type="text"
+                    type="url"
                     value={jobDraft.applyUrl}
                     onChange={(event) => setJobDraft((prev) => ({ ...prev, applyUrl: event.target.value }))}
                   />

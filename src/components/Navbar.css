@@ -52,19 +52,19 @@ body.ss-story-viewer-open .ss-nav-wrap {
 }
 
 /* Black-only navbar buttons */
-.ss-nav {
+body.ss-theme-black .ss-nav {
   background: #000 !important;
   border-color: rgba(255, 255, 255, 0.12) !important;
   box-shadow: none !important;
   backdrop-filter: none !important;
 }
 
-.ss-camera-btn,
-.ss-sos-chip,
-.ss-sos-mobile,
-.ss-link,
-.ss-link.is-active,
-.ss-link:hover {
+body.ss-theme-black .ss-camera-btn,
+body.ss-theme-black .ss-sos-chip,
+body.ss-theme-black .ss-sos-mobile,
+body.ss-theme-black .ss-link,
+body.ss-theme-black .ss-link.is-active,
+body.ss-theme-black .ss-link:hover {
   background: #0b0b0b !important;
   background-image: none !important;
   border-color: rgba(255, 255, 255, 0.12) !important;
@@ -72,8 +72,33 @@ body.ss-story-viewer-open .ss-nav-wrap {
   color: #f5f5f5 !important;
 }
 
-.ss-link:hover {
+body.ss-theme-black .ss-link:hover {
   background: #111 !important;
+}
+
+/* Light theme navbar */
+body.ss-theme-white .ss-nav {
+  background: #ffffff !important;
+  border-color: rgba(60, 80, 110, 0.18) !important;
+  box-shadow: 0 10px 18px rgba(36, 50, 72, 0.08) !important;
+  backdrop-filter: none !important;
+}
+
+body.ss-theme-white .ss-camera-btn,
+body.ss-theme-white .ss-sos-chip,
+body.ss-theme-white .ss-sos-mobile,
+body.ss-theme-white .ss-link,
+body.ss-theme-white .ss-link.is-active,
+body.ss-theme-white .ss-link:hover {
+  background: #ffffff !important;
+  background-image: none !important;
+  border-color: rgba(60, 80, 110, 0.18) !important;
+  box-shadow: none !important;
+  color: #101622 !important;
+}
+
+body.ss-theme-white .ss-link:hover {
+  background: #f2f4f7 !important;
 }
 
 .ss-brand {

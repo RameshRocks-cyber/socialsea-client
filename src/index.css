@@ -52,12 +52,14 @@ body.ss-theme-black {
 }
 
 body.ss-theme-white {
-  --ss-theme-accent: #4188bf;
-  --ss-theme-accent-2: #58c2a8;
-  --ss-theme-bg: #071427;
-  --ss-theme-bg-soft: #102540;
-  --ss-theme-border: rgba(124, 176, 205, 0.5);
-  --ss-theme-text: #eaf5ff;
+  --ss-theme-accent: #9f6f4a;
+  --ss-theme-accent-2: #c4955b;
+  --ss-theme-bg: #ffffff;
+  --ss-theme-bg-soft: #f4f6f9;
+  --ss-theme-border: rgba(159, 111, 74, 0.28);
+  --ss-theme-text: #2b1d12;
+  background: #ffffff;
+  color: #2b1d12;
 }
 
 html,
@@ -196,8 +198,8 @@ a {
   padding-top: 0;
 }
 
-/* Global black palette override */
-body {
+/* Global black palette override (default dark mode) */
+body.ss-theme-black {
   --ss-theme-accent: #2e2e2e;
   --ss-theme-accent-2: #3a3a3a;
   --ss-theme-bg: #0a1220;
@@ -206,63 +208,142 @@ body {
   --ss-theme-text: #f7fbff;
 }
 
-body,
-.app-main,
-.app-content,
-.feed-page,
-.reels-page,
-.yt-watch-page,
-.watch-main,
-.watch-side,
-.chat-page,
-.settings-page,
-.profile-page,
-.ss-nav {
+body.ss-theme-black,
+body.ss-theme-black .app-main,
+body.ss-theme-black .app-content,
+body.ss-theme-black .feed-page,
+body.ss-theme-black .reels-page,
+body.ss-theme-black .yt-watch-page,
+body.ss-theme-black .watch-main,
+body.ss-theme-black .watch-side,
+body.ss-theme-black .chat-page,
+body.ss-theme-black .settings-page,
+body.ss-theme-black .profile-page,
+body.ss-theme-black .ss-nav {
   background: #0b0b0b !important;
   background-image: none !important;
   color: #f7fbff !important;
 }
 
-.feed-mode-switch,
-.feed-mode-btn,
-.explore-search-input,
-.yt-chip,
-.watch-action-btn,
-.watch-quality-btn,
-.watch-quality-menu,
-.watch-comment-input-row input,
-.watch-comment-input-row button,
-.reel-action-btn,
-.reel-follow-btn,
-.ss-nav-icon-btn,
-.ss-nav .ss-nav-item,
-.ss-nav .ss-nav-link {
+body.ss-theme-black .feed-mode-switch,
+body.ss-theme-black .feed-mode-btn,
+body.ss-theme-black .explore-search-input,
+body.ss-theme-black .yt-chip,
+body.ss-theme-black .watch-action-btn,
+body.ss-theme-black .watch-quality-btn,
+body.ss-theme-black .watch-quality-menu,
+body.ss-theme-black .watch-comment-input-row input,
+body.ss-theme-black .watch-comment-input-row button,
+body.ss-theme-black .reel-action-btn,
+body.ss-theme-black .reel-follow-btn,
+body.ss-theme-black .ss-nav-icon-btn,
+body.ss-theme-black .ss-nav .ss-nav-item,
+body.ss-theme-black .ss-nav .ss-nav-link {
   background: #1a1a1a !important;
   background-image: none !important;
   color: #f7fbff !important;
   border-color: rgba(0, 0, 0, 0.88) !important;
 }
 
-.feed-mode-btn.is-active,
-.yt-chip.is-active,
-.watch-action-btn.is-active {
+body.ss-theme-black .feed-mode-btn.is-active,
+body.ss-theme-black .yt-chip.is-active,
+body.ss-theme-black .watch-action-btn.is-active {
   background: #2a2a2a !important;
   color: #fff !important;
   border-color: rgba(0, 0, 0, 0.92) !important;
 }
 
-.explore-tile,
-.long-feed-card,
-.yt-home-card,
-.watch-item,
-.watch-comments,
-.reel-frame,
-.post-view-card,
-.settings-section,
-.profile-shortcut-card {
+body.ss-theme-black .explore-tile,
+body.ss-theme-black .long-feed-card,
+body.ss-theme-black .yt-home-card,
+body.ss-theme-black .watch-item,
+body.ss-theme-black .watch-comments,
+body.ss-theme-black .reel-frame,
+body.ss-theme-black .post-view-card,
+body.ss-theme-black .settings-section,
+body.ss-theme-black .profile-shortcut-card {
   background: #111111 !important;
   border-color: rgba(0, 0, 0, 0.9) !important;
   box-shadow: none !important;
+}
+
+/* Light theme overrides */
+body.ss-theme-white,
+body.ss-theme-white .app-main,
+body.ss-theme-white .app-content,
+body.ss-theme-white .feed-page,
+body.ss-theme-white .reels-page,
+body.ss-theme-white .yt-watch-page,
+body.ss-theme-white .watch-main,
+body.ss-theme-white .watch-side,
+body.ss-theme-white .chat-page,
+body.ss-theme-white .settings-page,
+body.ss-theme-white .profile-page,
+body.ss-theme-white .ss-nav {
+  background: #ffffff !important;
+  color: #101622 !important;
+}
+
+body.ss-theme-white .ss-nav,
+body.ss-theme-white .auth-card-new,
+body.ss-theme-white .settings-section,
+body.ss-theme-white .settings-panel,
+body.ss-theme-white .chat-header-menu,
+body.ss-theme-white .chat-bubble,
+body.ss-theme-white .explore-tile,
+body.ss-theme-white .long-feed-card,
+body.ss-theme-white .yt-home-card,
+body.ss-theme-white .watch-main,
+body.ss-theme-white .watch-side,
+body.ss-theme-white .watch-item,
+body.ss-theme-white .watch-comments,
+body.ss-theme-white .reel-frame,
+body.ss-theme-white .post-view-card,
+body.ss-theme-white .profile-shortcut-card {
+  background: #ffffff !important;
+  border-color: rgba(159, 111, 74, 0.28) !important;
+  color: #2b1d12 !important;
+  box-shadow: 0 10px 20px rgba(130, 92, 58, 0.12) !important;
+}
+
+body.ss-theme-white .feed-mode-switch,
+body.ss-theme-white .feed-mode-btn,
+body.ss-theme-white .explore-search-input,
+body.ss-theme-white .yt-chip,
+body.ss-theme-white .watch-action-btn,
+body.ss-theme-white .watch-quality-btn,
+body.ss-theme-white .watch-quality-menu,
+body.ss-theme-white .watch-comment-input-row input,
+body.ss-theme-white .watch-comment-input-row button,
+body.ss-theme-white .reel-action-btn,
+body.ss-theme-white .reel-follow-btn,
+body.ss-theme-white .ss-nav-icon-btn,
+body.ss-theme-white .ss-nav .ss-nav-item,
+body.ss-theme-white .ss-nav .ss-nav-link,
+body.ss-theme-white .auth-primary-btn,
+body.ss-theme-white .auth-secondary-btn,
+body.ss-theme-white .new-chat-btn,
+body.ss-theme-white .call-action,
+body.ss-theme-white .settings-back,
+body.ss-theme-white .settings-panel-head button,
+body.ss-theme-white .settings-select-grid button,
+body.ss-theme-white .watch-later-shortcut,
+body.ss-theme-white .chat-send-btn,
+body.ss-theme-white .mic-fab {
+  background: #ffffff !important;
+  color: #2b1d12 !important;
+  border-color: rgba(159, 111, 74, 0.28) !important;
+  box-shadow: none !important;
+}
+
+body.ss-theme-white .feed-mode-btn.is-active,
+body.ss-theme-white .yt-chip.is-active,
+body.ss-theme-white .watch-action-btn.is-active,
+body.ss-theme-white .settings-page .settings-select-grid button.active,
+body.ss-theme-white .settings-page .settings-theme-mode button.active {
+  background: var(--ss-theme-accent) !important;
+  color: #ffffff !important;
+  border-color: var(--ss-theme-accent) !important;
 }
 
 /* Full-width site layout: remove page-level centered width caps */
@@ -274,8 +355,8 @@ body,
 }
 
 /* Black-only global override (remove blur + color glow) */
-body,
-body.ss-themed {
+body.ss-theme-black,
+body.ss-theme-black.ss-themed {
   --ss-theme-accent: #101010;
   --ss-theme-accent-2: #1a1a1a;
   --ss-theme-bg: #000000;
@@ -284,79 +365,79 @@ body.ss-themed {
   --ss-theme-text: #f5f5f5;
 }
 
-body * {
+body.ss-theme-black * {
   backdrop-filter: none !important;
   filter: none !important;
 }
 
-body,
-.app-main,
-.app-content,
-.auth-screen,
-.feed-page,
-.reels-page,
-.watch-page,
-.yt-watch-page,
-.chat-page,
-.settings-page,
-.profile-page,
-.ss-nav {
+body.ss-theme-black,
+body.ss-theme-black .app-main,
+body.ss-theme-black .app-content,
+body.ss-theme-black .auth-screen,
+body.ss-theme-black .feed-page,
+body.ss-theme-black .reels-page,
+body.ss-theme-black .watch-page,
+body.ss-theme-black .yt-watch-page,
+body.ss-theme-black .chat-page,
+body.ss-theme-black .settings-page,
+body.ss-theme-black .profile-page,
+body.ss-theme-black .ss-nav {
   background: #000 !important;
   background-image: none !important;
   box-shadow: none !important;
 }
 
-.ss-nav,
-.ss-nav * {
+body.ss-theme-black .ss-nav,
+body.ss-theme-black .ss-nav * {
   text-shadow: none !important;
 }
 
-.ss-nav,
-.auth-card-new,
-.settings-section,
-.settings-panel,
-.chat-header-menu,
-.chat-bubble,
-.explore-tile,
-.long-feed-card,
-.yt-home-card,
-.watch-main,
-.watch-side,
-.watch-item,
-.watch-comments,
-.reel-frame,
-.post-view-card,
-.profile-shortcut-card {
+body.ss-theme-black .ss-nav,
+body.ss-theme-black .auth-card-new,
+body.ss-theme-black .settings-section,
+body.ss-theme-black .settings-panel,
+body.ss-theme-black .chat-header-menu,
+body.ss-theme-black .chat-bubble,
+body.ss-theme-black .explore-tile,
+body.ss-theme-black .long-feed-card,
+body.ss-theme-black .yt-home-card,
+body.ss-theme-black .watch-main,
+body.ss-theme-black .watch-side,
+body.ss-theme-black .watch-item,
+body.ss-theme-black .watch-comments,
+body.ss-theme-black .reel-frame,
+body.ss-theme-black .post-view-card,
+body.ss-theme-black .profile-shortcut-card {
   background: #0b0b0b !important;
   background-image: none !important;
   border-color: rgba(255, 255, 255, 0.12) !important;
   box-shadow: none !important;
 }
 
-.feed-mode-switch,
-.feed-mode-btn,
-.explore-search-input,
-.yt-chip,
-.watch-action-btn,
-.watch-quality-btn,
-.watch-quality-menu,
-.watch-comment-input-row input,
-.watch-comment-input-row button,
-.reel-action-btn,
-.reel-follow-btn,
-.ss-nav-icon-btn,
-.ss-nav .ss-nav-item,
-.ss-nav .ss-nav-link,
-.auth-primary-btn,
-.auth-secondary-btn,
-.new-chat-btn,
-.call-action,
-.settings-back,
-.settings-panel-head button,
-.settings-select-grid button,
-.watch-later-shortcut,
-.chat-send-btn,
-.mic-fab {
+body.ss-theme-black .feed-mode-switch,
+body.ss-theme-black .feed-mode-btn,
+body.ss-theme-black .explore-search-input,
+body.ss-theme-black .yt-chip,
+body.ss-theme-black .watch-action-btn,
+body.ss-theme-black .watch-quality-btn,
+body.ss-theme-black .watch-quality-menu,
+body.ss-theme-black .watch-comment-input-row input,
+body.ss-theme-black .watch-comment-input-row button,
+body.ss-theme-black .reel-action-btn,
+body.ss-theme-black .reel-follow-btn,
+body.ss-theme-black .ss-nav-icon-btn,
+body.ss-theme-black .ss-nav .ss-nav-item,
+body.ss-theme-black .ss-nav .ss-nav-link,
+body.ss-theme-black .auth-primary-btn,
+body.ss-theme-black .auth-secondary-btn,
+body.ss-theme-black .new-chat-btn,
+body.ss-theme-black .call-action,
+body.ss-theme-black .settings-back,
+body.ss-theme-black .settings-panel-head button,
+body.ss-theme-black .settings-select-grid button,
+body.ss-theme-black .watch-later-shortcut,
+body.ss-theme-black .chat-send-btn,
+body.ss-theme-black .mic-fab {
   background: #111 !important;
   background-image: none !important;
   color: #f5f5f5 !important;

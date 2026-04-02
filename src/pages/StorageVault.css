@@ -4,6 +4,11 @@
   color: #f5f5f5;
 }
 
+body.ss-theme-white .storage-page {
+  background: #ffffff;
+  color: #2b1d12;
+}
+
 .storage-shell {
   width: min(100%, 960px);
   margin: 0 auto;
@@ -38,6 +43,13 @@
   cursor: pointer;
 }
 
+body.ss-theme-white .storage-top-btn,
+body.ss-theme-white .storage-top-btn.secondary {
+  background: #ffffff;
+  border-color: rgba(159, 111, 74, 0.28);
+  color: #2b1d12;
+}
+
 .storage-top-btn.secondary {
   background: transparent;
   color: #d0d0d0;
@@ -53,6 +65,12 @@
   cursor: pointer;
 }
 
+body.ss-theme-white .storage-back {
+  background: #ffffff;
+  border-color: rgba(159, 111, 74, 0.28);
+  color: #2b1d12;
+}
+
 .storage-top h1 {
   margin: 0;
   font-size: 22px;
@@ -62,6 +80,10 @@
   margin: 6px 0 0;
   color: #b6b6b6;
   font-size: 13px;
+}
+
+body.ss-theme-white .storage-subtitle {
+  color: #7b5c44;
 }
 
 .storage-plans {
@@ -75,6 +97,15 @@
   margin-bottom: 16px;
 }
 
+body.ss-theme-white .storage-plans,
+body.ss-theme-white .storage-billing,
+body.ss-theme-white .storage-uploader {
+  background: #ffffff;
+  border-color: rgba(159, 111, 74, 0.28);
+  color: #2b1d12;
+  box-shadow: 0 10px 20px rgba(130, 92, 58, 0.08);
+}
+
 .storage-plan-header h2 {
   margin: 0 0 6px;
   font-size: 18px;
@@ -84,6 +115,11 @@
   margin: 0;
   color: #b6b6b6;
   font-size: 13px;
+}
+
+body.ss-theme-white .storage-plan-header p,
+body.ss-theme-white .storage-billing-header p {
+  color: #7b5c44;
 }
 
 .storage-plan-grid {
@@ -102,9 +138,26 @@
   gap: 10px;
 }
 
+body.ss-theme-white .storage-plan-card,
+body.ss-theme-white .storage-billing-card,
+body.ss-theme-white .storage-item,
+body.ss-theme-white .storage-doc,
+body.ss-theme-white .storage-doc-panel,
+body.ss-theme-white .storage-doc-notes {
+  background: #ffffff;
+  border-color: rgba(159, 111, 74, 0.28);
+  color: #2b1d12;
+  box-shadow: 0 8px 16px rgba(130, 92, 58, 0.08);
+}
+
 .storage-plan-card.active {
   border-color: #f5f5f5;
   box-shadow: 0 0 0 1px rgba(245, 245, 245, 0.6);
+}
+
+body.ss-theme-white .storage-plan-card.active {
+  border-color: rgba(159, 111, 74, 0.6);
+  box-shadow: 0 0 0 1px rgba(159, 111, 74, 0.25);
 }
 
 .storage-plan-title {
@@ -128,6 +181,12 @@
   font-size: 11px;
 }
 
+body.ss-theme-white .storage-plan-badge {
+  border-color: rgba(159, 111, 74, 0.28);
+  background: #fff7ee;
+  color: #7b5c44;
+}
+
 .storage-plan-copy {
   margin: 0;
   color: #cfcfcf;
@@ -140,6 +199,14 @@
   font-size: 12px;
 }
 
+body.ss-theme-white .storage-plan-copy,
+body.ss-theme-white .storage-plan-detail,
+body.ss-theme-white .storage-billing-note,
+body.ss-theme-white .storage-tip,
+body.ss-theme-white .storage-meta {
+  color: #7b5c44;
+}
+
 .storage-plan-btn {
   border-radius: 999px;
   padding: 8px 14px;
@@ -149,6 +216,16 @@
   font-size: 13px;
   cursor: pointer;
   align-self: flex-start;
+}
+
+body.ss-theme-white .storage-plan-btn,
+body.ss-theme-white .storage-upload-btn,
+body.ss-theme-white .storage-clear-btn,
+body.ss-theme-white .storage-action,
+body.ss-theme-white .storage-doc-btn {
+  background: #ffffff;
+  color: #2b1d12;
+  border-color: rgba(159, 111, 74, 0.28);
 }
 
 .storage-billing {
@@ -208,6 +285,14 @@
   font-size: 13px;
 }
 
+body.ss-theme-white .storage-billing-input,
+body.ss-theme-white .storage-doc-notes input,
+body.ss-theme-white .storage-doc-notes textarea {
+  background: #ffffff;
+  color: #2b1d12;
+  border-color: rgba(159, 111, 74, 0.28);
+}
+
 .storage-billing-row {
   display: flex;
   align-items: center;
@@ -217,9 +302,19 @@
   color: #cfcfcf;
 }
 
+body.ss-theme-white .storage-billing-row,
+body.ss-theme-white .storage-bank-item {
+  color: #7b5c44;
+}
+
 .storage-billing-row strong {
   color: #f5f5f5;
   font-weight: 600;
+}
+
+body.ss-theme-white .storage-billing-row strong,
+body.ss-theme-white .storage-bank-item strong {
+  color: #2b1d12;
 }
 
 .storage-billing-row.total strong {
@@ -257,6 +352,209 @@
   color: #9bdcff;
 }
 
+body.ss-theme-white .storage-billing-status {
+  color: #2f7a57;
+}
+
+.storage-doc {
+  border: 1px solid #252525;
+  border-radius: 16px;
+  padding: 16px;
+  background: #0b0b0b;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.storage-doc-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.storage-doc-header h2 {
+  margin: 0 0 6px;
+  font-size: 18px;
+}
+
+.storage-doc-header p {
+  margin: 0;
+  color: #b6b6b6;
+  font-size: 13px;
+}
+
+.storage-doc-toggle {
+  border-radius: 999px;
+  padding: 8px 14px;
+  border: 1px solid #303030;
+  background: #121212;
+  color: #f5f5f5;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.storage-doc-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  gap: 12px;
+}
+
+.storage-doc-panel {
+  border: 1px solid #2b2b2b;
+  border-radius: 14px;
+  padding: 12px;
+  background: #0f0f0f;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.storage-doc-preview {
+  position: relative;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #141414;
+  min-height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.storage-doc-preview video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #000000;
+}
+
+.storage-doc-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: #bdbdbd;
+  background: rgba(0, 0, 0, 0.4);
+  letter-spacing: 0.3px;
+}
+
+.storage-doc-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.storage-doc-pill {
+  border-radius: 999px;
+  padding: 4px 10px;
+  border: 1px solid #2f2f2f;
+  background: #141414;
+  color: #cfcfcf;
+  font-size: 12px;
+}
+
+.storage-doc-pill.live {
+  border-color: #ff6b6b;
+  color: #ffd5d5;
+  background: rgba(255, 107, 107, 0.12);
+}
+
+.storage-doc-pill.speech {
+  border-color: #5ad2ff;
+  color: #cceeff;
+  background: rgba(90, 210, 255, 0.12);
+}
+
+.storage-doc-pill.ready {
+  border-color: #9df2a5;
+  color: #d6f9dc;
+  background: rgba(157, 242, 165, 0.12);
+}
+
+.storage-doc-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.storage-doc-btn {
+  border-radius: 999px;
+  padding: 8px 14px;
+  border: 1px solid #303030;
+  background: #121212;
+  color: #f5f5f5;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.storage-doc-btn.secondary {
+  background: transparent;
+  color: #d0d0d0;
+}
+
+.storage-doc-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.storage-doc-status {
+  margin: 0;
+  font-size: 12px;
+  color: #9bdcff;
+}
+
+.storage-doc-error {
+  margin: 0;
+  font-size: 12px;
+  color: #ff7a7a;
+}
+
+.storage-doc-notes {
+  border: 1px solid #2b2b2b;
+  border-radius: 14px;
+  padding: 12px;
+  background: #0f0f0f;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.storage-doc-notes label {
+  font-size: 12px;
+  color: #c6c6c6;
+}
+
+.storage-doc-notes input,
+.storage-doc-notes textarea {
+  border-radius: 10px;
+  border: 1px solid #2b2b2b;
+  background: #121212;
+  color: #f5f5f5;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+.storage-doc-notes textarea {
+  resize: vertical;
+  min-height: 160px;
+}
+
+.storage-doc-interim {
+  margin: 0;
+  font-size: 12px;
+  color: #f2d99d;
+}
+
+.storage-doc-hint {
+  margin: 0;
+  font-size: 12px;
+  color: #9a9a9a;
+}
+
 .vault-lock {
   border: 1px solid #252525;
   border-radius: 16px;
@@ -265,6 +563,14 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+
+body.ss-theme-white .vault-lock,
+body.ss-theme-white .vault-card,
+body.ss-theme-white .vault-selected-slot {
+  background: #ffffff;
+  border-color: rgba(159, 111, 74, 0.28);
+  color: #2b1d12;
 }
 
 .vault-lock-header h3 {
@@ -289,6 +595,11 @@
   color: #c6c6c6;
 }
 
+body.ss-theme-white .vault-field label,
+body.ss-theme-white .vault-empty {
+  color: #7b5c44;
+}
+
 .vault-field input {
   border-radius: 10px;
   border: 1px solid #2b2b2b;
@@ -296,6 +607,12 @@
   color: #f5f5f5;
   padding: 10px 12px;
   font-size: 13px;
+}
+
+body.ss-theme-white .vault-field input {
+  background: #ffffff;
+  color: #2b1d12;
+  border-color: rgba(159, 111, 74, 0.28);
 }
 
 .vault-gallery {
@@ -634,4 +951,41 @@
     flex-direction: row;
     justify-content: flex-start;
   }
+
+  .storage-doc-body {
+    grid-template-columns: 1fr;
+  }
+
+  .storage-doc-preview {
+    min-height: 180px;
+  }
+}
+
+/* Light mode: Storage vault extras */
+body.ss-theme-white .storage-preview {
+  background: #ffffff;
+}
+
+body.ss-theme-white .storage-file-icon {
+  background: #f7efe6;
+  color: #7b5c44;
+  border-color: rgba(159, 111, 74, 0.22);
+}
+
+body.ss-theme-white .storage-info p,
+body.ss-theme-white .storage-billing-note,
+body.ss-theme-white .storage-empty,
+body.ss-theme-white .vault-empty,
+body.ss-theme-white .vault-error,
+body.ss-theme-white .storage-error {
+  color: #7b5c44;
+}
+
+body.ss-theme-white .storage-doc-preview {
+  background: #ffffff;
+}
+
+body.ss-theme-white .storage-doc-overlay {
+  color: #7b5c44;
+  background: rgba(255, 255, 255, 0.85);
 }

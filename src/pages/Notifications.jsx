@@ -9,6 +9,8 @@ import "./Notifications.css";
 const EMAIL_REGEX = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
 const FOLLOWING_CACHE_KEY = "socialsea_following_cache_v1";
 const READ_NOTIFICATIONS_KEY = "socialsea_read_notifications_v1";
+const NOTIFICATIONS_CACHE_KEY = "socialsea_notifications_cache_v1";
+const NOTIFICATIONS_CACHE_TTL_MS = 2 * 60 * 1000;
 const isServerNotificationId = (value) => /^\d+$/.test(String(value || "").trim());
 
 const readFollowingCache = () => {
@@ -58,6 +60,31 @@ const readSeenNotificationIds = () => {
 const persistSeenNotificationIds = (setValue) => {
   try {
     localStorage.setItem(READ_NOTIFICATIONS_KEY, JSON.stringify(Array.from(setValue || [])));
+  } catch {
+    // ignore storage errors
+  }
+};
+
+const readNotificationsCache = () => {
+  try {
+    const raw = localStorage.getItem(NOTIFICATIONS_CACHE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    const at = Number(parsed?.at || 0);
+    const items = Array.isArray(parsed?.items) ? parsed.items : [];
+    if (!Number.isFinite(at) || Date.now() - at > NOTIFICATIONS_CACHE_TTL_MS) return [];
+    return items;
+  } catch {
+    return [];
+  }
+};
+
+const writeNotificationsCache = (items) => {
+  try {
+    localStorage.setItem(
+      NOTIFICATIONS_CACHE_KEY,
+      JSON.stringify({ at: Date.now(), items: Array.isArray(items) ? items : [] })
+    );
   } catch {
     // ignore storage errors
   }
@@ -255,8 +282,15 @@ export default function Notifications() {
 
   useEffect(() => {
     let active = true;
+    const cached = readNotificationsCache();
+    const hasCache = cached.length > 0;
+    if (hasCache) {
+      setItems(cached);
+      setLoading(false);
+    }
     const load = async (showLoader = false) => {
-      if (showLoader) setLoading(true);
+      if (showLoader && !hasCache) setLoading(true);
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
       try {
         const fetchFollowRequests = async () => {
           const endpoints = ["/api/follow/requests", "/api/follow/pending-requests"];
@@ -273,7 +307,7 @@ export default function Notifications() {
         };
 
         const [notifResult, followResult] = await Promise.allSettled([
-          api.get("/api/notifications"),
+          api.get("/api/notifications", { params: { limit: 120 } }),
           fetchFollowRequests()
         ]);
 
@@ -287,6 +321,7 @@ export default function Notifications() {
         const merged = mergeFollowRequestsWithNotifications(list, followRequests);
         if (!active) return;
         setItems(merged);
+        writeNotificationsCache(merged);
         setFollowedById((prev) => {
           const next = { ...prev };
           merged.forEach((entry) => {
@@ -327,8 +362,8 @@ export default function Notifications() {
       }
     };
 
-    load(true);
-    const timer = setInterval(() => load(false), 7000);
+    load(!hasCache);
+    const timer = setInterval(() => load(false), 15000);
     return () => {
       active = false;
       clearInterval(timer);

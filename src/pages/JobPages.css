@@ -80,6 +80,45 @@
   margin: 0;
 }
 
+.job-page-subtitle-muted {
+  color: #8f8f8f;
+}
+
+.job-page-contact {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.job-page-contact-item {
+  border: 1px solid #2b2b2b;
+  background: #111;
+  color: #e6e6e6;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.job-page-contact-item:hover {
+  border-color: #3a3a3a;
+}
+
+.job-page-contact-label {
+  color: #9aa1a8;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 10px;
+}
+
+.job-page-contact-value {
+  color: inherit;
+}
+
 .job-search {
   margin-top: 10px;
   display: flex;
@@ -584,3 +623,36 @@
   }
 }
 
+
+/* Light mode: Job pages */
+body.ss-theme-white .job-page {
+  color: #2b1d12;
+  background: #ffffff;
+}
+
+body.ss-theme-white .job-page-avatar {
+  border-color: rgba(159, 111, 74, 0.28);
+  background: #ffffff;
+}
+
+body.ss-theme-white .job-page-edit,
+body.ss-theme-white .job-page-download {
+  background: #ffffff;
+  color: #2b1d12;
+  border-color: rgba(159, 111, 74, 0.28);
+}
+
+body.ss-theme-white .job-page-subtitle,
+body.ss-theme-white .job-page-subtitle-muted {
+  color: #7b5c44;
+}
+
+body.ss-theme-white .job-page-contact-item {
+  background: #ffffff;
+  color: #2b1d12;
+  border-color: rgba(159, 111, 74, 0.28);
+}
+
+body.ss-theme-white .job-page-contact-label {
+  color: #8d6a4a;
+}

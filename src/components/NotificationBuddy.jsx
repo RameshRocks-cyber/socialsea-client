@@ -901,7 +901,7 @@ export default function NotificationBuddy({ enabled = true }) {
       if (document.visibilityState === "hidden") return;
       try {
         const [notifResult, followResult] = await Promise.allSettled([
-          api.get("/api/notifications"),
+          api.get("/api/notifications", { params: { limit: 120 } }),
           fetchFollowRequests()
         ]);
 
