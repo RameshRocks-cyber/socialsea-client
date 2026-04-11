@@ -27,6 +27,7 @@ import {
 import { MdSignLanguage } from "react-icons/md";
 import { Room, RoomEvent, createLocalTracks } from "livekit-client";
 import api from "../api/axios";
+import { pingChatPresence } from "../api/chatPresence";
 import { buildProfilePath } from "../utils/profileRoute";
 import { getApiBaseUrl, toApiUrl } from "../api/baseUrl";
 import { clearAuthStorage } from "../auth";
@@ -6419,7 +6420,7 @@ export default function Chat() {
     const pingPresence = async () => {
       if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
       try {
-        await api.post("/api/chat/presence", null, { suppressAuthRedirect: true, timeout: 4000 });
+        await pingChatPresence({ timeoutMs: 4000 });
       } catch {
         // ignore presence ping failures
       }

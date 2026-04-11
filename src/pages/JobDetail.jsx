@@ -54,6 +54,23 @@ const JobDetail = () => {
   const [notice, setNotice] = useState("");
   const [applications, setApplications] = useState(() => readApplications());
   const viewerEmail = getViewerEmail();
+  const alreadyApplied = useMemo(
+    () => (job?.id ? hasAppliedForJob(applications, job.id, viewerEmail) : false),
+    [applications, job?.id, viewerEmail]
+  );
+
+  useEffect(() => {
+    const refresh = () => setApplications(readApplications());
+    const onStorage = (event) => {
+      if (!event || event.key === APPLICATIONS_KEY) refresh();
+    };
+    window.addEventListener("focus", refresh);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, []);
 
   if (!job) {
     return (
@@ -78,10 +95,6 @@ const JobDetail = () => {
     (hasProfileMatch ? companyProfile.name : "") ||
     "Company";
   const canApply = Boolean(job.id);
-  const alreadyApplied = useMemo(
-    () => hasAppliedForJob(applications, job.id, viewerEmail),
-    [applications, job.id, viewerEmail]
-  );
   const isSaved = savedJobs.includes(job.id);
 
   const toggleSave = () => {
@@ -101,19 +114,6 @@ const JobDetail = () => {
     setNotice(`We will hide ${job.track} jobs in the main list.`);
     setMenuOpen(false);
   };
-
-  useEffect(() => {
-    const refresh = () => setApplications(readApplications());
-    const onStorage = (event) => {
-      if (!event || event.key === APPLICATIONS_KEY) refresh();
-    };
-    window.addEventListener("focus", refresh);
-    window.addEventListener("storage", onStorage);
-    return () => {
-      window.removeEventListener("focus", refresh);
-      window.removeEventListener("storage", onStorage);
-    };
-  }, []);
 
   return (
     <div className="job-detail-page">

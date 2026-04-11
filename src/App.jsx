@@ -59,6 +59,7 @@ import ApplicantProfile from "./pages/ApplicantProfile.jsx";
 import { getUserRole, isAuthenticated } from "./auth";
 import { getApiBaseUrl } from "./api/baseUrl";
 import api from "./api/axios";
+import { pingChatPresence } from "./api/chatPresence";
 import PageErrorBoundary from "./components/PageErrorBoundary";
 import { lazyWithRetry } from "./utils/lazyWithRetry";
 import "./App.css";
@@ -295,13 +296,7 @@ function AppRoutes() {
     const sendPresenceHeartbeat = () => {
       if (!active) return;
       if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
-      api
-        .request({
-          method: "POST",
-          url: "/api/chat/presence",
-          timeout: 6000,
-          suppressAuthRedirect: true
-        })
+      pingChatPresence({ timeoutMs: 6000 })
         .catch(() => {
           // Presence heartbeat should stay silent on transient network issues.
         });

@@ -13,7 +13,6 @@ export default class NotificationBuddyBoundary extends React.Component {
 
   componentDidCatch(error) {
     // Keep the app running even if the buddy throws.
-    // eslint-disable-next-line no-console
     console.error("NotificationBuddy crashed:", error);
   }
 

@@ -93,6 +93,23 @@ const JobApply = () => {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [applications, setApplications] = useState(() => readApplications());
+  const alreadyApplied = useMemo(
+    () => (job?.id ? hasAppliedForJob(applications, job.id, viewerEmail) : false),
+    [applications, job?.id, viewerEmail]
+  );
+
+  useEffect(() => {
+    const refresh = () => setApplications(readApplications());
+    const onStorage = (event) => {
+      if (!event || event.key === APPLICATIONS_KEY) refresh();
+    };
+    window.addEventListener("focus", refresh);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, []);
 
   if (!job) {
     return (
@@ -119,23 +136,6 @@ const JobApply = () => {
     (hasProfileMatch ? companyProfile.name : "") ||
     "Company";
   const canApplyExternally = Boolean(job.applyUrl);
-  const alreadyApplied = useMemo(
-    () => hasAppliedForJob(applications, job.id, viewerEmail),
-    [applications, job.id, viewerEmail]
-  );
-
-  useEffect(() => {
-    const refresh = () => setApplications(readApplications());
-    const onStorage = (event) => {
-      if (!event || event.key === APPLICATIONS_KEY) refresh();
-    };
-    window.addEventListener("focus", refresh);
-    window.addEventListener("storage", onStorage);
-    return () => {
-      window.removeEventListener("focus", refresh);
-      window.removeEventListener("storage", onStorage);
-    };
-  }, []);
 
   const updateField = (key, value) => {
     setForm((prev) => ({ ...prev, [key]: value }));

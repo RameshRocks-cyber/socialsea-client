@@ -6,9 +6,10 @@ export function useAdminNotifications() {
   const { setCount, setItems } = useContext(NotificationContext);
 
   useEffect(() => {
-    connectAdminNotifications((notification) => {
+    const disconnect = connectAdminNotifications((notification) => {
       setItems((prev) => [notification, ...prev]);
       setCount((c) => c + 1);
     });
-  }, []);
+    return () => disconnect?.();
+  }, [setCount, setItems]);
 }

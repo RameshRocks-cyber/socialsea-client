@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getAllJobs } from "../data/jobStore";
 import { buildCompanyId, readCompanyProfile } from "../services/companyProfileStore";
@@ -6,6 +6,7 @@ import { buildProfilePath } from "../utils/profileRoute";
 import "./JobPages.css";
 
 const APPLICATIONS_KEY = "socialsea_job_applications_v1";
+const JOBS_KEY = "socialsea_company_jobs_v1";
 
 const readApplications = () => {
   try {
@@ -35,8 +36,30 @@ const formatDate = (value) => {
 export default function ApplicantInbox() {
   const navigate = useNavigate();
   const profile = useMemo(() => readCompanyProfile(), []);
-  const jobs = useMemo(() => getAllJobs(), []);
-  const applications = useMemo(() => readApplications(), []);
+  const [jobs, setJobs] = useState(() => getAllJobs());
+  const [applications, setApplications] = useState(() => readApplications());
+
+  useEffect(() => {
+    const refresh = () => {
+      setJobs(getAllJobs());
+      setApplications(readApplications());
+    };
+    const onStorage = (event) => {
+      if (!event) {
+        refresh();
+        return;
+      }
+      if (event.key === APPLICATIONS_KEY || event.key === JOBS_KEY) {
+        refresh();
+      }
+    };
+    window.addEventListener("focus", refresh);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, []);
 
   const companyId = profile.companyId || buildCompanyId(profile.name);
   const filtered = companyId

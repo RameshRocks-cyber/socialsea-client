@@ -17,6 +17,7 @@ import {
 import { FaGraduationCap } from "react-icons/fa";
 import api from "../api/axios";
 import { getApiBaseUrl } from "../api/baseUrl";
+import { pingChatPresence } from "../api/chatPresence";
 import "./Navbar.css";
 
 const ITEMS = [
@@ -687,7 +688,7 @@ export default function Navbar() {
     const pingPresence = async () => {
       if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
       try {
-        await api.post("/api/chat/presence", null, { suppressAuthRedirect: true, timeout: 4000 });
+        await pingChatPresence({ timeoutMs: 4000 });
       } catch {
         // ignore presence ping failures
       }
@@ -1651,7 +1652,7 @@ export default function Navbar() {
             const bTime = new Date(b?.createdAt || 0).getTime();
             return bTime - aTime;
           });
-        const emergency = emergencyCandidates.find((item) => !Boolean(item?.read)) || emergencyCandidates[0];
+        const emergency = emergencyCandidates.find((item) => !item?.read) || emergencyCandidates[0];
         if (!emergency) return;
         if (myEmail) {
           if (
@@ -1675,7 +1676,7 @@ export default function Navbar() {
           }
         }
         if (isAlertSuppressed(notifAlertId) || isAlertSuppressed(notifId)) return;
-        if (Boolean(emergency?.read)) return;
+        if (emergency?.read) return;
         if (notifId && notifId === lastEmergencyNotificationIdRef.current) return;
         if (Number.isFinite(createdAtMs) && Date.now() - createdAtMs > 30 * 60 * 1000) return;
 
@@ -2340,7 +2341,7 @@ export default function Navbar() {
       const raw = localStorage.getItem(SOS_SESSION_KEY);
       if (!raw) return false;
       const session = JSON.parse(raw);
-      if (!Boolean(session?.triggeredByCurrentBrowser) || !isSessionActive(session)) return false;
+      if (!session?.triggeredByCurrentBrowser || !isSessionActive(session)) return false;
       const currentKnown = Boolean(myUserId || myEmail);
       if (!currentKnown) return true;
       return matchesCurrentSessionUser(session);

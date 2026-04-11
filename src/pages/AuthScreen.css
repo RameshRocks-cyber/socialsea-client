@@ -298,3 +298,57 @@
     padding: 18px 14px;
   }
 }
+
+/* Light theme: improve contrast on auth screens */
+body.ss-theme-white .auth-brand h1 {
+  color: #1b2433;
+}
+
+body.ss-theme-white .auth-brand p {
+  color: #4b5b6b;
+}
+
+body.ss-theme-white .auth-form-new label {
+  color: #334155;
+}
+
+body.ss-theme-white .auth-form-new input {
+  background: #f3f6fb;
+  color: #1f2937;
+  border-color: rgba(100, 116, 139, 0.35);
+}
+
+body.ss-theme-white .auth-form-new input::placeholder {
+  color: #64748b;
+}
+
+body.ss-theme-white .auth-password-toggle {
+  background: #eef2f7;
+  color: #0f172a;
+  border-color: rgba(100, 116, 139, 0.35);
+}
+
+body.ss-theme-white .auth-forgot-link,
+body.ss-theme-white .auth-link-btn {
+  color: #1d4ed8;
+}
+
+body.ss-theme-white .auth-foot {
+  color: #475569;
+}
+
+body.ss-theme-white .auth-foot a {
+  color: #1d4ed8;
+}
+
+body.ss-theme-white .auth-error {
+  color: #c2410c;
+}
+
+body.ss-theme-white .auth-success {
+  color: #15803d;
+}
+
+body.ss-theme-white .auth-debug-otp {
+  color: #0369a1;
+}
