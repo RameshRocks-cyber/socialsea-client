@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import api from "../api/axios";
 import { loginWithPassword, registerWithPassword } from "../api/auth";
 import { clearAuthStorage } from "../auth";
+import { recordAccountHistoryEntry } from "../services/activityStore";
 import { buildProfilePath, persistProfileIdentity } from "../utils/profileRoute";
 import "./AuthScreen.css";
 
@@ -78,6 +79,11 @@ export default function Login() {
       const profileRes = await api.get("/api/profile/me");
       const profile = profileRes?.data || {};
       persistProfileIdentity(profile);
+      recordAccountHistoryEntry({
+        action: "Signed in",
+        detail: profile?.email || profile?.username || String(userId || "User"),
+        source: "login"
+      });
       const completed =
         Boolean(profile?.profileCompleted) ||
         Boolean(String(profile?.name || "").trim()) ||
@@ -88,6 +94,11 @@ export default function Login() {
         return;
       }
     } catch {
+      recordAccountHistoryEntry({
+        action: "Signed in",
+        detail: String(userId || "User"),
+        source: "login"
+      });
       persistAuthValue("profileCompleted", "false");
     }
     navigate("/profile-setup", { replace: true });

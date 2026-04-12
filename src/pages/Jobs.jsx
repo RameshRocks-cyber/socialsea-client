@@ -1,10 +1,14 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { getAllJobs } from "../data/jobStore";
+import { scoreJobForResume, buildResumeMatchProfile } from "../services/jobMatching";
+import { recordSearchActivity } from "../services/activityStore";
 import { readCompanyProfile } from "../services/companyProfileStore";
+import { loadResume, readResumeSnapshot } from "../services/resumeStorage";
 import "./JobPages.css";
 
 const HIDDEN_TYPES_KEY = "hiddenJobTypes";
+const RESUME_KEY = "socialsea_resume_snapshot_v1";
 
 const parseList = (key) => {
   try {
@@ -23,13 +27,47 @@ const Jobs = () => {
   const [hiddenTypes] = useState(() => parseList(HIDDEN_TYPES_KEY));
   const normalizedQuery = searchQuery.trim().toLowerCase();
   const companyProfile = useMemo(() => readCompanyProfile(), []);
+  const [resume, setResume] = useState(() => readResumeSnapshot());
+  const [loadingResume, setLoadingResume] = useState(true);
 
   const allJobs = getAllJobs();
   const visibleJobs = allJobs.filter((job) => !hiddenTypes.includes(job.track));
 
+  useEffect(() => {
+    let mounted = true;
+
+    const syncResume = async () => {
+      const nextResume = await loadResume();
+      if (!mounted) return;
+      setResume(nextResume);
+      setLoadingResume(false);
+    };
+
+    const handleStorage = (event) => {
+      if (!event || event.key === RESUME_KEY) {
+        setResume(readResumeSnapshot());
+      }
+    };
+
+    syncResume();
+    window.addEventListener("storage", handleStorage);
+    return () => {
+      mounted = false;
+      window.removeEventListener("storage", handleStorage);
+    };
+  }, []);
+
+  const resumeProfile = useMemo(() => buildResumeMatchProfile(resume), [resume]);
+
+  const scoredVisibleJobs = useMemo(
+    () => visibleJobs.map((job) => scoreJobForResume(job, resumeProfile)),
+    [visibleJobs, resumeProfile]
+  );
+
   const filteredJobs = useMemo(() => {
-    if (!normalizedQuery) return visibleJobs;
-    return visibleJobs.filter((job) => {
+    if (!normalizedQuery) return scoredVisibleJobs;
+    return scoredVisibleJobs.filter((item) => {
+      const job = item.job;
       const profileMatch =
         Boolean(companyProfile.companyId) &&
         companyProfile.companyId === job.companyId &&
@@ -48,11 +86,12 @@ const Jobs = () => {
         .toLowerCase();
       return haystack.includes(normalizedQuery);
     });
-  }, [visibleJobs, normalizedQuery, companyProfile]);
+  }, [scoredVisibleJobs, normalizedQuery, companyProfile]);
 
   const applySearch = (event) => {
     event.preventDefault();
     setSearchQuery(searchInput);
+    recordSearchActivity({ query: searchInput, source: "jobs" });
   };
 
   const openJob = (jobId) => {
@@ -84,7 +123,8 @@ const Jobs = () => {
         {filteredJobs.length === 0 ? (
           <p className="job-empty">No jobs available yet.</p>
         ) : (
-          filteredJobs.map((job) => {
+          filteredJobs.map((item) => {
+            const job = item.job;
             const profileMatch =
               Boolean(companyProfile.companyId) &&
               companyProfile.companyId === job.companyId &&
@@ -110,6 +150,17 @@ const Jobs = () => {
                 <div className="job-list-meta">
                   <span>Salary: {job.salary}</span>
                   <span>Experience: {job.experience}</span>
+                </div>
+                <div className="job-pill-row">
+                  <span className="job-pill job-pill-accent">
+                    {item.matchPercentage}% match
+                  </span>
+                  <span className="job-pill">
+                    {item.chancePercentage}% chance
+                  </span>
+                  {!loadingResume && (
+                    <span className="job-pill">{item.resumeStrengthPercentage}% profile strength</span>
+                  )}
                 </div>
                 <div className="job-list-skills">
                   Required skills: {(job.skills || []).join(", ")}

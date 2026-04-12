@@ -2,8 +2,14 @@
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   FiArrowLeft,
+  FiBellOff,
   FiCamera,
   FiChevronDown,
+  FiChevronRight,
+  FiClock,
+  FiFileText,
+  FiImage,
+  FiLink,
   FiMic,
   FiMicOff,
   FiMonitor,
@@ -16,6 +22,7 @@ import {
   FiMessageCircle,
   FiSend,
   FiSmile,
+  FiSearch,
   FiUsers,
   FiUserPlus,
   FiVolume2,
@@ -185,6 +192,9 @@ const CHAT_CUSTOM_STICKERS_KEY = "socialsea_chat_custom_stickers_v1";
 const CHAT_TRANSLATOR_KEY = "socialsea_chat_translator_v1";
 const CHAT_AUTOSPEAK_KEY = "socialsea_chat_autospeak_v1";
 const CHAT_WALLPAPER_KEY = "socialsea_chat_wallpaper_v1";
+const CHAT_MUTED_CONTACTS_KEY = "socialsea_chat_muted_contacts_v1";
+const CHAT_DISAPPEARING_KEY = "socialsea_chat_disappearing_v1";
+const CHAT_MESSAGE_EXPIRY_KEY = "socialsea_chat_message_expiry_v1";
 const BLOCKED_USERS_KEY = "socialsea_blocked_users_v1";
 const CHAT_SHARE_DRAFT_KEY = "socialsea_chat_share_draft_v1";
 const CHAT_DISCOVERY_CACHE_KEY = "socialsea_discovery_contacts_v1";
@@ -201,6 +211,12 @@ const SIGN_LIVE_DEBOUNCE_MS = 2200;
 const SIGN_LIVE_MAX_BUFFER_CHARS = 320;
 const SIGN_LIVE_CONTINUOUS_COOLDOWN_MS = 1400;
 const SIGN_SEQUENCE_FRAME_WINDOW = 18;
+const DISAPPEARING_MESSAGE_OPTIONS = [
+  { value: "0", label: "Off", ms: 0 },
+  { value: "86400000", label: "24 hours", ms: 24 * 60 * 60 * 1000 },
+  { value: "604800000", label: "7 days", ms: 7 * 24 * 60 * 60 * 1000 },
+  { value: "7776000000", label: "90 days", ms: 90 * 24 * 60 * 60 * 1000 }
+];
 const BASE_SPEECH_LANG_OPTIONS = [
   "en-IN", "en-US", "en-GB", "en-AU",
   "te-IN", "hi-IN", "ta-IN", "kn-IN", "ml-IN", "mr-IN", "bn-IN", "gu-IN", "pa-IN", "ur-IN", "or-IN",
@@ -456,6 +472,38 @@ const trimReplyPreview = (value, maxLen = 72) => {
   if (!text) return "";
   if (text.length <= maxLen) return text;
   return `${text.slice(0, Math.max(1, maxLen - 1)).trimEnd()}...`;
+};
+
+const CHAT_LINK_REGEX = /((?:https?:\/\/|www\.)[^\s<]+)/gi;
+
+const normalizeChatLinkHref = (value) => {
+  const raw = String(value || "").trim().replace(/[),.!?]+$/, "");
+  if (!raw) return "";
+  const candidate = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  try {
+    return new URL(candidate).toString();
+  } catch {
+    return "";
+  }
+};
+
+const extractLinksFromMessageText = (value) => {
+  const text = String(value || "");
+  if (!text) return [];
+  const matches = text.match(CHAT_LINK_REGEX) || [];
+  const seen = new Set();
+  return matches
+    .map((match) => {
+      const clean = String(match || "").trim().replace(/[),.!?]+$/, "");
+      const href = normalizeChatLinkHref(clean);
+      if (!href || seen.has(href)) return null;
+      seen.add(href);
+      return {
+        href,
+        label: clean
+      };
+    })
+    .filter(Boolean);
 };
 
 const extractReelShare = (value) => {
@@ -866,6 +914,7 @@ export default function Chat() {
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
   const [newChatOpen, setNewChatOpen] = useState(false);
+  const [showSidebarMenu, setShowSidebarMenu] = useState(false);
   const [newChatQuery, setNewChatQuery] = useState("");
   const [searchingUsers, setSearchingUsers] = useState(false);
   const [searchUsers, setSearchUsers] = useState([]);
@@ -932,7 +981,37 @@ export default function Chat() {
   const [showHeaderMenu, setShowHeaderMenu] = useState(false);
   const [showCallMenu, setShowCallMenu] = useState(false);
   const [showWallpaperPanel, setShowWallpaperPanel] = useState(false);
+  const [activeUtilityPanel, setActiveUtilityPanel] = useState("");
+  const [chatSearchQuery, setChatSearchQuery] = useState("");
+  const [highlightedMessageId, setHighlightedMessageId] = useState("");
   const [showBackButton] = useState(true);
+  const [mutedChatsById, setMutedChatsById] = useState(() => {
+    try {
+      const raw = localStorage.getItem(CHAT_MUTED_CONTACTS_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  });
+  const [disappearingByContact, setDisappearingByContact] = useState(() => {
+    try {
+      const raw = localStorage.getItem(CHAT_DISAPPEARING_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  });
+  const [messageExpiryById, setMessageExpiryById] = useState(() => {
+    try {
+      const raw = localStorage.getItem(CHAT_MESSAGE_EXPIRY_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  });
   const [translatorEnabled, setTranslatorEnabled] = useState(() => {
     try {
       const raw = localStorage.getItem(CHAT_TRANSLATOR_KEY);
@@ -1357,7 +1436,11 @@ export default function Chat() {
   const headerMenuWrapRef = useRef(null);
   const headerMenuRef = useRef(null);
   const callMenuRef = useRef(null);
+  const utilityPanelRef = useRef(null);
   const wallpaperPanelRef = useRef(null);
+  const chatSearchInputRef = useRef(null);
+  const sidebarMenuWrapRef = useRef(null);
+  const sidebarMenuRef = useRef(null);
   const translationCacheRef = useRef({});
   const threadRef = useRef(null);
   const shouldStickToBottomRef = useRef(true);
@@ -1365,6 +1448,7 @@ export default function Chat() {
   const scrollRafRef = useRef(0);
   const openScrollPlanRef = useRef({ contactId: "", untilMs: 0, timers: [] });
   const showScrollDownRef = useRef(false);
+  const highlightTimerRef = useRef(null);
   const spokenSignMessageIdsRef = useRef(new Set());
   const autoSpeakBootstrappedByContactRef = useRef({});
   const signApiUnavailableRef = useRef(false);
@@ -1520,6 +1604,30 @@ export default function Chat() {
       // ignore
     }
   }, [chatWallpaper]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(CHAT_MUTED_CONTACTS_KEY, JSON.stringify(mutedChatsById));
+    } catch {
+      // ignore
+    }
+  }, [mutedChatsById]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(CHAT_DISAPPEARING_KEY, JSON.stringify(disappearingByContact));
+    } catch {
+      // ignore
+    }
+  }, [disappearingByContact]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(CHAT_MESSAGE_EXPIRY_KEY, JSON.stringify(messageExpiryById));
+    } catch {
+      // ignore
+    }
+  }, [messageExpiryById]);
 
   const selectChatWallpaperPreset = (presetId) => {
     const picked = CHAT_WALLPAPER_PRESETS.find((item) => item.id === presetId);
@@ -2005,6 +2113,57 @@ export default function Chat() {
     const timer = setInterval(() => setNowTick(Date.now()), 30000);
     return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => () => {
+    if (highlightTimerRef.current) {
+      clearTimeout(highlightTimerRef.current);
+      highlightTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeUtilityPanel !== "search") return;
+    const timer = setTimeout(() => {
+      chatSearchInputRef.current?.focus();
+      chatSearchInputRef.current?.select?.();
+    }, 40);
+    return () => clearTimeout(timer);
+  }, [activeUtilityPanel]);
+
+  useEffect(() => {
+    const now = Date.now();
+    const expiredIds = Object.entries(messageExpiryById)
+      .filter(([, meta]) => Number(meta?.expiresAt || 0) > 0 && Number(meta.expiresAt) <= now)
+      .map(([messageId]) => String(messageId));
+    if (!expiredIds.length) return;
+    const expiredSet = new Set(expiredIds);
+    setMessageExpiryById((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      expiredIds.forEach((messageId) => {
+        if (Object.prototype.hasOwnProperty.call(next, messageId)) {
+          delete next[messageId];
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+    setMessagesByContact((prev) => {
+      let changed = false;
+      const next = Object.fromEntries(
+        Object.entries(prev).map(([contactId, list]) => {
+          const filtered = Array.isArray(list)
+            ? list.filter((message) => !expiredSet.has(String(message?.id || "")))
+            : list;
+          if (Array.isArray(list) && filtered.length !== list.length) changed = true;
+          return [contactId, filtered];
+        })
+      );
+      if (!changed) return prev;
+      messagesByContactRef.current = next;
+      return next;
+    });
+  }, [messageExpiryById, nowTick]);
 
   useEffect(() => {
     const refreshStories = () => {
@@ -2578,6 +2737,10 @@ export default function Chat() {
   };
 
   const shouldNotifyForMessage = (message, contactId = "") => {
+    const contactKey = String(contactId || "");
+    if (contactKey && mutedChatsById[contactKey]) {
+      return false;
+    }
     const key = buildMessageAlertKey(message, contactId);
     if (!key) return true;
     const now = Date.now();
@@ -4895,6 +5058,12 @@ export default function Chat() {
     setCallError("");
   };
 
+  const openNewGroup = () => {
+    setGroupInviteIds([]);
+    setGroupInviteOpen(true);
+    setCallError("");
+  };
+
   const toggleGroupInvite = (id) => {
     const key = String(id || "");
     if (!key) return;
@@ -4923,6 +5092,9 @@ export default function Chat() {
       setCallError("Select at least one participant");
       return;
     }
+    const normalizedActiveId = String(activeContactId || "").trim();
+    const anchorContactId =
+      normalizedActiveId && selected.includes(normalizedActiveId) ? normalizedActiveId : selected[0] || normalizedActiveId;
     const currentPeerId = callStateRef.current.phase !== "idle" ? String(callStateRef.current.peerId || "") : "";
     const members = Array.from(new Set([String(myUserId || ""), ...selected, currentPeerId].filter(Boolean))).slice(0, GROUP_CALL_MAX);
     const roomId = buildGroupRoomId();
@@ -4938,6 +5110,10 @@ export default function Chat() {
       peerName: "Group Call",
       initiatedByMe: true
     });
+
+    if (!isConversationRoute && anchorContactId) {
+      navigate(`/chat/${anchorContactId}`);
+    }
 
     try {
       const stream = localStreamRef.current || await ensureLocalStream("video");
@@ -6475,8 +6651,8 @@ export default function Chat() {
         const wsBase = base.replace(/\/api\/?$/, "") || base;
 
         const wsOrigin = wsBase.startsWith("ws") ? wsBase : wsBase.replace(/^http/i, "ws");
-        const transport = String(import.meta.env?.VITE_WS_TRANSPORT || "").toLowerCase();
-        const useSockJS = transport === "sockjs" || (!transport && !isLocalRuntime());
+        const transport = String(import.meta.env?.VITE_WS_TRANSPORT || "").trim().toLowerCase();
+        const useSockJS = !["ws", "websocket", "native"].includes(transport);
         const client = new Client({
           ...(useSockJS
             ? { webSocketFactory: () => new SockJS(`${wsBase}/ws?token=${encodeURIComponent(token)}`) }
@@ -7116,10 +7292,165 @@ export default function Chat() {
 
   const activeContact = contacts.find((c) => c.id === activeContactId) || null;
   const activeContactBlocked = activeContact ? isBlockedContact(activeContact) : false;
-  const activeMessages = messagesByContact[activeContactId] || [];
+  const activeContactKey = String(activeContactId || "");
+  const activeMuted = Boolean(mutedChatsById[activeContactKey]);
+  const activeDisappearingValue = String(disappearingByContact[activeContactKey] || "0");
+  const activeDisappearingMs = Math.max(0, Number(activeDisappearingValue) || 0);
+  const activeMessages = useMemo(() => {
+    const baseList = Array.isArray(messagesByContact[activeContactKey]) ? messagesByContact[activeContactKey] : [];
+    if (!baseList.length) return [];
+    const now = nowTick;
+    return baseList
+      .map((message) => {
+        const messageId = String(message?.id || "");
+        const directExpiresAt = toEpochMs(message?.expiresAt || message?.expires || message?.expiry || 0);
+        const localMeta = messageId ? messageExpiryById[messageId] : null;
+        const localExpiresAt =
+          localMeta && (!localMeta?.contactId || String(localMeta.contactId) === activeContactKey)
+            ? Number(localMeta?.expiresAt || 0)
+            : 0;
+        const expiresAt = directExpiresAt || localExpiresAt;
+        if (!expiresAt) return message;
+        const normalizedExpiresAt = new Date(expiresAt).toISOString();
+        return String(message?.expiresAt || "") === normalizedExpiresAt
+          ? message
+          : { ...message, expiresAt: normalizedExpiresAt };
+      })
+      .filter((message) => {
+        const expiresAt = toEpochMs(message?.expiresAt || message?.expires || message?.expiry || 0);
+        return !expiresAt || expiresAt > now;
+      });
+  }, [messagesByContact, activeContactKey, messageExpiryById, nowTick]);
   const activeCallHistory = Array.isArray(callHistoryByContact[activeContactId])
     ? callHistoryByContact[activeContactId]
     : [];
+
+  const setActiveContactMuted = (nextValue) => {
+    if (!activeContactKey) return;
+    setMutedChatsById((prev) => {
+      const next = { ...prev };
+      if (nextValue) next[activeContactKey] = true;
+      else delete next[activeContactKey];
+      return next;
+    });
+  };
+
+  const setActiveDisappearingSetting = (nextValue) => {
+    if (!activeContactKey) return;
+    const numericValue = Math.max(0, Number(nextValue) || 0);
+    setDisappearingByContact((prev) => {
+      const next = { ...prev };
+      if (numericValue > 0) next[activeContactKey] = String(numericValue);
+      else delete next[activeContactKey];
+      return next;
+    });
+  };
+
+  const upsertMessageExpiry = (messageId, expiresAtMs, contactId = activeContactKey) => {
+    const key = String(messageId || "");
+    const contactKey = String(contactId || "");
+    const nextExpiresAt = Number(expiresAtMs || 0);
+    if (!key || !contactKey || !nextExpiresAt) return;
+    setMessageExpiryById((prev) => {
+      const current = prev?.[key];
+      if (
+        current &&
+        Number(current?.expiresAt || 0) === nextExpiresAt &&
+        String(current?.contactId || "") === contactKey
+      ) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [key]: {
+          contactId: contactKey,
+          expiresAt: nextExpiresAt
+        }
+      };
+    });
+  };
+
+  const buildActiveDisappearingExpiryMs = () =>
+    activeDisappearingMs > 0 ? Date.now() + activeDisappearingMs : 0;
+
+  const getMessagePreviewLabel = (message) => {
+    if (!message) return "Message";
+    const decoded = decodeSignAssistText(message?.text || "");
+    const plainText = String(decoded?.text || message?.text || "").replace(/\s+/g, " ").trim();
+    const mediaType = String(message?.mediaType || (message?.audioUrl ? "audio" : "")).toLowerCase();
+    if (message?.audioUrl || mediaType === "audio") return "Voice message";
+    if (mediaType === "image") return message?.fileName || "Photo";
+    if (mediaType === "video") return message?.fileName || "Video";
+    if (message?.mediaUrl) return message?.fileName || "Document";
+    return plainText || "Message";
+  };
+
+  const mediaPanelItems = useMemo(
+    () =>
+      [...activeMessages]
+        .filter((message) => {
+          const mediaType = String(message?.mediaType || (message?.audioUrl ? "audio" : "")).toLowerCase();
+          return Boolean(message?.audioUrl || ["image", "video", "audio"].includes(mediaType));
+        })
+        .reverse()
+        .slice(0, 60),
+    [activeMessages]
+  );
+
+  const linkDocumentItems = useMemo(() => {
+    const items = [];
+    [...activeMessages].reverse().forEach((message) => {
+      const messageId = String(message?.id || "");
+      const textLinks = extractLinksFromMessageText(message?.text || "");
+      textLinks.forEach((link, index) => {
+        items.push({
+          id: `${messageId}_link_${index}`,
+          type: "link",
+          href: link.href,
+          label: link.label,
+          message
+        });
+      });
+      const mediaType = String(message?.mediaType || (message?.audioUrl ? "audio" : "")).toLowerCase();
+      const hasDocument =
+        Boolean(message?.mediaUrl) &&
+        !["image", "video", "audio"].includes(mediaType);
+      if (hasDocument) {
+        const rawDocumentUrl = String(message?.mediaUrl || "").trim();
+        const documentHref = /^(blob:|data:|https?:\/\/)/i.test(rawDocumentUrl) ? rawDocumentUrl : toApiUrl(rawDocumentUrl);
+        items.push({
+          id: `${messageId}_document`,
+          type: "document",
+          href: documentHref,
+          label: String(message?.fileName || "").trim() || "Document",
+          message
+        });
+      }
+    });
+    return items.slice(0, 80);
+  }, [activeMessages]);
+
+  const normalizedChatSearchQuery = chatSearchQuery.trim().toLowerCase();
+  const searchPanelItems = useMemo(() => {
+    if (!normalizedChatSearchQuery) return [];
+    return [...activeMessages]
+      .reverse()
+      .filter((message) => {
+        const preview = getMessagePreviewLabel(message).toLowerCase();
+        const fileName = String(message?.fileName || "").toLowerCase();
+        const links = extractLinksFromMessageText(message?.text || "");
+        return (
+          preview.includes(normalizedChatSearchQuery) ||
+          fileName.includes(normalizedChatSearchQuery) ||
+          links.some(
+            (link) =>
+              String(link?.label || "").toLowerCase().includes(normalizedChatSearchQuery) ||
+              String(link?.href || "").toLowerCase().includes(normalizedChatSearchQuery)
+          )
+        );
+      })
+      .slice(0, 60);
+  }, [activeMessages, normalizedChatSearchQuery]);
 
   const clampFutureTimestamp = (ts) => {
     if (!Number.isFinite(ts) || ts <= 0) return 0;
@@ -8090,6 +8421,8 @@ export default function Chat() {
       previewText = cleanText,
       onSent = null
     } = options;
+    const expiresAtMs = buildActiveDisappearingExpiryMs();
+    const expiresAtIso = expiresAtMs ? new Date(expiresAtMs).toISOString() : "";
     const useFallback = chatFallbackMode || isChatApiDisabled();
 
     const emitLocalPacket = (payload) => {
@@ -8127,6 +8460,7 @@ export default function Chat() {
           receiverId: Number(activeContactId) || null,
           text: cleanText,
           speechTyped: false,
+          expiresAt: expiresAtIso || undefined,
           createdAt: new Date().toISOString(),
           mine: true
         }, activeContactId);
@@ -8143,9 +8477,11 @@ export default function Chat() {
           senderId: mine.senderId || Number(myUserId) || myUserId,
           receiverId: mine.receiverId || Number(activeContactId) || activeContactId,
           text: cleanText,
+          expiresAt: expiresAtIso || undefined,
           createdAt: mine.createdAt || new Date().toISOString(),
           senderEmail: myEmail || ""
         });
+        if (expiresAtMs) upsertMessageExpiry(mine.id, expiresAtMs, activeContactId);
         shouldStickToBottomRef.current = true;
         setTimeout(() => scrollThreadToBottom("smooth"), 50);
         if (typeof onSent === "function") onSent();
@@ -8165,6 +8501,7 @@ export default function Chat() {
           ...(res?.data || {}),
           text: cleanText,
           speechTyped: false,
+          expiresAt: expiresAtIso || undefined,
           mine: true,
           senderId: myUserId,
           receiverId: activeContactId,
@@ -8172,6 +8509,7 @@ export default function Chat() {
         },
         activeContactId
       );
+      if (expiresAtMs) upsertMessageExpiry(sent.id, expiresAtMs, activeContactId);
       setMessagesByContact((prev) => ({
         ...prev,
         [activeContactId]: [...(prev[activeContactId] || []), sent]
@@ -8182,6 +8520,7 @@ export default function Chat() {
         senderId: sent.senderId || Number(myUserId) || myUserId,
         receiverId: sent.receiverId || Number(activeContactId) || activeContactId,
         text: cleanText,
+        expiresAt: expiresAtIso || undefined,
         createdAt: sent.createdAt || new Date().toISOString(),
         senderEmail: myEmail || ""
       });
@@ -8852,6 +9191,8 @@ export default function Chat() {
     if (!file || !activeContactId) return;
     const type = String(file.type || "").toLowerCase();
     const forcedKind = String(options?.forcedKind || "").toLowerCase();
+    const expiresAtMs = buildActiveDisappearingExpiryMs();
+    const expiresAtIso = expiresAtMs ? new Date(expiresAtMs).toISOString() : "";
     const kind = forcedKind || (
       type.startsWith("image/")
         ? "image"
@@ -8879,9 +9220,11 @@ export default function Chat() {
       mediaUrl: URL.createObjectURL(file),
       mediaType: kind,
       fileName: file.name || "",
+      expiresAt: expiresAtIso || undefined,
       createdAt: new Date().toISOString(),
       mine: true
     }, activeContactId);
+    if (expiresAtMs) upsertMessageExpiry(localTempId, expiresAtMs, activeContactId);
 
     setMessagesByContact((prev) => ({
       ...prev,
@@ -8910,7 +9253,11 @@ export default function Chat() {
         data: form,
         headers: { "Content-Type": "multipart/form-data" }
       });
-      const sent = normalizeMessage({ ...(res?.data || {}), mine: true }, activeContactId);
+      const sent = normalizeMessage(
+        { ...(res?.data || {}), expiresAt: expiresAtIso || undefined, mine: true },
+        activeContactId
+      );
+      if (expiresAtMs) upsertMessageExpiry(sent.id, expiresAtMs, activeContactId);
       setMessagesByContact((prev) => ({
         ...prev,
         [activeContactId]: (prev[activeContactId] || []).map((m) => String(m?.id) === localTempId ? sent : m)
@@ -9700,22 +10047,36 @@ export default function Chat() {
     setShowHeaderMenu(false);
     setShowCallMenu(false);
     setShowWallpaperPanel(false);
+    setActiveUtilityPanel("");
+    setChatSearchQuery("");
+    setHighlightedMessageId("");
     setReplyDraft(null);
   }, [activeContactId]);
+
+  useEffect(() => {
+    setShowSidebarMenu(false);
+  }, [location.pathname]);
 
   useEffect(() => {
     const onDocClick = (event) => {
       const wrap = headerMenuWrapRef.current;
       const panel = headerMenuRef.current;
       const callMenu = callMenuRef.current;
+      const utilityPanel = utilityPanelRef.current;
       const wallpaperPanel = wallpaperPanelRef.current;
+      const sidebarWrap = sidebarMenuWrapRef.current;
+      const sidebarMenu = sidebarMenuRef.current;
       if (wrap?.contains(event.target)) return;
       if (panel?.contains(event.target)) return;
       if (callMenu?.contains(event.target)) return;
+      if (utilityPanel?.contains(event.target)) return;
       if (wallpaperPanel?.contains(event.target)) return;
+      if (sidebarWrap?.contains(event.target)) return;
+      if (sidebarMenu?.contains(event.target)) return;
       setShowHeaderMenu(false);
       setShowCallMenu(false);
       setShowWallpaperPanel(false);
+      setShowSidebarMenu(false);
     };
     document.addEventListener("mousedown", onDocClick);
     return () => document.removeEventListener("mousedown", onDocClick);
@@ -9785,23 +10146,9 @@ export default function Chat() {
       );
     };
     const fetchReelById = async (id) => {
-      try {
-        const direct = await requestChatObject({
-          endpoints: [
-            `/api/reels/${encodeURIComponent(id)}`,
-            `/reels/${encodeURIComponent(id)}`,
-            `/api/feed/${encodeURIComponent(id)}`,
-            `/feed/${encodeURIComponent(id)}`
-          ]
-        });
-        if (direct && getReelIdValue(direct) === id) return direct;
-      } catch {
-        // ignore direct lookup failures
-      }
-
       const listEndpoints = [
-        ["/api/reels", "/reels"],
-        ["/api/feed", "/feed"],
+        ["/api/reels"],
+        ["/api/feed"],
         ["/api/profile/me/posts"],
         ["/api/profile/posts"]
       ];
@@ -10085,6 +10432,26 @@ export default function Chat() {
     }
   }, []);
 
+  const focusThreadMessage = (messageId) => {
+    const key = String(messageId || "");
+    if (!key) return;
+    setActiveUtilityPanel("");
+    requestAnimationFrame(() => {
+      const thread = threadRef.current;
+      if (!thread?.querySelectorAll) return;
+      const target = Array.from(thread.querySelectorAll("[data-chat-msg-id]"))
+        .find((node) => String(node?.getAttribute?.("data-chat-msg-id") || "") === key);
+      if (!target) return;
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+      setHighlightedMessageId(key);
+      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+      highlightTimerRef.current = setTimeout(() => {
+        setHighlightedMessageId("");
+        highlightTimerRef.current = null;
+      }, 1800);
+    });
+  };
+
   const openBubbleMenu = (event, item) => {
     event.preventDefault();
     setBubbleMenu({
@@ -10355,22 +10722,107 @@ export default function Chat() {
           Return to call {pipActive ? "(PiP closed)" : ""}
         </button>
       )}
+
+      {groupInviteOpen && (
+        <div className="group-call-overlay" role="dialog" aria-label="Start group call">
+          <div className="group-call-card">
+            <h3>Start group video call</h3>
+            <p>Select up to {GROUP_CALL_MAX} people</p>
+            <div className="group-call-list">
+              {contacts
+                .filter((c) => String(c?.id || "") !== String(myUserId))
+                .map((c) => {
+                  const checked = groupInviteIds.includes(String(c.id));
+                  const displayName = getContactDisplayName(c);
+                  return (
+                    <label key={c.id} className="group-call-item">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleGroupInvite(c.id)}
+                      />
+                      <span>{displayName}</span>
+                    </label>
+                  );
+                })}
+              {contacts.length === 0 && <p className="group-call-empty">No contacts available.</p>}
+            </div>
+            <div className="group-call-actions">
+              <button
+                type="button"
+                className="group-call-start"
+                onClick={groupCallActive ? addPeopleToGroupCall : startGroupCall}
+              >
+                {groupCallActive ? "Add people" : "Start call"}
+              </button>
+              <button type="button" className="group-call-cancel" onClick={() => setGroupInviteOpen(false)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {!isConversationRoute && !isRequestsRoute && (
         <aside className="chat-sidebar">
         <div className="chat-sidebar-head">
           <h2>Messages</h2>
-          <div className="chat-sidebar-actions">
+          <div className="chat-sidebar-actions" ref={sidebarMenuWrapRef}>
             <button
               type="button"
-              className="chat-requests-link"
-              onClick={() => navigate("/chat/requests")}
+              className="chat-sidebar-menu-btn"
+              onClick={() => setShowSidebarMenu((prev) => !prev)}
+              aria-haspopup="menu"
+              aria-expanded={showSidebarMenu}
+              title="More options"
             >
-              Requests
-              {requestsTotal > 0 && <span className="chat-requests-count">{requestsTotal}</span>}
+              <FiMoreVertical />
             </button>
-            <button type="button" className="new-chat-btn" onClick={() => setNewChatOpen(true)}>
-              + New Chat
-            </button>
+
+            {showSidebarMenu && (
+              <aside className="chat-sidebar-menu" ref={sidebarMenuRef} role="menu" aria-label="Chat options">
+                <button
+                  type="button"
+                  className="chat-sidebar-menu-item"
+                  role="menuitem"
+                  onClick={() => {
+                    setShowSidebarMenu(false);
+                    openNewGroup();
+                  }}
+                >
+                  <span className="chat-sidebar-menu-left">
+                    <FiUsers /> New Group
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="chat-sidebar-menu-item"
+                  role="menuitem"
+                  onClick={() => {
+                    setShowSidebarMenu(false);
+                    navigate("/chat/requests");
+                  }}
+                >
+                  <span className="chat-sidebar-menu-left">
+                    <FiUserPlus /> Requests
+                  </span>
+                  {requestsTotal > 0 && <span className="chat-requests-count">{requestsTotal}</span>}
+                </button>
+                <button
+                  type="button"
+                  className="chat-sidebar-menu-item"
+                  role="menuitem"
+                  onClick={() => {
+                    setShowSidebarMenu(false);
+                    setNewChatOpen(true);
+                  }}
+                >
+                  <span className="chat-sidebar-menu-left">
+                    <FiMessageCircle /> New Chat
+                  </span>
+                </button>
+              </aside>
+            )}
           </div>
         </div>
         <div className="chat-stories">
@@ -10727,45 +11179,6 @@ export default function Chat() {
             </div>
           </div>
         )}
-        {groupInviteOpen && (
-          <div className="group-call-overlay" role="dialog" aria-label="Start group call">
-            <div className="group-call-card">
-              <h3>Start group video call</h3>
-              <p>Select up to {GROUP_CALL_MAX} people</p>
-              <div className="group-call-list">
-                {contacts
-                  .filter((c) => String(c?.id || "") !== String(myUserId))
-                  .map((c) => {
-                    const checked = groupInviteIds.includes(String(c.id));
-                    const displayName = getContactDisplayName(c);
-                    return (
-                      <label key={c.id} className="group-call-item">
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => toggleGroupInvite(c.id)}
-                        />
-                        <span>{displayName}</span>
-                      </label>
-                    );
-                  })}
-                {contacts.length === 0 && <p className="group-call-empty">No contacts available.</p>}
-              </div>
-              <div className="group-call-actions">
-                <button
-                  type="button"
-                  className="group-call-start"
-                  onClick={groupCallActive ? addPeopleToGroupCall : startGroupCall}
-                >
-                  {groupCallActive ? "Add people" : "Start call"}
-                </button>
-                <button type="button" className="group-call-cancel" onClick={() => setGroupInviteOpen(false)}>
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
         {callActive && !incomingCall && !showVideoCallScreen && (
           <button
             type="button"
@@ -11049,6 +11462,7 @@ export default function Chat() {
                       setShowCallMenu((prev) => !prev);
                       setShowHeaderMenu(false);
                       setShowWallpaperPanel(false);
+                      setActiveUtilityPanel("");
                     }}
                     disabled={callActive || !!incomingCall}
                     aria-haspopup="menu"
@@ -11092,136 +11506,212 @@ export default function Chat() {
                     setShowHeaderMenu((prev) => !prev);
                     setShowCallMenu(false);
                     setShowWallpaperPanel(false);
+                    setActiveUtilityPanel("");
                   }}
                 >
                   <FiMoreVertical />
                 </button>
+                {showHeaderMenu && (
+                  <aside className="chat-header-menu" ref={headerMenuRef}>
+                    {callActive && (
+                      <button
+                        type="button"
+                        className="chat-header-menu-row"
+                        onClick={() => {
+                          toggleSpeaker();
+                          setShowHeaderMenu(false);
+                        }}
+                        title="Speaker on/off"
+                      >
+                        {isSpeakerOn ? <FiVolume2 /> : <FiVolumeX />} {isSpeakerOn ? "Speaker on" : "Speaker off"}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="chat-header-menu-row chat-header-menu-link"
+                      onClick={() => {
+                        setActiveUtilityPanel("search");
+                        setShowHeaderMenu(false);
+                        setShowCallMenu(false);
+                        setShowWallpaperPanel(false);
+                      }}
+                    >
+                      <span className="chat-menu-action-start">
+                        <span className="chat-menu-action-icon"><FiSearch /></span>
+                        <strong>Search</strong>
+                      </span>
+                      <FiChevronRight />
+                    </button>
+                    <button
+                      type="button"
+                      className="chat-header-menu-row chat-header-menu-link"
+                      onClick={() => {
+                        setActiveUtilityPanel("media");
+                        setShowHeaderMenu(false);
+                        setShowCallMenu(false);
+                        setShowWallpaperPanel(false);
+                      }}
+                    >
+                      <span className="chat-menu-action-start">
+                        <span className="chat-menu-action-icon"><FiImage /></span>
+                        <strong>Media</strong>
+                      </span>
+                      <FiChevronRight />
+                    </button>
+                    <button
+                      type="button"
+                      className="chat-header-menu-row chat-header-menu-link"
+                      onClick={() => {
+                        setActiveUtilityPanel("links-documents");
+                        setShowHeaderMenu(false);
+                        setShowCallMenu(false);
+                        setShowWallpaperPanel(false);
+                      }}
+                    >
+                      <span className="chat-menu-action-start">
+                        <span className="chat-menu-action-icon"><FiLink /></span>
+                        <strong>Links and documents</strong>
+                      </span>
+                      <FiChevronRight />
+                    </button>
+                    <div className="chat-translate-card">
+                      <label className="chat-header-menu-row chat-switch-row">
+                        <span className="chat-menu-action-start">
+                          <span className="chat-menu-action-icon"><FiBellOff /></span>
+                          <strong>Mute notifications</strong>
+                        </span>
+                        <span className="chat-switch">
+                          <input
+                            type="checkbox"
+                            checked={activeMuted}
+                            onChange={(e) => setActiveContactMuted(e.target.checked)}
+                          />
+                          <span className="chat-switch-track" />
+                        </span>
+                      </label>
+                    </div>
+                    <label className="chat-header-menu-row chat-language-row">
+                      <span className="chat-menu-action-start">
+                        <span className="chat-menu-action-icon"><FiClock /></span>
+                        <strong>Disappearing messages</strong>
+                      </span>
+                      <select
+                        className="chat-translate-select"
+                        value={activeDisappearingValue}
+                        onChange={(e) => setActiveDisappearingSetting(e.target.value)}
+                      >
+                        {DISAPPEARING_MESSAGE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <div className="chat-translate-card">
+                      <label className="chat-header-menu-row chat-switch-row">
+                        <span className="chat-menu-label-group">
+                          <strong>Translator</strong>
+                        </span>
+                        <span className="chat-switch">
+                          <input
+                            type="checkbox"
+                            checked={translatorEnabled}
+                            onChange={(e) => setTranslatorEnabled(e.target.checked)}
+                          />
+                          <span className="chat-switch-track" />
+                        </span>
+                      </label>
+                    </div>
+                    <div className="chat-translate-card">
+                      <label className="chat-header-menu-row chat-switch-row">
+                        <span className="chat-menu-label-group">
+                          <strong>Auto-speak</strong>
+                        </span>
+                        <span className="chat-switch">
+                          <input
+                            type="checkbox"
+                            checked={signAssistAutoSpeak}
+                            onChange={(e) => setAutoSpeakEnabled(e.target.checked)}
+                          />
+                          <span className="chat-switch-track" />
+                        </span>
+                      </label>
+                    </div>
+                    {translatorEnabled && (
+                      <label className="chat-header-menu-row chat-language-row">
+                        <span className="chat-menu-label-group">
+                          <strong>Language</strong>
+                        </span>
+                        <select
+                          className="chat-translate-select"
+                          value={translatorLang}
+                          onChange={(e) => setTranslatorLang(e.target.value)}
+                        >
+                          {TRANSLATE_LANG_OPTIONS.map((opt) => (
+                            <option key={opt.value} value={opt.value}>
+                              {opt.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+                    <label className="chat-header-menu-row chat-language-row">
+                      <span className="chat-menu-label-group">
+                        <strong>Speak language</strong>
+                      </span>
+                      <select
+                        className="chat-translate-select"
+                        value={speechLang}
+                        onChange={(e) => setSpeechLang(e.target.value)}
+                      >
+                        {speechLangOptions.map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="chat-header-menu-row chat-language-row">
+                      <span className="chat-menu-label-group">
+                        <strong>Voice</strong>
+                      </span>
+                      <select
+                        className="chat-translate-select"
+                        value={speechVoiceGender}
+                        onChange={(e) => setSpeechVoiceGender(e.target.value)}
+                      >
+                        <option value="female">Female voice</option>
+                        <option value="male">Male voice</option>
+                      </select>
+                    </label>
+                    <button
+                      type="button"
+                      className="chat-header-menu-row chat-header-menu-link"
+                      onClick={() => {
+                        setShowWallpaperPanel(true);
+                        setShowHeaderMenu(false);
+                        setShowCallMenu(false);
+                      }}
+                    >
+                      <span className="chat-menu-action-start">
+                        <span className="chat-menu-action-icon"><FiImage /></span>
+                        <strong>Chat wallpaper</strong>
+                      </span>
+                      <FiChevronRight />
+                    </button>
+                    {translatorError && <p className="chat-translate-error">{translatorError}</p>}
+                    <button
+                      type="button"
+                      className="chat-header-menu-row chat-header-danger-btn"
+                      onClick={blockActiveContact}
+                      disabled={activeContactBlocked}
+                    >
+                      {activeContactBlocked ? "User blocked" : "Block user"}
+                    </button>
+                  </aside>
+                )}
               </div>
             </header>
-
-            {showHeaderMenu && (
-              <aside className="chat-header-menu" ref={headerMenuRef}>
-                {callActive && (
-                  <button
-                    type="button"
-                    className="chat-header-menu-row"
-                    onClick={() => {
-                      toggleSpeaker();
-                      setShowHeaderMenu(false);
-                    }}
-                    title="Speaker on/off"
-                  >
-                    {isSpeakerOn ? <FiVolume2 /> : <FiVolumeX />} {isSpeakerOn ? "Speaker on" : "Speaker off"}
-                  </button>
-                )}
-                <div className="chat-translate-card">
-                  <label className="chat-header-menu-row chat-switch-row">
-                    <span className="chat-menu-label-group">
-                      <strong>Translator</strong>
-                      <small>Auto-translate incoming messages</small>
-                    </span>
-                    <span className="chat-switch">
-                      <input
-                        type="checkbox"
-                        checked={translatorEnabled}
-                        onChange={(e) => setTranslatorEnabled(e.target.checked)}
-                      />
-                      <span className="chat-switch-track" />
-                    </span>
-                  </label>
-                </div>
-                <div className="chat-translate-card">
-                  <label className="chat-header-menu-row chat-switch-row">
-                    <span className="chat-menu-label-group">
-                      <strong>Auto-speak</strong>
-                      <small>Read incoming messages aloud</small>
-                    </span>
-                    <span className="chat-switch">
-                      <input
-                        type="checkbox"
-                        checked={signAssistAutoSpeak}
-                        onChange={(e) => setAutoSpeakEnabled(e.target.checked)}
-                      />
-                      <span className="chat-switch-track" />
-                    </span>
-                  </label>
-                </div>
-                {translatorEnabled && (
-                  <label className="chat-header-menu-row chat-language-row">
-                    <span className="chat-menu-label-group">
-                      <strong>Language</strong>
-                      <small>Select target language</small>
-                    </span>
-                    <select
-                      className="chat-translate-select"
-                      value={translatorLang}
-                      onChange={(e) => setTranslatorLang(e.target.value)}
-                    >
-                      {TRANSLATE_LANG_OPTIONS.map((opt) => (
-                        <option key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                )}
-                <label className="chat-header-menu-row chat-language-row">
-                  <span className="chat-menu-label-group">
-                    <strong>Speak language</strong>
-                    <small>Choose text-to-speech language</small>
-                  </span>
-                  <select
-                    className="chat-translate-select"
-                    value={speechLang}
-                    onChange={(e) => setSpeechLang(e.target.value)}
-                  >
-                    {speechLangOptions.map((opt) => (
-                      <option key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="chat-header-menu-row chat-language-row">
-                  <span className="chat-menu-label-group">
-                    <strong>Voice</strong>
-                    <small>Select male or female voice</small>
-                  </span>
-                  <select
-                    className="chat-translate-select"
-                    value={speechVoiceGender}
-                    onChange={(e) => setSpeechVoiceGender(e.target.value)}
-                  >
-                    <option value="female">Female voice</option>
-                    <option value="male">Male voice</option>
-                  </select>
-                </label>
-                <button
-                  type="button"
-                  className="chat-header-menu-row chat-header-menu-link"
-                  onClick={() => {
-                    setShowWallpaperPanel(true);
-                    setShowHeaderMenu(false);
-                    setShowCallMenu(false);
-                  }}
-                >
-                  <span className="chat-menu-label-group">
-                    <strong>Chat wallpaper</strong>
-                    <small>Choose background picture for this chat page</small>
-                  </span>
-                  <FiChevronDown />
-                </button>
-                {translatorError && <p className="chat-translate-error">{translatorError}</p>}
-                <button
-                  type="button"
-                  className="chat-header-menu-row chat-header-danger-btn"
-                  onClick={blockActiveContact}
-                  disabled={activeContactBlocked}
-                >
-                  {activeContactBlocked ? "User blocked" : "Block user"}
-                </button>
-              </aside>
-            )}
             {showWallpaperPanel && (
               <div className="chat-wallpaper-panel-backdrop" onClick={() => setShowWallpaperPanel(false)}>
                 <div
@@ -11289,6 +11779,165 @@ export default function Chat() {
                 </div>
               </div>
             )}
+            {activeUtilityPanel && (
+              <div className="chat-utility-panel-backdrop" onClick={() => setActiveUtilityPanel("")}>
+                <div
+                  className="chat-utility-panel"
+                  ref={utilityPanelRef}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="chat-utility-panel-head">
+                    <div className="chat-utility-panel-title">
+                      <strong>
+                        {activeUtilityPanel === "search"
+                          ? "Search"
+                          : activeUtilityPanel === "media"
+                            ? "Media"
+                            : "Links and documents"}
+                      </strong>
+                      <small>
+                        {activeUtilityPanel === "search"
+                          ? "Find messages in this chat"
+                          : activeUtilityPanel === "media"
+                            ? `${mediaPanelItems.length} shared item${mediaPanelItems.length === 1 ? "" : "s"}`
+                            : `${linkDocumentItems.length} link or document${linkDocumentItems.length === 1 ? "" : "s"}`}
+                      </small>
+                    </div>
+                    <button
+                      type="button"
+                      className="chat-wallpaper-close"
+                      onClick={() => setActiveUtilityPanel("")}
+                    >
+                      Close
+                    </button>
+                  </div>
+
+                  {activeUtilityPanel === "search" && (
+                    <>
+                      <label className="chat-utility-search">
+                        <FiSearch />
+                        <input
+                          ref={chatSearchInputRef}
+                          type="search"
+                          value={chatSearchQuery}
+                          onChange={(e) => setChatSearchQuery(e.target.value)}
+                          placeholder="Search in this chat"
+                        />
+                      </label>
+                      <div className="chat-utility-list">
+                        {!normalizedChatSearchQuery ? (
+                          <p className="chat-utility-empty">Type a word to search this conversation.</p>
+                        ) : searchPanelItems.length === 0 ? (
+                          <p className="chat-utility-empty">No matching messages found.</p>
+                        ) : (
+                          searchPanelItems.map((message) => (
+                            <button
+                              key={String(message?.id || `${message?.createdAt || ""}_${message?.text || ""}`)}
+                              type="button"
+                              className="chat-utility-item"
+                              onClick={() => focusThreadMessage(message?.id)}
+                            >
+                              <span className="chat-utility-item-body">
+                                <strong>{trimReplyPreview(getMessagePreviewLabel(message), 90)}</strong>
+                                <small>
+                                  {new Date(message?.createdAt || Date.now()).toLocaleString([], {
+                                    day: "numeric",
+                                    month: "short",
+                                    hour: "numeric",
+                                    minute: "2-digit"
+                                  })}
+                                </small>
+                              </span>
+                              <FiChevronRight />
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    </>
+                  )}
+
+                  {activeUtilityPanel === "media" && (
+                    <div className="chat-utility-list">
+                      {mediaPanelItems.length === 0 ? (
+                        <p className="chat-utility-empty">No media shared in this chat yet.</p>
+                      ) : (
+                        mediaPanelItems.map((message) => {
+                          const mediaType = String(message?.mediaType || (message?.audioUrl ? "audio" : "")).toLowerCase();
+                          const mediaHref = message?.audioUrl ? toApiUrl(message.audioUrl) : resolveMediaUrl(message?.mediaUrl);
+                          return (
+                            <button
+                              key={String(message?.id || mediaHref)}
+                              type="button"
+                              className="chat-utility-item"
+                              onClick={() => focusThreadMessage(message?.id)}
+                            >
+                              <span className="chat-utility-item-media">
+                                {mediaType === "image" && mediaHref ? (
+                                  <img src={mediaHref} alt={message?.fileName || "Media"} className="chat-utility-thumb" />
+                                ) : mediaType === "video" && mediaHref ? (
+                                  <video src={mediaHref} className="chat-utility-thumb" muted playsInline preload="metadata" />
+                                ) : (
+                                  <span className="chat-utility-media-icon">
+                                    <FiVolume2 />
+                                  </span>
+                                )}
+                              </span>
+                              <span className="chat-utility-item-body">
+                                <strong>{trimReplyPreview(getMessagePreviewLabel(message), 84)}</strong>
+                                <small>
+                                  {new Date(message?.createdAt || Date.now()).toLocaleString([], {
+                                    day: "numeric",
+                                    month: "short",
+                                    hour: "numeric",
+                                    minute: "2-digit"
+                                  })}
+                                </small>
+                              </span>
+                              <FiChevronRight />
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  )}
+
+                  {activeUtilityPanel === "links-documents" && (
+                    <div className="chat-utility-list">
+                      {linkDocumentItems.length === 0 ? (
+                        <p className="chat-utility-empty">No links or documents shared in this chat yet.</p>
+                      ) : (
+                        linkDocumentItems.map((entry) => (
+                          <a
+                            key={entry.id}
+                            className="chat-utility-item chat-utility-link-item"
+                            href={entry.href}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            <span className="chat-utility-media-icon">
+                              {entry.type === "document" ? <FiFileText /> : <FiLink />}
+                            </span>
+                            <span className="chat-utility-item-body">
+                              <strong>{trimReplyPreview(entry.label, 90)}</strong>
+                              <small>
+                                {entry.type === "document" ? "Document" : "Link"} ·{" "}
+                                {new Date(entry?.message?.createdAt || Date.now()).toLocaleString([], {
+                                  day: "numeric",
+                                  month: "short",
+                                  hour: "numeric",
+                                  minute: "2-digit"
+                                })}
+                              </small>
+                            </span>
+                            <FiChevronRight />
+                          </a>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             {(incomingCall || (callActive && callState.mode === "audio") || callError) && (
               <div className="call-panel">
@@ -11346,7 +11995,13 @@ export default function Chat() {
               </div>
             )}
 
-            <div ref={threadRef} onScroll={onThreadScroll} className="chat-thread wa-thread" style={threadWallpaperStyle}>
+            <div
+              ref={threadRef}
+              onScroll={onThreadScroll}
+              className="chat-thread wa-thread"
+              style={threadWallpaperStyle}
+              data-no-page-swipe
+            >
 
               {chatItems.map((item) => {
                 if (item.kind === "day") {
@@ -11409,6 +12064,8 @@ export default function Chat() {
                     key={item.id}
                     className={`chat-bubble ${
                       item.kind === "call" ? `call-log ${item.mine ? "mine" : "their"}` : item.mine ? "mine" : "their"
+                    } ${
+                      item.kind === "message" && String(item.raw?.id || "") === highlightedMessageId ? "is-highlighted" : ""
                     }`}
                     data-chat-msg-id={item.kind === "message" ? String(item.raw?.id || "") : undefined}
                     onContextMenu={enableBubbleMenu ? (e) => openBubbleMenu(e, item) : undefined}

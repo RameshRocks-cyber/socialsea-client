@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import api from "../api/axios";
+import { recordSearchActivity } from "../services/activityStore";
 import { buildProfilePath, getProfileIdentifier } from "../utils/profileRoute";
 import { toApiUrl } from "../api/baseUrl";
 import "./FollowConnections.css";
@@ -596,6 +597,11 @@ export default function FollowConnections() {
           if (myId && keys.includes(myId)) return false;
           if (myEmail && keys.includes(myEmail)) return false;
           return true;
+        });
+        recordSearchActivity({
+          query,
+          source: kind === "followers" ? "followers" : "following",
+          resultsCount: filtered.length
         });
         if (!cancelled) {
           setSearchResults(dedupeUsers(filtered));

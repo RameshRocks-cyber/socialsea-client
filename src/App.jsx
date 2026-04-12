@@ -20,12 +20,15 @@ import AdminPosts from "./pages/AdminPosts";
 import AdminReports from "./pages/AdminReports";
 import AdminLiveRecordings from "./pages/AdminLiveRecordings";
 import AdminAnonymousPending from "./pages/AdminAnonymousPending";
+import AdminAmbulanceRequests from "./pages/AdminAmbulanceRequests";
 import NotificationsPage from "./NotificationsPage";
 import Dashboard from "./Dashboard";
 import ProtectedRoute from "./components/ProtectedRoute";
 import Unauthorized from "./pages/Unauthorized";
 import ProfileSetup from "./pages/ProfileSetup";
 import Settings from "./pages/Settings";
+import SettingsAppearance from "./pages/SettingsAppearance";
+import YourActivity from "./pages/YourActivity";
 import SettingsContentTypes from "./pages/SettingsContentTypes";
 import SettingsSounds from "./pages/SettingsSounds";
 import SettingsLocation from "./pages/SettingsLocation";
@@ -33,6 +36,7 @@ import SettingsPrivacy from "./pages/SettingsPrivacy";
 import NotificationBuddySettings from "./pages/NotificationBuddySettings";
 import SOSPage from "./pages/SOSPage";
 import SOSNavigate from "./pages/SOSNavigate";
+import AmbulanceNavigation from "./pages/AmbulanceNavigation";
 import AdminLayout from "./AdminLayout";
 import Saved from "./pages/Saved";
 import FollowRequests from "./pages/FollowRequests";
@@ -61,6 +65,7 @@ import { getApiBaseUrl } from "./api/baseUrl";
 import api from "./api/axios";
 import { pingChatPresence } from "./api/chatPresence";
 import PageErrorBoundary from "./components/PageErrorBoundary";
+import { recordExternalLinkActivity, recordTimeSpent, resolveRouteLabel } from "./services/activityStore";
 import { lazyWithRetry } from "./utils/lazyWithRetry";
 import "./App.css";
 
@@ -85,8 +90,11 @@ const isPrivateIpHost = (host) => {
 
 const SWIPE_TABS = [
   { path: "/feed", match: (pathname) => pathname === "/feed" || pathname === "/home" || pathname === "/" },
-  { path: "/reels", match: (pathname) => pathname === "/reels" },
-  { path: "/chat", match: (pathname) => pathname === "/chat" || pathname === "/chat/requests" },
+  {
+    path: "/reels",
+    match: (pathname) => pathname === "/reels" || pathname === "/ambulance" || pathname.startsWith("/ambulance/")
+  },
+  { path: "/chat", match: (pathname) => pathname === "/chat" || pathname.startsWith("/chat/") },
   { path: "/notifications", match: (pathname) => pathname === "/notifications" },
   { path: "/profile/me", match: (pathname) => pathname.startsWith("/profile") },
 ];
@@ -95,13 +103,33 @@ const SWIPE_MIN_DISTANCE_PX = 72;
 const SWIPE_MAX_DURATION_MS = 700;
 const SWIPE_DOMINANCE_RATIO = 1.2;
 const PRESENCE_HEARTBEAT_MS = 20000;
+const SETTINGS_KEY = "socialsea_settings_v1";
 
 const getSwipeTabIndex = (pathname) => SWIPE_TABS.findIndex((tab) => tab.match(pathname));
+
+const readAmbulanceNavigationEnabled = () => {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw);
+    if (typeof parsed?.ambulanceNavigation === "boolean") return parsed.ambulanceNavigation;
+    return false;
+  } catch {
+    return false;
+  }
+};
+
+const resolveSwipeTabPath = (index) => {
+  const tab = SWIPE_TABS[index];
+  if (!tab) return "";
+  if (tab.path === "/reels" && readAmbulanceNavigationEnabled()) return "/ambulance";
+  return tab.path;
+};
 
 const shouldIgnoreSwipeTarget = (target) => {
   if (!(target instanceof Element)) return false;
   if (target.closest("[data-no-page-swipe], .no-page-swipe")) return true;
-  if (target.closest("input, textarea, select, option, button, a, [role='button'], [contenteditable='true']")) {
+  if (target.closest("input, textarea, select, option, [contenteditable='true']")) {
     return true;
   }
   return false;
@@ -143,6 +171,7 @@ function AppRoutes() {
   const shouldMountUserNavbar = authed && !location.pathname.startsWith("/admin") && !isAuthScreen;
   const showUserNavbar = shouldMountUserNavbar;
   const appMainRef = useRef(null);
+  const routeTimerRef = useRef({ pathname: "", startedAt: 0 });
   const swipeStateRef = useRef({
     active: false,
     startX: 0,
@@ -167,6 +196,93 @@ function AppRoutes() {
     document.addEventListener("play", handleVideoPlay, true);
     return () => document.removeEventListener("play", handleVideoPlay, true);
   }, []);
+
+  useEffect(() => {
+    if (!authed || isAuthScreen || location.pathname.startsWith("/admin")) {
+      routeTimerRef.current = { pathname: "", startedAt: 0 };
+      return undefined;
+    }
+
+    const startedAt = Date.now();
+    const previous = routeTimerRef.current;
+    if (previous.pathname && previous.startedAt) {
+      recordTimeSpent({
+        pathname: previous.pathname,
+        milliseconds: startedAt - previous.startedAt
+      });
+    }
+
+    routeTimerRef.current = { pathname: location.pathname, startedAt };
+    return undefined;
+  }, [authed, isAuthScreen, location.pathname]);
+
+  useEffect(() => {
+    if (!authed || isAuthScreen || location.pathname.startsWith("/admin")) return undefined;
+
+    const flushCurrentRoute = () => {
+      const current = routeTimerRef.current;
+      if (!current.pathname || !current.startedAt) return;
+      recordTimeSpent({
+        pathname: current.pathname,
+        milliseconds: Date.now() - current.startedAt
+      });
+      routeTimerRef.current = { ...current, startedAt: 0 };
+    };
+
+    const restartTimer = () => {
+      routeTimerRef.current = { pathname: location.pathname, startedAt: Date.now() };
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        flushCurrentRoute();
+      } else {
+        restartTimer();
+      }
+    };
+
+    const onBeforeUnload = () => {
+      flushCurrentRoute();
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => {
+      flushCurrentRoute();
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("beforeunload", onBeforeUnload);
+    };
+  }, [authed, isAuthScreen, location.pathname]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return undefined;
+
+    const onDocumentClick = (event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const anchor = target.closest("a[href]");
+      if (!anchor) return;
+      const href = String(anchor.getAttribute("href") || "").trim();
+      if (!href || href.startsWith("#") || href.startsWith("javascript:") || href.startsWith("mailto:") || href.startsWith("tel:")) {
+        return;
+      }
+
+      try {
+        const resolved = new URL(href, window.location.origin);
+        if (resolved.origin === window.location.origin) return;
+        recordExternalLinkActivity({
+          url: resolved.toString(),
+          label: anchor.textContent || anchor.getAttribute("aria-label") || resolved.hostname,
+          source: resolveRouteLabel(location.pathname)
+        });
+      } catch {
+        // ignore malformed URLs
+      }
+    };
+
+    document.addEventListener("click", onDocumentClick, true);
+    return () => document.removeEventListener("click", onDocumentClick, true);
+  }, [location.pathname]);
 
   useEffect(() => {
     if (isAuthScreen || !navigator.geolocation) return undefined;
@@ -379,7 +495,7 @@ function AppRoutes() {
       if (currentIndex < 0) return;
       const nextIndex = currentIndex + direction;
       if (nextIndex < 0 || nextIndex >= SWIPE_TABS.length) return;
-      const nextPath = SWIPE_TABS[nextIndex]?.path;
+      const nextPath = resolveSwipeTabPath(nextIndex);
       if (!nextPath || nextPath === location.pathname) return;
       navigate(nextPath);
     };
@@ -476,6 +592,9 @@ function AppRoutes() {
               <Route path="/story/create" element={<ProtectedRoute><StoryCreate /></ProtectedRoute>} />
               <Route path="/highlights/create" element={<ProtectedRoute><HighlightsCreate /></ProtectedRoute>} />
               <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+              <Route path="/settings/appearance" element={<ProtectedRoute><SettingsAppearance /></ProtectedRoute>} />
+              <Route path="/settings/activity" element={<ProtectedRoute><YourActivity /></ProtectedRoute>} />
+              <Route path="/settings/activity/:sectionId" element={<ProtectedRoute><YourActivity /></ProtectedRoute>} />
               <Route path="/settings/content-types" element={<ProtectedRoute><SettingsContentTypes /></ProtectedRoute>} />
               <Route path="/settings/sounds" element={<ProtectedRoute><SettingsSounds /></ProtectedRoute>} />
               <Route path="/settings/location" element={<ProtectedRoute><SettingsLocation /></ProtectedRoute>} />
@@ -484,6 +603,7 @@ function AppRoutes() {
               <Route path="/sos" element={<ProtectedRoute><SOSPage /></ProtectedRoute>} />
               <Route path="/sos/live/:alertId" element={<ProtectedRoute><SOSPage /></ProtectedRoute>} />
               <Route path="/sos/navigate/:alertId" element={<ProtectedRoute><SOSNavigate /></ProtectedRoute>} />
+              <Route path="/ambulance" element={<ProtectedRoute><AmbulanceNavigation /></ProtectedRoute>} />
               <Route path="/saved" element={<ProtectedRoute><Saved /></ProtectedRoute>} />
               <Route path="/follow-requests" element={<ProtectedRoute><FollowRequests /></ProtectedRoute>} />
               <Route path="/storage/unlock" element={<ProtectedRoute><StorageVaultUnlock /></ProtectedRoute>} />
@@ -498,6 +618,7 @@ function AppRoutes() {
                 <Route path="users" element={<AdminUsers />} />
                 <Route path="posts" element={<AdminPosts />} />
                 <Route path="live-recordings" element={<AdminLiveRecordings />} />
+                <Route path="ambulance" element={<AdminAmbulanceRequests />} />
                 <Route path="reports" element={<AdminReports />} />
                 <Route path="anonymous/pending" element={<AdminAnonymousPending />} />
                 <Route path="notifications" element={<NotificationsPage />} />

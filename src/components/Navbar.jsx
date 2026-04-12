@@ -11,6 +11,7 @@ import {
   FiSettings,
   FiSlash,
   FiUser,
+  FiMap,
   FiVideo,
   FiX
 } from "react-icons/fi";
@@ -39,6 +40,7 @@ const SOS_OWN_STOP_AT_KEY = "socialsea_sos_own_stop_at_v1";
 const SOS_LAST_SIGNAL_ID_KEY = "socialsea_sos_last_signal_id_v1";
 const SOS_LAST_SESSION_SIG_KEY = "socialsea_sos_last_session_sig_v1";
 const SOS_LAST_NOTIFICATION_ID_KEY = "socialsea_sos_last_notification_id_v1";
+const TRAFFIC_LAST_NOTIFICATION_ID_KEY = "socialsea_traffic_last_notification_id_v1";
 const SOS_NAV_CACHE_KEY = "socialsea_sos_nav_cache_v1";
 const SOS_SUPPRESSED_ALERTS_KEY = "socialsea_sos_suppressed_alerts_v1";
 const SOS_SUPPRESSED_ALERTS_AT_KEY = "socialsea_sos_suppressed_alerts_at_v1";
@@ -52,6 +54,7 @@ const SOS_ALERT_STALE_MS =
     : 0;
 const SOS_EMERGENCY_POLL_MS = Number(import.meta.env.VITE_SOS_EMERGENCY_POLL_MS || 2500);
 const SOS_NOTIFICATION_POLL_MS = Number(import.meta.env.VITE_SOS_NOTIFICATION_POLL_MS || 5000);
+const TRAFFIC_NOTIFICATION_POLL_MS = Number(import.meta.env.VITE_TRAFFIC_NOTIFICATION_POLL_MS || 5500);
 const allowSelfEmergencyPopup = (() => {
   if (typeof window === "undefined") return false;
   const host = String(window.location.hostname || "").toLowerCase().trim();
@@ -270,6 +273,30 @@ const readStudyModeReels = () => {
     if (!raw) return false;
     const parsed = JSON.parse(raw);
     return Boolean(parsed?.studyModeReels);
+  } catch {
+    return false;
+  }
+};
+
+const readTrafficAlertsEnabled = () => {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw);
+    if (typeof parsed?.trafficAlerts === "boolean") return parsed.trafficAlerts;
+    return false;
+  } catch {
+    return false;
+  }
+};
+
+const readAmbulanceNavigationEnabled = () => {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw);
+    if (typeof parsed?.ambulanceNavigation === "boolean") return parsed.ambulanceNavigation;
+    return false;
   } catch {
     return false;
   }
@@ -579,12 +606,16 @@ export default function Navbar() {
   const onChatConversationRoute =
     location.pathname.startsWith("/chat/") && !location.pathname.startsWith("/chat/requests");
   const isOnSosRoute = location.pathname.startsWith("/sos");
+  const isOnAmbulanceRoute = location.pathname === "/ambulance" || location.pathname.startsWith("/ambulance/");
   const profileTarget = "/profile/me";
   const [incomingCall, setIncomingCall] = useState(null);
   const [showSosInNavbar, setShowSosInNavbar] = useState(readShowSosInNavbar);
   const [studyModeReels, setStudyModeReels] = useState(readStudyModeReels);
+  const [trafficAlertsEnabled, setTrafficAlertsEnabled] = useState(readTrafficAlertsEnabled);
+  const [ambulanceNavigationEnabled, setAmbulanceNavigationEnabled] = useState(readAmbulanceNavigationEnabled);
   const [sosActive, setSosActive] = useState(readIsSosActive);
   const [sosPopup, setSosPopup] = useState(null);
+  const [trafficPopup, setTrafficPopup] = useState(null);
   const [sosUserLocation, setSosUserLocation] = useState(null);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraError, setCameraError] = useState("");
@@ -649,12 +680,22 @@ export default function Navbar() {
   const lastHandledSignalIdRef = useRef(readSessionValue(SOS_LAST_SIGNAL_ID_KEY));
   const lastHandledSessionSigRef = useRef(readSessionValue(SOS_LAST_SESSION_SIG_KEY));
   const lastEmergencyNotificationIdRef = useRef(readSessionValue(SOS_LAST_NOTIFICATION_ID_KEY));
+  const lastTrafficNotificationIdRef = useRef(readSessionValue(TRAFFIC_LAST_NOTIFICATION_ID_KEY));
   const cameraVideoRef = useRef(null);
   const cameraStreamRef = useRef(null);
 
   const items = ITEMS.map((item) => {
     if (item.label === "Profile") return { ...item, to: profileTarget };
     if (item.to === "/reels") {
+      if (ambulanceNavigationEnabled) {
+        return {
+          ...item,
+          to: "/ambulance",
+          label: "Navigation",
+          match: (p) => p === "/ambulance" || p.startsWith("/ambulance/"),
+          icon: FiMap
+        };
+      }
       return {
         ...item,
         icon: studyModeReels ? FaGraduationCap : item.icon
@@ -671,6 +712,8 @@ export default function Navbar() {
     const refresh = () => {
       setShowSosInNavbar(readShowSosInNavbar());
       setStudyModeReels(readStudyModeReels());
+      setTrafficAlertsEnabled(readTrafficAlertsEnabled());
+      setAmbulanceNavigationEnabled(readAmbulanceNavigationEnabled());
     };
     const onStorage = (event) => {
       if (!event || event.key === SETTINGS_KEY) refresh();
@@ -1711,6 +1754,101 @@ export default function Navbar() {
   }, [myEmail, myUserId]);
 
   useEffect(() => {
+    if (!trafficAlertsEnabled) return undefined;
+    const authToken =
+      sessionStorage.getItem("accessToken") ||
+      sessionStorage.getItem("token") ||
+      localStorage.getItem("accessToken") ||
+      localStorage.getItem("token") ||
+      "";
+    if (!authToken || authToken === "null" || authToken === "undefined") return undefined;
+
+    let disposed = false;
+
+    const stripUrls = (value) =>
+      String(value || "")
+        .replace(/https?:\/\/\S+/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+
+    const isTrafficNotification = (item) => {
+      const kind = String(item?.kind || "").toLowerCase();
+      const type = String(item?.type || "").toLowerCase();
+      if (kind === "traffic" || type === "traffic") return true;
+      const title = String(item?.title || "");
+      const message = String(item?.message || "");
+      return /give way|ambulance nearby|traffic alert/i.test(`${title} ${message}`);
+    };
+
+    const pollTrafficNotifications = async () => {
+      try {
+        if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+        // Don't stack above the emergency SOS popup.
+        if (popupStateRef.current?.isEmergency) return;
+
+        const res = await api.get("/api/notifications", {
+          suppressAuthRedirect: true,
+          skipAuth: false,
+          timeout: 4500,
+          params: { limit: 50 }
+        });
+        if (disposed) return;
+        const list = Array.isArray(res?.data) ? res.data : [];
+        const trafficCandidates = list
+          .filter((item) => isTrafficNotification(item))
+          .sort((a, b) => {
+            const aTime = new Date(a?.createdAt || 0).getTime();
+            const bTime = new Date(b?.createdAt || 0).getTime();
+            return bTime - aTime;
+          });
+
+        const traffic = trafficCandidates.find((item) => !item?.read) || null;
+        if (!traffic || traffic?.read) return;
+
+        const notifId = String(traffic?.id || "").trim();
+        if (!notifId) return;
+        if (notifId === lastTrafficNotificationIdRef.current) return;
+
+        const createdAtMs = new Date(traffic?.createdAt || 0).getTime();
+        if (Number.isFinite(createdAtMs) && Date.now() - createdAtMs > 15 * 60 * 1000) return;
+
+        lastTrafficNotificationIdRef.current = notifId;
+        try {
+          sessionStorage.setItem(TRAFFIC_LAST_NOTIFICATION_ID_KEY, notifId);
+        } catch {
+          // ignore storage errors
+        }
+
+        const mapsUrl = String(traffic?.mapsUrl || traffic?.routeUrl || traffic?.spotUrl || "").trim();
+        const routeUrl = String(traffic?.routeUrl || "").trim();
+        const spotUrl = String(traffic?.spotUrl || "").trim();
+        const title = String(traffic?.title || "Ambulance Nearby").trim() || "Ambulance Nearby";
+        const text =
+          stripUrls(traffic?.message) ||
+          "Ambulance approaching nearby. Please give way.";
+
+        setTrafficPopup({
+          id: notifId,
+          title,
+          text,
+          mapsUrl,
+          routeUrl,
+          spotUrl
+        });
+      } catch {
+        // ignore traffic notification polling errors
+      }
+    };
+
+    pollTrafficNotifications();
+    const timer = setInterval(pollTrafficNotifications, Math.max(3000, TRAFFIC_NOTIFICATION_POLL_MS));
+    return () => {
+      disposed = true;
+      clearInterval(timer);
+    };
+  }, [trafficAlertsEnabled, myEmail, myUserId]);
+
+  useEffect(() => {
     let disposed = false;
 
     const forceFromActiveSession = () => {
@@ -2612,6 +2750,43 @@ export default function Navbar() {
     window.open(href, "_blank", "noopener,noreferrer");
   };
 
+  const markNotificationRead = async (idText) => {
+    const safeId = String(idText || "").trim();
+    if (!safeId) return;
+    const endpoints = [
+      { method: "post", url: `/api/notifications/${encodeURIComponent(safeId)}/read` },
+      { method: "post", url: `/api/notifications/read/${encodeURIComponent(safeId)}` },
+      { method: "patch", url: `/api/notifications/${encodeURIComponent(safeId)}`, data: { read: true } }
+    ];
+
+    for (const ep of endpoints) {
+      try {
+        await api.request({
+          ...ep,
+          timeout: 4500,
+          suppressAuthRedirect: true,
+          skipAuth: false
+        });
+        return;
+      } catch (err) {
+        if (err?.response?.status === 404) continue;
+      }
+    }
+  };
+
+  const dismissTrafficPopup = async () => {
+    const idText = String(trafficPopup?.id || "").trim();
+    setTrafficPopup(null);
+    if (idText) await markNotificationRead(idText);
+  };
+
+  const openTrafficPopupUrl = async (url) => {
+    openPopupUrl(url);
+    const idText = String(trafficPopup?.id || "").trim();
+    setTrafficPopup(null);
+    if (idText) await markNotificationRead(idText);
+  };
+
   return (
     <header className={`ss-nav-wrap ${onChatConversationRoute ? "is-chat-conversation" : ""}`}>
       <nav className="ss-nav" aria-label="Main navigation">
@@ -2729,6 +2904,38 @@ export default function Navbar() {
         </div>
         );
       })()}
+
+      {trafficPopup && (
+        <div className="ss-traffic-popup" role="status" aria-live="polite">
+          <div className="ss-traffic-popup-title">{trafficPopup.title || "Ambulance Nearby"}</div>
+          <div className="ss-traffic-popup-text">{trafficPopup.text}</div>
+          <div className="ss-traffic-popup-actions">
+            <button
+              type="button"
+              className="ss-traffic-popup-btn"
+              onClick={() => void openTrafficPopupUrl(trafficPopup.routeUrl || trafficPopup.mapsUrl)}
+              disabled={!(trafficPopup.routeUrl || trafficPopup.mapsUrl)}
+            >
+              Open Route
+            </button>
+            <button
+              type="button"
+              className="ss-traffic-popup-btn"
+              onClick={() => void openTrafficPopupUrl(trafficPopup.spotUrl || trafficPopup.mapsUrl)}
+              disabled={!(trafficPopup.spotUrl || trafficPopup.mapsUrl)}
+            >
+              Open Spot
+            </button>
+            <button
+              type="button"
+              className="ss-traffic-popup-btn ss-traffic-popup-btn-cancel"
+              onClick={() => void dismissTrafficPopup()}
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       {cameraOpen && (
         <div className="ss-camera-modal-backdrop" onClick={closeCameraStudio}>

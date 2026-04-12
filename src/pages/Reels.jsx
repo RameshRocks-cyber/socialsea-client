@@ -11,6 +11,7 @@ import { BsBookmarkFill } from "react-icons/bs";
 import { HiHandThumbUp, HiOutlineHandThumbUp } from "react-icons/hi2";
 import api from "../api/axios";
 import { getApiBaseUrl, toApiUrl } from "../api/baseUrl";
+import { recordCommentActivity, recordRepostActivity, recordWatchHistory } from "../services/activityStore";
 import { addStoryEntry, readStoryIdentity } from "../services/storyStorage";
 import StudyMode from "./StudyMode";
 import "./Reels.css";
@@ -435,6 +436,12 @@ export default function Reels() {
   }, [currentIndex]);
 
   useEffect(() => {
+    const activeReel = reels[currentIndex];
+    if (!activeReel?.id) return;
+    recordWatchHistory({ item: activeReel, source: "reels" });
+  }, [reels, currentIndex]);
+
+  useEffect(() => {
     likedPostIdsRef.current = likedPostIds;
   }, [likedPostIds]);
 
@@ -800,12 +807,14 @@ export default function Reels() {
   const submitComment = async (postId) => {
     const text = (commentTextByPost[postId] || "").trim();
     if (!text) return;
+    const reel = reels.find((item) => String(item?.id) === String(postId));
     try {
       await api.post(`/api/comments/${postId}`, text, {
         headers: { "Content-Type": "text/plain" },
       });
       setCommentTextByPost((prev) => ({ ...prev, [postId]: "" }));
       await loadComments(postId);
+      recordCommentActivity({ postId, text, item: reel, source: "reels" });
     } catch {
       // noop
     }
@@ -815,6 +824,7 @@ export default function Reels() {
     const shareUrl = `${window.location.origin}/reels?post=${reel.id}`;
     const shareText = `${reel.description || reel.content || "Check this reel"} ${shareUrl}`;
     try {
+      recordRepostActivity({ item: reel, source: "reels", via: "chat" });
       addStoryEntry(
         {
           id: reel?.id || `reel-share-${Date.now()}`,

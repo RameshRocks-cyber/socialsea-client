@@ -650,3 +650,139 @@
   font-size: 0.78rem;
 }
 
+.admin-amb-head {
+  gap: 14px;
+}
+
+.admin-amb-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.admin-amb-select {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #fff;
+  padding: 10px 12px;
+  border-radius: 12px;
+}
+
+.admin-amb-refresh {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #fff;
+  padding: 10px 12px;
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.admin-amb-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
+}
+
+.admin-amb-card {
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.03);
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.admin-amb-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.admin-amb-name {
+  font-weight: 800;
+  letter-spacing: 0.3px;
+}
+
+.admin-amb-pill {
+  font-size: 0.75rem;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.05);
+  text-transform: uppercase;
+}
+
+.admin-amb-pill.status-pending {
+  border-color: rgba(255, 205, 0, 0.4);
+  background: rgba(255, 205, 0, 0.08);
+}
+
+.admin-amb-pill.status-approved {
+  border-color: rgba(73, 225, 143, 0.35);
+  background: rgba(73, 225, 143, 0.07);
+}
+
+.admin-amb-pill.status-rejected {
+  border-color: rgba(255, 70, 70, 0.35);
+  background: rgba(255, 70, 70, 0.07);
+}
+
+.admin-amb-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.admin-amb-meta span {
+  display: block;
+  font-size: 0.76rem;
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.admin-amb-meta strong {
+  display: block;
+  margin-top: 3px;
+  font-size: 0.9rem;
+  word-break: break-word;
+}
+
+.admin-amb-note {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 0.9rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+
+.admin-amb-dates {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.admin-amb-dates span {
+  display: block;
+  font-size: 0.76rem;
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.admin-amb-dates strong {
+  display: block;
+  margin-top: 3px;
+  font-size: 0.86rem;
+}
+
+.admin-amb-reject {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 0.9rem;
+}
+
+.admin-amb-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+

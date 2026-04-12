@@ -9,6 +9,7 @@ import {
   normalizeContentTypeList
 } from "./contentPrefs";
 import { COLOR_THEME_OPTIONS, readTheme, setTheme, readCustomThemeColors, setCustomThemeColors } from "../theme";
+import { recordAccountHistoryEntry } from "../services/activityStore";
 import "./Settings.css";
 
 const CLOSE_FRIENDS_KEY = "socialsea_close_friends_v1";
@@ -47,9 +48,26 @@ const defaultPrefs = {
   dailyTimeLimit: "2h/day",
   notificationSound: DEFAULT_SOUND_PREFS.notificationSound,
   ringtoneSound: DEFAULT_SOUND_PREFS.ringtoneSound,
+  trafficAlerts: false,
+  ambulanceNavigation: false,
   contentTypes: DEFAULT_CONTENT_TYPES,
   jobMode: "profile",
   showMyStoriesOnProfile: true
+};
+
+const SETTING_LABELS = {
+  accountPrivate: "Account privacy",
+  crossposting: "Crossposting",
+  storyLocationEnabled: "Story, live and location",
+  activityInFriendsTab: "Activity in Friends tab",
+  showSosInNavbar: "SOS on Navbar",
+  studyModeReels: "Study mode",
+  gestureCursorEnabled: "Hand gesture cursor",
+  notifications: "Notifications",
+  notificationBuddy: "Notification Character",
+  trafficAlerts: "Traffic Alerts",
+  ambulanceNavigation: "Ambulance Navigation",
+  showMyStoriesOnProfile: "My Stories on profile"
 };
 
 const readIds = (key) => {
@@ -137,6 +155,8 @@ export default function Settings() {
   const [colorTheme, setColorTheme] = useState(readTheme);
   const [customThemeColors, setCustomThemeColorsState] = useState(readCustomThemeColors);
   const [privacyBusy, setPrivacyBusy] = useState(false);
+  const [ambulanceApproved, setAmbulanceApproved] = useState(false);
+  const [trafficAlertsBusy, setTrafficAlertsBusy] = useState(false);
 
   const [closeFriends, setCloseFriends] = useState(() => readJsonArray(CLOSE_FRIENDS_KEY));
   const [blockedUsers, setBlockedUsers] = useState(() => readJsonArray(BLOCKED_KEY));
@@ -179,8 +199,16 @@ export default function Settings() {
         const res = await api.get("/api/profile/me");
         const data = res?.data?.user || res?.data || {};
         const value = data?.privateAccount ?? data?.accountPrivate;
+        const trafficValue = data?.trafficAlertsEnabled ?? data?.trafficAlerts;
+        const ambulanceValue = data?.ambulanceDriverApproved;
         if (!cancelled && typeof value === "boolean") {
           setPrefs((prev) => ({ ...prev, accountPrivate: value }));
+        }
+        if (!cancelled && typeof trafficValue === "boolean") {
+          setPrefs((prev) => ({ ...prev, trafficAlerts: trafficValue }));
+        }
+        if (!cancelled && typeof ambulanceValue === "boolean") {
+          setAmbulanceApproved(ambulanceValue);
         }
       } catch {
         // keep local preference if backend is unavailable
@@ -298,6 +326,11 @@ export default function Settings() {
   const setAccountPrivacy = async (next) => {
     if (privacyBusy || next === prefs.accountPrivate) return;
     setPrefs((prev) => ({ ...prev, accountPrivate: next }));
+    recordAccountHistoryEntry({
+      action: "Account privacy",
+      detail: next ? "Private" : "Public",
+      source: "settings"
+    });
     setPrivacyBusy(true);
     try {
       await api.post("/api/profile/me/privacy", { privateAccount: next });
@@ -308,15 +341,61 @@ export default function Settings() {
     }
   };
 
+  const setTrafficAlerts = async (next) => {
+    if (trafficAlertsBusy || next === prefs.trafficAlerts) return;
+    setPrefs((prev) => ({ ...prev, trafficAlerts: next }));
+    recordAccountHistoryEntry({
+      action: "Traffic Alerts",
+      detail: next ? "Turned on" : "Turned off",
+      source: "settings"
+    });
+    setTrafficAlertsBusy(true);
+    try {
+      await api.post("/api/profile/me/traffic-alerts", { enabled: next });
+    } catch {
+      // Keep local selection if the backend is unavailable
+    } finally {
+      setTrafficAlertsBusy(false);
+    }
+  };
+
   const setToggle = (key) => {
     if (key === "accountPrivate") {
       setAccountPrivacy(!prefs.accountPrivate);
       return;
     }
-    setPrefs((prev) => ({ ...prev, [key]: !prev[key] }));
+    if (key === "trafficAlerts") {
+      setTrafficAlerts(!prefs.trafficAlerts);
+      return;
+    }
+    const nextValue = !prefs[key];
+    setPrefs((prev) => ({ ...prev, [key]: nextValue }));
+    recordAccountHistoryEntry({
+      action: SETTING_LABELS[key] || key,
+      detail: typeof nextValue === "boolean" ? (nextValue ? "Turned on" : "Turned off") : String(nextValue),
+      source: "settings"
+    });
   };
-  const setChoice = (key, value) => setPrefs((prev) => ({ ...prev, [key]: value }));
-  const setJobMode = (mode) => setPrefs((prev) => ({ ...prev, jobMode: mode }));
+  const setChoice = (key, value) => {
+    setPrefs((prev) => ({ ...prev, [key]: value }));
+    recordAccountHistoryEntry({
+      action: SETTING_LABELS[key] || key,
+      detail: String(value),
+      source: "settings"
+    });
+  };
+  const setJobMode = (mode) => {
+    setPrefs((prev) => ({ ...prev, jobMode: mode }));
+    recordAccountHistoryEntry({
+      action: "Jobs on profile",
+      detail:
+        mode === "profile" ? "Show on profile" :
+        mode === "post" ? "Post a job" :
+        mode === "storage" ? "Storage Vault" :
+        "Off",
+      source: "settings"
+    });
+  };
 
   const removeFromPanel = (id) => {
     if (activePanel === "saved") {
@@ -439,7 +518,7 @@ export default function Settings() {
 
         <section className="settings-section">
           <h2>How you use SocialSea</h2>
-          <Row icon={"AP"} title="Appearance" value={colorThemeLabel} onClick={() => setActivePanel("theme")} />
+          <Row icon={"AP"} title="Appearance" value={colorThemeLabel} onClick={() => navigate("/settings/appearance")} />
           <Row
             icon={"CT"}
             title="Content types"
@@ -460,7 +539,7 @@ export default function Settings() {
           />
           <Row icon={"B"} title="Saved" value={savedIds.length} onClick={() => navigate("/saved")} />
           <Row icon={"A"} title="Archive" value={archiveIds.length} onClick={() => setActivePanel("archive")} />
-          <Row icon={"Y"} title="Your activity" onClick={() => setActivePanel("activity")} />
+          <Row icon={"Y"} title="Your activity" onClick={() => navigate("/settings/activity")} />
           <Row
             icon={"SOS"}
             title="SOS on Navbar"
@@ -478,6 +557,24 @@ export default function Settings() {
             title="Notifications"
             value={prefs.notifications ? "On" : "Off"}
             onClick={() => navigate("/notifications")}
+          />
+          <Row
+            icon={"TA"}
+            title="Traffic Alerts"
+            value={prefs.trafficAlerts ? "On" : "Off"}
+            onClick={() => setToggle("trafficAlerts")}
+          />
+          <Row
+            icon={"AMB"}
+            title="Ambulance Navigation"
+            value={ambulanceApproved ? (prefs.ambulanceNavigation ? "On" : "Off") : "Request access"}
+            onClick={() => {
+              if (!ambulanceApproved) {
+                navigate("/ambulance");
+                return;
+              }
+              setToggle("ambulanceNavigation");
+            }}
           />
           <Row
             icon={"MS"}
@@ -544,7 +641,7 @@ export default function Settings() {
 
         <section className="settings-section">
           <h2>How others can interact with you</h2>
-          <Row icon={"AP"} title="Appearance" value={colorThemeLabel} onClick={() => setActivePanel("theme")} />
+          <Row icon={"AP"} title="Appearance" value={colorThemeLabel} onClick={() => navigate("/settings/appearance")} />
           <Row icon={"M"} title="Messages and story replies" value={prefs.messageReplies} onClick={() => setActivePanel("messages")} />
           <Row icon={"@"} title="Tags and mentions" value={prefs.tagsMentions} onClick={() => setActivePanel("tags")} />
           <Row icon={"C"} title="Comments" value={prefs.comments} onClick={() => setActivePanel("comments")} />

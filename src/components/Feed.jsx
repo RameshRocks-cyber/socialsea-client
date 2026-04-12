@@ -4,6 +4,7 @@ import { FiBookmark } from "react-icons/fi";
 import { BsBookmarkFill } from "react-icons/bs";
 import api from "../api/axios";
 import { getApiBaseUrl, toApiUrl } from "../api/baseUrl";
+import { recordCommentActivity, recordRepostActivity, recordSearchActivity } from "../services/activityStore";
 import { readLiveBroadcast, subscribeLiveBroadcast } from "../utils/liveBroadcast";
 import { CONTENT_TYPE_OPTIONS } from "../pages/contentPrefs";
 import "./Feed.css";
@@ -201,6 +202,15 @@ export default function Feed() {
       document.body.classList.remove("feed-no-swipe-back");
     };
   }, []);
+
+  useEffect(() => {
+    const text = query.trim();
+    if (text.length < 2) return undefined;
+    const timer = window.setTimeout(() => {
+      recordSearchActivity({ query: text, source: "feed" });
+    }, 450);
+    return () => window.clearTimeout(timer);
+  }, [query]);
 
   useEffect(() => {
     if (!feedMenuOpen) return;
@@ -802,12 +812,14 @@ export default function Feed() {
   const submitComment = async (postId) => {
     const text = (commentTextByPost[postId] || "").trim();
     if (!text) return;
+    const targetPost = posts.find((post) => String(post?.id) === String(postId));
     try {
       await api.post(`/api/comments/${postId}`, text, {
         headers: { "Content-Type": "text/plain" }
       });
       setCommentTextByPost((prev) => ({ ...prev, [postId]: "" }));
       await loadComments(postId);
+      recordCommentActivity({ postId, text, item: targetPost, source: "feed" });
     } catch {
       // noop
     }
@@ -817,6 +829,7 @@ export default function Feed() {
     const shareUrl = `${window.location.origin}${window.location.pathname}?post=${post.id}`;
     const shareText = `${post.description || post.content || "Check this post"} ${shareUrl}`;
     try {
+      recordRepostActivity({ item: post, source: "feed", via: "chat" });
       try {
         sessionStorage.setItem(CHAT_SHARE_DRAFT_KEY, shareText);
       } catch {

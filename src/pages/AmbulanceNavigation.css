@@ -1,0 +1,704 @@
+.ambulance-page {
+  min-height: calc(100vh - 64px);
+  padding: 18px 14px 90px;
+  background:
+    radial-gradient(circle at top, rgba(114, 161, 255, 0.18), transparent 52%),
+    linear-gradient(180deg, #f8fbff 0%, #f2f6fd 52%, #eef3fb 100%);
+  color: #152033;
+}
+
+.ambulance-card {
+  max-width: 1040px;
+  margin: 0 auto;
+  border: 1px solid rgba(170, 192, 222, 0.42);
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(10px);
+  border-radius: 22px;
+  padding: 16px;
+  box-shadow:
+    0 20px 46px rgba(83, 111, 153, 0.14),
+    0 1px 0 rgba(255, 255, 255, 0.9) inset;
+}
+
+.ambulance-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.ambulance-head h1 {
+  margin: 0;
+  font-size: 22px;
+  letter-spacing: 0.4px;
+  color: #10203c;
+}
+
+.ambulance-muted {
+  margin: 6px 0 0;
+  color: #66758f;
+  font-size: 13px;
+}
+
+.ambulance-muted strong {
+  color: #274f93;
+}
+
+.ambulance-back {
+  background: linear-gradient(180deg, #ffffff, #f5f8fd);
+  border: 1px solid rgba(160, 183, 214, 0.55);
+  color: #17305d;
+  padding: 8px 12px;
+  border-radius: 12px;
+  cursor: pointer;
+  font-weight: 600;
+  box-shadow: 0 8px 18px rgba(89, 117, 158, 0.12);
+}
+
+.ambulance-notice {
+  margin: 12px 0;
+  padding: 9px 11px;
+  border-radius: 12px;
+  border: 1px solid rgba(134, 177, 243, 0.35);
+  background: linear-gradient(180deg, rgba(233, 243, 255, 0.96), rgba(247, 251, 255, 0.96));
+  color: #1c3764;
+  font-size: 13px;
+}
+
+.ambulance-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+}
+
+@media (min-width: 980px) {
+  .ambulance-grid {
+    grid-template-columns: 1.05fr 0.95fr;
+  }
+}
+
+.ambulance-panel {
+  border: 1px solid rgba(180, 201, 229, 0.44);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 251, 255, 0.98));
+  border-radius: 18px;
+  padding: 12px;
+  box-shadow: 0 14px 28px rgba(88, 117, 159, 0.08);
+}
+
+.ambulance-panel h2 {
+  margin: 0 0 10px;
+  font-size: 16px;
+  color: #10203c;
+}
+
+.ambulance-list {
+  padding-left: 18px;
+  margin: 8px 0 0;
+  color: #50627e;
+  font-size: 13px;
+}
+
+.ambulance-form {
+  display: grid;
+  gap: 10px;
+}
+
+.ambulance-form label {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  color: #40526e;
+  font-weight: 600;
+}
+
+.ambulance-form input,
+.ambulance-form textarea {
+  width: 100%;
+  border-radius: 11px;
+  border: 1px solid rgba(176, 198, 227, 0.72);
+  background: #ffffff;
+  color: #152033;
+  padding: 10px 11px;
+  font-size: 13px;
+  outline: none;
+  box-shadow: inset 0 1px 2px rgba(117, 138, 168, 0.08);
+}
+
+.ambulance-form input::placeholder,
+.ambulance-form textarea::placeholder {
+  color: #8a97aa;
+}
+
+.ambulance-form textarea {
+  resize: vertical;
+}
+
+.ambulance-hint {
+  font-size: 12px;
+  color: #7c8da6;
+}
+
+.ambulance-primary {
+  border: 1px solid rgba(63, 110, 195, 0.28);
+  background: linear-gradient(180deg, #3a7bff, #2d62db);
+  color: #ffffff;
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 12px 22px rgba(57, 103, 188, 0.22);
+}
+
+.ambulance-primary:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.ambulance-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.ambulance-danger {
+  border: 1px solid rgba(230, 145, 145, 0.42);
+  background: linear-gradient(180deg, #fff4f4, #ffe7e7);
+  color: #ae2e2e;
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.ambulance-ghost {
+  border: 1px solid rgba(177, 198, 228, 0.62);
+  background: linear-gradient(180deg, #ffffff, #f5f8fd);
+  color: #183564;
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.ambulance-ghost:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.ambulance-coords {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 11px;
+  border-radius: 12px;
+  border: 1px dashed rgba(154, 183, 226, 0.72);
+  background: linear-gradient(180deg, rgba(245, 249, 255, 0.96), rgba(238, 245, 255, 0.96));
+  font-size: 13px;
+}
+
+.ambulance-coords-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.ambulance-link {
+  color: #2a5fd0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  font-weight: 600;
+}
+
+.ambulance-link-button {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: #2a5fd0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  font-weight: 600;
+  cursor: pointer;
+  font: inherit;
+}
+
+.ambulance-link-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.ambulance-warning {
+  padding: 9px 11px;
+  border-radius: 12px;
+  border: 1px solid rgba(245, 195, 82, 0.45);
+  background: linear-gradient(180deg, #fff8e8, #fff3d0);
+  color: #7e5c00;
+  font-size: 13px;
+}
+
+.ambulance-error {
+  padding: 9px 11px;
+  border-radius: 12px;
+  border: 1px solid rgba(230, 128, 128, 0.42);
+  background: linear-gradient(180deg, #fff1f1, #ffe6e6);
+  color: #a33232;
+  font-size: 13px;
+}
+
+.ambulance-stats {
+  margin-top: 6px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ambulance-stats > div {
+  padding: 9px 11px;
+  border-radius: 13px;
+  border: 1px solid rgba(181, 201, 229, 0.52);
+  background: linear-gradient(180deg, #ffffff, #f7faff);
+  font-size: 13px;
+  box-shadow: 0 10px 18px rgba(88, 117, 159, 0.06);
+}
+
+.ambulance-route-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.ambulance-route-summary > div {
+  padding: 9px 11px;
+  border-radius: 13px;
+  border: 1px solid rgba(181, 201, 229, 0.52);
+  background: linear-gradient(180deg, #ffffff, #f7faff);
+  display: grid;
+  gap: 4px;
+  box-shadow: 0 10px 18px rgba(88, 117, 159, 0.06);
+}
+
+.ambulance-steps {
+  display: grid;
+  gap: 8px;
+}
+
+.ambulance-step {
+  border: 1px solid rgba(181, 201, 229, 0.46);
+  background: linear-gradient(180deg, #ffffff, #f8fbff);
+  border-radius: 13px;
+  padding: 9px 11px;
+}
+
+.ambulance-step-title {
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 4px;
+  color: #162542;
+}
+
+.ambulance-step-meta {
+  font-size: 12px;
+  color: #73839a;
+}
+
+.ambulance-last-alert {
+  margin-top: 12px;
+  padding: 9px 11px;
+  border-radius: 14px;
+  border: 1px solid rgba(181, 201, 229, 0.52);
+  background: linear-gradient(180deg, #ffffff, #f7faff);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+  box-shadow: 0 10px 18px rgba(88, 117, 159, 0.06);
+}
+
+.ambulance-request-state {
+  margin: 12px 0;
+  padding: 9px 11px;
+  border-radius: 14px;
+  border: 1px solid rgba(181, 201, 229, 0.52);
+  background: linear-gradient(180deg, #ffffff, #f7faff);
+  font-size: 13px;
+}
+
+.ambulance-request-state.pending {
+  border-color: rgba(245, 195, 82, 0.45);
+  background: linear-gradient(180deg, #fff8e8, #fff3d0);
+}
+
+.ambulance-request-state.rejected {
+  border-color: rgba(230, 128, 128, 0.42);
+  background: linear-gradient(180deg, #fff1f1, #ffe6e6);
+}
+
+.ambulance-request-reason {
+  margin-top: 8px;
+  color: #5c6b82;
+}
+
+.ambulance-grid.ambulance-grid-map {
+  grid-template-areas:
+    "map"
+    "controls";
+}
+
+.ambulance-grid.ambulance-grid-map .ambulance-controls-panel {
+  grid-area: controls;
+}
+
+.ambulance-grid.ambulance-grid-map .ambulance-map-panel {
+  grid-area: map;
+}
+
+@media (min-width: 980px) {
+  .ambulance-grid.ambulance-grid-map {
+    grid-template-columns: 1.35fr 0.65fr;
+    grid-template-areas: "map controls";
+  }
+}
+
+.ambulance-map-wrap {
+  position: relative;
+  height: clamp(380px, 62vh, 680px);
+  border-radius: 20px;
+  overflow: hidden;
+  border: 1px solid rgba(181, 201, 229, 0.5);
+  background: #eef4fb;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.ambulance-map-wrap-fullscreen {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  border-radius: 0;
+  border: none;
+  z-index: 2000;
+}
+
+.ambulance-map-wrap::after {
+  display: none;
+}
+
+.ambulance-map {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+
+.ambulance-map.leaflet-container {
+  background: #eef4fb;
+}
+
+.ambulance-map-bottom {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  display: grid;
+  gap: 6px;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.ambulance-map-wrap-fullscreen .ambulance-map-bottom {
+  left: clamp(12px, 2vw, 24px);
+  right: clamp(12px, 2vw, 24px);
+  bottom: max(14px, env(safe-area-inset-bottom));
+}
+
+.ambulance-map-bottom > * {
+  pointer-events: auto;
+}
+
+.ambulance-map-banner {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  right: 14px;
+  z-index: 3;
+  padding: 9px 11px;
+  border-radius: 14px;
+  border: 1px solid rgba(245, 195, 82, 0.45);
+  background: rgba(255, 248, 224, 0.92);
+  color: #7e5c00;
+  font-size: 13px;
+}
+
+.ambulance-map-wrap-fullscreen .ambulance-map-banner {
+  top: max(14px, env(safe-area-inset-top));
+  left: clamp(12px, 2vw, 24px);
+  right: clamp(12px, 2vw, 24px);
+}
+
+.ambulance-chipbar {
+  border: 1px solid rgba(181, 201, 229, 0.46);
+  background: rgba(255, 255, 255, 0.88);
+  border-radius: 12px;
+  padding: 5px 6px;
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  justify-self: start;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 8px 14px rgba(88, 117, 159, 0.08);
+  overflow: hidden;
+}
+
+.ambulance-chipitem {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.ambulance-chipbar-divider {
+  width: 1px;
+  height: 22px;
+  align-self: center;
+  border-radius: 999px;
+  background: rgba(176, 198, 227, 0.95);
+  opacity: 0.75;
+}
+
+.ambulance-chip-label {
+  font-size: 9.5px;
+  color: #7a8aa0;
+}
+
+.ambulance-chip-value {
+  font-size: 11.5px;
+  font-weight: 800;
+  color: #10203c;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ambulance-chip-link {
+  display: inline-block;
+  max-width: 100%;
+  color: #2a5fd0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.ambulance-map-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ambulance-map-actions .ambulance-primary,
+.ambulance-map-actions .ambulance-ghost,
+.ambulance-map-actions .ambulance-danger {
+  flex: 1;
+  min-width: 136px;
+}
+
+.ambulance-map-foot {
+  border: 1px solid rgba(181, 201, 229, 0.46);
+  background: rgba(255, 255, 255, 0.82);
+  border-radius: 14px;
+  padding: 6px 7px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  box-shadow: 0 10px 20px rgba(88, 117, 159, 0.09);
+  backdrop-filter: blur(8px);
+}
+
+.ambulance-map-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.ambulance-map-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(176, 198, 227, 0.7);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(245, 248, 253, 0.96));
+  color: #183564;
+  border-radius: 999px;
+  height: 28px;
+  padding: 0 9px;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 10.5px;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  box-shadow: 0 5px 10px rgba(88, 117, 159, 0.08);
+  transition:
+    transform 120ms ease,
+    box-shadow 120ms ease,
+    border-color 120ms ease,
+    background 120ms ease;
+}
+
+.ambulance-map-pill:hover:not(:disabled) {
+  border-color: rgba(76, 134, 233, 0.55);
+  box-shadow: 0 10px 18px rgba(57, 103, 188, 0.14);
+  transform: translateY(-1px);
+}
+
+.ambulance-map-pill:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 6px 12px rgba(57, 103, 188, 0.12);
+}
+
+.ambulance-map-pill-primary {
+  border-color: rgba(63, 110, 195, 0.38);
+  background: linear-gradient(180deg, #3a7bff, #2d62db);
+  color: #ffffff;
+  box-shadow: 0 10px 18px rgba(57, 103, 188, 0.22);
+}
+
+.ambulance-map-pill-primary:hover:not(:disabled) {
+  border-color: rgba(76, 134, 233, 0.8);
+  box-shadow: 0 14px 24px rgba(57, 103, 188, 0.26);
+}
+
+.ambulance-map-pill-primary:active:not(:disabled) {
+  box-shadow: 0 10px 18px rgba(57, 103, 188, 0.22);
+}
+
+.ambulance-map-pill-danger {
+  border-color: rgba(230, 145, 145, 0.55);
+  background: linear-gradient(180deg, #fff4f4, #ffe7e7);
+  color: #ae2e2e;
+  box-shadow: 0 10px 18px rgba(199, 57, 57, 0.12);
+}
+
+.ambulance-map-pill-danger:hover:not(:disabled) {
+  border-color: rgba(230, 128, 128, 0.75);
+  box-shadow: 0 14px 24px rgba(199, 57, 57, 0.16);
+}
+
+.ambulance-map-pill-danger:active:not(:disabled) {
+  box-shadow: 0 10px 18px rgba(199, 57, 57, 0.12);
+}
+
+.ambulance-map-pill-warn {
+  border-color: rgba(245, 195, 82, 0.62);
+  background: linear-gradient(180deg, #fff8e8, #fff3d0);
+  color: #7e5c00;
+  box-shadow: 0 10px 18px rgba(214, 154, 0, 0.14);
+}
+
+.ambulance-map-pill-warn:hover:not(:disabled) {
+  border-color: rgba(245, 195, 82, 0.86);
+  box-shadow: 0 14px 24px rgba(214, 154, 0, 0.18);
+}
+
+.ambulance-map-pill-warn:active:not(:disabled) {
+  box-shadow: 0 10px 18px rgba(214, 154, 0, 0.14);
+}
+
+.ambulance-map-divider {
+  width: 1px;
+  height: 18px;
+  border-radius: 999px;
+  background: rgba(176, 198, 227, 0.9);
+  opacity: 0.75;
+  margin: 0 2px;
+}
+
+.ambulance-map-pill:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.ambulance-map-pill-icon {
+  gap: 6px;
+}
+
+.ambulance-map-pill svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+.ambulance-map-pill.is-active {
+  border-color: rgba(63, 110, 195, 0.38);
+  background: linear-gradient(180deg, #e8f0ff, #dae8ff);
+  color: #173c7c;
+}
+
+.ambulance-map-foot-text {
+  font-size: 10.5px;
+  color: #74859d;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .ambulance-map-pill-icon span {
+    display: none;
+  }
+
+  .ambulance-map-pill-primary span,
+  .ambulance-map-pill-danger span,
+  .ambulance-map-pill-warn span {
+    display: none;
+  }
+
+  .ambulance-map-divider {
+    display: none;
+  }
+
+  .ambulance-map-foot-text {
+    flex: 1 1 100%;
+    white-space: normal;
+  }
+}
+
+.ambulance-problem-icon {
+  background: transparent;
+  border: none;
+}
+
+.ambulance-problem-tri {
+  width: 0;
+  height: 0;
+  border-left: 10px solid transparent;
+  border-right: 10px solid transparent;
+  border-bottom: 18px solid #ffd14a;
+  filter: drop-shadow(0 8px 12px rgba(0, 0, 0, 0.6));
+}
+
+.ambulance-map-wrap .leaflet-control-attribution {
+  background: rgba(255, 255, 255, 0.9);
+  color: #5c6b82;
+  border: 1px solid rgba(181, 201, 229, 0.7);
+  border-radius: 10px;
+  padding: 2px 8px;
+  margin: 10px;
+}
+
+.ambulance-map-wrap .leaflet-control-attribution a {
+  color: #2a5fd0;
+}
+
+.ambulance-map-wrap .leaflet-bar a {
+  background: rgba(255, 255, 255, 0.96);
+  color: #17305d;
+  border: 1px solid rgba(181, 201, 229, 0.74);
+}
+
+.ambulance-map-wrap .leaflet-bar a:hover {
+  background: #edf4ff;
+}

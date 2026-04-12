@@ -6,6 +6,7 @@ import { getApiBaseUrl, toApiUrl } from "../api/baseUrl";
 import { clearAuthStorage } from "../auth";
 import { SETTINGS_KEY } from "./soundPrefs";
 import { getJobsByOwner, removeCompanyJob } from "../data/jobStore";
+import { recordRecentlyDeleted } from "../services/activityStore";
 import { readActiveStories, syncStoryCaches } from "../services/storyStorage";
 import { getVaultCount } from "../services/vaultStorage";
 import { buildProfilePath, getProfileIdentifier, persistProfileIdentity } from "../utils/profileRoute";
@@ -885,6 +886,7 @@ export default function Profile() {
     if (!isOwnProfile || postId == null) return;
     const ok = window.confirm("Delete this post?");
     if (!ok) return;
+    const deletedPost = posts.find((post) => String(post?.id) === String(postId));
 
     setPostActionError("");
     setDeletingPostIds((prev) => ({ ...prev, [postId]: true }));
@@ -925,6 +927,7 @@ export default function Profile() {
           setPosts((prev) => prev.filter((p) => String(p?.id) !== String(postId)));
           setDeleteRevealPostId((prev) => (String(prev || "") === String(postId) ? null : prev));
           setDeletingPostIds((prev) => ({ ...prev, [postId]: false }));
+          recordRecentlyDeleted({ item: deletedPost, source: "profile" });
           return;
         } catch (err) {
           lastError = err;
@@ -937,6 +940,7 @@ export default function Profile() {
     persistHiddenProfilePostId(postId);
     setPosts((prev) => prev.filter((p) => String(p?.id) !== String(postId)));
     setDeleteRevealPostId((prev) => (String(prev || "") === String(postId) ? null : prev));
+    recordRecentlyDeleted({ item: deletedPost, source: "profile" });
     setPostActionError(
       status === 404
         ? "Delete endpoint is not available on backend yet. Post hidden locally."

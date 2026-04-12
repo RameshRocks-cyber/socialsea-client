@@ -186,6 +186,12 @@
   border-color: rgba(15, 157, 121, 0.38);
 }
 
+.notify-type.traffic {
+  color: #eafff1;
+  background: rgba(14, 156, 94, 0.24);
+  border-color: rgba(74, 207, 144, 0.46);
+}
+
 .notify-type.comment {
   color: #e7e7e7;
   background: rgba(74, 74, 74, 0.22);
@@ -354,6 +360,12 @@ body.ss-theme-white .notify-type.like {
 }
 
 body.ss-theme-white .notify-type.follow {
+  background: #e7f7f1 !important;
+  color: #0f5f45 !important;
+  border-color: rgba(15, 157, 121, 0.35) !important;
+}
+
+body.ss-theme-white .notify-type.traffic {
   background: #e7f7f1 !important;
   color: #0f5f45 !important;
   border-color: rgba(15, 157, 121, 0.35) !important;

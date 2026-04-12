@@ -240,6 +240,7 @@ export default function Notifications() {
 
   const kindMeta = (kind) => {
     if (kind === "emergency") return { Icon: FiAlertTriangle, label: "Emergency", tone: "emergency" };
+    if (kind === "traffic") return { Icon: FiMapPin, label: "Traffic", tone: "traffic" };
     if (kind === "like") return { Icon: FiHeart, label: "Like", tone: "like" };
     if (kind === "follow") return { Icon: FiUserPlus, label: "Follow", tone: "follow" };
     if (kind === "comment") return { Icon: FiMessageCircle, label: "Comment", tone: "comment" };
@@ -259,6 +260,20 @@ export default function Notifications() {
       navigateUrl: String(item?.navigateUrl || pick("/sos/navigate/") || "").trim(),
       mapsUrl: String(item?.mapsUrl || pick("google.com/maps") || "").trim(),
     };
+  };
+
+  const extractTrafficLinks = (item, message) => {
+    const text = String(message || "");
+    const urls = text.match(/https?:\/\/\S+/g) || [];
+    const pick = (marker) => {
+      const found = urls.find((u) => u.includes(marker));
+      return found ? found.replace(/[),.;]+$/g, "") : "";
+    };
+    const spotUrl = String(item?.spotUrl || pick("/maps/search") || "").trim();
+    const routeUrl = String(item?.routeUrl || pick("/maps/dir") || "").trim();
+    let mapsUrl = String(item?.mapsUrl || "").trim();
+    if (!mapsUrl) mapsUrl = routeUrl || spotUrl || pick("google.com/maps") || pick("maps.google.com") || "";
+    return { spotUrl, routeUrl, mapsUrl };
   };
 
   const formatWhen = (value) => {
@@ -552,6 +567,9 @@ export default function Notifications() {
           const canFollow = kind === "follow" && !!actorIdentifier && !isFollowRequest;
           const emergency = extractEmergencyLinks(n, content);
           const emergencyNav = emergency.navigateUrl || emergency.mapsUrl;
+          const traffic = kind === "traffic" ? extractTrafficLinks(n, content) : null;
+          const trafficRoute = traffic?.routeUrl || traffic?.mapsUrl || "";
+          const trafficSpot = traffic?.spotUrl || "";
           const idText = String(n?.id || "").trim();
           const isRead = Boolean(n?.read) || !idText || seenNotificationIds.has(idText);
           const followRequestId = n?.followRequestId;
@@ -643,6 +661,20 @@ export default function Notifications() {
                     {emergencyNav && (
                       <a className="notify-emergency-btn navigate" href={emergencyNav} target="_blank" rel="noreferrer">
                         <FiMapPin /> Navigate
+                      </a>
+                    )}
+                  </div>
+                )}
+                {kind === "traffic" && (trafficRoute || trafficSpot) && (
+                  <div className="notify-emergency-actions">
+                    {trafficRoute && (
+                      <a className="notify-emergency-btn navigate" href={trafficRoute} target="_blank" rel="noreferrer">
+                        <FiMapPin /> Route
+                      </a>
+                    )}
+                    {trafficSpot && trafficSpot !== trafficRoute && (
+                      <a className="notify-emergency-btn live" href={trafficSpot} target="_blank" rel="noreferrer">
+                        <FiMapPin /> Spot
                       </a>
                     )}
                   </div>

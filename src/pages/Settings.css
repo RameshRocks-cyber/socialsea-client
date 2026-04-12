@@ -41,12 +41,11 @@ body.ss-theme-white .settings-panel {
 
 body.ss-theme-white .settings-section h2 {
   color: #2b1d12;
-  border-bottom: 1px solid rgba(159, 111, 74, 0.22);
+  border-bottom: none;
   background: #ffffff;
 }
 
 body.ss-theme-white .settings-row {
-  border-bottom-color: rgba(159, 111, 74, 0.18);
   background: #ffffff;
   color: #2b1d12;
 }
@@ -178,14 +177,13 @@ body.ss-theme-white .settings-page .settings-theme-mode button.active:focus-visi
   color: #cfcfcf;
   font-size: 0.88rem;
   font-weight: 700;
-  border-bottom: 1px solid rgba(80, 80, 80, 0.35);
+  border-bottom: none;
   background: linear-gradient(180deg, rgba(18, 18, 18, 0.7), rgba(8, 8, 8, 0));
 }
 
 .settings-row {
   width: 100%;
   border: none;
-  border-bottom: 1px solid rgba(70, 70, 70, 0.35);
   background: transparent;
   color: var(--ss-text);
   display: grid;
@@ -196,10 +194,6 @@ body.ss-theme-white .settings-page .settings-theme-mode button.active:focus-visi
   cursor: pointer;
   text-align: left;
   transition: background-color 0.18s ease, transform 0.18s ease;
-}
-
-.settings-row:last-child {
-  border-bottom: none;
 }
 
 .settings-row:hover {

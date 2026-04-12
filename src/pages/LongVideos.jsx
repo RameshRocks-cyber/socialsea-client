@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import api from "../api/axios";
 import { getApiBaseUrl } from "../api/baseUrl";
+import { recordCommentActivity, recordSearchActivity, recordWatchHistory } from "../services/activityStore";
 import { readLiveBroadcast, subscribeLiveBroadcast } from "../utils/liveBroadcast";
 import "./LongVideos.css";
 
@@ -707,6 +708,11 @@ export default function LongVideos() {
     return withCloudinaryQuality(url, "auto");
   }, [activeVideo]);
 
+  useEffect(() => {
+    if (!activeVideo?.id) return;
+    recordWatchHistory({ item: activeVideo, source: "watch" });
+  }, [activeVideo?.id]);
+
   useEffect(() => {    if (!activeVideo?.id) return;
     api.get(`/api/comments/${activeVideo.id}`)
       .then((res) => {
@@ -717,6 +723,15 @@ export default function LongVideos() {
       })
       .catch(() => {});
   }, [activeVideo?.id]);
+
+  useEffect(() => {
+    const text = String(searchText || "").trim();
+    if (text.length < 2) return undefined;
+    const timer = window.setTimeout(() => {
+      recordSearchActivity({ query: text, source: "watch" });
+    }, 450);
+    return () => window.clearTimeout(timer);
+  }, [searchText]);
 
   const toggleLike = async (postId) => {    if (!postId) return;
     const wasLiked = Boolean(likedPostIds[postId]);
@@ -793,6 +808,7 @@ export default function LongVideos() {
 
   const submitComment = async (postId) => {
     const text = String(commentTextByPost[postId] || "").trim();    if (!text) return;
+    const post = watchableVideos.find((item) => String(item?.id) === String(postId));
     try {
       await api.post(`/api/comments/${postId}`, text, {
         headers: { "Content-Type": "text/plain" }
@@ -803,6 +819,7 @@ export default function LongVideos() {
         [postId]: Array.isArray(res?.data) ? res.data : []
       }));
       setCommentTextByPost((prev) => ({ ...prev, [postId]: "" }));
+      recordCommentActivity({ postId, text, item: post, source: "watch" });
     } catch {
       // noop
     }
