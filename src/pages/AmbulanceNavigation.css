@@ -428,10 +428,12 @@
   z-index: 3;
   padding: 9px 11px;
   border-radius: 14px;
-  border: 1px solid rgba(245, 195, 82, 0.45);
-  background: rgba(255, 248, 224, 0.92);
+  border: 1px solid rgba(245, 195, 82, 0.32);
+  background: rgba(255, 248, 224, 0.78);
   color: #7e5c00;
   font-size: 13px;
+  box-shadow: 0 10px 22px rgba(183, 140, 39, 0.12);
+  backdrop-filter: blur(10px);
 }
 
 .ambulance-map-wrap-fullscreen .ambulance-map-banner {
@@ -441,8 +443,8 @@
 }
 
 .ambulance-chipbar {
-  border: 1px solid rgba(181, 201, 229, 0.46);
-  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(181, 201, 229, 0.34);
+  background: rgba(255, 255, 255, 0.74);
   border-radius: 12px;
   padding: 5px 6px;
   display: inline-flex;
@@ -451,7 +453,8 @@
   justify-self: start;
   align-items: center;
   gap: 6px;
-  box-shadow: 0 8px 14px rgba(88, 117, 159, 0.08);
+  box-shadow: 0 12px 24px rgba(88, 117, 159, 0.12);
+  backdrop-filter: blur(12px);
   overflow: hidden;
 }
 
@@ -467,8 +470,8 @@
   height: 22px;
   align-self: center;
   border-radius: 999px;
-  background: rgba(176, 198, 227, 0.95);
-  opacity: 0.75;
+  background: rgba(176, 198, 227, 0.72);
+  opacity: 0.55;
 }
 
 .ambulance-chip-label {
@@ -507,8 +510,8 @@
 }
 
 .ambulance-map-foot {
-  border: 1px solid rgba(181, 201, 229, 0.46);
-  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(181, 201, 229, 0.34);
+  background: rgba(255, 255, 255, 0.72);
   border-radius: 14px;
   padding: 6px 7px;
   display: flex;
@@ -516,8 +519,8 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  box-shadow: 0 10px 20px rgba(88, 117, 159, 0.09);
-  backdrop-filter: blur(8px);
+  box-shadow: 0 14px 28px rgba(88, 117, 159, 0.12);
+  backdrop-filter: blur(12px);
 }
 
 .ambulance-map-tools {
@@ -531,8 +534,8 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  border: 1px solid rgba(176, 198, 227, 0.7);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(245, 248, 253, 0.96));
+  border: 1px solid rgba(176, 198, 227, 0.46);
+  background: rgba(255, 255, 255, 0.78);
   color: #183564;
   border-radius: 999px;
   height: 28px;
@@ -542,17 +545,19 @@
   font-size: 10.5px;
   letter-spacing: 0.2px;
   white-space: nowrap;
-  box-shadow: 0 5px 10px rgba(88, 117, 159, 0.08);
+  box-shadow: 0 8px 16px rgba(88, 117, 159, 0.1);
   transition:
     transform 120ms ease,
     box-shadow 120ms ease,
     border-color 120ms ease,
     background 120ms ease;
+  backdrop-filter: blur(8px);
 }
 
 .ambulance-map-pill:hover:not(:disabled) {
-  border-color: rgba(76, 134, 233, 0.55);
-  box-shadow: 0 10px 18px rgba(57, 103, 188, 0.14);
+  border-color: rgba(76, 134, 233, 0.45);
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 10px 18px rgba(57, 103, 188, 0.12);
   transform: translateY(-1px);
 }
 
@@ -562,8 +567,8 @@
 }
 
 .ambulance-map-pill-primary {
-  border-color: rgba(63, 110, 195, 0.38);
-  background: linear-gradient(180deg, #3a7bff, #2d62db);
+  border-color: rgba(63, 110, 195, 0.3);
+  background: linear-gradient(180deg, rgba(58, 123, 255, 0.92), rgba(45, 98, 219, 0.92));
   color: #ffffff;
   box-shadow: 0 10px 18px rgba(57, 103, 188, 0.22);
 }
@@ -578,8 +583,8 @@
 }
 
 .ambulance-map-pill-danger {
-  border-color: rgba(230, 145, 145, 0.55);
-  background: linear-gradient(180deg, #fff4f4, #ffe7e7);
+  border-color: rgba(230, 145, 145, 0.34);
+  background: rgba(255, 238, 238, 0.86);
   color: #ae2e2e;
   box-shadow: 0 10px 18px rgba(199, 57, 57, 0.12);
 }
@@ -594,8 +599,8 @@
 }
 
 .ambulance-map-pill-warn {
-  border-color: rgba(245, 195, 82, 0.62);
-  background: linear-gradient(180deg, #fff8e8, #fff3d0);
+  border-color: rgba(245, 195, 82, 0.38);
+  background: rgba(255, 245, 213, 0.86);
   color: #7e5c00;
   box-shadow: 0 10px 18px rgba(214, 154, 0, 0.14);
 }
@@ -613,8 +618,8 @@
   width: 1px;
   height: 18px;
   border-radius: 999px;
-  background: rgba(176, 198, 227, 0.9);
-  opacity: 0.75;
+  background: rgba(176, 198, 227, 0.62);
+  opacity: 0.52;
   margin: 0 2px;
 }
 
@@ -641,7 +646,7 @@
 
 .ambulance-map-foot-text {
   font-size: 10.5px;
-  color: #74859d;
+  color: #6f819b;
   white-space: nowrap;
 }
 
