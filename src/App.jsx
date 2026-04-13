@@ -1,5 +1,6 @@
 ﻿import { Suspense, lazy, useEffect, useRef } from "react";
 import { BrowserRouter, Routes, Route, useLocation, Navigate, useNavigate } from "react-router-dom";
+import { useLayoutEffect } from "react";
 import Navbar from "./components/Navbar";
 import NotificationBuddyBoundary from "./components/NotificationBuddyBoundary";
 import GestureCursor from "./components/GestureCursor";
@@ -33,12 +34,14 @@ import SettingsContentTypes from "./pages/SettingsContentTypes";
 import SettingsSounds from "./pages/SettingsSounds";
 import SettingsLocation from "./pages/SettingsLocation";
 import SettingsPrivacy from "./pages/SettingsPrivacy";
+import SettingsLanguage from "./pages/SettingsLanguage";
 import NotificationBuddySettings from "./pages/NotificationBuddySettings";
 import SOSPage from "./pages/SOSPage";
 import SOSNavigate from "./pages/SOSNavigate";
 import AmbulanceNavigation from "./pages/AmbulanceNavigation";
 import AdminLayout from "./AdminLayout";
 import Saved from "./pages/Saved";
+import { applyUiLanguageFromStorage, readPreferredLanguageSetting, syncPreferredLanguageFromBackend } from "./i18n/uiLanguage";
 import FollowRequests from "./pages/FollowRequests";
 import LongVideos from "./pages/LongVideos";
 import FollowConnections from "./pages/FollowConnections";
@@ -195,6 +198,49 @@ function AppRoutes() {
 
     document.addEventListener("play", handleVideoPlay, true);
     return () => document.removeEventListener("play", handleVideoPlay, true);
+  }, []);
+
+  useEffect(() => {
+    if (!authed) return undefined;
+    syncPreferredLanguageFromBackend();
+    return undefined;
+  }, [authed]);
+
+  useLayoutEffect(() => {
+    if (typeof document === "undefined") return undefined;
+
+    const lang = readPreferredLanguageSetting();
+    const html = document.documentElement;
+
+    if (!lang || lang === "en") {
+      html.classList.remove("ss-lang-transition");
+      return undefined;
+    }
+
+    // Google Translate updates the DOM asynchronously. During SPA navigation this can cause
+    // a brief flash of the previous language before the new route is translated.
+    // Hide the app briefly so users don't see the language "blink" between states.
+    html.classList.add("ss-lang-transition");
+    applyUiLanguageFromStorage();
+
+    const timer = window.setTimeout(() => {
+      html.classList.remove("ss-lang-transition");
+    }, 280);
+
+    return () => {
+      window.clearTimeout(timer);
+      html.classList.remove("ss-lang-transition");
+    };
+  }, [location.pathname]);
+
+  useEffect(() => {
+    const refresh = () => {
+      const lang = readPreferredLanguageSetting();
+      if (!lang || lang === "en") return;
+      applyUiLanguageFromStorage();
+    };
+    window.addEventListener("ss-settings-update", refresh);
+    return () => window.removeEventListener("ss-settings-update", refresh);
   }, []);
 
   useEffect(() => {
@@ -597,6 +643,7 @@ function AppRoutes() {
               <Route path="/settings/activity/:sectionId" element={<ProtectedRoute><YourActivity /></ProtectedRoute>} />
               <Route path="/settings/content-types" element={<ProtectedRoute><SettingsContentTypes /></ProtectedRoute>} />
               <Route path="/settings/sounds" element={<ProtectedRoute><SettingsSounds /></ProtectedRoute>} />
+              <Route path="/settings/language" element={<ProtectedRoute><SettingsLanguage /></ProtectedRoute>} />
               <Route path="/settings/location" element={<ProtectedRoute><SettingsLocation /></ProtectedRoute>} />
               <Route path="/settings/privacy" element={<ProtectedRoute><SettingsPrivacy /></ProtectedRoute>} />
               <Route path="/settings/notification-buddy" element={<ProtectedRoute><NotificationBuddySettings /></ProtectedRoute>} />

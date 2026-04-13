@@ -10,6 +10,7 @@ import {
 } from "./contentPrefs";
 import { COLOR_THEME_OPTIONS, readTheme, setTheme, readCustomThemeColors, setCustomThemeColors } from "../theme";
 import { recordAccountHistoryEntry } from "../services/activityStore";
+import { getLanguageLabel } from "../i18n/languages";
 import "./Settings.css";
 
 const CLOSE_FRIENDS_KEY = "socialsea_close_friends_v1";
@@ -50,6 +51,7 @@ const defaultPrefs = {
   ringtoneSound: DEFAULT_SOUND_PREFS.ringtoneSound,
   trafficAlerts: false,
   ambulanceNavigation: false,
+  preferredLanguage: "en",
   contentTypes: DEFAULT_CONTENT_TYPES,
   jobMode: "profile",
   showMyStoriesOnProfile: true
@@ -67,6 +69,7 @@ const SETTING_LABELS = {
   notificationBuddy: "Notification Character",
   trafficAlerts: "Traffic Alerts",
   ambulanceNavigation: "Ambulance Navigation",
+  preferredLanguage: "Language",
   showMyStoriesOnProfile: "My Stories on profile"
 };
 
@@ -184,6 +187,7 @@ export default function Settings() {
     }
     return `${contentTypeSelection.length} selected`;
   }, [contentTypeSelection]);
+  const preferredLanguageLabel = useMemo(() => getLanguageLabel(prefs.preferredLanguage), [prefs.preferredLanguage]);
 
   useEffect(() => {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(prefs));
@@ -201,6 +205,7 @@ export default function Settings() {
         const value = data?.privateAccount ?? data?.accountPrivate;
         const trafficValue = data?.trafficAlertsEnabled ?? data?.trafficAlerts;
         const ambulanceValue = data?.ambulanceDriverApproved;
+        const languageValue = data?.preferredLanguage;
         if (!cancelled && typeof value === "boolean") {
           setPrefs((prev) => ({ ...prev, accountPrivate: value }));
         }
@@ -209,6 +214,9 @@ export default function Settings() {
         }
         if (!cancelled && typeof ambulanceValue === "boolean") {
           setAmbulanceApproved(ambulanceValue);
+        }
+        if (!cancelled && typeof languageValue === "string" && languageValue.trim()) {
+          setPrefs((prev) => ({ ...prev, preferredLanguage: languageValue.trim() }));
         }
       } catch {
         // keep local preference if backend is unavailable
@@ -525,6 +533,7 @@ export default function Settings() {
             value={contentTypeSummary}
             onClick={() => navigate("/settings/content-types")}
           />
+          <Row icon={"LG"} title="Language" value={preferredLanguageLabel} onClick={() => navigate("/settings/language")} />
           <Row
             icon={"ST"}
             title="Study mode (hide Reels)"

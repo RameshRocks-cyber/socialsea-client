@@ -1,2 +1,5 @@
-/api/*  http://43.205.213.14:8080/api/:splat  200
-/*      /index.html                             200
+/api/*      http://65.0.102.55:8080/api/:splat      200
+/uploads/*  http://65.0.102.55:8080/uploads/:splat  200
+/ws         http://65.0.102.55:8080/ws              200
+/ws/*       http://65.0.102.55:8080/ws/:splat       200
+/*          /index.html                             200

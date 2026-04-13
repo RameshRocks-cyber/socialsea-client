@@ -6,8 +6,10 @@ import { NotificationProvider } from "./context/NotificationContext";
 import { ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import { applyStoredTheme } from "./theme";
+import { applyUiLanguageFromStorage } from "./i18n/uiLanguage";
 
 applyStoredTheme();
+applyUiLanguageFromStorage();
 
 createRoot(document.getElementById('root')).render(
   <AuthProvider>
