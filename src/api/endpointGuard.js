@@ -2,6 +2,7 @@ const STORAGE_KEY = "socialsea_endpoint_guard_v1";
 
 const DEFAULT_TTLS_MS = {
   chat_presence: 5 * 60 * 1000,
+  profile_language: 12 * 60 * 60 * 1000,
   notifications: 30 * 60 * 1000,
   notifications_mark: 30 * 60 * 1000
 };
@@ -53,6 +54,7 @@ export const getEndpointGuardKey = (config) => {
   const rawUrl = String(config?.url || "").trim().toLowerCase();
   if (!rawUrl) return "";
   if (rawUrl.startsWith("/api/chat/presence") || rawUrl.startsWith("/chat/presence")) return "chat_presence";
+  if (rawUrl.startsWith("/api/profile/me/language") || rawUrl.startsWith("/profile/me/language")) return "profile_language";
   if (rawUrl.startsWith("/api/notifications/read-all") || rawUrl.startsWith("/api/notifications/mark-all-read")) {
     return "notifications_mark";
   }

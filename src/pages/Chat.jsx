@@ -54,6 +54,7 @@ const CHAT_MESSAGE_LOCAL_KEY = "socialsea_chat_message_local_v1";
 const CHAT_MESSAGE_CHANNEL = "socialsea-chat-message";
 const CALL_ACCEPT_TARGET_KEY = "socialsea_call_accept_target_v1";
 const CALL_RING_MS = 30000;
+const CALL_MEDIA_CONNECT_MS = 25000;
 const STORY_STORAGE_KEY = "socialsea_stories_v1";
 const CALL_POLL_MS = 3000;
 const CALL_SIGNAL_MAX_AGE_MS = 45000;
@@ -145,8 +146,11 @@ const isLocalLikeHost = (host) => {
   return false;
 };
 const resolveLivekitUrl = () => {
-  const envUrl = String(import.meta.env.VITE_LIVEKIT_URL || "").trim();
-  if (envUrl) return envUrl;
+  const rawEnv = String(import.meta.env.VITE_LIVEKIT_URL || "").trim();
+  const envLower = rawEnv.toLowerCase();
+  const envDisabled = envLower === "false" || envLower === "0" || envLower === "off" || envLower === "disabled";
+  if (envDisabled) return "";
+  if (rawEnv) return rawEnv;
   if (typeof window !== "undefined") {
     const host = String(window.location.hostname || "").trim().toLowerCase();
     if (!isLocalLikeHost(host)) {
@@ -1396,6 +1400,7 @@ export default function Chat() {
   const livekitRoomIdRef = useRef("");
   const livekitConnectingRef = useRef(false);
   const callTimeoutRef = useRef(null);
+  const mediaConnectTimeoutRef = useRef(null);
   const callStateRef = useRef(callState);
   const incomingCallRef = useRef(null);
   const incomingCallPopupRef = useRef(null);
@@ -3754,6 +3759,23 @@ export default function Chat() {
     }
   };
 
+  const clearMediaConnectTimer = () => {
+    if (mediaConnectTimeoutRef.current) {
+      clearTimeout(mediaConnectTimeoutRef.current);
+      mediaConnectTimeoutRef.current = null;
+    }
+  };
+
+  const armMediaConnectTimeout = (timeoutMs = CALL_MEDIA_CONNECT_MS) => {
+    clearMediaConnectTimer();
+    mediaConnectTimeoutRef.current = setTimeout(() => {
+      const now = Date.now();
+      if (now < rejoinGraceUntilRef.current) return;
+      if (callStateRef.current.phase !== "connecting") return;
+      finishCall(true, "Connection timed out");
+    }, timeoutMs);
+  };
+
   const armOutgoingCallTimeout = () => {
     clearCallTimer();
     callTimeoutRef.current = setTimeout(() => {
@@ -3914,6 +3936,7 @@ export default function Chat() {
 
         const syncLivekitInCall = () => {
           clearCallTimer();
+          clearMediaConnectTimer();
           clearDisconnectGuardTimer();
           stopOutgoingRing();
           setCallState((prev) =>
@@ -4115,6 +4138,7 @@ export default function Chat() {
   const finishCall = (notifyPeer = false, reason = "") => {
     const current = callStateRef.current;
     clearRejoinRetryTimer();
+    clearMediaConnectTimer();
     rejoinRetryCountRef.current = 0;
     rejoinPayloadRef.current = null;
     if (groupActiveRef.current) {
@@ -4174,6 +4198,7 @@ export default function Chat() {
       sendSignal(current.peerId, { type: "hangup", mode: current.mode });
     }
     clearCallTimer();
+    clearMediaConnectTimer();
     stopRingtone();
     stopOutgoingRing();
     closePeer();
@@ -4298,6 +4323,7 @@ export default function Chat() {
 
     const markConnected = () => {
       clearCallTimer();
+      clearMediaConnectTimer();
       clearDisconnectGuardTimer();
       stopOutgoingRing();
       setCallState((prev) => {
@@ -4813,8 +4839,10 @@ export default function Chat() {
         if (current.phase !== "in-call") {
           setCallState((prev) => (prev.phase === "in-call" ? prev : { ...prev, phase: "connecting" }));
           setCallPhaseNote("Connecting media...");
+          armMediaConnectTimeout();
         } else {
           setCallPhaseNote("");
+          clearMediaConnectTimer();
         }
       }
       return;
@@ -4932,6 +4960,11 @@ export default function Chat() {
           mode: signal?.mode === "video" ? "video" : prev.mode
         }));
         if (signal?.mode === "video") setIsCameraOff(false);
+        if (callStateRef.current.phase !== "in-call") {
+          armMediaConnectTimeout();
+        } else {
+          clearMediaConnectTimer();
+        }
       } catch {
         finishCall(false, "Failed to establish call");
       }
@@ -5367,6 +5400,7 @@ export default function Chat() {
           initiatedByMe: false,
           provider: "livekit"
         });
+        armMediaConnectTimeout();
         persistCallRejoin({
           peerId: call.fromUserId,
           peerName: call.fromName,
@@ -5429,6 +5463,7 @@ export default function Chat() {
         initiatedByMe: false,
         provider: "webrtc"
       });
+      armMediaConnectTimeout();
       persistCallRejoin({ peerId: call.fromUserId, peerName: call.fromName, mode: call.mode, provider: "webrtc" });
       setIncomingCall(null);
       setRingtoneMuted(false);
@@ -5839,7 +5874,7 @@ export default function Chat() {
         });
       }
     } catch (err) {
-      const status = err?.response?.status;
+      const status = Number(err?.response?.status || 0);
       if (status === 404) {
         disableChatApiTemporarily();
         const fromLocal = extractContactsFromLocalHistory();
@@ -5856,6 +5891,9 @@ export default function Chat() {
         finalize();
         return;
       } else {
+        if (isRetryableChatRouteStatus(status)) {
+          disableChatApiTemporarily();
+        }
         const fromLocal = extractContactsFromLocalHistory();
         if (fromLocal.length) {
           list = fromLocal;
@@ -6189,7 +6227,7 @@ export default function Chat() {
       setChatFallbackMode(false);
     } catch (err) {
       const status = Number(err?.response?.status || 0);
-      if (status === 404) {
+      if (isRetryableChatRouteStatus(status)) {
         disableChatApiTemporarily();
         setChatFallbackMode(true);
         if (!localFallbackList) {

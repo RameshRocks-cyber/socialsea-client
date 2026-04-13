@@ -73,7 +73,8 @@ const refreshClient = axios.create({
 function normalizeApiPath(config) {
   const base = String(config?.baseURL || "").replace(/\/+$/, "");
   const url = String(config?.url || "");
-  if (base === "/api" && /^\/api(\/|$)/.test(url)) {
+  const endsWithApi = base === "/api" || base.endsWith("/api");
+  if (endsWithApi && /^\/api(\/|$)/.test(url)) {
     config.url = url.replace(/^\/api(?=\/|$)/, "") || "/";
   }
   return config;

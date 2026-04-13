@@ -37,8 +37,11 @@ const isLocalLikeHost = (host) => {
   return false;
 };
 const resolveLivekitUrl = () => {
-  const envUrl = String(import.meta.env.VITE_LIVEKIT_URL || "").trim();
-  if (envUrl) return envUrl;
+  const rawEnv = String(import.meta.env.VITE_LIVEKIT_URL || "").trim();
+  const envLower = rawEnv.toLowerCase();
+  const envDisabled = envLower === "false" || envLower === "0" || envLower === "off" || envLower === "disabled";
+  if (envDisabled) return "";
+  if (rawEnv) return rawEnv;
   if (typeof window !== "undefined") {
     const host = String(window.location.hostname || "").trim().toLowerCase();
     if (!isLocalLikeHost(host)) {

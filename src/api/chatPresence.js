@@ -2,6 +2,8 @@ import api from "./axios";
 import { getApiBaseUrl } from "./baseUrl";
 
 const CHAT_SERVER_BASE_KEY = "socialsea_chat_server_base_v1";
+const CHAT_PRESENCE_PROBE_KEY = "socialsea_chat_presence_probe_v1";
+const CHAT_PRESENCE_PROBE_MAX_AGE_MS = 12 * 60 * 60 * 1000;
 
 const normalizeBaseCandidate = (rawValue) => {
   const value = String(rawValue || "").trim().replace(/\/+$/, "");
@@ -21,6 +23,35 @@ const readStoredValue = (key) => {
 
 const uniqueList = (items) =>
   items.filter((value, index, arr) => value && arr.indexOf(value) === index);
+
+const readPresenceProbe = () => {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(CHAT_PRESENCE_PROBE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    const method = String(parsed?.method || "").trim().toUpperCase();
+    const url = String(parsed?.url || "").trim();
+    const at = Number(parsed?.at || 0);
+    if (!method || !url || !Number.isFinite(at) || at <= 0) return null;
+    if (Date.now() - at > CHAT_PRESENCE_PROBE_MAX_AGE_MS) return null;
+    return { method, url };
+  } catch {
+    return null;
+  }
+};
+
+const writePresenceProbe = ({ method, url } = {}) => {
+  if (typeof window === "undefined") return;
+  const m = String(method || "").trim().toUpperCase();
+  const u = String(url || "").trim();
+  if (!m || !u) return;
+  try {
+    localStorage.setItem(CHAT_PRESENCE_PROBE_KEY, JSON.stringify({ method: m, url: u, at: Date.now() }));
+  } catch {
+    // ignore storage failures
+  }
+};
 
 const resolveRuntimeBase = () => {
   if (typeof window === "undefined") return "";
@@ -53,8 +84,9 @@ export const buildChatPresenceBases = () =>
 export const pingChatPresence = async ({ timeoutMs = 4000 } = {}) => {
   const bases = buildChatPresenceBases();
   if (!bases.length) return false;
-  const endpoints = ["/api/chat/presence", "/chat/presence"];
-  const methods = ["POST", "GET"];
+  const probe = readPresenceProbe();
+  const endpoints = uniqueList([probe?.url, "/api/chat/presence", "/chat/presence"]);
+  const methods = uniqueList([probe?.method, "GET", "POST"].filter(Boolean));
 
   for (const baseURL of bases) {
     for (const url of endpoints) {
@@ -68,6 +100,7 @@ export const pingChatPresence = async ({ timeoutMs = 4000 } = {}) => {
             suppressAuthRedirect: true,
             allowCrossOriginAuth: true
           });
+          writePresenceProbe({ method, url });
           return true;
         } catch (err) {
           const status = Number(err?.response?.status || 0);
