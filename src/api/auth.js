@@ -15,7 +15,7 @@ const normalizeBaseCandidate = (rawValue) => {
 
   try {
     const host = new URL(value).hostname.toLowerCase();
-    if (BAD_OTP_HOSTS.has(host)) return "https://socialsea.co.in";
+    if (BAD_OTP_HOSTS.has(host)) return "/api";
   } catch {
     return "";
   }
@@ -49,9 +49,7 @@ const buildOtpBaseCandidates = () => {
     stored,
     defaultBase,
     envBase,
-    "https://api.socialsea.co.in",
     "/api",
-    "https://socialsea.co.in",
   ];
 
   const candidates = (isLocalPage ? localCandidates : deployedCandidates)

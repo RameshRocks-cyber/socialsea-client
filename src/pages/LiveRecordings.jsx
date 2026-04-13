@@ -128,7 +128,7 @@ export default function LiveRecordings() {
       storedBase,
       getApiBaseUrl(),
       import.meta.env.VITE_API_URL,
-      ...(isLocalDev ? ["/api", "http://localhost:8080", "http://127.0.0.1:8080"] : ["https://socialsea.co.in"]),
+      ...(isLocalDev ? ["/api", "http://localhost:8080", "http://127.0.0.1:8080"] : ["/api"]),
     ]
       .filter((v, i, arr) => v && arr.indexOf(v) === i);
   };

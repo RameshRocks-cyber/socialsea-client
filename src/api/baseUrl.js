@@ -33,11 +33,7 @@ function isLoopbackHost(host) {
 
 function isFrontendLikeHost(host) {
   const value = String(host || "").toLowerCase();
-  return (
-    value === "socialsea.co.in" ||
-    value === "www.socialsea.co.in" ||
-    value.endsWith(".netlify.app")
-  );
+  return value === "socialsea.co.in" || value === "www.socialsea.co.in" || value.endsWith(".netlify.app");
 }
 
 function isPrivateIpHost(host) {
@@ -70,10 +66,28 @@ export function getApiBaseUrl() {
     const host = String(window.location.hostname || "").toLowerCase();
     const isLocalHost = host === "localhost" || host === "127.0.0.1";
     const isLanHost = isPrivateIpHost(host);
+    const isNetlifyHost = host.endsWith(".netlify.app");
+    const allowLegacySocialSeaApi =
+      String(import.meta.env?.VITE_ALLOW_LEGACY_SOCIALSEA_API || "")
+        .trim()
+        .toLowerCase() === "true";
+    const isLegacySocialSeaApiHost = (value) => {
+      const normalized = String(value || "").trim().toLowerCase();
+      return (
+        normalized === "api.socialsea.co.in" ||
+        normalized === "socialsea.co.in" ||
+        normalized === "www.socialsea.co.in"
+      );
+    };
+    const shouldIgnoreLegacyHostedUrl = (url) => {
+      if (!isNetlifyHost || allowLegacySocialSeaApi) return false;
+      const targetHost = hostFromUrl(url);
+      return isLegacySocialSeaApiHost(targetHost);
+    };
 
     // Explicit override must win in all environments (including local dev).
     // This avoids accidental fallback to localhost when a remote backend is intended.
-    if (forcedUrl) {
+    if (forcedUrl && !shouldIgnoreLegacyHostedUrl(forcedUrl)) {
       persistAuthBaseUrl(forcedUrl);
       return forcedUrl;
     }
@@ -82,9 +96,13 @@ export function getApiBaseUrl() {
       // Deployed frontend should target the API host directly.
       const envUrl = normalizeApiUrl(import.meta.env.VITE_API_URL);
       const envHost = hostFromUrl(envUrl);
-      if (envUrl && !isFrontendLikeHost(envHost)) {
+      if (envUrl && !shouldIgnoreLegacyHostedUrl(envUrl) && !isFrontendLikeHost(envHost)) {
         persistAuthBaseUrl(envUrl);
         return envUrl;
+      }
+      if (isNetlifyHost) {
+        persistAuthBaseUrl("/api");
+        return "/api";
       }
       persistAuthBaseUrl("https://api.socialsea.co.in");
       return "https://api.socialsea.co.in";

@@ -238,7 +238,7 @@ export default function Feed() {
         storedBase,
         getApiBaseUrl(),
         import.meta.env.VITE_API_URL,
-        ...(isLocalDev ? ["http://localhost:8080", "http://127.0.0.1:8080", "/api"] : ["https://socialsea.co.in"]),
+        ...(isLocalDev ? ["http://localhost:8080", "http://127.0.0.1:8080", "/api"] : ["/api"]),
       ].filter((v, i, arr) => v && arr.indexOf(v) === i);
     };
     const extractList = (payload) =>

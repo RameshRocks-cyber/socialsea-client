@@ -3315,6 +3315,29 @@ body.ss-theme-white .chat-page.chat-single-pane .chat-day-sep {
   padding: 12px;
 }
 
+.call-popup-handle {
+  width: 100%;
+  height: 18px;
+  margin: -4px 0 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.call-popup-handle:active {
+  cursor: grabbing;
+}
+
+.call-popup-grip {
+  width: 44px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+}
+
 .incoming-call-popup-title,
 .incoming-call-popup-subtitle {
   margin: 0;

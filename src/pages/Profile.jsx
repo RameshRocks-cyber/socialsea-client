@@ -467,7 +467,7 @@ export default function Profile() {
       storedBase || undefined,
       envBase || undefined,
       ...(isLocalHost ? ["http://localhost:8080", "http://127.0.0.1:8080", "/api"] : []),
-      "https://socialsea.co.in"
+      "/api"
     ].filter((value, index, arr) => value && arr.indexOf(value) === index);
 
       const normalizePosts = (items) => {
@@ -896,7 +896,7 @@ export default function Profile() {
       defaultBase,
       "http://localhost:8080",
       "http://127.0.0.1:8080",
-      "https://socialsea.co.in"
+      "/api"
     ].filter((value, index, arr) => value && arr.indexOf(value) === index);
 
     const endpointCandidates = [

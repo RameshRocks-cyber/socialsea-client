@@ -45,6 +45,7 @@ const SOS_NAV_CACHE_KEY = "socialsea_sos_nav_cache_v1";
 const SOS_SUPPRESSED_ALERTS_KEY = "socialsea_sos_suppressed_alerts_v1";
 const SOS_SUPPRESSED_ALERTS_AT_KEY = "socialsea_sos_suppressed_alerts_at_v1";
 const SOS_SEEN_ALERTS_KEY = "socialsea_sos_seen_alerts_v1";
+const SOS_POPUP_POS_KEY = "socialsea_sos_popup_pos_v1";
 const SOS_ALERT_SUPPRESS_TTL_MS = 5 * 60 * 1000;
 const SOS_SIGNAL_STALE_MS = 2 * 60 * 1000;
 const SOS_ALERT_STALE_MINUTES = Number(import.meta.env.VITE_EMERGENCY_ALERT_STALE_MINUTES || 180);
@@ -182,7 +183,6 @@ const emergencyBaseCandidates = () => {
           storedBase,
           import.meta.env.VITE_API_URL,
           runtimeHostBase,
-          "https://api.socialsea.co.in"
         ]
   );
 
@@ -615,6 +615,18 @@ export default function Navbar() {
   const [ambulanceNavigationEnabled, setAmbulanceNavigationEnabled] = useState(readAmbulanceNavigationEnabled);
   const [sosActive, setSosActive] = useState(readIsSosActive);
   const [sosPopup, setSosPopup] = useState(null);
+  const [sosPopupPos, setSosPopupPos] = useState(() => {
+    try {
+      const raw = localStorage.getItem(SOS_POPUP_POS_KEY);
+      const parsed = raw ? JSON.parse(raw) : null;
+      const x = Number(parsed?.x);
+      const y = Number(parsed?.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+      return { x, y };
+    } catch {
+      return null;
+    }
+  });
   const [trafficPopup, setTrafficPopup] = useState(null);
   const [sosUserLocation, setSosUserLocation] = useState(null);
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -658,6 +670,9 @@ export default function Navbar() {
   const seenSignalRef = useRef(new Set());
   const incomingCallRef = useRef(null);
   const sosTapRef = useRef({ count: 0, lastAt: 0 });
+  const sosPopupRef = useRef(null);
+  const sosPopupDragRef = useRef({ active: false, offsetX: 0, offsetY: 0 });
+  const sosPopupPosRef = useRef(sosPopupPos);
   const seenEmergencyAlertsRef = useRef(new Set());
   const seenLocalSignalsRef = useRef(new Set());
   const seenSessionSignalsRef = useRef(new Set());
@@ -707,6 +722,81 @@ export default function Navbar() {
   useEffect(() => {
     incomingCallRef.current = incomingCall;
   }, [incomingCall]);
+
+  useEffect(() => {
+    sosPopupPosRef.current = sosPopupPos;
+  }, [sosPopupPos]);
+
+  const persistSosPopupPos = (pos) => {
+    try {
+      if (!pos || !Number.isFinite(pos.x) || !Number.isFinite(pos.y)) {
+        localStorage.removeItem(SOS_POPUP_POS_KEY);
+        return;
+      }
+      localStorage.setItem(SOS_POPUP_POS_KEY, JSON.stringify({ x: pos.x, y: pos.y }));
+    } catch {
+      // ignore storage failures
+    }
+  };
+
+  const resetSosPopupPos = () => {
+    sosPopupPosRef.current = null;
+    setSosPopupPos(null);
+    persistSosPopupPos(null);
+  };
+
+  const startSosPopupDrag = (event) => {
+    const popup = sosPopupRef.current;
+    if (!popup) return;
+    const rect = popup.getBoundingClientRect();
+    const point = event?.touches?.[0] || event?.changedTouches?.[0] || event;
+    if (!point) return;
+    event.preventDefault?.();
+    event.stopPropagation?.();
+    sosPopupDragRef.current.active = true;
+    sosPopupDragRef.current.offsetX = point.clientX - rect.left;
+    sosPopupDragRef.current.offsetY = point.clientY - rect.top;
+    if (!sosPopupPosRef.current) {
+      const next = { x: rect.left, y: rect.top };
+      sosPopupPosRef.current = next;
+      setSosPopupPos(next);
+    }
+  };
+
+  useEffect(() => {
+    const handleMove = (event) => {
+      if (!sosPopupDragRef.current.active) return;
+      const point = event?.touches?.[0] || event?.changedTouches?.[0] || event;
+      if (!point) return;
+      event.preventDefault?.();
+      const popup = sosPopupRef.current;
+      if (!popup) return;
+      const rect = popup.getBoundingClientRect();
+      const padding = 8;
+      const maxX = Math.max(padding, window.innerWidth - rect.width - padding);
+      const maxY = Math.max(padding, window.innerHeight - rect.height - padding);
+      const nextX = Math.min(maxX, Math.max(padding, point.clientX - sosPopupDragRef.current.offsetX));
+      const nextY = Math.min(maxY, Math.max(padding, point.clientY - sosPopupDragRef.current.offsetY));
+      const next = { x: nextX, y: nextY };
+      sosPopupPosRef.current = next;
+      setSosPopupPos(next);
+    };
+
+    const handleEnd = () => {
+      if (!sosPopupDragRef.current.active) return;
+      sosPopupDragRef.current.active = false;
+      persistSosPopupPos(sosPopupPosRef.current);
+    };
+
+    window.addEventListener("pointermove", handleMove, { passive: false });
+    window.addEventListener("pointerup", handleEnd);
+    window.addEventListener("pointercancel", handleEnd);
+    return () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleEnd);
+      window.removeEventListener("pointercancel", handleEnd);
+    };
+  }, []);
 
   useEffect(() => {
     const refresh = () => {
@@ -2866,42 +2956,67 @@ export default function Navbar() {
       {sosPopup && (() => {
         const popupData = typeof sosPopup === "string" ? buildSosPopupPayload(sosPopup) : sosPopup;
         return (
-        <div className="ss-sos-popup" role="status" aria-live="polite">
-          <div className="ss-sos-popup-text">{popupData?.text}</div>
-          {popupData?.showActions && (
-            <div className="ss-sos-popup-actions">
-              <button
-                type="button"
-                className="ss-sos-popup-btn"
-                onClick={() => openPopupUrl(popupData?.liveUrl)}
-                disabled={!popupData?.liveUrl}
-              >
-                Open Live Video
-              </button>
-              <button
-                type="button"
-                className="ss-sos-popup-btn"
-                onClick={() => openPopupUrl(popupData?.locationUrl)}
-                disabled={!popupData?.locationUrl}
-              >
-                Open Location
-              </button>
-              <button
-                type="button"
-                className="ss-sos-popup-btn ss-sos-popup-btn-cancel"
-                onClick={() => {
-                  const alertKey = String(popupData?.alertId || "").trim();
-                  const dedupeKey = String(popupData?.dedupeKey || "").trim();
-                  if (alertKey) suppressAlert(alertKey);
-                  if (dedupeKey) suppressAlert(dedupeKey);
-                  setSosPopup(null);
-                }}
-              >
-                Cancel
-              </button>
+          <div
+            ref={sosPopupRef}
+            className={`ss-sos-popup ${sosPopupPos ? "is-dragged" : ""}`}
+            style={
+              sosPopupPos
+                ? {
+                    left: `${sosPopupPos.x}px`,
+                    top: `${sosPopupPos.y}px`,
+                    right: "auto",
+                    bottom: "auto",
+                    transform: "none"
+                  }
+                : undefined
+            }
+            role="status"
+            aria-live="polite"
+          >
+            <div
+              className="ss-popup-handle"
+              onPointerDown={startSosPopupDrag}
+              onDoubleClick={resetSosPopupPos}
+              title="Drag to move (double-click to reset)"
+              aria-hidden="true"
+            >
+              <span className="ss-popup-grip" aria-hidden="true" />
             </div>
-          )}
-        </div>
+            <div className="ss-sos-popup-text">{popupData?.text}</div>
+            {popupData?.showActions && (
+              <div className="ss-sos-popup-actions">
+                <button
+                  type="button"
+                  className="ss-sos-popup-btn"
+                  onClick={() => openPopupUrl(popupData?.liveUrl)}
+                  disabled={!popupData?.liveUrl}
+                >
+                  Open Live Video
+                </button>
+                <button
+                  type="button"
+                  className="ss-sos-popup-btn"
+                  onClick={() => openPopupUrl(popupData?.locationUrl)}
+                  disabled={!popupData?.locationUrl}
+                >
+                  Open Location
+                </button>
+                <button
+                  type="button"
+                  className="ss-sos-popup-btn ss-sos-popup-btn-cancel"
+                  onClick={() => {
+                    const alertKey = String(popupData?.alertId || "").trim();
+                    const dedupeKey = String(popupData?.dedupeKey || "").trim();
+                    if (alertKey) suppressAlert(alertKey);
+                    if (dedupeKey) suppressAlert(dedupeKey);
+                    setSosPopup(null);
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+          </div>
         );
       })()}
 

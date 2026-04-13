@@ -63,6 +63,8 @@ const CALL_REJOIN_RETRY_MS = 6000;
 const CALL_REJOIN_MAX_RETRIES = 2;
 const CALL_REFRESH_GRACE_MS = 20000;
 const CALL_REFRESH_GRACE_KEY = "socialsea_call_refresh_grace_v1";
+const INCOMING_CALL_POPUP_POS_KEY = "socialsea_incoming_call_popup_pos_v1";
+const ACTIVE_CALL_POPUP_POS_KEY = "socialsea_active_call_popup_pos_v1";
 const CHAT_CONVO_POLL_MS = 10000;
 const CHAT_THREAD_POLL_BACKGROUND_MS = 15000;
 const CHAT_MESSAGE_ALERT_DEDUPE_MS = 10 * 60 * 1000;
@@ -836,8 +838,6 @@ export default function Chat() {
           import.meta.env?.VITE_API_BASE_URL,
           import.meta.env?.VITE_API_URL,
           typeof window !== "undefined" ? window.location.origin : "",
-          "https://api.socialsea.co.in",
-          "https://socialsea.co.in"
         ]
           .map((value) => normalizeBaseCandidate(value))
           .filter(Boolean)
@@ -952,6 +952,30 @@ export default function Chat() {
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [remoteIsScreenShare, setRemoteIsScreenShare] = useState(false);
   const [localVideoPos, setLocalVideoPos] = useState(null);
+  const [incomingCallPopupPos, setIncomingCallPopupPos] = useState(() => {
+    try {
+      const raw = localStorage.getItem(INCOMING_CALL_POPUP_POS_KEY);
+      const parsed = raw ? JSON.parse(raw) : null;
+      const x = Number(parsed?.x);
+      const y = Number(parsed?.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+      return { x, y };
+    } catch {
+      return null;
+    }
+  });
+  const [activeCallPopupPos, setActiveCallPopupPos] = useState(() => {
+    try {
+      const raw = localStorage.getItem(ACTIVE_CALL_POPUP_POS_KEY);
+      const parsed = raw ? JSON.parse(raw) : null;
+      const x = Number(parsed?.x);
+      const y = Number(parsed?.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+      return { x, y };
+    } catch {
+      return null;
+    }
+  });
   const [bubbleMenu, setBubbleMenu] = useState(null);
   const [showEmojiTray, setShowEmojiTray] = useState(false);
   const [imagePreview, setImagePreview] = useState(null);
@@ -1374,6 +1398,12 @@ export default function Chat() {
   const callTimeoutRef = useRef(null);
   const callStateRef = useRef(callState);
   const incomingCallRef = useRef(null);
+  const incomingCallPopupRef = useRef(null);
+  const incomingCallPopupDragRef = useRef({ active: false, offsetX: 0, offsetY: 0 });
+  const incomingCallPopupPosRef = useRef(incomingCallPopupPos);
+  const activeCallPopupRef = useRef(null);
+  const activeCallPopupDragRef = useRef({ active: false, offsetX: 0, offsetY: 0 });
+  const activeCallPopupPosRef = useRef(activeCallPopupPos);
   const callStartedAtRef = useRef(null);
   const callConnectedLoggedRef = useRef(false);
   const rejoinRetryTimerRef = useRef(null);
@@ -1951,6 +1981,14 @@ export default function Chat() {
   useEffect(() => {
     incomingCallRef.current = incomingCall;
   }, [incomingCall]);
+
+  useEffect(() => {
+    incomingCallPopupPosRef.current = incomingCallPopupPos;
+  }, [incomingCallPopupPos]);
+
+  useEffect(() => {
+    activeCallPopupPosRef.current = activeCallPopupPos;
+  }, [activeCallPopupPos]);
 
   useEffect(() => {
     setStoryCommentDraft("");
@@ -6633,6 +6671,11 @@ export default function Chat() {
   useEffect(() => {
     const token = getStoredToken();
     if (!token || !myUserId) return undefined;
+    const wsDisabled =
+      String(import.meta.env?.VITE_DISABLE_CHAT_WS || "")
+        .trim()
+        .toLowerCase() === "true";
+    if (wsDisabled) return undefined;
     let disposed = false;
     let activeClient = null;
 
@@ -6748,7 +6791,11 @@ export default function Chat() {
 
   useEffect(() => {
     if (!myUserId) return undefined;
-    const timer = setInterval(async () => {
+    let disposed = false;
+    let busy = false;
+    const poll = async () => {
+      if (disposed || busy) return;
+      busy = true;
       try {
         const res = await api.get("/api/calls/inbox");
         const list = Array.isArray(res.data) ? res.data : [];
@@ -6757,9 +6804,16 @@ export default function Chat() {
         });
       } catch {
         // ignore polling issues
+      } finally {
+        busy = false;
       }
-    }, CALL_POLL_MS);
-    return () => clearInterval(timer);
+    };
+    poll();
+    const timer = setInterval(poll, CALL_POLL_MS);
+    return () => {
+      disposed = true;
+      clearInterval(timer);
+    };
   }, [myUserId]);
 
   useEffect(() => {
@@ -7548,7 +7602,7 @@ export default function Chat() {
     const explicitOnline = getExplicitOnlineValue(contact);
     const windowMs = Number.isFinite(ONLINE_WINDOW_MS) && ONLINE_WINDOW_MS > 0 ? ONLINE_WINDOW_MS : 2 * 60 * 1000;
     const inferredOnline = presenceTs > 0 && nowTick - presenceTs <= windowMs;
-    const isOnline = explicitOnline === true ? true : explicitOnline === false ? false : inferredOnline;
+    const isOnline = explicitOnline === true || inferredOnline;
     if (isOnline) return { online: true, text: "online" };
     return {
       online: false,
@@ -7599,7 +7653,7 @@ export default function Chat() {
     const relPath = value.startsWith("/") ? value : `/${value.replace(/^\/+/, "")}`;
     const relPathNoApi = relPath.replace(/^\/api(?=\/|$)/i, "") || relPath;
     const devProxyBase = normalizeBase(import.meta.env?.VITE_DEV_PROXY_TARGET);
-    const apiFallbackBase = normalizeBase(import.meta.env?.VITE_API_FALLBACK || "https://api.socialsea.co.in");
+    const apiFallbackBase = normalizeBase(import.meta.env?.VITE_API_FALLBACK || "");
     const localBases = (() => {
       if (typeof window === "undefined") return [];
       const host = String(window.location.hostname || "").trim().toLowerCase();
@@ -8855,7 +8909,6 @@ export default function Chat() {
         envBase,
         "http://localhost:8080",
         "http://127.0.0.1:8080",
-        "https://socialsea.co.in"
       ].filter((v, i, arr) => v && arr.indexOf(v) === i);
 
       const endpointCandidates = [
@@ -9647,6 +9700,123 @@ export default function Chat() {
       window.removeEventListener("pointercancel", handleEnd);
     };
   }, []);
+
+  const persistPopupPos = useCallback((storageKey, pos) => {
+    try {
+      if (!pos || !Number.isFinite(pos.x) || !Number.isFinite(pos.y)) {
+        localStorage.removeItem(storageKey);
+        return;
+      }
+      localStorage.setItem(storageKey, JSON.stringify({ x: pos.x, y: pos.y }));
+    } catch {
+      // ignore storage failures
+    }
+  }, []);
+
+  const resetIncomingCallPopupPos = useCallback(() => {
+    incomingCallPopupPosRef.current = null;
+    setIncomingCallPopupPos(null);
+    persistPopupPos(INCOMING_CALL_POPUP_POS_KEY, null);
+  }, [persistPopupPos]);
+
+  const resetActiveCallPopupPos = useCallback(() => {
+    activeCallPopupPosRef.current = null;
+    setActiveCallPopupPos(null);
+    persistPopupPos(ACTIVE_CALL_POPUP_POS_KEY, null);
+  }, [persistPopupPos]);
+
+  const startIncomingCallPopupDrag = useCallback((event) => {
+    const popup = incomingCallPopupRef.current;
+    if (!popup) return;
+    const rect = popup.getBoundingClientRect();
+    const point = event?.touches?.[0] || event?.changedTouches?.[0] || event;
+    if (!point) return;
+    event.preventDefault?.();
+    event.stopPropagation?.();
+    incomingCallPopupDragRef.current.active = true;
+    incomingCallPopupDragRef.current.offsetX = point.clientX - rect.left;
+    incomingCallPopupDragRef.current.offsetY = point.clientY - rect.top;
+    if (!incomingCallPopupPosRef.current) {
+      const next = { x: rect.left, y: rect.top };
+      incomingCallPopupPosRef.current = next;
+      setIncomingCallPopupPos(next);
+    }
+  }, []);
+
+  const startActiveCallPopupDrag = useCallback((event) => {
+    const popup = activeCallPopupRef.current;
+    if (!popup) return;
+    const rect = popup.getBoundingClientRect();
+    const point = event?.touches?.[0] || event?.changedTouches?.[0] || event;
+    if (!point) return;
+    event.preventDefault?.();
+    event.stopPropagation?.();
+    activeCallPopupDragRef.current.active = true;
+    activeCallPopupDragRef.current.offsetX = point.clientX - rect.left;
+    activeCallPopupDragRef.current.offsetY = point.clientY - rect.top;
+    if (!activeCallPopupPosRef.current) {
+      const next = { x: rect.left, y: rect.top };
+      activeCallPopupPosRef.current = next;
+      setActiveCallPopupPos(next);
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleMove = (event) => {
+      const draggingIncoming = incomingCallPopupDragRef.current.active;
+      const draggingActive = activeCallPopupDragRef.current.active;
+      if (!draggingIncoming && !draggingActive) return;
+      const point = event?.touches?.[0] || event?.changedTouches?.[0] || event;
+      if (!point) return;
+      event.preventDefault?.();
+      const padding = 8;
+
+      if (draggingIncoming) {
+        const popup = incomingCallPopupRef.current;
+        if (!popup) return;
+        const rect = popup.getBoundingClientRect();
+        const maxX = Math.max(padding, window.innerWidth - rect.width - padding);
+        const maxY = Math.max(padding, window.innerHeight - rect.height - padding);
+        const nextX = Math.min(maxX, Math.max(padding, point.clientX - incomingCallPopupDragRef.current.offsetX));
+        const nextY = Math.min(maxY, Math.max(padding, point.clientY - incomingCallPopupDragRef.current.offsetY));
+        const next = { x: nextX, y: nextY };
+        incomingCallPopupPosRef.current = next;
+        setIncomingCallPopupPos(next);
+        return;
+      }
+
+      const popup = activeCallPopupRef.current;
+      if (!popup) return;
+      const rect = popup.getBoundingClientRect();
+      const maxX = Math.max(padding, window.innerWidth - rect.width - padding);
+      const maxY = Math.max(padding, window.innerHeight - rect.height - padding);
+      const nextX = Math.min(maxX, Math.max(padding, point.clientX - activeCallPopupDragRef.current.offsetX));
+      const nextY = Math.min(maxY, Math.max(padding, point.clientY - activeCallPopupDragRef.current.offsetY));
+      const next = { x: nextX, y: nextY };
+      activeCallPopupPosRef.current = next;
+      setActiveCallPopupPos(next);
+    };
+
+    const handleEnd = () => {
+      if (incomingCallPopupDragRef.current.active) {
+        incomingCallPopupDragRef.current.active = false;
+        persistPopupPos(INCOMING_CALL_POPUP_POS_KEY, incomingCallPopupPosRef.current);
+      }
+      if (activeCallPopupDragRef.current.active) {
+        activeCallPopupDragRef.current.active = false;
+        persistPopupPos(ACTIVE_CALL_POPUP_POS_KEY, activeCallPopupPosRef.current);
+      }
+    };
+
+    window.addEventListener("pointermove", handleMove, { passive: false });
+    window.addEventListener("pointerup", handleEnd);
+    window.addEventListener("pointercancel", handleEnd);
+    return () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleEnd);
+      window.removeEventListener("pointercancel", handleEnd);
+    };
+  }, [persistPopupPos]);
   const callStatusText =
     callPhaseNote ||
     (callState.phase === "in-call"
@@ -11140,7 +11310,32 @@ export default function Chat() {
       <section className={`chat-main ${showHeaderMenu ? "settings-open" : ""}`}>
         <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: "none" }} aria-hidden="true" />
         {incomingCall && (
-          <div className="incoming-call-popup" role="dialog" aria-live="polite" aria-label="Incoming call controls">
+          <div
+            ref={incomingCallPopupRef}
+            className={`incoming-call-popup ${incomingCallPopupPos ? "is-dragged" : ""}`}
+            style={
+              incomingCallPopupPos
+                ? {
+                    left: `${incomingCallPopupPos.x}px`,
+                    top: `${incomingCallPopupPos.y}px`,
+                    right: "auto",
+                    bottom: "auto"
+                  }
+                : undefined
+            }
+            role="dialog"
+            aria-live="polite"
+            aria-label="Incoming call controls"
+          >
+            <div
+              className="call-popup-handle"
+              onPointerDown={startIncomingCallPopupDrag}
+              onDoubleClick={resetIncomingCallPopupPos}
+              title="Drag to move (double-click to reset)"
+              aria-hidden="true"
+            >
+              <span className="call-popup-grip" aria-hidden="true" />
+            </div>
             <p className="incoming-call-popup-title">
               {incomingCall.mode === "video" ? "Incoming video call" : "Incoming audio call"}
             </p>
@@ -11159,7 +11354,32 @@ export default function Chat() {
           </div>
         )}
         {callActive && callState.mode === "audio" && (
-          <div className="active-call-popup" role="status" aria-live="polite" aria-label="Active call controls">
+          <div
+            ref={activeCallPopupRef}
+            className={`active-call-popup ${activeCallPopupPos ? "is-dragged" : ""}`}
+            style={
+              activeCallPopupPos
+                ? {
+                    left: `${activeCallPopupPos.x}px`,
+                    top: `${activeCallPopupPos.y}px`,
+                    right: "auto",
+                    bottom: "auto"
+                  }
+                : undefined
+            }
+            role="status"
+            aria-live="polite"
+            aria-label="Active call controls"
+          >
+            <div
+              className="call-popup-handle"
+              onPointerDown={startActiveCallPopupDrag}
+              onDoubleClick={resetActiveCallPopupPos}
+              title="Drag to move (double-click to reset)"
+              aria-hidden="true"
+            >
+              <span className="call-popup-grip" aria-hidden="true" />
+            </div>
             <p className="active-call-popup-title">
               {callState.mode === "video" ? "Video call" : "Audio call"} with {callState.peerName || "User"}
             </p>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import "./Settings.css";
 
@@ -14,6 +14,7 @@ export default function SettingsLocation() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [position, setPosition] = useState(null);
+  const requestIdRef = useRef(0);
 
   const mapsUrl = useMemo(() => {
     const lat = position?.latitude;
@@ -22,44 +23,104 @@ export default function SettingsLocation() {
     return `https://www.google.com/maps?q=${lat},${lon}`;
   }, [position]);
 
-  const captureLocation = () => {
-    if (!navigator.geolocation) {
+  const captureLocation = async () => {
+    const geo = navigator.geolocation;
+    if (!geo) {
       setError("Geolocation is not supported in this browser.");
       return;
     }
-    setLoading(true);
-    setError("");
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setPosition({
-          latitude: pos?.coords?.latitude,
-          longitude: pos?.coords?.longitude,
-          accuracy: pos?.coords?.accuracy,
-          altitude: pos?.coords?.altitude,
-          speed: pos?.coords?.speed,
-          heading: pos?.coords?.heading,
-          capturedAt: Date.now()
+    if (!window.isSecureContext) {
+      setError("Location requires HTTPS. Please open the site using https://");
+      return;
+    }
+
+    const requestId = (requestIdRef.current += 1);
+    const setIfCurrent = (fn) => {
+      if (requestIdRef.current !== requestId) return;
+      fn();
+    };
+
+    const toMessage = (geoErr) => {
+      const code = Number(geoErr?.code || 0);
+      if (code === 1) return "Location permission denied. Enable location permission for this site.";
+      if (code === 2) return "Position unavailable. Turn on device location and try again.";
+      if (code === 3) return "Location request timed out. Turn on GPS/Location and try again.";
+      return "Could not fetch location.";
+    };
+
+    const requestPosition = (options) =>
+      new Promise((resolve, reject) => {
+        geo.getCurrentPosition(resolve, reject, options);
+      });
+
+    const applyPosition = (pos) => {
+      const next = {
+        latitude: pos?.coords?.latitude,
+        longitude: pos?.coords?.longitude,
+        accuracy: pos?.coords?.accuracy,
+        altitude: pos?.coords?.altitude,
+        speed: pos?.coords?.speed,
+        heading: pos?.coords?.heading,
+        capturedAt: Date.now()
+      };
+      setIfCurrent(() => setPosition(next));
+      return next;
+    };
+
+    setIfCurrent(() => {
+      setLoading(true);
+      setError("");
+    });
+
+    // More reliable in production: allow a cached/network location first, then refine with GPS.
+    const fastOptions = { enableHighAccuracy: false, timeout: 15000, maximumAge: 60000 };
+    const preciseOptions = { enableHighAccuracy: true, timeout: 30000, maximumAge: 0 };
+
+    let best = null;
+    let lastErr = null;
+
+    try {
+      const pos = await requestPosition(fastOptions);
+      best = applyPosition(pos);
+      setIfCurrent(() => setLoading(false));
+    } catch (err) {
+      lastErr = err;
+      if (Number(err?.code) === 1) {
+        setIfCurrent(() => {
+          setError(toMessage(err));
+          setLoading(false);
         });
-        setLoading(false);
-      },
-      (geoErr) => {
-        const msg =
-          geoErr?.code === 1
-            ? "Location permission denied. Enable location permission for this site."
-            : geoErr?.code === 2
-            ? "Position unavailable. Please try again."
-            : geoErr?.code === 3
-            ? "Location request timed out. Please try again."
-            : "Could not fetch location.";
-        setError(msg);
-        setLoading(false);
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 12000,
-        maximumAge: 0
+        return;
       }
-    );
+    }
+
+    try {
+      const pos = await requestPosition(preciseOptions);
+      const next = {
+        latitude: pos?.coords?.latitude,
+        longitude: pos?.coords?.longitude,
+        accuracy: pos?.coords?.accuracy,
+        altitude: pos?.coords?.altitude,
+        speed: pos?.coords?.speed,
+        heading: pos?.coords?.heading,
+        capturedAt: Date.now()
+      };
+      const nextAccuracy = typeof next.accuracy === "number" ? next.accuracy : null;
+      const bestAccuracy = typeof best?.accuracy === "number" ? best.accuracy : null;
+      if (!best || (nextAccuracy != null && bestAccuracy != null && nextAccuracy < bestAccuracy)) {
+        setIfCurrent(() => setPosition(next));
+        best = next;
+      }
+    } catch (err) {
+      lastErr = err;
+      if (!best) setIfCurrent(() => setError(toMessage(err)));
+    } finally {
+      setIfCurrent(() => setLoading(false));
+    }
+
+    if (!best && lastErr) {
+      setIfCurrent(() => setError(toMessage(lastErr)));
+    }
   };
 
   useEffect(() => {

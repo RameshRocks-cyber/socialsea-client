@@ -52,7 +52,7 @@ const pruneExpired = (state) => {
 export const getEndpointGuardKey = (config) => {
   const rawUrl = String(config?.url || "").trim().toLowerCase();
   if (!rawUrl) return "";
-  if (rawUrl.startsWith("/api/chat/presence")) return "chat_presence";
+  if (rawUrl.startsWith("/api/chat/presence") || rawUrl.startsWith("/chat/presence")) return "chat_presence";
   if (rawUrl.startsWith("/api/notifications/read-all") || rawUrl.startsWith("/api/notifications/mark-all-read")) {
     return "notifications_mark";
   }

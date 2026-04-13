@@ -297,6 +297,29 @@ body.ss-theme-white .ss-link:hover {
   font-size: 0.86rem;
 }
 
+.ss-popup-handle {
+  width: 100%;
+  height: 18px;
+  margin: -4px 0 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.ss-popup-handle:active {
+  cursor: grabbing;
+}
+
+.ss-popup-grip {
+  width: 44px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.22);
+}
+
 .ss-sos-popup-text {
   line-height: 1.35;
 }

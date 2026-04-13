@@ -178,8 +178,7 @@ const emergencyBaseCandidates = () => {
           api.defaults.baseURL,
           storedBase,
           import.meta.env.VITE_API_URL,
-          runtimeHostBase,
-          "https://api.socialsea.co.in"
+          runtimeHostBase
         ]
   );
   const list = uniqueNonEmpty(rawList.map(normalizeEmergencyBase).filter(Boolean));
@@ -205,7 +204,6 @@ const sosSocketBaseCandidates = () => {
     api.defaults.baseURL,
     storedBase,
     import.meta.env.VITE_API_URL,
-    "https://api.socialsea.co.in"
   ]);
   return uniqueNonEmpty(raw.map(normalizeSocketBase).filter(Boolean));
 };
