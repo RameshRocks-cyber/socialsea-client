@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { getAllJobs } from "../data/jobStore";
+import { getAllJobs, JOBS_CHANGED_EVENT_NAME, syncJobsFromServer } from "../data/jobStore";
 import { scoreJobForResume, buildResumeMatchProfile } from "../services/jobMatching";
 import { recordSearchActivity } from "../services/activityStore";
 import { readCompanyProfile } from "../services/companyProfileStore";
@@ -29,8 +29,8 @@ const Jobs = () => {
   const companyProfile = useMemo(() => readCompanyProfile(), []);
   const [resume, setResume] = useState(() => readResumeSnapshot());
   const [loadingResume, setLoadingResume] = useState(true);
+  const [allJobs, setAllJobs] = useState(() => getAllJobs());
 
-  const allJobs = getAllJobs();
   const visibleJobs = allJobs.filter((job) => !hiddenTypes.includes(job.track));
 
   useEffect(() => {
@@ -54,6 +54,30 @@ const Jobs = () => {
     return () => {
       mounted = false;
       window.removeEventListener("storage", handleStorage);
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    const refreshFromCache = () => {
+      if (!active) return;
+      setAllJobs(getAllJobs());
+    };
+    const refreshFromServer = async () => {
+      await syncJobsFromServer({ includeExpired: true });
+      refreshFromCache();
+    };
+
+    refreshFromCache();
+    refreshFromServer();
+    window.addEventListener("focus", refreshFromServer);
+    window.addEventListener("storage", refreshFromCache);
+    window.addEventListener(JOBS_CHANGED_EVENT_NAME, refreshFromCache);
+    return () => {
+      active = false;
+      window.removeEventListener("focus", refreshFromServer);
+      window.removeEventListener("storage", refreshFromCache);
+      window.removeEventListener(JOBS_CHANGED_EVENT_NAME, refreshFromCache);
     };
   }, []);
 
@@ -98,10 +122,29 @@ const Jobs = () => {
     navigate(`/jobs/${jobId}`);
   };
 
+  const exitPage = () => {
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      navigate(-1);
+      return;
+    }
+    navigate("/feed");
+  };
+
   return (
     <div className="job-page job-list-page">
       <header className="job-page-header">
-        <h1 className="job-page-title">Jobs</h1>
+        <div className="job-page-header-top">
+          <h1 className="job-page-title">Jobs</h1>
+          <button
+            type="button"
+            className="job-page-exit"
+            onClick={exitPage}
+            aria-label="Exit page"
+            title="Exit"
+          >
+            ←
+          </button>
+        </div>
         <p className="job-page-subtitle">Company info</p>
         <div className="job-page-actions">
           <button type="button" className="job-page-edit" onClick={() => navigate("/applied-jobs")}>

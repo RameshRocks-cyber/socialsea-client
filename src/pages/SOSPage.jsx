@@ -1104,7 +1104,7 @@ export default function SOSPage() {
   };
 
   const toggleCameraFacing = () => {
-    if (status === "arming" || status === "active") {
+    if (status === "arming" || status === "active" || status === "stopping") {
       setMessage("Stop SOS to switch camera.");
       return;
     }
@@ -1326,7 +1326,7 @@ export default function SOSPage() {
   };
 
   const startSos = async () => {
-    if (status === "arming" || status === "active") return;
+    if (status === "arming" || status === "active" || status === "stopping") return;
     setStatus("arming");
     setMessage("");
     setAlertId(null);
@@ -1645,7 +1645,7 @@ export default function SOSPage() {
   };
 
   const onStartTap = () => {
-    if (status === "arming" || status === "active") return;
+    if (status === "arming" || status === "active" || status === "stopping") return;
     const now = Date.now();
     const prev = startTapRef.current;
     const count = now - prev.lastAt <= 2200 ? prev.count + 1 : 1;
@@ -2623,15 +2623,20 @@ export default function SOSPage() {
               type="button"
               className="sos-camera-toggle"
               onClick={toggleCameraFacing}
-              disabled={status === "arming" || status === "active"}
+              disabled={status === "arming" || status === "active" || status === "stopping"}
             >
               {cameraFacing === "user" ? "Switch to Back Camera" : "Switch to Front Camera"}
             </button>
-            <button type="button" className="sos-start" onClick={onStartTap} disabled={status === "arming" || status === "active"}>
-              Start SOS
+            <button
+              type="button"
+              className="sos-start"
+              onClick={onStartTap}
+              disabled={status === "arming" || status === "active" || status === "stopping"}
+            >
+              {status === "arming" ? "Starting..." : status === "stopping" ? "Stopping..." : "Start SOS"}
             </button>
             <button type="button" className="sos-stop" onClick={stopSos} disabled={status !== "active"}>
-              Stop SOS
+              {status === "stopping" ? "Stopping..." : "Stop SOS"}
             </button>
           </div>
         )}

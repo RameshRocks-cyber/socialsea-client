@@ -1,0 +1,2115 @@
+﻿import {
+  FiChevronDown,
+  FiChevronRight,
+  FiEye,
+  FiFileText,
+  FiHeart,
+  FiMessageCircle,
+  FiMic,
+  FiMicOff,
+  FiMonitor,
+  FiMoreVertical,
+  FiSend,
+  FiSmile,
+  FiUsers,
+  FiUserPlus,
+  FiVolume2,
+  FiVolumeX,
+  FiX,
+  FiLink,
+  FiPhone,
+  FiPhoneOff,
+  FiVideo,
+  FiVideoOff
+} from "react-icons/fi";
+import api from "../api/axios";
+import { toApiUrl } from "../api/baseUrl";
+import {
+  CHAT_WALLPAPER_PRESETS,
+  decodeSignAssistText,
+  extractReelShare,
+  formatStoryCount,
+  getStoryUserEmailValue,
+  getStoryUserIdValue,
+  trimReplyPreview,
+  useChat
+} from "./hooks/useChat";
+import ChatHeader from "./ChatHeader";
+import ChatInput from "./ChatInput";
+import VideoCall from "./VideoCall";
+
+export default function ChatMessages() {
+  const {
+    navigate,
+    location,
+    isConversationRoute,
+    isRequestsRoute,
+    safeGetItem,
+    safeSetItem,
+    normalizeThreadReadState,
+    readThreadReadState,
+    readStoryCache,
+    normalizeStoryList,
+    writeStoryCache,
+    isStoryFeedDisabled,
+    disableStoryFeedTemporarily,
+    readDiscoveryCache,
+    writeDiscoveryCache,
+    isChatApiDisabled,
+    disableChatApiTemporarily,
+    markThreadRead,
+    bumpThreadUnread,
+    syncThreadUnreadFromIncomingTimes,
+    fetchStoryFeed,
+    persistCallRejoin,
+    clearCallRejoin,
+    writeRefreshGrace,
+    myUserId,
+    setMyUserId,
+    myEmail,
+    setMyEmail,
+    contacts,
+    setContacts,
+    contactsRef,
+    contactActionId,
+    setContactActionId,
+    activeContactId,
+    setActiveContactId,
+    threadReadState,
+    setThreadReadState,
+    activeContactIdRef,
+    isConversationRouteRef,
+    threadReadStateRef,
+    messagesByContact,
+    setMessagesByContact,
+    inputText,
+    setInputText,
+    query,
+    setQuery,
+    error,
+    setError,
+    newChatOpen,
+    setNewChatOpen,
+    showSidebarMenu,
+    setShowSidebarMenu,
+    newChatQuery,
+    setNewChatQuery,
+    searchingUsers,
+    setSearchingUsers,
+    searchUsers,
+    setSearchUsers,
+    sidebarSearchUsers,
+    setSidebarSearchUsers,
+    chatFallbackMode,
+    setChatFallbackMode,
+    pendingShareDraft,
+    setPendingShareDraft,
+    shareHint,
+    setShareHint,
+    reelPreviewById,
+    setReelPreviewById,
+    reelPosterBySrc,
+    setReelPosterBySrc,
+    incomingCall,
+    setIncomingCall,
+    callState,
+    setCallState,
+    groupCallActive,
+    setGroupCallActive,
+    groupRoomId,
+    setGroupRoomId,
+    groupMembers,
+    setGroupMembers,
+    groupRemoteTiles,
+    setGroupRemoteTiles,
+    groupInviteOpen,
+    setGroupInviteOpen,
+    groupInviteIds,
+    setGroupInviteIds,
+    callError,
+    setCallError,
+    isMuted,
+    setIsMuted,
+    isCameraOff,
+    setIsCameraOff,
+    isSpeakerOn,
+    setIsSpeakerOn,
+    ringtoneMuted,
+    setRingtoneMuted,
+    callDurationSec,
+    setCallDurationSec,
+    callHistoryByContact,
+    setCallHistoryByContact,
+    videoFilterId,
+    setVideoFilterId,
+    showVideoFilters,
+    setShowVideoFilters,
+    isScreenSharing,
+    setIsScreenSharing,
+    remoteIsScreenShare,
+    setRemoteIsScreenShare,
+    localVideoPos,
+    setLocalVideoPos,
+    incomingCallPopupPos,
+    setIncomingCallPopupPos,
+    activeCallPopupPos,
+    setActiveCallPopupPos,
+    bubbleMenu,
+    setBubbleMenu,
+    showEmojiTray,
+    setShowEmojiTray,
+    imagePreview,
+    setImagePreview,
+    pickerTab,
+    setPickerTab,
+    favoritePicks,
+    setFavoritePicks,
+    customStickers,
+    setCustomStickers,
+    isRecordingAudio,
+    setIsRecordingAudio,
+    isSpeechTyping,
+    setIsSpeechTyping,
+    speechLang,
+    setSpeechLang,
+    speechLangOptions,
+    setSpeechLangOptions,
+    showHeaderMenu,
+    setShowHeaderMenu,
+    showCallMenu,
+    setShowCallMenu,
+    showWallpaperPanel,
+    setShowWallpaperPanel,
+    activeUtilityPanel,
+    setActiveUtilityPanel,
+    chatSearchQuery,
+    setChatSearchQuery,
+    highlightedMessageId,
+    setHighlightedMessageId,
+    s,
+    h,
+    mutedChatsById,
+    setMutedChatsById,
+    disappearingByContact,
+    setDisappearingByContact,
+    messageExpiryById,
+    setMessageExpiryById,
+    translatorEnabled,
+    setTranslatorEnabled,
+    translatorLang,
+    setTranslatorLang,
+    speechVoiceGender,
+    setSpeechVoiceGender,
+    translatedIncomingById,
+    setTranslatedIncomingById,
+    translatorError,
+    setTranslatorError,
+    showScrollDown,
+    setShowScrollDown,
+    followingCacheTick,
+    setFollowingCacheTick,
+    nowTick,
+    setNowTick,
+    pendingChatRequests,
+    setPendingChatRequests,
+    chatRequests,
+    setChatRequests,
+    sentChatRequests,
+    setSentChatRequests,
+    chatRequestsLoading,
+    setChatRequestsLoading,
+    chatRequestError,
+    setChatRequestError,
+    chatRequestBusyById,
+    setChatRequestBusyById,
+    storyItems,
+    setStoryItems,
+    storyViewerIndex,
+    setStoryViewerIndex,
+    storyViewerItems,
+    setStoryViewerItems,
+    storyViewerGroupKey,
+    setStoryViewerGroupKey,
+    storyOptionsItems,
+    setStoryOptionsItems,
+    storyOptionsGroupKey,
+    setStoryOptionsGroupKey,
+    activeStory,
+    storyViewerSrc,
+    setStoryViewerSrc,
+    storyViewerMuted,
+    setStoryViewerMuted,
+    storyViewerLoading,
+    setStoryViewerLoading,
+    storyViewerLoadError,
+    setStoryViewerLoadError,
+    storyViewerMediaKind,
+    setStoryViewerMediaKind,
+    storyViewerBlobType,
+    setStoryViewerBlobType,
+    storyOptionsOpen,
+    setStoryOptionsOpen,
+    storyPlayerProgress,
+    setStoryPlayerProgress,
+    storyPlayerPaused,
+    setStoryPlayerPaused,
+    storyReactions,
+    setStoryReactions,
+    storyCommentDraft,
+    setStoryCommentDraft,
+    storyCommentOpen,
+    setStoryCommentOpen,
+    storyUsernamesById,
+    setStoryUsernamesById,
+    storyUsernamesByEmail,
+    setStoryUsernamesByEmail,
+    storyUsernamesRef,
+    storyProfileLookupRef,
+    reelPreviewLoadingRef,
+    reelPosterLoadingRef,
+    storyContactIndex,
+    resolveStoryUsername,
+    storyGroups,
+    storyGroupsByKey,
+    soundPrefs,
+    setSoundPrefs,
+    hasRemoteVideo,
+    setHasRemoteVideo,
+    hasRemoteAudio,
+    setHasRemoteAudio,
+    pipEnabled,
+    setPipEnabled,
+    pipActive,
+    setPipActive,
+    pipDismissedRef,
+    groupPeersRef,
+    groupStreamsRef,
+    groupActiveRef,
+    rejoinAttemptedRef,
+    localVideoDragRef,
+    isScreenShareStream,
+    callPhaseNote,
+    setCallPhaseNote,
+    signAssistEnabled,
+    setSignAssistEnabled,
+    signAssistText,
+    setSignAssistText,
+    signAssistVoiceGender,
+    setSignAssistVoiceGender,
+    readAutoSpeakPrefs,
+    autoSpeakPrefsRef,
+    autoSpeakEnabledAtRef,
+    signAssistAutoSpeak,
+    setSignAssistAutoSpeak,
+    signAssistContinuousMode,
+    setSignAssistContinuousMode,
+    signAssistBusy,
+    setSignAssistBusy,
+    signAssistStatus,
+    setSignAssistStatus,
+    blockedUsers,
+    setBlockedUsers,
+    chatWallpaper,
+    setChatWallpaper,
+    showWallpaperEditor,
+    setShowWallpaperEditor,
+    wallpaperDraft,
+    setWallpaperDraft,
+    replyDraft,
+    setReplyDraft,
+    stompRef,
+    peerRef,
+    localStreamRef,
+    remoteStreamRef,
+    localVideoRef,
+    remoteVideoRef,
+    screenStreamRef,
+    cameraTrackRef,
+    remoteAudioRef,
+    livekitRoomRef,
+    livekitRoomIdRef,
+    livekitConnectingRef,
+    callTimeoutRef,
+    mediaConnectTimeoutRef,
+    callStateRef,
+    incomingCallRef,
+    incomingCallPopupRef,
+    incomingCallPopupDragRef,
+    incomingCallPopupPosRef,
+    activeCallPopupRef,
+    activeCallPopupDragRef,
+    activeCallPopupPosRef,
+    callStartedAtRef,
+    callConnectedLoggedRef,
+    rejoinRetryTimerRef,
+    rejoinRetryCountRef,
+    rejoinPayloadRef,
+    rejoinGraceUntilRef,
+    audioCtxRef,
+    remoteAudioCtxRef,
+    remoteAudioSourceRef,
+    remoteAudioGainRef,
+    ringtoneTimerRef,
+    outgoingRingTimerRef,
+    customRingtoneAudioRef,
+    disconnectGuardTimerRef,
+    historyRef,
+    storyLongPressTimeoutRef,
+    storyLongPressTriggeredRef,
+    storyViewerVideoRef,
+    storyViewerCandidatesRef,
+    storyViewerCandidateIndexRef,
+    storyViewerBlobUrlRef,
+    storyViewerBlobTriedRef,
+    storyViewerLoadTimeoutRef,
+    storyOptionsPausedRef,
+    activeStoryIdRef,
+    storyPlayerRafRef,
+    storyPlayerDurationRef,
+    storyPlayerElapsedRef,
+    storyPlayerLastTickRef,
+    storyPlayerPausedRef,
+    viewedStoryIdsRef,
+    storyFeedDisabledUntilRef,
+    chatApiDisabledUntilRef,
+    unreadPrefetchInFlightRef,
+    unreadPrefetchLastAtRef,
+    seenSignalsRef,
+    longPressTimerRef,
+    contactLongPressTimerRef,
+    contactLongPressTriggeredRef,
+    touchStartPointRef,
+    touchSwipeReplyRef,
+    tabIdRef,
+    callChannelRef,
+    readReceiptChannelRef,
+    messageChannelRef,
+    seenReadReceiptsRef,
+    lastReadReceiptSentByContactRef,
+    notifiedMessageKeysRef,
+    messagesByContactRef,
+    composerInputRef,
+    attachInputRef,
+    cameraInputRef,
+    stickerInputRef,
+    wallpaperInputRef,
+    mediaRecorderRef,
+    recordingStreamRef,
+    recordingChunksRef,
+    speechRecognitionRef,
+    speechFinalTranscriptRef,
+    speechInterimTranscriptRef,
+    speechLastAppliedTextRef,
+    headerMenuWrapRef,
+    headerMenuRef,
+    callMenuRef,
+    utilityPanelRef,
+    wallpaperPanelRef,
+    chatSearchInputRef,
+    sidebarMenuWrapRef,
+    sidebarMenuRef,
+    translationCacheRef,
+    threadRef,
+    shouldStickToBottomRef,
+    lastThreadItemCountRef,
+    scrollRafRef,
+    openScrollPlanRef,
+    showScrollDownRef,
+    highlightTimerRef,
+    spokenSignMessageIdsRef,
+    autoSpeakBootstrappedByContactRef,
+    signApiUnavailableRef,
+    signLocalModelRef,
+    signLocalModelLoadingRef,
+    signLivePollTimerRef,
+    signLastDetectedTextRef,
+    signLastDetectedAtRef,
+    signLiveBufferRef,
+    signAssistSendingRef,
+    signSequenceFramesRef,
+    signSequenceModelRef,
+    signSequenceModelLoadingRef,
+    chatServerBaseRef,
+    resolvingContactProfilesRef,
+    convoLoadingRef,
+    lastConvoPollRef,
+    lastThreadPollRef,
+    discoveryHydratedRef,
+    localHydratedRef,
+    TRANSLATE_LANG_OPTIONS,
+    threadWallpaperStyle,
+    selectChatWallpaperPreset,
+    openWallpaperPicker,
+    buildWallpaperDraft,
+    openWallpaperEditor,
+    closeWallpaperEditor,
+    applyWallpaperEditor,
+    onWallpaperPicked,
+    updateWallpaperOptions,
+    ensureAudioContext,
+    ensureAudioReady,
+    playTone,
+    playNotificationPattern,
+    playNotificationBeep,
+    playMessageAlert,
+    maybeShowBrowserNotification,
+    stopRingtone,
+    stopOutgoingRing,
+    playCustomRingtoneLoop,
+    startRingtone,
+    startOutgoingRing,
+    resumeRemoteAudio,
+    applySpeakerState,
+    kickstartRemotePlayback,
+    localThreadKey,
+    localChatStorageKey,
+    filterLocalChatForUser,
+    readLocalChat,
+    writeLocalChat,
+    readFollowingCache,
+    normalizeFollowKey,
+    writeFollowingCache,
+    updateFollowCache,
+    getFollowKeysForContact,
+    readChatRequestCache,
+    writeChatRequestCache,
+    hiddenMessageStorageKey,
+    readHiddenMessageMap,
+    writeHiddenMessageMap,
+    getHiddenMessageSetForContact,
+    markMessageHiddenForMe,
+    callHistoryStorageKey,
+    readCallHistory,
+    writeCallHistory,
+    pushCallHistory,
+    normalizeDisplayName,
+    isGenericUserLabel,
+    getContactDisplayName,
+    pickClosestTimestamp,
+    parseTimestampMs,
+    normalizeTimestamp,
+    toEpochMs,
+    normalizeMessage,
+    messageFingerprint,
+    buildMessageAlertKey,
+    shouldNotifyForMessage,
+    getMessageListItemSignature,
+    areMessageListsEquivalent,
+    getContactSignature,
+    areContactListsEquivalent,
+    scrollThreadToBottom,
+    refreshThreadScrollState,
+    getVisibleThreadMessageIds,
+    isPrivateIpHost,
+    isLocalRuntime,
+    isLocalAbsoluteHost,
+    normalizeBaseCandidate,
+    resolveAbsoluteChatBase,
+    looksLikeHtmlPayload,
+    isRetryableChatRouteStatus,
+    persistChatServerBase,
+    buildChatBaseCandidates,
+    toArrayPayload,
+    requestChatArray,
+    requestChatMutation,
+    requestChatObject,
+    mapUserToContact,
+    mergeContacts,
+    extractContactsFromLocalHistory,
+    buildGroupRoomId,
+    resolveContactName,
+    serializeGroupMembers,
+    syncGroupRemoteTiles,
+    sendSignal,
+    clearCallTimer,
+    clearMediaConnectTimer,
+    armMediaConnectTimeout,
+    armOutgoingCallTimeout,
+    armIncomingCallTimeout,
+    clearDisconnectGuardTimer,
+    clearRejoinRetryTimer,
+    setupRemoteAudioPipeline,
+    updateRemoteMediaFlags,
+    livekitEnabled,
+    buildLivekitRoomId,
+    disconnectLivekit,
+    connectLivekit,
+    stopStream,
+    resetMedia,
+    closePeer,
+    closeSinglePeerOnly,
+    resetGroupCall,
+    finishCall,
+    ensureLocalStream,
+    createPeerConnection,
+    createGroupPeerConnection,
+    removeGroupPeer,
+    ensureGroupMesh,
+    closeGroupPeers,
+    applySdpQualityHints,
+    tuneSendersForQuality,
+    attemptRejoin,
+    ensureSignalContact,
+    onSignal,
+    onIncomingChatMessage,
+    openGroupInvite,
+    openNewGroup,
+    toggleGroupInvite,
+    startGroupCall,
+    addPeopleToGroupCall,
+    startOutgoingCall,
+    getVideoSender,
+    acceptIncomingCall,
+    declineIncomingCall,
+    toggleIncomingRingtoneMute,
+    toggleMute,
+    toggleSpeaker,
+    toggleCamera,
+    stopScreenShare,
+    toggleScreenShare,
+    upgradeCallToVideo,
+    loadConversations,
+    loadDiscoveryContacts,
+    searchContacts,
+    loadThread,
+    isBlockedContact,
+    followingCache,
+    isFollowingContact,
+    getRequestKey,
+    getRequestStatus,
+    setRequestStatus,
+    setRequestStatusByIdentifiers,
+    resolveChatRequestContact,
+    resolveChatRequestIdentifiers,
+    acceptChatRequest,
+    rejectChatRequest,
+    requestChatAccess,
+    filteredContacts,
+    newChatCandidates,
+    outgoingRequestKeys,
+    hasOutgoingRequest,
+    filteredSentChatRequests,
+    requestsTotal,
+    canChatWith,
+    openContact,
+    startNewChat,
+    toggleContactActions,
+    startContactLongPress,
+    stopContactLongPress,
+    handleContactPointerUp,
+    handleContactKeyDown,
+    deleteConversation,
+    activeContact,
+    activeContactBlocked,
+    activeContactKey,
+    activeMuted,
+    activeDisappearingValue,
+    activeDisappearingMs,
+    activeMessages,
+    activeCallHistory,
+    setActiveContactMuted,
+    setActiveDisappearingSetting,
+    upsertMessageExpiry,
+    buildActiveDisappearingExpiryMs,
+    getMessagePreviewLabel,
+    mediaPanelItems,
+    linkDocumentItems,
+    normalizedChatSearchQuery,
+    searchPanelItems,
+    clampFutureTimestamp,
+    formatLastSeen,
+    hasExplicitOnlineFlag,
+    normalizeOnlineValue,
+    getExplicitOnlineValue,
+    getPeerMessageActivityTs,
+    getPeerCallActivityTs,
+    getContactActivityTs,
+    getContactPresenceTs,
+    getContactPresence,
+    resolveStoryMediaUrl,
+    revokeStoryViewerBlobUrl,
+    clearStoryViewerLoadTimer,
+    buildStoryMediaCandidates,
+    isStoryVideo,
+    detectStoryMediaKind,
+    inferStoryMediaKind,
+    fetchStoryBlob,
+    loadStoryViewerCandidate,
+    tryBlobForStoryCandidate,
+    handleStoryViewerMediaError,
+    isMyStoryGroup,
+    openStoryGroup,
+    getStoryGroupLabel,
+    closeStory,
+    openStoryOptions,
+    closeStoryOptions,
+    deleteStoryItems,
+    startStoryLongPress,
+    cancelStoryLongPress,
+    handleStoryTileClick,
+    goNextStory,
+    goPrevStory,
+    resolvedStoryMediaUrl,
+    resolvedStoryMediaKind,
+    resolvedStoryIsVideo,
+    stopStoryProgress,
+    resetStoryProgress,
+    runStoryProgress,
+    pauseStoryPlayback,
+    resumeStoryPlayback,
+    handleStoryVideoLoaded,
+    handleStoryVideoTimeUpdate,
+    handleStoryVideoEnded,
+    storyKeyFor,
+    applyStoryStats,
+    peerLatestMessageTs,
+    headerPresenceText,
+    sendTextPayload,
+    sendMessage,
+    sendSignAssistMessage,
+    ensureSequenceModel,
+    pushSequenceFrame,
+    detectSequenceSignText,
+    detectLocalSignText,
+    resetSignLiveBuffer,
+    flushSignLiveBuffer,
+    pushSignLiveBuffer,
+    handleContinuousSign,
+    captureSignAssistFromVideo,
+    speakSignAssistText,
+    setAutoSpeakEnabled,
+    setContinuousModeEnabled,
+    processVisibleAutoSpeak,
+    goToProfile,
+    blockActiveContact,
+    addComposerText,
+    toggleEmojiTray,
+    isFavoritePick,
+    toggleFavoritePick,
+    onEmojiPick,
+    onStickerPick,
+    onCustomStickerPick,
+    removeCustomSticker,
+    onStickerImagePicked,
+    openStickerPicker,
+    favoriteItemsForTray,
+    sendMediaFile,
+    onFilePicked,
+    openAttachPicker,
+    openCameraPicker,
+    normalizeSpeechChunk,
+    mergeSpeechChunks,
+    stopSpeechTyping,
+    toggleSpeechTyping,
+    releaseRecordingStream,
+    stopAudioRecording,
+    toggleAudioRecording,
+    callActive,
+    openImagePreview,
+    closeImagePreview,
+    showVideoCallScreen,
+    activeVideoFilter,
+    startLocalVideoDrag,
+    persistPopupPos,
+    resetIncomingCallPopupPos,
+    resetActiveCallPopupPos,
+    startIncomingCallPopupDrag,
+    startActiveCallPopupDrag,
+    callStatusText,
+    callLabel,
+    formatCallStatus,
+    formatCallCard,
+    formatMessageTime,
+    canTranslateMessage,
+    getSpeakableIncomingPayload,
+    translateText,
+    getMessageTickState,
+    getTickSymbol,
+    formatDayLabel,
+    formatCallDuration,
+    resolveMediaUrl,
+    threadItems,
+    chatItems,
+    sendVisibleReadReceipts,
+    onThreadScroll,
+    focusThreadMessage,
+    openBubbleMenu,
+    openBubbleMenuOnClick,
+    onBubbleTouchStart,
+    onBubbleTouchMove,
+    onBubbleTouchEnd,
+    closeBubbleMenu,
+    hasDraft,
+    getBubbleDownloadInfo,
+    saveBubbleMedia,
+    copyBubbleItem,
+    deleteBubbleItem,
+    deleteBubbleItemForEveryone,
+    contactId,
+  } = useChat();
+
+  return (
+    <div className={`chat-page ${isConversationRoute ? "chat-single-pane" : "chat-list-only"}`}>
+      <VideoCall placement="page" />
+
+      {!isConversationRoute && !isRequestsRoute && (
+        <aside className="chat-sidebar">
+        <div className="chat-sidebar-head">
+          <h2>Messages</h2>
+          <div className="chat-sidebar-actions" ref={sidebarMenuWrapRef}>
+            <button
+              type="button"
+              className="chat-sidebar-menu-btn"
+              onClick={() => setShowSidebarMenu((prev) => !prev)}
+              aria-haspopup="menu"
+              aria-expanded={showSidebarMenu}
+              title="More options"
+            >
+              <FiMoreVertical />
+            </button>
+
+            {showSidebarMenu && (
+              <aside className="chat-sidebar-menu" ref={sidebarMenuRef} role="menu" aria-label="Chat options">
+                <button
+                  type="button"
+                  className="chat-sidebar-menu-item"
+                  role="menuitem"
+                  onClick={() => {
+                    setShowSidebarMenu(false);
+                    openNewGroup();
+                  }}
+                >
+                  <span className="chat-sidebar-menu-left">
+                    <FiUsers /> New Group
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="chat-sidebar-menu-item"
+                  role="menuitem"
+                  onClick={() => {
+                    setShowSidebarMenu(false);
+                    navigate("/chat/requests");
+                  }}
+                >
+                  <span className="chat-sidebar-menu-left">
+                    <FiUserPlus /> Requests
+                  </span>
+                  {requestsTotal > 0 && <span className="chat-requests-count">{requestsTotal}</span>}
+                </button>
+                <button
+                  type="button"
+                  className="chat-sidebar-menu-item"
+                  role="menuitem"
+                  onClick={() => {
+                    setShowSidebarMenu(false);
+                    setNewChatOpen(true);
+                  }}
+                >
+                  <span className="chat-sidebar-menu-left">
+                    <FiMessageCircle /> New Chat
+                  </span>
+                </button>
+              </aside>
+            )}
+          </div>
+        </div>
+        <div className="chat-stories">
+          <div className="chat-stories-head">
+            <h3>Stories</h3>
+            <button type="button" className="chat-story-add" onClick={() => navigate("/story/create")}>
+              + Add
+            </button>
+          </div>
+          <div className="chat-stories-row">
+            <button type="button" className="chat-story-tile add" onClick={() => navigate("/story/create")}>
+              <span className="chat-story-thumb">+</span>
+              <small>Your story</small>
+            </button>
+            {storyGroups.map((group) => {
+              const story = group.latest || group.items[0];
+              const mediaUrl = resolveStoryMediaUrl(story?.mediaUrl || story?.url || "");
+              const isVideo = isStoryVideo(mediaUrl);
+              const baseLabel = getStoryGroupLabel(group);
+              const label =
+                group.items.length > 1 ? `${baseLabel} (${group.items.length})` : baseLabel;
+              return (
+                <button
+                  key={group.key}
+                  type="button"
+                  className="chat-story-tile"
+                  onClick={() => handleStoryTileClick(group)}
+                  onPointerDown={startStoryLongPress(group)}
+                  onPointerUp={cancelStoryLongPress}
+                  onPointerLeave={cancelStoryLongPress}
+                  onPointerCancel={cancelStoryLongPress}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    if (isMyStoryGroup(group)) openStoryOptions(group);
+                  }}
+                >
+                  <span className="chat-story-thumb">
+                    {mediaUrl ? (
+                      isVideo ? (
+                        <video src={mediaUrl} muted playsInline preload="metadata" />
+                      ) : (
+                        <img src={mediaUrl} alt={label} />
+                      )
+                    ) : (
+                      <span className="chat-story-fallback">{label.slice(0, 1).toUpperCase()}</span>
+                    )}
+                    {isVideo && <span className="chat-story-play">▶</span>}
+                  </span>
+                  <small>{label.length > 14 ? `${label.slice(0, 12)}...` : label}</small>
+                </button>
+              );
+            })}
+            {storyGroups.length === 0 && (
+              <p className="chat-story-empty">No stories yet</p>
+            )}
+          </div>
+        </div>
+        <input
+          type="text"
+          className="chat-search"
+          placeholder="Search chats"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        {error && <p className="chat-error">{error}</p>}
+        {!error && !!shareHint && <p className="chat-empty">{shareHint}</p>}
+        <div className="chat-contact-list">
+           {filteredContacts.map((c) => {
+             const presence = getContactPresence(c);
+             const displayName = getContactDisplayName(c);
+             const contactId = c?.id != null ? String(c.id) : "";
+             const isActive = isConversationRoute && String(activeContactId) === contactId;
+             const unreadCount = contactId
+               ? Math.max(0, Math.floor(Number(threadReadState?.[contactId]?.unread || 0)))
+               : 0;
+             const showUnread = unreadCount > 0 && !isActive;
+             const showActions = Boolean(contactId) && String(contactActionId) === contactId;
+             const contactKey = contactId || c?.email || displayName;
+             return (
+               <div key={contactKey} className={`chat-contact-card ${isActive ? "active" : ""}`}>
+                 <button
+                   type="button"
+                   className={`chat-contact ${isActive ? "active" : ""} ${showUnread ? "has-unread" : ""}`}
+                   onPointerDown={startContactLongPress(contactId)}
+                   onPointerUp={(e) => handleContactPointerUp(e, c)}
+                   onPointerLeave={stopContactLongPress}
+                   onPointerCancel={stopContactLongPress}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    toggleContactActions(contactId);
+                  }}
+                  onDoubleClick={() => openContact(c)}
+                  onKeyDown={(e) => handleContactKeyDown(e, c)}
+                >
+                  <span className="chat-avatar">
+                    {c.profilePic ? <img src={c.profilePic} alt={displayName} className="chat-avatar-img" /> : c.avatar}
+                    <span className={`chat-presence-dot ${presence.online ? "is-online" : ""}`} />
+                  </span>
+                  <span className="chat-meta">
+                    <span className="chat-meta-row">
+                      <strong>{displayName}</strong>
+                      <span className={`chat-status-pill ${presence.online ? "is-online" : ""}`}>
+                        {presence.text}
+                      </span>
+                     </span>
+                     <small>{c.lastMessage || "Tap to start chatting"}</small>
+                   </span>
+                   <span className="chat-contact-right" aria-hidden={!showUnread}>
+                     {showUnread && (
+                       <span className="chat-unread-badge" aria-label={`${unreadCount} unread messages`}>
+                         {unreadCount > 99 ? "99+" : unreadCount}
+                       </span>
+                     )}
+                   </span>
+                 </button>
+                 {showActions && (
+                   <div className="chat-contact-actions">
+                     <button
+                      type="button"
+                      className="chat-contact-delete"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        deleteConversation(c);
+                      }}
+                    >
+                      Delete chat
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {!error && filteredContacts.length === 0 && <p className="chat-empty">No users found</p>}
+        </div>
+
+        {newChatOpen && (
+          <div className="new-chat-modal-backdrop" onClick={() => setNewChatOpen(false)}>
+            <div className="new-chat-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="new-chat-top">
+                <h4>Start New Chat</h4>
+                <button type="button" onClick={() => setNewChatOpen(false)}>
+                  x
+                </button>
+              </div>
+              <input
+                type="text"
+                className="chat-search"
+                placeholder="Search people"
+                value={newChatQuery}
+                onChange={(e) => setNewChatQuery(e.target.value)}
+              />
+              <div className="new-chat-list">
+                {searchingUsers && <p className="chat-empty">Searching users...</p>}
+                {newChatCandidates.map((c) => {
+                  const displayName = getContactDisplayName(c);
+                  const canChat = canChatWith(c);
+                  const outgoingPending = hasOutgoingRequest(c);
+                  const rawRequestStatus = getRequestStatus(c);
+                  const cleanedStatus =
+                    !chatRequestsLoading && !outgoingPending &&
+                    (rawRequestStatus === "requested" || rawRequestStatus === "pending")
+                      ? ""
+                      : rawRequestStatus;
+                  const requestStatus = isFollowingContact(c)
+                    ? "following"
+                    : outgoingPending
+                      ? "requested"
+                      : cleanedStatus;
+                  const requestLabel =
+                    requestStatus === "following"
+                      ? "Following"
+                      : requestStatus === "requested" || requestStatus === "pending"
+                        ? "Requested"
+                        : requestStatus === "error"
+                          ? "Retry"
+                          : "Request";
+                  return (
+                    <div key={c.id} className="chat-contact-row">
+                      <button
+                        type="button"
+                        className={`chat-contact ${canChat ? "" : "is-locked"}`}
+                        onClick={canChat ? () => startNewChat(c) : undefined}
+                        disabled={!canChat}
+                      >
+                        <span className="chat-avatar">
+                          {c.profilePic ? <img src={c.profilePic} alt={displayName} className="chat-avatar-img" /> : c.avatar}
+                        </span>
+                        <span className="chat-meta">
+                          <strong>{displayName}</strong>
+                          <small>{c.email || c.username || "Start conversation"}</small>
+                        </span>
+                      </button>
+                      {!canChat && (
+                        <button
+                          type="button"
+                          className="chat-request-btn"
+                          onClick={() => requestChatAccess(c)}
+                          disabled={requestStatus === "requested" || requestStatus === "pending"}
+                        >
+                          {requestLabel}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+                {!searchingUsers && newChatCandidates.length === 0 && <p className="chat-empty">No users found</p>}
+              </div>
+            </div>
+          </div>
+        )}
+        </aside>
+      )}
+
+      {!isConversationRoute && isRequestsRoute && (
+        <section className="chat-requests-page">
+          <div className="chat-requests-page-head">
+            <button
+              type="button"
+              className="chat-requests-back"
+              onClick={() => navigate("/chat")}
+            >
+              <FiArrowLeft /> Back
+            </button>
+            <h2>Chat Requests</h2>
+            <span className="chat-requests-summary">
+              {chatRequests.length} incoming / {filteredSentChatRequests.length} sent
+            </span>
+          </div>
+          <div className="chat-requests-grid">
+            <div className="chat-requests">
+              <div className="chat-requests-head">
+                <h3>Incoming</h3>
+                {chatRequests.length > 0 && <span className="chat-requests-count">{chatRequests.length}</span>}
+              </div>
+              <div className="chat-requests-list">
+                {chatRequestsLoading && <p className="chat-request-empty">Loading requests...</p>}
+                {!chatRequestsLoading && !chatRequestError && chatRequests.length === 0 && (
+                  <p className="chat-request-empty">No new requests</p>
+                )}
+                {chatRequestError && <p className="chat-request-error">{chatRequestError}</p>}
+                {chatRequests.map((req) => {
+                  const contact = resolveChatRequestContact(req);
+                  if (!contact) return null;
+                  const displayName = getContactDisplayName(contact);
+                  const requestId = String(req?.id || "").trim();
+                  const busy = Boolean(requestId && chatRequestBusyById[requestId]);
+                  const actionable = Boolean(requestId);
+                  return (
+                    <div key={requestId || contact.id} className="chat-request-card">
+                      <span className="chat-avatar">
+                        {contact.profilePic ? (
+                          <img src={contact.profilePic} alt={displayName} className="chat-avatar-img" />
+                        ) : (
+                          contact.avatar
+                        )}
+                      </span>
+                      <span className="chat-request-meta">
+                        <strong>{displayName}</strong>
+                        <small>{contact.email || contact.username || "Chat request"}</small>
+                      </span>
+                      <div className="chat-request-actions">
+                        <button
+                          type="button"
+                          className="chat-request-btn accept"
+                          onClick={() => acceptChatRequest(req)}
+                          disabled={!actionable || busy}
+                        >
+                          Accept
+                        </button>
+                        <button
+                          type="button"
+                          className="chat-request-btn reject"
+                          onClick={() => rejectChatRequest(req)}
+                          disabled={!actionable || busy}
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="chat-requests chat-requests-sent">
+              <div className="chat-requests-head">
+                <h3>Sent</h3>
+                {filteredSentChatRequests.length > 0 && (
+                  <span className="chat-requests-count">{filteredSentChatRequests.length}</span>
+                )}
+              </div>
+              <div className="chat-requests-list">
+                {chatRequestsLoading && filteredSentChatRequests.length === 0 && (
+                  <p className="chat-request-empty">Loading requests...</p>
+                )}
+                {!chatRequestsLoading && filteredSentChatRequests.length === 0 && (
+                  <p className="chat-request-empty">No sent requests</p>
+                )}
+                {filteredSentChatRequests.map((req) => {
+                  const contact = resolveChatRequestContact(req);
+                  if (!contact) return null;
+                  const displayName = getContactDisplayName(contact);
+                  return (
+                    <div key={`sent-${req?.id || contact.id}`} className="chat-request-card">
+                      <span className="chat-avatar">
+                        {contact.profilePic ? (
+                          <img src={contact.profilePic} alt={displayName} className="chat-avatar-img" />
+                        ) : (
+                          contact.avatar
+                        )}
+                      </span>
+                      <span className="chat-request-meta">
+                        <strong>{displayName}</strong>
+                        <small>{contact.email || contact.username || "Awaiting response"}</small>
+                      </span>
+                      <span className="chat-request-status">Pending</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {isConversationRoute && (
+      <section className={`chat-main ${showHeaderMenu ? "settings-open" : ""}`}>
+        <VideoCall placement="thread" />
+
+        {!activeContact && <p className="chat-placeholder">{isConversationRoute ? "Loading conversation..." : "Select a conversation"}</p>}
+
+        {activeContact && (
+          <>
+            <ChatHeader />
+            {showWallpaperPanel && (
+              <div className="chat-wallpaper-panel-backdrop" onClick={() => setShowWallpaperPanel(false)}>
+                <div
+                  className="chat-wallpaper-panel"
+                  ref={wallpaperPanelRef}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="chat-wallpaper-panel-head">
+                    <div className="chat-wallpaper-panel-title">
+                      <strong>Chat wallpaper</strong>
+                      <small>Choose background picture for this chat page</small>
+                    </div>
+                    <button
+                      type="button"
+                      className="chat-wallpaper-close"
+                      onClick={() => setShowWallpaperPanel(false)}
+                    >
+                      Close
+                    </button>
+                  </div>
+                  <div className="chat-wallpaper-grid">
+                    {CHAT_WALLPAPER_PRESETS.map((preset) => (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        className={`chat-wallpaper-chip ${chatWallpaper?.presetId === preset.id ? "is-active" : ""}`}
+                        onClick={() => selectChatWallpaperPreset(preset.id)}
+                      >
+                        <span
+                          className="chat-wallpaper-chip-preview"
+                          style={preset.image ? { backgroundImage: `url("${preset.image}")` } : undefined}
+                        />
+                        <small>{preset.label}</small>
+                      </button>
+                    ))}
+                  </div>
+                  <div className="chat-wallpaper-actions">
+                    <button type="button" className="chat-wallpaper-upload" onClick={openWallpaperPicker}>
+                      Upload Picture
+                    </button>
+                    {!!chatWallpaper?.image && (
+                      <button
+                        type="button"
+                        className="chat-wallpaper-upload"
+                        onClick={() => openWallpaperEditor(chatWallpaper)}
+                      >
+                        Preview / Adjust
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="chat-wallpaper-upload secondary"
+                      onClick={() => selectChatWallpaperPreset("none")}
+                    >
+                      Remove
+                    </button>
+                    <input
+                      ref={wallpaperInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="chat-hidden-file-input"
+                      onChange={onWallpaperPicked}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+            {activeUtilityPanel && (
+              <div className="chat-utility-panel-backdrop" onClick={() => setActiveUtilityPanel("")}>
+                <div
+                  className="chat-utility-panel"
+                  ref={utilityPanelRef}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="chat-utility-panel-head">
+                    <div className="chat-utility-panel-title">
+                      <strong>
+                        {activeUtilityPanel === "search"
+                          ? "Search"
+                          : activeUtilityPanel === "media"
+                            ? "Media"
+                            : "Links and documents"}
+                      </strong>
+                      <small>
+                        {activeUtilityPanel === "search"
+                          ? "Find messages in this chat"
+                          : activeUtilityPanel === "media"
+                            ? `${mediaPanelItems.length} shared item${mediaPanelItems.length === 1 ? "" : "s"}`
+                            : `${linkDocumentItems.length} link or document${linkDocumentItems.length === 1 ? "" : "s"}`}
+                      </small>
+                    </div>
+                    <button
+                      type="button"
+                      className="chat-wallpaper-close"
+                      onClick={() => setActiveUtilityPanel("")}
+                    >
+                      Close
+                    </button>
+                  </div>
+
+                  {activeUtilityPanel === "search" && (
+                    <>
+                      <label className="chat-utility-search">
+                        <FiSearch />
+                        <input
+                          ref={chatSearchInputRef}
+                          type="search"
+                          value={chatSearchQuery}
+                          onChange={(e) => setChatSearchQuery(e.target.value)}
+                          placeholder="Search in this chat"
+                        />
+                      </label>
+                      <div className="chat-utility-list">
+                        {!normalizedChatSearchQuery ? (
+                          <p className="chat-utility-empty">Type a word to search this conversation.</p>
+                        ) : searchPanelItems.length === 0 ? (
+                          <p className="chat-utility-empty">No matching messages found.</p>
+                        ) : (
+                          searchPanelItems.map((message) => (
+                            <button
+                              key={String(message?.id || `${message?.createdAt || ""}_${message?.text || ""}`)}
+                              type="button"
+                              className="chat-utility-item"
+                              onClick={() => focusThreadMessage(message?.id)}
+                            >
+                              <span className="chat-utility-item-body">
+                                <strong>{trimReplyPreview(getMessagePreviewLabel(message), 90)}</strong>
+                                <small>
+                                  {new Date(message?.createdAt || Date.now()).toLocaleString([], {
+                                    day: "numeric",
+                                    month: "short",
+                                    hour: "numeric",
+                                    minute: "2-digit"
+                                  })}
+                                </small>
+                              </span>
+                              <FiChevronRight />
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    </>
+                  )}
+
+                  {activeUtilityPanel === "media" && (
+                    <div className="chat-utility-list">
+                      {mediaPanelItems.length === 0 ? (
+                        <p className="chat-utility-empty">No media shared in this chat yet.</p>
+                      ) : (
+                        mediaPanelItems.map((message) => {
+                          const mediaType = String(message?.mediaType || (message?.audioUrl ? "audio" : "")).toLowerCase();
+                          const mediaHref = message?.audioUrl ? toApiUrl(message.audioUrl) : resolveMediaUrl(message?.mediaUrl);
+                          return (
+                            <button
+                              key={String(message?.id || mediaHref)}
+                              type="button"
+                              className="chat-utility-item"
+                              onClick={() => focusThreadMessage(message?.id)}
+                            >
+                              <span className="chat-utility-item-media">
+                                {mediaType === "image" && mediaHref ? (
+                                  <img src={mediaHref} alt={message?.fileName || "Media"} className="chat-utility-thumb" />
+                                ) : mediaType === "video" && mediaHref ? (
+                                  <video src={mediaHref} className="chat-utility-thumb" muted playsInline preload="metadata" />
+                                ) : (
+                                  <span className="chat-utility-media-icon">
+                                    <FiVolume2 />
+                                  </span>
+                                )}
+                              </span>
+                              <span className="chat-utility-item-body">
+                                <strong>{trimReplyPreview(getMessagePreviewLabel(message), 84)}</strong>
+                                <small>
+                                  {new Date(message?.createdAt || Date.now()).toLocaleString([], {
+                                    day: "numeric",
+                                    month: "short",
+                                    hour: "numeric",
+                                    minute: "2-digit"
+                                  })}
+                                </small>
+                              </span>
+                              <FiChevronRight />
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  )}
+
+                  {activeUtilityPanel === "links-documents" && (
+                    <div className="chat-utility-list">
+                      {linkDocumentItems.length === 0 ? (
+                        <p className="chat-utility-empty">No links or documents shared in this chat yet.</p>
+                      ) : (
+                        linkDocumentItems.map((entry) => (
+                          <a
+                            key={entry.id}
+                            className="chat-utility-item chat-utility-link-item"
+                            href={entry.href}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            <span className="chat-utility-media-icon">
+                              {entry.type === "document" ? <FiFileText /> : <FiLink />}
+                            </span>
+                            <span className="chat-utility-item-body">
+                              <strong>{trimReplyPreview(entry.label, 90)}</strong>
+                              <small>
+                                {entry.type === "document" ? "Document" : "Link"} ·{" "}
+                                {new Date(entry?.message?.createdAt || Date.now()).toLocaleString([], {
+                                  day: "numeric",
+                                  month: "short",
+                                  hour: "numeric",
+                                  minute: "2-digit"
+                                })}
+                              </small>
+                            </span>
+                            <FiChevronRight />
+                          </a>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {(incomingCall || (callActive && callState.mode === "audio") || callError) && (
+              <div className="call-panel">
+                {callLabel && <p className="call-status">{callLabel}</p>}
+                {callError && <p className="call-error">{callError}</p>}
+
+                {incomingCall && (
+                  <div className="incoming-call-actions">
+                    <button type="button" className="call-accept" onClick={acceptIncomingCall}>
+                      {incomingCall.mode === "video" ? <FiVideo /> : <FiPhone />} Attend
+                    </button>
+                    <button type="button" className="call-decline" onClick={declineIncomingCall}>
+                      <FiPhoneOff /> Decline
+                    </button>
+                  </div>
+                )}
+
+                {callActive && (
+                  <>
+                    {callState.mode === "audio" && (
+                      <div className="audio-call-pill">
+                        <span>{callState.peerName || "User"}</span>
+                      </div>
+                    )}
+
+                    <div className="in-call-controls">
+                      <button type="button" className="call-control" onClick={toggleMute} title="Mute mic">
+                        {isMuted ? <FiMicOff /> : <FiMic />}
+                      </button>
+                      <button type="button" className="call-control" onClick={toggleSpeaker} title="Speaker on/off">
+                        {isSpeakerOn ? <FiVolume2 /> : <FiVolumeX />}
+                      </button>
+                      {callState.mode === "audio" && (
+                        <>
+                          <button type="button" className="call-control" onClick={upgradeCallToVideo} title="Switch to video">
+                            <FiVideo />
+                          </button>
+                          <button
+                            type="button"
+                            className="call-control"
+                            onClick={openGroupInvite}
+                            title="Group video call"
+                            disabled={!!incomingCall}
+                          >
+                            <FiUsers />
+                          </button>
+                        </>
+                      )}
+                      <button type="button" className="call-hangup" onClick={() => finishCall(true)}>
+                        <FiPhoneOff />
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            <div
+              ref={threadRef}
+              onScroll={onThreadScroll}
+              className="chat-thread wa-thread"
+              style={threadWallpaperStyle}
+              data-no-page-swipe
+            >
+
+              {chatItems.map((item) => {
+                if (item.kind === "day") {
+                  return (
+                    <div key={item.id} className="chat-day-sep">
+                      {item.label}
+                    </div>
+                  );
+                }
+                const reelShare = item.kind === "message" ? extractReelShare(item.raw?.text || item.text) : null;
+                const senderName = item.mine
+                  ? "You"
+                  : String(activeContact?.name || activeContact?.username || "User").trim();
+                const senderInitial = senderName ? senderName.charAt(0).toUpperCase() : "U";
+                const renderReelShareCard = (mediaUrl) => {
+                  if (!reelShare) return null;
+                  const openReel = () => {
+                    if (reelShare?.href) navigate(reelShare.href);
+                  };
+                  const preview = reelShare?.id ? reelPreviewById[reelShare.id] : null;
+                  const previewSrc = mediaUrl || preview?.src || "";
+                  const previewPoster = preview?.poster || reelPosterBySrc[previewSrc] || "";
+                  return (
+                    <div className="chat-reel-wrap">
+                      <div className={`chat-reel-card ${item.mine ? "mine" : "their"}`}>
+                        <button type="button" className="chat-reel-media" onClick={openReel}>
+                          {previewSrc && previewPoster ? (
+                            <video
+                              className="chat-reel-video"
+                              src={previewSrc}
+                              poster={previewPoster || undefined}
+                              muted
+                              playsInline
+                              preload="metadata"
+                            />
+                          ) : previewPoster ? (
+                            <img
+                              className="chat-reel-video"
+                              src={previewPoster}
+                              alt="Reel preview"
+                              loading="lazy"
+                            />
+                          ) : previewSrc ? (
+                            <div className="chat-reel-video chat-reel-placeholder">Loading...</div>
+                          ) : (
+                            <div className="chat-reel-video chat-reel-placeholder">REEL</div>
+                          )}
+                          <div className="chat-reel-overlay">
+                            <span className="chat-reel-play">▶</span>
+                          </div>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                };
+                const enableBubbleMenu = item.kind === "message";
+                const callCard = item.kind === "call" ? formatCallCard(item.raw) : null;
+                return (
+                  <div
+                    key={item.id}
+                    className={`chat-bubble ${
+                      item.kind === "call" ? `call-log ${item.mine ? "mine" : "their"}` : item.mine ? "mine" : "their"
+                    } ${
+                      item.kind === "message" && String(item.raw?.id || "") === highlightedMessageId ? "is-highlighted" : ""
+                    }`}
+                    data-chat-msg-id={item.kind === "message" ? String(item.raw?.id || "") : undefined}
+                    onContextMenu={enableBubbleMenu ? (e) => openBubbleMenu(e, item) : undefined}
+                    onPointerUp={enableBubbleMenu ? (e) => openBubbleMenuOnClick(e, item) : undefined}
+                    onTouchStart={enableBubbleMenu ? (e) => onBubbleTouchStart(item, e) : undefined}
+                    onTouchMove={enableBubbleMenu ? (e) => onBubbleTouchMove(item, e) : undefined}
+                    onTouchEnd={enableBubbleMenu ? onBubbleTouchEnd : undefined}
+                    onTouchCancel={enableBubbleMenu ? onBubbleTouchEnd : undefined}
+                  >
+                    <div className={`chat-bubble-line ${item.kind === "call" ? "call-line" : ""}`}>
+                      {item.kind === "message" && item.raw?.replyTo && (
+                        <div className={`chat-reply-chip ${item.mine ? "mine" : "their"}`}>
+                          <small>
+                            {String(item.raw.replyTo.senderId || "") === String(myUserId)
+                              ? "You"
+                              : item.raw.replyTo.senderName || "Message"}
+                          </small>
+                          <span>{trimReplyPreview(item.raw.replyTo.preview || "Message")}</span>
+                        </div>
+                      )}
+                      {item.kind === "message" && item.raw?.audioUrl ? (
+                        <div className={`chat-voice-note ${item.mine ? "mine" : "their"}`}>
+                          {item.mine && (
+                            <span className="chat-voice-note-icon" aria-hidden="true">
+                              <FiVolume2 />
+                            </span>
+                          )}
+                          <audio controls preload="metadata" className="chat-audio" src={toApiUrl(item.raw.audioUrl)} />
+                        </div>
+                      ) : item.kind === "message" && item.raw?.mediaUrl ? (
+                        (() => {
+                          const mediaUrl = resolveMediaUrl(item.raw.mediaUrl);
+                          const fileName = String(item.raw?.fileName || "");
+                          const textLabel = String(item.raw?.text || "");
+                          const looksAudio =
+                            item.raw?.mediaType === "audio" ||
+                            /\.(webm|ogg|mp3|m4a|wav|aac|opus)(\?|#|$)/i.test(fileName) ||
+                            /\.(webm|ogg|mp3|m4a|wav|aac|opus)(\?|#|$)/i.test(textLabel) ||
+                            /\.(webm|ogg|mp3|m4a|wav|aac|opus)(\?|#|$)/i.test(mediaUrl);
+                          if (looksAudio) {
+                            return (
+                              <div className={`chat-voice-note ${item.mine ? "mine" : "their"}`}>
+                                {item.mine && (
+                                  <span className="chat-voice-note-icon" aria-hidden="true">
+                                    <FiVolume2 />
+                                  </span>
+                                )}
+                                <audio controls preload="metadata" className="chat-audio" src={mediaUrl} />
+                              </div>
+                            );
+                          }
+                          if (item.raw?.mediaType === "image") {
+                            return (
+                              <button
+                                type="button"
+                                className="chat-media-image-btn"
+                                onClick={() => openImagePreview(mediaUrl, fileName || "image")}
+                              >
+                                <img
+                                  src={mediaUrl}
+                                  alt={fileName || "image"}
+                                  className="chat-media-image"
+                                />
+                              </button>
+                            );
+                          }
+                          if (item.raw?.mediaType === "video") {
+                            if (reelShare) {
+                              return renderReelShareCard(mediaUrl);
+                            }
+                            return (
+                              <video controls preload="metadata" className="chat-media-video" src={mediaUrl} />
+                            );
+                          }
+                          return (
+                            <a className="chat-file-link" href={mediaUrl} target="_blank" rel="noreferrer">
+                              File: {fileName || "Download file"}
+                            </a>
+                          );
+                        })()
+                      ) : item.kind === "message" && reelShare ? (
+                        renderReelShareCard("")
+                      ) : item.kind === "message" && /^\[Attachment:\s*.+\]$/i.test(String(item.raw?.text || "")) ? (
+                        <span className="chat-attachment-text">{String(item.raw?.text || "")}</span>
+                      ) : item.kind === "call" ? (
+                        <div className="call-card">
+                          <span className={`call-dot ${callCard?.tone ? `is-${callCard.tone}` : ""}`} aria-hidden="true">
+                            {callCard?.icon === "video" ? <FiVideo /> : callCard?.icon === "off" ? <FiPhoneOff /> : <FiPhone />}
+                          </span>
+                          <span className="call-card-text">
+                            <strong>{callCard?.title || "Call"}</strong>
+                            <small>{callCard?.subtitle || ""}</small>
+                          </span>
+                        </div>
+                      ) : (
+                        <>
+                          <span>{decodeSignAssistText(item.raw?.text || item.text)?.text || item.text}</span>
+                          {item.kind === "message" && decodeSignAssistText(item.raw?.text || item.text) && (
+                            <small className="chat-sign-assist-badge">
+                              Sign Assist - Voice: {decodeSignAssistText(item.raw?.text || item.text)?.voiceGender || "neutral"}
+                            </small>
+                          )}
+                          {item.kind === "message" && canTranslateMessage(item.raw) && translatorEnabled && (() => {
+                            const msgKey = String(item.raw?.id || `${item.raw?.createdAt}_${item.raw?.text}`);
+                            const translated = String(translatedIncomingById[msgKey] || "").trim();
+                            if (!translated) return null;
+                            if (translated.toLowerCase() === String(item.text || "").trim().toLowerCase()) return null;
+                            return (
+                              <small className="chat-translated-text" title="Translated">
+                                {translated}
+                              </small>
+                            );
+                          })()}
+                        </>
+                      )}
+                    </div>
+                    <small className="chat-bubble-time">
+                      {formatMessageTime(item.createdAt)}
+                      {item.kind === "message" && item.mine && (item.raw?.audioUrl || item.raw?.mediaType === "audio") && (
+                        <span className="chat-voice-status-icon" title="Voice note" aria-label="Voice note">
+                          <FiVolume2 />
+                        </span>
+                      )}
+                      {item.kind === "message" && item.mine && (() => {
+                        const tickState = getMessageTickState(item.raw);
+                        if (!tickState) return null;
+                        return (
+                          <span className={`chat-read-ticks ${tickState}`} aria-label={tickState}>
+                            {getTickSymbol(tickState)}
+                          </span>
+                        );
+                      })()}
+                    </small>
+                  </div>
+                );
+              })}
+              {threadItems.length === 0 && <p className="chat-empty-thread">No messages yet. Say hi.</p>}
+            </div>
+            {showScrollDown && (
+              <button
+                type="button"
+                className="chat-scroll-bottom-btn"
+                onClick={() => scrollThreadToBottom("smooth")}
+                aria-label="Scroll to latest message"
+                title="Scroll down"
+              >
+                <FiChevronDown />
+              </button>
+            )}
+
+            <ChatInput />
+            {showWallpaperEditor && wallpaperDraft?.image && (
+              <div className="chat-wallpaper-editor-backdrop" onClick={closeWallpaperEditor}>
+                <div className="chat-wallpaper-editor" onClick={(e) => e.stopPropagation()}>
+                  <div className="chat-wallpaper-preview-head">
+                    <strong>Live preview</strong>
+                    <small>Adjust wallpaper as needed</small>
+                  </div>
+                  <div
+                    className="chat-wallpaper-live-preview editor"
+                    style={{
+                      backgroundImage: `linear-gradient(rgba(2, 8, 16, 0.72), rgba(2, 8, 16, 0.78)), url("${wallpaperDraft.image}")`,
+                      backgroundSize:
+                        wallpaperDraft.fit === "contain"
+                          ? `${Number(wallpaperDraft.zoom || 100)}% auto`
+                          : wallpaperDraft.fit === "stretch"
+                            ? "100% 100%"
+                            : `${Number(wallpaperDraft.zoom || 100)}% ${Number(wallpaperDraft.zoom || 100)}%`,
+                      backgroundPosition: `${Number(wallpaperDraft.x || 50)}% ${Number(wallpaperDraft.y || 50)}%`,
+                      backgroundRepeat: "no-repeat"
+                    }}
+                  />
+                  <div className="chat-wallpaper-control-grid">
+                    <label className="chat-wallpaper-control">
+                      <span>Fit</span>
+                      <select
+                        value={String(wallpaperDraft?.fit || "cover")}
+                        onChange={(e) => updateWallpaperOptions({ fit: String(e.target.value || "cover") })}
+                      >
+                        <option value="cover">Cover</option>
+                        <option value="contain">Contain</option>
+                        <option value="stretch">Stretch</option>
+                      </select>
+                    </label>
+                    <label className="chat-wallpaper-control">
+                      <span>Zoom</span>
+                      <input
+                        type="range"
+                        min="60"
+                        max="220"
+                        step="1"
+                        value={Number(wallpaperDraft?.zoom || 100)}
+                        onChange={(e) => updateWallpaperOptions({ zoom: Number(e.target.value) || 100 })}
+                      />
+                    </label>
+                    <label className="chat-wallpaper-control">
+                      <span>Horizontal</span>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        step="1"
+                        value={Number(wallpaperDraft?.x || 50)}
+                        onChange={(e) => updateWallpaperOptions({ x: Number(e.target.value) || 50 })}
+                      />
+                    </label>
+                    <label className="chat-wallpaper-control">
+                      <span>Vertical</span>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        step="1"
+                        value={Number(wallpaperDraft?.y || 50)}
+                        onChange={(e) => updateWallpaperOptions({ y: Number(e.target.value) || 50 })}
+                      />
+                    </label>
+                  </div>
+                  <div className="chat-wallpaper-editor-actions">
+                    <button type="button" className="chat-wallpaper-upload secondary" onClick={closeWallpaperEditor}>
+                      Cancel
+                    </button>
+                    <button type="button" className="chat-wallpaper-upload" onClick={applyWallpaperEditor}>
+                      Apply
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+            {bubbleMenu && (
+              <div className="bubble-menu-backdrop" onClick={closeBubbleMenu}>
+                <div
+                  className="bubble-menu"
+                  style={{ top: bubbleMenu.y, left: bubbleMenu.x }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <button type="button" onClick={copyBubbleItem}>Copy</button>
+                  {getBubbleDownloadInfo(bubbleMenu?.item) && (
+                    <button type="button" onClick={saveBubbleMedia}>Save to gallery</button>
+                  )}
+                  {bubbleMenu?.item?.kind === "message" && bubbleMenu?.item?.mine && (
+                    <button type="button" className="bubble-menu-danger" onClick={deleteBubbleItemForEveryone}>
+                      Delete for everyone
+                    </button>
+                  )}
+                  <button type="button" onClick={deleteBubbleItem}>Delete</button>
+                  <button type="button" onClick={closeBubbleMenu}>Cancel</button>
+                </div>
+              </div>
+            )}
+            {imagePreview && (
+              <div className="chat-image-preview-backdrop" onClick={closeImagePreview}>
+                <button
+                  type="button"
+                  className="chat-image-preview-close"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    closeImagePreview();
+                  }}
+                  aria-label="Close image preview"
+                >
+                  ×
+                </button>
+                <img
+                  src={imagePreview.src}
+                  alt={imagePreview.alt || "Image preview"}
+                  className="chat-image-preview"
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </div>
+            )}
+          </>
+        )}
+      </section>
+      )}
+      {storyViewerIndex != null && activeStory && (
+        <div className="chat-story-viewer-backdrop" onClick={closeStory}>
+          <div className="chat-story-player" onClick={(e) => e.stopPropagation()}>
+            {(() => {
+              const mediaUrl = resolvedStoryMediaUrl;
+              const isVideo = resolvedStoryIsVideo;
+              const label = String(activeStory?.storyText || activeStory?.caption || "").trim();
+              const storyUserNameRaw = resolveStoryUsername(activeStory);
+              const storyUserLabel = storyUserNameRaw
+                ? storyUserNameRaw
+                : String(activeStory?.userId || "") === String(myUserId || "")
+                  ? "You"
+                  : "Story";
+              const isMyStoryItem = (() => {
+                const storyUserId = String(getStoryUserIdValue(activeStory) || "").trim();
+                if (storyUserId && myUserId && storyUserId === String(myUserId)) return true;
+                const storyEmail = String(getStoryUserEmailValue(activeStory) || "").trim().toLowerCase();
+                if (storyEmail && myEmail && storyEmail === String(myEmail || "").trim().toLowerCase()) return true;
+                return false;
+              })();
+              const storyKey = storyKeyFor(activeStory, storyViewerIndex);
+              const storyReaction = storyReactions?.[storyKey] || {};
+              const storyLiked = Boolean(storyReaction.liked);
+              const storyLikeCount = Number(activeStory?.likeCount || 0);
+              const storyCommentCount = Number(activeStory?.commentCount || 0);
+              const storyViewCount = Number(activeStory?.viewCount || 0);
+              const storyOptionsGroup = storyViewerGroupKey
+                ? storyGroupsByKey.get(storyViewerGroupKey)
+                : null;
+              const openViewerOptions = () => {
+                const fallbackGroup =
+                  !storyOptionsGroup && storyViewerItems.length
+                    ? { key: storyViewerGroupKey || "viewer", items: storyViewerItems }
+                    : null;
+                const target = storyOptionsGroup || fallbackGroup;
+                if (target) openStoryOptions(target);
+              };
+              const toggleStoryLike = async () => {
+                const nextLiked = !storyLiked;
+                setStoryReactions((prev) => {
+                  const current = prev?.[storyKey] || {};
+                  return {
+                    ...prev,
+                    [storyKey]: { ...current, liked: nextLiked }
+                  };
+                });
+
+                const storyId = activeStory?.id;
+                if (!storyId) return;
+                try {
+                  let payload = null;
+                  if (nextLiked) {
+                    const res = await api.post(`/api/stories/${storyId}/like`);
+                    payload = res?.data;
+                  } else {
+                    const res = await api.delete(`/api/stories/${storyId}/like`);
+                    payload = res?.data;
+                  }
+                  if (payload && typeof payload === "object") {
+                    applyStoryStats(storyId, {
+                      likeCount: payload.likeCount,
+                      commentCount: payload.commentCount,
+                      viewCount: payload.viewCount,
+                      likedByMe: Boolean(payload.liked)
+                    });
+                  }
+                } catch {
+                  setStoryReactions((prev) => {
+                    const current = prev?.[storyKey] || {};
+                    return {
+                      ...prev,
+                      [storyKey]: { ...current, liked: !nextLiked }
+                    };
+                  });
+                }
+              };
+              const submitStoryComment = async () => {
+                const text = String(storyCommentDraft || "").trim();
+                if (!text) return;
+                setStoryCommentDraft("");
+                setStoryCommentOpen(false);
+                const storyId = activeStory?.id;
+                if (!storyId) return;
+                try {
+                  const res = await api.post(`/api/stories/${storyId}/comment`, { text });
+                  const payload = res?.data;
+                  if (payload && typeof payload === "object") {
+                    applyStoryStats(storyId, {
+                      likeCount: payload.likeCount,
+                      commentCount: payload.commentCount,
+                      viewCount: payload.viewCount,
+                      likedByMe: Boolean(payload.liked)
+                    });
+                  }
+                } catch {
+                  // ignore comment failure
+                }
+              };
+              return (
+                <>
+                  <div className="chat-story-progress">
+                    {storyViewerItems.map((story, idx) => {
+                      const key = story?.id ? `${story.id}` : `${idx}`;
+                      let width = 0;
+                      if (idx < storyViewerIndex) width = 100;
+                      else if (idx === storyViewerIndex) width = Math.round(storyPlayerProgress * 100);
+                      return (
+                        <div key={key} className="chat-story-progress-bar">
+                          <span style={{ width: `${width}%` }} />
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="chat-story-player-header">
+                    <div className="chat-story-player-meta">
+                      <strong>{storyUserLabel || "Story"}</strong>
+                      <span>
+                        {storyViewerIndex + 1}/{storyViewerItems.length}
+                      </span>
+                    </div>
+                    <div className="chat-story-player-actions">
+                      {isVideo && mediaUrl && (
+                        <button
+                          type="button"
+                          className="ghost"
+                          aria-label={storyViewerMuted ? "Unmute story" : "Mute story"}
+                          onClick={() => {
+                            setStoryViewerMuted((prev) => {
+                              const next = !prev;
+                              if (storyViewerVideoRef.current) {
+                                storyViewerVideoRef.current.muted = next;
+                                if (!next) {
+                                  storyViewerVideoRef.current.play?.().catch(() => {});
+                                }
+                              }
+                              return next;
+                            });
+                          }}
+                        >
+                          {storyViewerMuted ? <FiVolumeX /> : <FiVolume2 />}
+                        </button>
+                      )}
+                      {isMyStoryItem && (
+                        <button
+                          type="button"
+                          className="ghost"
+                          aria-label="Story options"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            openViewerOptions();
+                          }}
+                        >
+                          <FiMoreVertical />
+                        </button>
+                      )}
+                      <button type="button" className="close" aria-label="Close story" onClick={closeStory}>
+                        <FiX />
+                      </button>
+                    </div>
+                  </div>
+                  <div
+                    className="chat-story-player-media"
+                    onPointerDown={pauseStoryPlayback}
+                    onPointerUp={resumeStoryPlayback}
+                    onPointerLeave={resumeStoryPlayback}
+                    onPointerCancel={resumeStoryPlayback}
+                  >
+                    {mediaUrl ? (
+                      isVideo ? (
+                        <video
+                          key={mediaUrl}
+                          ref={storyViewerVideoRef}
+                          src={mediaUrl}
+                          autoPlay
+                          muted={storyViewerMuted}
+                          playsInline
+                          preload="auto"
+                          controls={false}
+                          onLoadedData={(event) => {
+                            clearStoryViewerLoadTimer();
+                            setStoryViewerLoading(false);
+                            handleStoryVideoLoaded(event);
+                          }}
+                          onCanPlay={(event) => {
+                            clearStoryViewerLoadTimer();
+                            setStoryViewerLoading(false);
+                            handleStoryVideoLoaded(event);
+                          }}
+                          onTimeUpdate={handleStoryVideoTimeUpdate}
+                          onEnded={handleStoryVideoEnded}
+                          onError={() => {
+                            clearStoryViewerLoadTimer();
+                            handleStoryViewerMediaError();
+                          }}
+                          onPlay={() => {
+                            if (!storyPlayerPausedRef.current) {
+                              setStoryPlayerPaused(false);
+                            }
+                          }}
+                          onPause={() => {
+                            if (!storyPlayerPausedRef.current) {
+                              setStoryPlayerPaused(true);
+                            }
+                          }}
+                        />
+                      ) : (
+                        <img
+                          src={mediaUrl}
+                          alt={label}
+                          onLoad={() => setStoryViewerLoading(false)}
+                          onError={handleStoryViewerMediaError}
+                        />
+                      )
+                    ) : (
+                      <div className="chat-story-player-empty">Story media not available</div>
+                    )}
+                    {storyViewerLoading && <div className="chat-story-player-status">Loading story...</div>}
+                    {storyViewerLoadError && (
+                      <div className="chat-story-player-status error">{storyViewerLoadError}</div>
+                    )}
+                    {storyPlayerPaused && !storyViewerLoadError && (
+                      <div className="chat-story-player-paused">Paused</div>
+                    )}
+                  </div>
+                  {label && <p className="chat-story-player-caption">{label}</p>}
+                  <div className="chat-story-reactions">
+                    <span className="chat-story-reaction-user">{storyUserLabel || "Story"}</span>
+                    <div className="chat-story-reaction-buttons">
+                      <button
+                        type="button"
+                        className={`chat-story-reaction-btn ${storyLiked ? "is-liked" : ""}`}
+                        onClick={toggleStoryLike}
+                      >
+                        <FiHeart />
+                        {storyLiked ? "Liked" : "Like"}
+                      </button>
+                      <button
+                        type="button"
+                        className="chat-story-reaction-btn"
+                        onClick={() => setStoryCommentOpen((prev) => !prev)}
+                      >
+                        <FiMessageCircle />
+                        Comment
+                      </button>
+                    </div>
+                  </div>
+                  {isMyStoryItem && (
+                    <div className="chat-story-stats" aria-label="Story stats">
+                      <span className="chat-story-stat">
+                        <FiHeart />
+                        {formatStoryCount(storyLikeCount)}
+                      </span>
+                      <span className="chat-story-stat">
+                        <FiMessageCircle />
+                        {formatStoryCount(storyCommentCount)}
+                      </span>
+                      <span className="chat-story-stat">
+                        <FiEye />
+                        {formatStoryCount(storyViewCount)}
+                      </span>
+                    </div>
+                  )}
+                  {storyCommentOpen && (
+                    <div className="chat-story-comment-row">
+                      <input
+                        type="text"
+                        placeholder="Add a comment..."
+                        value={storyCommentDraft}
+                        onChange={(e) => setStoryCommentDraft(e.target.value)}
+                      />
+                      <button type="button" aria-label="Send comment" onClick={submitStoryComment}>
+                        <FiSend />
+                      </button>
+                    </div>
+                  )}
+                  {storyViewerItems.length > 1 && (
+                    <div className="chat-story-player-nav">
+                      <button
+                        type="button"
+                        className="prev"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          goPrevStory();
+                        }}
+                        disabled={storyViewerIndex <= 0}
+                        aria-label="Previous story"
+                      />
+                      <button
+                        type="button"
+                        className="next"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          goNextStory();
+                        }}
+                        disabled={storyViewerIndex >= storyViewerItems.length - 1}
+                        aria-label="Next story"
+                      />
+                    </div>
+                  )}
+                </>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+      {storyOptionsOpen && storyOptionsItems.length > 0 && (
+        <div className="chat-story-options-backdrop" onClick={closeStoryOptions}>
+          <div className="chat-story-options" onClick={(e) => e.stopPropagation()}>
+            <h4>Story options</h4>
+            <button
+              type="button"
+              onClick={() => {
+                deleteStoryItems([storyOptionsItems[0]]);
+                closeStoryOptions();
+              }}
+            >
+              {storyOptionsItems.length > 1 ? "Delete latest story" : "Delete story"}
+            </button>
+            {storyOptionsItems.length > 1 && (
+              <button
+                type="button"
+                className="danger"
+                onClick={() => {
+                  deleteStoryItems(storyOptionsItems);
+                  closeStoryOptions();
+                }}
+              >
+                Delete all stories
+              </button>
+            )}
+            <button type="button" className="ghost" onClick={closeStoryOptions}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

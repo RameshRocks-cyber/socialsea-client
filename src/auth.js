@@ -1,3 +1,6 @@
+import { toApiUrl } from "./api/baseUrl";
+import { getOrCreateDeviceId } from "./deviceId";
+
 const getStoredToken = () =>
   sessionStorage.getItem("accessToken") ||
   sessionStorage.getItem("token") ||
@@ -69,6 +72,21 @@ export const getUserRole = () => {
 };
 
 export const logout = () => {
+  try {
+    const token = getStoredToken();
+    if (token && token !== "null" && token !== "undefined") {
+      fetch(toApiUrl("/api/security/sessions/logout"), {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${String(token).trim()}`,
+          "X-Device-Id": getOrCreateDeviceId(),
+        },
+        keepalive: true,
+      }).catch(() => {});
+    }
+  } catch {
+    // ignore revoke failures
+  }
   clearAuthStorage();
   window.location.href = "/login";
 };

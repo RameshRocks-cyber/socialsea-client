@@ -3,8 +3,10 @@ import { useLocation, useNavigate } from "react-router-dom";
 import {
   addCompanyJob,
   getStoredJobs,
+  JOBS_CHANGED_EVENT_NAME,
   isJobExpired,
   removeCompanyJob,
+  syncJobsFromServer,
   updateCompanyJob
 } from "../data/jobStore";
 import {
@@ -253,7 +255,7 @@ export default function PostJob() {
     goToPanel("job");
   };
 
-  const saveJob = () => {
+  const saveJob = async () => {
     setJobNotice("");
     if (!canPostJobs) {
       setJobNotice("Add a company name in Company Details before posting jobs.");
@@ -289,18 +291,19 @@ export default function PostJob() {
     };
 
     if (jobEditId) {
-      updateCompanyJob(jobEditId, payload);
+      await updateCompanyJob(jobEditId, payload);
       setJobNotice("Job updated.");
     } else {
-      addCompanyJob({ ...payload, createdAt: Date.now() });
+      await addCompanyJob({ ...payload, createdAt: Date.now() });
       setJobNotice("Job posted successfully.");
     }
 
+    await syncJobsFromServer({ mine: true, includeClosed: true, includeExpired: true });
     setJobs(getStoredJobs());
     resetJobDraft();
   };
 
-  const updateJobStatus = (jobId, status) => {
+  const updateJobStatus = async (jobId, status) => {
     if (!jobId) return;
     const nextStatus = normalizeStatus(status);
     const currentJob = jobs.find((job) => String(job.id) === String(jobId));
@@ -309,15 +312,17 @@ export default function PostJob() {
       const durationDays = toDurationDays(currentJob.durationDays) || DEFAULT_JOB_DURATION_DAYS;
       nextPayload.expiresAt = Date.now() + durationDays * DAY_MS;
     }
-    updateCompanyJob(jobId, nextPayload);
+    await updateCompanyJob(jobId, nextPayload);
+    await syncJobsFromServer({ mine: true, includeClosed: true, includeExpired: true });
     setJobs(getStoredJobs());
   };
 
-  const deleteJob = (jobId) => {
+  const deleteJob = async (jobId) => {
     if (!jobId) return;
     const ok = window.confirm("Delete this job?");
     if (!ok) return;
-    removeCompanyJob(jobId);
+    await removeCompanyJob(jobId);
+    await syncJobsFromServer({ mine: true, includeClosed: true, includeExpired: true });
     setJobs(getStoredJobs());
     if (String(jobEditId) === String(jobId)) {
       resetJobDraft();
@@ -332,15 +337,22 @@ export default function PostJob() {
   }, [location.search]);
 
   useEffect(() => {
-    const refresh = () => setJobs(getStoredJobs());
+    const refresh = async () => {
+      await syncJobsFromServer({ mine: true, includeClosed: true, includeExpired: true });
+      setJobs(getStoredJobs());
+    };
     const onStorage = (event) => {
       if (!event || event.key === JOBS_KEY) refresh();
     };
+    const onJobsChanged = () => setJobs(getStoredJobs());
+    refresh();
     window.addEventListener("focus", refresh);
     window.addEventListener("storage", onStorage);
+    window.addEventListener(JOBS_CHANGED_EVENT_NAME, onJobsChanged);
     return () => {
       window.removeEventListener("focus", refresh);
       window.removeEventListener("storage", onStorage);
+      window.removeEventListener(JOBS_CHANGED_EVENT_NAME, onJobsChanged);
     };
   }, []);
 

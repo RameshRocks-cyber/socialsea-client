@@ -343,6 +343,88 @@ body.ss-theme-white .settings-page .settings-theme-mode button.active:focus-visi
   color: var(--ss-muted);
 }
 
+.ss-session-card {
+  border: 1px solid rgba(70, 70, 70, 0.5);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: rgba(10, 10, 10, 0.9);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.ss-session-meta {
+  min-width: 0;
+  flex: 1;
+}
+
+.ss-session-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ss-session-title strong {
+  font-size: 0.95rem;
+}
+
+.ss-session-badge {
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  border: 1px solid rgba(120, 120, 120, 0.35);
+  background: rgba(255, 255, 255, 0.06);
+  color: #f0f0f0;
+}
+
+.ss-session-badge.badge-current {
+  border-color: rgba(121, 187, 255, 0.6);
+  background: rgba(45, 130, 255, 0.12);
+}
+
+.ss-session-badge.badge-active {
+  border-color: rgba(120, 255, 193, 0.55);
+  background: rgba(0, 255, 166, 0.08);
+}
+
+.ss-session-badge.badge-revoked {
+  border-color: rgba(255, 138, 159, 0.55);
+  background: rgba(255, 77, 110, 0.08);
+}
+
+.ss-session-sub {
+  margin-top: 4px;
+  color: var(--ss-muted);
+  font-size: 0.78rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.ss-session-ua {
+  margin-top: 7px;
+  color: #9aa3b2;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.ss-session-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.ss-session-muted {
+  padding: 6px 0;
+  color: var(--ss-muted);
+  font-size: 0.78rem;
+}
+
 .settings-theme-mode {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

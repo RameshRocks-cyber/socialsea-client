@@ -35,6 +35,7 @@ import SettingsSounds from "./pages/SettingsSounds";
 import SettingsLocation from "./pages/SettingsLocation";
 import SettingsPrivacy from "./pages/SettingsPrivacy";
 import SettingsLanguage from "./pages/SettingsLanguage";
+import SettingsLoginActivity from "./pages/SettingsLoginActivity";
 import NotificationBuddySettings from "./pages/NotificationBuddySettings";
 import SOSPage from "./pages/SOSPage";
 import SOSNavigate from "./pages/SOSNavigate";
@@ -91,24 +92,23 @@ const isPrivateIpHost = (host) => {
   return false;
 };
 
-const SWIPE_TABS = [
-  { path: "/feed", match: (pathname) => pathname === "/feed" || pathname === "/home" || pathname === "/" },
-  {
-    path: "/reels",
-    match: (pathname) => pathname === "/reels" || pathname === "/ambulance" || pathname.startsWith("/ambulance/")
-  },
-  { path: "/chat", match: (pathname) => pathname === "/chat" || pathname.startsWith("/chat/") },
-  { path: "/notifications", match: (pathname) => pathname === "/notifications" },
-  { path: "/profile/me", match: (pathname) => pathname.startsWith("/profile") },
-];
-
 const SWIPE_MIN_DISTANCE_PX = 72;
 const SWIPE_MAX_DURATION_MS = 700;
 const SWIPE_DOMINANCE_RATIO = 1.2;
 const PRESENCE_HEARTBEAT_MS = 20000;
 const SETTINGS_KEY = "socialsea_settings_v1";
 
-const getSwipeTabIndex = (pathname) => SWIPE_TABS.findIndex((tab) => tab.match(pathname));
+const readShowSosInNavbar = () => {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (!raw) return true;
+    const parsed = JSON.parse(raw);
+    if (typeof parsed?.showSosInNavbar === "boolean") return parsed.showSosInNavbar;
+    return true;
+  } catch {
+    return true;
+  }
+};
 
 const readAmbulanceNavigationEnabled = () => {
   try {
@@ -122,12 +122,36 @@ const readAmbulanceNavigationEnabled = () => {
   }
 };
 
-const resolveSwipeTabPath = (index) => {
-  const tab = SWIPE_TABS[index];
-  if (!tab) return "";
-  if (tab.path === "/reels" && readAmbulanceNavigationEnabled()) return "/ambulance";
-  return tab.path;
+const getSwipeTabs = () => {
+  const showSosInNavbar = readShowSosInNavbar();
+  const ambulanceNavigationEnabled = readAmbulanceNavigationEnabled();
+
+  const tabs = [
+    { path: "/feed", match: (pathname) => pathname === "/feed" || pathname === "/home" || pathname === "/" },
+    ambulanceNavigationEnabled
+      ? {
+          path: "/ambulance",
+          match: (pathname) => pathname === "/ambulance" || pathname.startsWith("/ambulance/")
+        }
+      : { path: "/reels", match: (pathname) => pathname === "/reels" },
+    { path: "/chat", match: (pathname) => pathname === "/chat" || pathname.startsWith("/chat/") },
+    { path: "/notifications", match: (pathname) => pathname === "/notifications" },
+    { path: "/profile/me", match: (pathname) => pathname.startsWith("/profile") },
+  ];
+
+  if (showSosInNavbar) {
+    tabs.unshift({
+      path: "/sos",
+      match: (pathname) => pathname === "/sos" || pathname.startsWith("/sos/")
+    });
+  }
+
+  return tabs;
 };
+
+const getSwipeTabIndex = (pathname, tabs) => tabs.findIndex((tab) => tab.match(pathname));
+
+const resolveSwipeTabPath = (index, tabs) => tabs[index]?.path || "";
 
 const shouldIgnoreSwipeTarget = (target) => {
   if (!(target instanceof Element)) return false;
@@ -487,8 +511,12 @@ function AppRoutes() {
       typeof window !== "undefined" &&
       ("ontouchstart" in window || Number(navigator.maxTouchPoints || 0) > 0);
     if (!hasTouchSupport) return undefined;
+    const isMobileViewport =
+      typeof window !== "undefined" && window.matchMedia("(max-width: 900px)").matches;
+    if (!isMobileViewport) return undefined;
 
-    const tabIndex = getSwipeTabIndex(location.pathname);
+    const swipeTabs = getSwipeTabs();
+    const tabIndex = getSwipeTabIndex(location.pathname, swipeTabs);
     if (tabIndex < 0) return undefined;
 
     const node = appMainRef.current;
@@ -537,11 +565,12 @@ function AppRoutes() {
       if (canAncestorHandleHorizontalSwipe(state.target, deltaX)) return;
 
       const direction = deltaX < 0 ? 1 : -1;
-      const currentIndex = getSwipeTabIndex(location.pathname);
+      const activeSwipeTabs = getSwipeTabs();
+      const currentIndex = getSwipeTabIndex(location.pathname, activeSwipeTabs);
       if (currentIndex < 0) return;
       const nextIndex = currentIndex + direction;
-      if (nextIndex < 0 || nextIndex >= SWIPE_TABS.length) return;
-      const nextPath = resolveSwipeTabPath(nextIndex);
+      if (nextIndex < 0 || nextIndex >= activeSwipeTabs.length) return;
+      const nextPath = resolveSwipeTabPath(nextIndex, activeSwipeTabs);
       if (!nextPath || nextPath === location.pathname) return;
       navigate(nextPath);
     };
@@ -646,6 +675,7 @@ function AppRoutes() {
               <Route path="/settings/language" element={<ProtectedRoute><SettingsLanguage /></ProtectedRoute>} />
               <Route path="/settings/location" element={<ProtectedRoute><SettingsLocation /></ProtectedRoute>} />
               <Route path="/settings/privacy" element={<ProtectedRoute><SettingsPrivacy /></ProtectedRoute>} />
+              <Route path="/settings/login-activity" element={<ProtectedRoute><SettingsLoginActivity /></ProtectedRoute>} />
               <Route path="/settings/notification-buddy" element={<ProtectedRoute><NotificationBuddySettings /></ProtectedRoute>} />
               <Route path="/sos" element={<ProtectedRoute><SOSPage /></ProtectedRoute>} />
               <Route path="/sos/live/:alertId" element={<ProtectedRoute><SOSPage /></ProtectedRoute>} />

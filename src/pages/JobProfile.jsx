@@ -1,5 +1,5 @@
 ﻿import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { getDefaultResume, loadResume } from "../services/resumeStorage";
 import { toApiUrl } from "../api/baseUrl";
 import "./JobPages.css";
@@ -62,6 +62,7 @@ const buildMeta = (primary, details) => {
 };
 
 const JobProfile = () => {
+  const navigate = useNavigate();
   const [resume, setResume] = useState(() => getDefaultResume());
 
   useEffect(() => {
@@ -77,6 +78,14 @@ const JobProfile = () => {
 
   const handleDownload = () => {
     window.print();
+  };
+
+  const exitPage = () => {
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      navigate(-1);
+      return;
+    }
+    navigate("/feed");
   };
 
   const experience = resume.experience?.filter(hasEntry) || [];
@@ -177,6 +186,15 @@ const JobProfile = () => {
           </div>
         </div>
         <div className="job-page-actions">
+          <button
+            type="button"
+            className="job-page-exit"
+            onClick={exitPage}
+            aria-label="Exit page"
+            title="Exit"
+          >
+            ←
+          </button>
           <Link className="job-page-edit" to="/resume-builder">
             Edit Resume
           </Link>

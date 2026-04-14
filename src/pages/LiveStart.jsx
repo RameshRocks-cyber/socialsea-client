@@ -139,6 +139,7 @@ export default function LiveStart({ mode = "host" }) {
   const [hostRatio, setHostRatio] = useState(() => localStorage.getItem(LIVE_VIEW_RATIO_KEY) || "vertical");
   const [viewerNotice, setViewerNotice] = useState("");
   const [mediaError, setMediaError] = useState("");
+  const [startingLive, setStartingLive] = useState(false);
   const [liveFrameUrl, setLiveFrameUrl] = useState("");
   const [viewerFrameReady, setViewerFrameReady] = useState(false);
   const [viewerStreamReady, setViewerStreamReady] = useState(false);
@@ -772,19 +773,25 @@ export default function LiveStart({ mode = "host" }) {
   };
 
   const startLive = async () => {
+    if (startingLive) return;
+    setStartingLive(true);
     setLiveSyncError("");
-    const resolvedLivekitUrl = resolveLivekitUrl();
-    if (!resolvedLivekitUrl) {
-      setLiveSyncError("LiveKit is not configured. Set VITE_LIVEKIT_URL and backend LIVEKIT keys.");
-      return;
-    }
-    if (resolvedLivekitUrl !== livekitUrl) {
-      setLivekitUrl(resolvedLivekitUrl);
-    }
-    const now = Date.now();
-    const ok = await writeLiveBroadcast(buildLivePayload({ id: now, startedAt: now }));
-    if (!ok) {
-      setLiveSyncError("Live started locally, but server sync failed. Restart backend or deploy live API.");
+    try {
+      const resolvedLivekitUrl = resolveLivekitUrl();
+      if (!resolvedLivekitUrl) {
+        setLiveSyncError("LiveKit is not configured. Set VITE_LIVEKIT_URL and backend LIVEKIT keys.");
+        return;
+      }
+      if (resolvedLivekitUrl !== livekitUrl) {
+        setLivekitUrl(resolvedLivekitUrl);
+      }
+      const now = Date.now();
+      const ok = await writeLiveBroadcast(buildLivePayload({ id: now, startedAt: now }));
+      if (!ok) {
+        setLiveSyncError("Live started locally, but server sync failed. Restart backend or deploy live API.");
+      }
+    } finally {
+      setStartingLive(false);
     }
   };
 
@@ -1883,8 +1890,9 @@ export default function LiveStart({ mode = "host" }) {
                 type="button"
                 className="live-start-btn"
                 onClick={liveState ? endLive : startLive}
+                disabled={startingLive}
               >
-                {liveState ? "End Live" : "Start Live"}
+                {startingLive ? "Starting..." : liveState ? "End Live" : "Start Live"}
               </button>
               <button type="button" className="live-start-btn ghost" onClick={() => navigate(-1)}>
                 Back

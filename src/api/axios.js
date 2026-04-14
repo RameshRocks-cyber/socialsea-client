@@ -1,6 +1,7 @@
 import axios from "axios";
 import { getApiBaseUrl } from "./baseUrl";
 import { clearAuthStorage } from "../auth";
+import { getOrCreateDeviceId } from "../deviceId";
 import {
   buildGuardedResponse,
   clearEndpointGuard,
@@ -110,6 +111,16 @@ api.interceptors.request.use((config) => {
     if (config.headers?.Authorization) delete config.headers.Authorization;
     return config;
   }
+
+  try {
+    const deviceId = getOrCreateDeviceId();
+    if (deviceId) {
+      config.headers = config.headers || {};
+      config.headers["X-Device-Id"] = deviceId;
+    }
+  } catch {
+    // ignore device-id failures
+  }
   if (config?.skipAuth) {
     if (config.headers?.Authorization) {
       delete config.headers.Authorization;
@@ -129,7 +140,19 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-refreshClient.interceptors.request.use((config) => normalizeApiPath(config));
+refreshClient.interceptors.request.use((config) => {
+  normalizeApiPath(config);
+  try {
+    const deviceId = getOrCreateDeviceId();
+    if (deviceId) {
+      config.headers = config.headers || {};
+      config.headers["X-Device-Id"] = deviceId;
+    }
+  } catch {
+    // ignore device-id failures
+  }
+  return config;
+});
 
 // 🔹 Handle Expired Token (401 ONLY)
 api.interceptors.response.use(

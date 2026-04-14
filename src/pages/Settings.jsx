@@ -549,6 +549,7 @@ export default function Settings() {
           <Row icon={"B"} title="Saved" value={savedIds.length} onClick={() => navigate("/saved")} />
           <Row icon={"A"} title="Archive" value={archiveIds.length} onClick={() => setActivePanel("archive")} />
           <Row icon={"Y"} title="Your activity" onClick={() => navigate("/settings/activity")} />
+          <Row icon={"LA"} title="Login activity" value="Open" onClick={() => navigate("/settings/login-activity")} />
           <Row
             icon={"SOS"}
             title="SOS on Navbar"

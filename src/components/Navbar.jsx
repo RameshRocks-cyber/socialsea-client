@@ -966,7 +966,7 @@ export default function Navbar() {
         .join(" ");
     };
 
-        const pollCalls = async () => {
+    const pollCalls = async () => {
       try {
         const res = await api.get("/api/calls/inbox");
         if (disposed) return;
@@ -1011,12 +1011,13 @@ export default function Navbar() {
         for (const signal of list) {
           const type = String(signal?.type || "").toLowerCase();
           const fromId = String(signal?.fromUserId || "");
-          if (type !== "offer" || !fromId || fromId === String(myUserId)) continue;
+          const isOffer = type === "offer" || type === "livekit-invite";
+          if (!isOffer || !fromId || fromId === String(myUserId)) continue;
           const signalMs = toSignalMs(signal);
           if (signalMs > 0 && Date.now() - signalMs > CALL_SIGNAL_MAX_AGE_MS) continue;
           const terminalMs = latestTerminalByPeer.get(fromId) || 0;
           if ((terminalMs > 0 && signalMs <= terminalMs) || (terminalMs > 0 && signalMs <= 0)) continue;
-          const signature = `${type}|${fromId}|${signal?.timestamp || ""}|${signal?.sdp || ""}`;
+          const signature = `${type}|${fromId}|${signal?.timestamp || ""}|${signal?.roomId || ""}|${signal?.sdp || ""}`;
           if (seenSignalRef.current.has(signature)) continue;
           seenSignalRef.current.add(signature);
           if (seenSignalRef.current.size > 800) seenSignalRef.current.clear();
@@ -1024,7 +1025,10 @@ export default function Navbar() {
             fromUserId: fromId,
             fromName: normalizeName(signal?.fromName || signal?.fromEmail || `User ${fromId}`),
             mode: signal?.mode === "video" ? "video" : "audio",
-            at: Date.now()
+            sdp: typeof signal?.sdp === "string" ? signal.sdp : "",
+            roomId: typeof signal?.roomId === "string" ? signal.roomId : "",
+            provider: type === "livekit-invite" ? "livekit" : "webrtc",
+            at: signalMs || Date.now()
           });
           break;
         }
@@ -1098,14 +1102,35 @@ export default function Navbar() {
     };
   }, [incomingCall?.fromUserId, myUserId]);
 
+  const persistCallAcceptTarget = (call, { autoAccept } = {}) => {
+    if (!call?.fromUserId) return;
+    try {
+      const payload = {
+        fromUserId: String(call.fromUserId),
+        fromName: String(call.fromName || "User"),
+        mode: call.mode === "video" ? "video" : "audio",
+        sdp: String(call.sdp || ""),
+        roomId: String(call.roomId || ""),
+        provider: String(call.provider || ""),
+        at: Number(call.at || 0) || Date.now(),
+        autoAccept: autoAccept === true
+      };
+      sessionStorage.setItem(CALL_ACCEPT_TARGET_KEY, JSON.stringify(payload));
+    } catch {
+      // ignore storage issues
+    }
+  };
+
   const openIncomingCall = () => {
     if (!incomingCall?.fromUserId) return;
+    persistCallAcceptTarget(incomingCall, { autoAccept: false });
     setIncomingCall(null);
     navigate(`/chat/${incomingCall.fromUserId}`);
   };
 
   const acceptIncomingCall = () => {
     if (!incomingCall?.fromUserId) return;
+    persistCallAcceptTarget(incomingCall, { autoAccept: true });
     setIncomingCall(null);
     navigate(`/chat/${incomingCall.fromUserId}`);
   };

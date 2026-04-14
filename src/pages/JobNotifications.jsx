@@ -200,10 +200,29 @@ const JobNotifications = () => {
     navigate(`/resume-builder${query}`);
   };
 
+  const exitPage = () => {
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      navigate(-1);
+      return;
+    }
+    navigate("/feed");
+  };
+
   return (
     <div className="job-page">
       <header className="job-page-header">
-        <h1 className="job-page-title">Job Notifications</h1>
+        <div className="job-page-header-top">
+          <h1 className="job-page-title">Job Notifications</h1>
+          <button
+            type="button"
+            className="job-page-exit"
+            onClick={exitPage}
+            aria-label="Exit page"
+            title="Exit"
+          >
+            ←
+          </button>
+        </div>
         <p className="job-page-subtitle">
           Jobs are ranked from your resume skills, projects, experience, and profile strength.
         </p>

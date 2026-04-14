@@ -50,20 +50,6 @@ export default function LongVideos() {
   const [liveBroadcast, setLiveBroadcast] = useState(() => readLiveBroadcast());
   const playerRef = useRef(null);
   const playerWrapRef = useRef(null);
-  const pinchRef = useRef({
-    active: false,
-    startDistance: 0,
-    startScale: 1,
-    startMidX: 0,
-    startMidY: 0,
-    startOffsetX: 0,
-    startOffsetY: 0,
-    panActive: false,
-    panStartX: 0,
-    panStartY: 0,
-    panStartOffsetX: 0,
-    panStartOffsetY: 0
-  });
   const gestureRef = useRef({
     active: false,
     mode: "",
@@ -106,7 +92,6 @@ export default function LongVideos() {
   const [playerBufferedUntil, setPlayerBufferedUntil] = useState(0);
   const [isSeeking, setIsSeeking] = useState(false);
   const [playerZoom, setPlayerZoom] = useState({ scale: 1, x: 0, y: 0 });
-  const [playerZoomMode, setPlayerZoomMode] = useState("fit");
   const [playerVolume, setPlayerVolume] = useState(1);
   const swipeRef = useRef({
     tracking: false,
@@ -897,34 +882,6 @@ export default function LongVideos() {
     gestureHudTimerRef.current = window.setTimeout(() => setGestureHud({ text: "", position: "bottom" }), timeoutMs);
   };
 
-  const applyPlayerZoomMode = (mode) => {
-    if (mode === "fit") {
-      setPlayerZoom({ scale: 1, x: 0, y: 0 });
-      setPlayerZoomMode("fit");
-      showGestureHud("Fit");
-      return;
-    }
-    if (mode === "fill") {
-      setPlayerZoom({ scale: 1, x: 0, y: 0 });
-      setPlayerZoomMode("fill");
-      showGestureHud("Fill");
-      return;
-    }
-    setPlayerZoom({ scale: 1.35, x: 0, y: 0 });
-    setPlayerZoomMode("zoom");
-    showGestureHud("Zoom");
-  };
-
-  const cyclePlayerZoomMode = () => {
-    if (playerZoomMode === "fit") {
-      applyPlayerZoomMode("fill");
-    } else if (playerZoomMode === "fill") {
-      applyPlayerZoomMode("zoom");
-    } else {
-      applyPlayerZoomMode("fit");
-    }
-  };
-
   const changeVideoByOffset = (offset) => {
     const primary = watchSequence.length > 1 ? watchSequence : watchableVideos;    if (!primary.length) return;
     const currentId = String(activeVideo?.id || "");
@@ -1052,31 +1009,6 @@ export default function LongVideos() {
 
   const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
-  const getTouchDistance = (touchA, touchB) => {
-    const dx = Number(touchA?.clientX || 0) - Number(touchB?.clientX || 0);
-    const dy = Number(touchA?.clientY || 0) - Number(touchB?.clientY || 0);
-    return Math.hypot(dx, dy);
-  };
-
-  const getTouchMidpoint = (touchA, touchB) => ({
-    x: (Number(touchA?.clientX || 0) + Number(touchB?.clientX || 0)) / 2,
-    y: (Number(touchA?.clientY || 0) + Number(touchB?.clientY || 0)) / 2
-  });
-
-  const clampZoomOffset = (nextScale, nextX, nextY) => {
-    const wrap = playerWrapRef.current;    if (!wrap || nextScale <= 1.0001) {
-      return { scale: 1, x: 0, y: 0 };
-    }
-    const rect = wrap.getBoundingClientRect();
-    const maxX = Math.max(0, ((nextScale - 1) * rect.width) / 2);
-    const maxY = Math.max(0, ((nextScale - 1) * rect.height) / 2);
-    return {
-      scale: nextScale,
-      x: clamp(nextX, -maxX, maxX),
-      y: clamp(nextY, -maxY, maxY)
-    };
-  };
-
   const enterPlayerFullscreen = async () => {
     const wrap = playerWrapRef.current;    if (!wrap || document.fullscreenElement === wrap) return;
     try {
@@ -1125,7 +1057,7 @@ export default function LongVideos() {
   const handlePlayerPointerDown = (event) => {
     if (event.pointerType === "touch") return;
     if (event.pointerType === "mouse" && event.button !== 0) return;
-    if (pinchRef.current.active || pinchRef.current.panActive) return;    if (
+    if (
       event.target?.closest?.(".watch-overlay-controls") ||
       event.target?.closest?.(".watch-corner-fullscreen") ||
       event.target?.closest?.(".watch-quality-btn") ||
@@ -1167,7 +1099,7 @@ export default function LongVideos() {
 
   const handlePlayerPointerMove = (event) => {
     if (event.pointerType === "touch") return;
-    if (pinchRef.current.active || pinchRef.current.panActive) return;    if (
+    if (
       event.target?.closest?.(".watch-overlay-controls") ||
       event.target?.closest?.(".watch-corner-fullscreen") ||
       event.target?.closest?.(".watch-quality-btn") ||
@@ -1193,7 +1125,7 @@ export default function LongVideos() {
 
   const handlePlayerPointerUp = (event) => {
     if (event.pointerType === "touch") return;
-    if (pinchRef.current.active || pinchRef.current.panActive) return;    if (
+    if (
       event.target?.closest?.(".watch-overlay-controls") ||
       event.target?.closest?.(".watch-corner-fullscreen") ||
       event.target?.closest?.(".watch-quality-btn") ||
@@ -1249,28 +1181,7 @@ export default function LongVideos() {
     swipeRef.current.active = false;
 
     if (touches.length >= 2) {
-      const a = touches[0];
-      const b = touches[1];
-      const midpoint = getTouchMidpoint(a, b);
-      pinchRef.current.active = true;
-      pinchRef.current.panActive = false;
-      pinchRef.current.startDistance = Math.max(1, getTouchDistance(a, b));
-      pinchRef.current.startScale = Number(playerZoom.scale || 1);
-      pinchRef.current.startMidX = midpoint.x;
-      pinchRef.current.startMidY = midpoint.y;
-      pinchRef.current.startOffsetX = Number(playerZoom.x || 0);
-      pinchRef.current.startOffsetY = Number(playerZoom.y || 0);
-      if (event.cancelable) event.preventDefault();
-      return;
-    }
-
-    if (touches.length === 1 && Number(playerZoom.scale || 1) > 1.0001) {
-      pinchRef.current.panActive = true;
-      pinchRef.current.active = false;
-      pinchRef.current.panStartX = Number(touches[0].clientX || 0);
-      pinchRef.current.panStartY = Number(touches[0].clientY || 0);
-      pinchRef.current.panStartOffsetX = Number(playerZoom.x || 0);
-      pinchRef.current.panStartOffsetY = Number(playerZoom.y || 0);
+      // Keep long-video player in fit mode only; ignore pinch zoom gestures.
       if (event.cancelable) event.preventDefault();
       return;
     }
@@ -1290,42 +1201,12 @@ export default function LongVideos() {
     const touches = event.touches;
     if (!touches) return;
 
-    if (pinchRef.current.active && touches.length >= 2) {
-      const a = touches[0];
-      const b = touches[1];
-      const distance = Math.max(1, getTouchDistance(a, b));
-      const midpoint = getTouchMidpoint(a, b);
-      const nextScale = clamp((pinchRef.current.startScale || 1) * (distance / pinchRef.current.startDistance), 1, 3);
-      const deltaX = midpoint.x - pinchRef.current.startMidX;
-      const deltaY = midpoint.y - pinchRef.current.startMidY;
-      const clamped = clampZoomOffset(
-        nextScale,
-        (pinchRef.current.startOffsetX || 0) + deltaX,
-        (pinchRef.current.startOffsetY || 0) + deltaY
-      );
-      setPlayerZoom(clamped);
-      if (clamped.scale > 1.02) {
-        setPlayerZoomMode((prev) => (prev === "zoom" ? prev : "zoom"));
-      }
+    if (touches.length >= 2) {
       if (event.cancelable) event.preventDefault();
       return;
     }
 
-    if (pinchRef.current.panActive && touches.length === 1 && Number(playerZoom.scale || 1) > 1.0001) {
-      const touch = touches[0];
-      const deltaX = Number(touch.clientX || 0) - (pinchRef.current.panStartX || 0);
-      const deltaY = Number(touch.clientY || 0) - (pinchRef.current.panStartY || 0);
-      const clamped = clampZoomOffset(
-        Number(playerZoom.scale || 1),
-        (pinchRef.current.panStartOffsetX || 0) + deltaX,
-        (pinchRef.current.panStartOffsetY || 0) + deltaY
-      );
-      setPlayerZoom(clamped);
-      if (event.cancelable) event.preventDefault();
-      return;
-    }
-
-    if (swipeRef.current.tracking && touches.length === 1 && Number(playerZoom.scale || 1) <= 1.0001) {
+    if (swipeRef.current.tracking && touches.length === 1) {
       const touch = touches[0];
       const x = Number(touch.clientX || 0);
       const y = Number(touch.clientY || 0);
@@ -1393,7 +1274,7 @@ export default function LongVideos() {
     swipeRef.current.tracking = false;
     swipeRef.current.active = false;
 
-    if (!wasSwipe && event?.changedTouches?.length && !pinchRef.current.active && !pinchRef.current.panActive) {
+    if (!wasSwipe && event?.changedTouches?.length) {
       const touch = event.changedTouches[0];
       const now = Date.now();
       const prev = lastTapRef.current;
@@ -1408,18 +1289,6 @@ export default function LongVideos() {
       } else {
         lastTapRef.current = { at: now, x: touch.clientX, y: touch.clientY };
       }
-    }
-
-    if (pinchRef.current.active && Number(playerZoom.scale || 1) <= 1.0001) {
-      setPlayerZoom({ scale: 1, x: 0, y: 0 });
-      setPlayerZoomMode("fit");
-    }
-    pinchRef.current.active = false;
-    if (!pinchRef.current.panActive) return;
-    pinchRef.current.panActive = false;
-    if (Number(playerZoom.scale || 1) <= 1.0001) {
-      setPlayerZoom({ scale: 1, x: 0, y: 0 });
-      setPlayerZoomMode("fit");
     }
   };
   useEffect(() => {
@@ -1496,8 +1365,6 @@ export default function LongVideos() {
     setIsPlayerMinimized(false);
     setIsPlayerInPip(false);
     setPlayerZoom({ scale: 1, x: 0, y: 0 });
-    pinchRef.current.active = false;
-    pinchRef.current.panActive = false;
   }, [activeVideo?.id]);
 
   useEffect(() => {    if (!isWatchMode || !activeVideo?.id) return;
@@ -1670,7 +1537,7 @@ export default function LongVideos() {
                       "--watch-player-brightness": playerBrightness,
                       transform: `translate3d(${playerZoom.x}px, ${playerZoom.y}px, 0) scale(${playerZoom.scale})`,
                       transformOrigin: "center center",
-                      objectFit: playerZoomMode === "fit" ? "contain" : "cover"
+                      objectFit: "contain"
                     }}
                     onPlay={() => {
                       setIsPlayerPaused(false);
