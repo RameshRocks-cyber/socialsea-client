@@ -84,7 +84,8 @@ function normalizeApiPath(config) {
 // 🔹 Attach Access Token Automatically
 api.interceptors.request.use((config) => {
   const guardKey = getEndpointGuardKey(config);
-  if (guardKey && shouldSkipEndpoint(guardKey)) {
+  const bypassEndpointGuard = config?.bypassEndpointGuard === true;
+  if (guardKey && !bypassEndpointGuard && shouldSkipEndpoint(guardKey)) {
     const data = buildGuardedResponse(guardKey);
     config.adapter = async () => ({
       data,
@@ -165,8 +166,9 @@ api.interceptors.response.use(
     const originalRequest = error.config;
     const status = error?.response?.status;
     const guardKey = getEndpointGuardKey(originalRequest);
+    const bypassEndpointGuard = originalRequest?.bypassEndpointGuard === true;
 
-    if (guardKey) {
+    if (guardKey && !bypassEndpointGuard) {
       if (status === 404) {
         markEndpointDown(guardKey, { status, reason: "not-found" });
       } else if (status === 405) {

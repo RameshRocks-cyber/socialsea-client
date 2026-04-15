@@ -150,13 +150,14 @@ export const syncJobsFromServer = async (options = {}) => {
       suppressAuthRedirect: true
     });
     const incoming = parseServerJobs(response?.data);
+    const existing = readStoredJobs();
     if (mine) {
       const meId = ensureString(sessionStorage.getItem("userId") || localStorage.getItem("userId"));
-      const existing = readStoredJobs();
       const others = meId ? existing.filter((job) => ensureString(job?.ownerId) !== meId) : existing;
       writeStoredJobs(mergeById([...incoming, ...others]));
     } else {
-      writeStoredJobs(mergeById(incoming));
+      // Keep locally-known jobs as a fallback so a transient empty response does not blank the jobs page.
+      writeStoredJobs(mergeById([...incoming, ...existing]));
     }
     dispatchJobsChanged();
     return getStoredJobs();

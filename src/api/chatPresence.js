@@ -66,6 +66,7 @@ const resolveRuntimeBase = () => {
 export const buildChatPresenceBases = () =>
   uniqueList(
     [
+      "/api",
       readStoredValue(CHAT_SERVER_BASE_KEY),
       readStoredValue("socialsea_auth_base_url"),
       readStoredValue("socialsea_otp_base_url"),
@@ -74,8 +75,7 @@ export const buildChatPresenceBases = () =>
       import.meta.env?.VITE_API_URL,
       api.defaults.baseURL,
       getApiBaseUrl(),
-      resolveRuntimeBase(),
-      "/api"
+      resolveRuntimeBase()
     ]
       .map(normalizeBaseCandidate)
       .filter(Boolean)
@@ -98,7 +98,8 @@ export const pingChatPresence = async ({ timeoutMs = 4000 } = {}) => {
             baseURL,
             timeout: timeoutMs,
             suppressAuthRedirect: true,
-            allowCrossOriginAuth: true
+            allowCrossOriginAuth: true,
+            bypassEndpointGuard: true
           });
           writePresenceProbe({ method, url });
           return true;

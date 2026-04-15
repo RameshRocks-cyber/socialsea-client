@@ -2927,14 +2927,51 @@ function useChatController() {
   const toEpochMs = (value) => parseTimestampMs(value);
 
   const normalizeMessage = (message, otherId = "") => {
-    const rawText = String(message?.text ?? message?.message ?? message?.content ?? "");
+    const rawText = String(
+      message?.text ??
+        message?.message ??
+        message?.content ??
+        message?.body ??
+        message?.caption ??
+        message?.message_text ??
+        ""
+    );
     const { text: normalizedText, replyTo } = parseReplyEnvelope(rawText);
-    const rawTime = message?.createdAt ?? message?.sentAt ?? message?.timestamp ?? message?.time ?? "";
+    const rawTime =
+      message?.createdAt ??
+      message?.created_at ??
+      message?.sentAt ??
+      message?.sent_at ??
+      message?.timestamp ??
+      message?.time ??
+      message?.createdAtMs ??
+      message?.created_at_ms ??
+      "";
     const senderId = String(
-      message?.senderId ?? message?.fromUserId ?? message?.fromId ?? message?.userId ?? message?.sender?.id ?? ""
+      message?.senderId ??
+        message?.sender_id ??
+        message?.fromUserId ??
+        message?.from_user_id ??
+        message?.fromId ??
+        message?.from_id ??
+        message?.userId ??
+        message?.user_id ??
+        message?.sender?.id ??
+        message?.sender?.userId ??
+        message?.sender?.user_id ??
+        ""
     );
     const receiverId = String(
-      message?.receiverId ?? message?.toUserId ?? message?.toId ?? message?.receiver?.id ?? ""
+      message?.receiverId ??
+        message?.receiver_id ??
+        message?.toUserId ??
+        message?.to_user_id ??
+        message?.toId ??
+        message?.to_id ??
+        message?.receiver?.id ??
+        message?.receiver?.userId ??
+        message?.receiver?.user_id ??
+        ""
     );
     const mine =
       typeof message?.mine === "boolean"
@@ -2948,7 +2985,9 @@ function useChatController() {
     const stableId =
       message?.id ||
       message?.messageId ||
+      message?.message_id ||
       message?.chatId ||
+      message?.chat_id ||
       [
         senderId || "unknown",
         receiverId || otherId || "unknown",
@@ -2963,11 +3002,11 @@ function useChatController() {
       receiverId: receiverId || undefined,
       text: normalizedText,
       replyTo: replyTo || undefined,
-      audioUrl: String(message?.audioUrl || ""),
-      speechTyped: Boolean(message?.speechTyped),
-      mediaUrl: String(message?.mediaUrl || ""),
-      mediaType: String(message?.mediaType || ""),
-      fileName: String(message?.fileName || ""),
+      audioUrl: String(message?.audioUrl ?? message?.audio_url ?? ""),
+      speechTyped: Boolean(message?.speechTyped ?? message?.speech_typed),
+      mediaUrl: String(message?.mediaUrl ?? message?.media_url ?? ""),
+      mediaType: String(message?.mediaType ?? message?.media_type ?? ""),
+      fileName: String(message?.fileName ?? message?.file_name ?? ""),
       createdAt: normalizeTimestamp(rawTime),
       mine
     };
@@ -3138,6 +3177,11 @@ function useChatController() {
     return host === "localhost" || host === "127.0.0.1" || isPrivateIpHost(host);
   };
 
+  const isSecurePage = () => {
+    if (typeof window === "undefined") return false;
+    return String(window.location.protocol || "").toLowerCase() === "https:";
+  };
+
   const isLocalAbsoluteHost = (host) => {
     const value = String(host || "").toLowerCase();
     return value === "localhost" || value === "127.0.0.1" || isPrivateIpHost(value);
@@ -3148,6 +3192,8 @@ function useChatController() {
     if (!value || value === "/") return "";
     if (value.startsWith("/")) return value;
     if (!/^https?:\/\//i.test(value)) return "";
+    // Prevent mixed-content failures on https frontends when stale http bases are stored.
+    if (isSecurePage() && /^http:\/\//i.test(value)) return "";
     if (isLocalRuntime()) {
       try {
         const host = new URL(value).hostname.toLowerCase();
@@ -3213,11 +3259,18 @@ function useChatController() {
     const isLocalDev =
       typeof window !== "undefined" &&
       ["localhost", "127.0.0.1"].includes(String(window.location.hostname || "").toLowerCase());
+    const sameOriginApi = "/api";
+    const sameOriginAbsolute =
+      typeof window !== "undefined" && window.location?.origin
+        ? `${String(window.location.origin).replace(/\/+$/, "")}/api`
+        : "";
     const storedAuthBase = safeGetItem("socialsea_auth_base_url");
     const storedOtpBase = safeGetItem("socialsea_otp_base_url");
     const absoluteBase = resolveAbsoluteChatBase();
     const relativeBase = normalizeBaseCandidate(getApiBaseUrl()) || "/api";
     return [
+      sameOriginApi,
+      sameOriginAbsolute,
       chatServerBaseRef.current,
       absoluteBase,
       relativeBase,
@@ -3927,8 +3980,11 @@ function useChatController() {
   const sendSignal = async (targetUserId, payload) => {
     const client = stompRef.current;
     if (!targetUserId) return;
+    const signalType = String(payload?.type || "").trim().toLowerCase();
+    const shouldSurfaceFailure = ["offer", "answer", "livekit-invite", "livekit-accept", "ringing"].includes(signalType);
     let sentViaWs = false;
     let sentViaRest = false;
+    let restStatus = 0;
     try {
       if (client?.connected) {
         client.publish({
@@ -3942,9 +3998,15 @@ function useChatController() {
     }
     if (!sentViaWs) {
       try {
-        await api.post(`/api/calls/signal/${targetUserId}`, payload || {});
+        const encodedTargetId = encodeURIComponent(String(targetUserId));
+        await requestChatMutation({
+          method: "POST",
+          endpoints: [`/api/calls/signal/${encodedTargetId}`, `/calls/signal/${encodedTargetId}`],
+          data: payload || {}
+        });
         sentViaRest = true;
-      } catch {
+      } catch (err) {
+        restStatus = Number(err?.response?.status || 0);
         sentViaRest = false;
       }
     }
@@ -3979,8 +4041,10 @@ function useChatController() {
       // ignore broadcast fallback issues
     }
 
-    if (!sentViaWs && !sentViaRest) {
-      setCallError("Call signaling failed. Please login again and retry.");
+    if (!sentViaWs && !sentViaRest && shouldSurfaceFailure) {
+      const authIssue = restStatus === 401 || restStatus === 403;
+      setCallError(authIssue ? "Call signaling failed. Please login again and retry." : "Call signaling unavailable. Please retry.");
+      window.setTimeout(() => setCallError(""), 2500);
     }
   };
 
@@ -5367,10 +5431,30 @@ function useChatController() {
 
   const onIncomingChatMessage = (payload) => {
     const senderId = String(
-      payload?.senderId ?? payload?.fromUserId ?? payload?.fromId ?? payload?.sender?.id ?? payload?.userId ?? ""
+      payload?.senderId ??
+        payload?.sender_id ??
+        payload?.fromUserId ??
+        payload?.from_user_id ??
+        payload?.fromId ??
+        payload?.from_id ??
+        payload?.sender?.id ??
+        payload?.sender?.userId ??
+        payload?.sender?.user_id ??
+        payload?.userId ??
+        payload?.user_id ??
+        ""
     );
     const receiverId = String(
-      payload?.receiverId ?? payload?.toUserId ?? payload?.toId ?? payload?.receiver?.id ?? ""
+      payload?.receiverId ??
+        payload?.receiver_id ??
+        payload?.toUserId ??
+        payload?.to_user_id ??
+        payload?.toId ??
+        payload?.to_id ??
+        payload?.receiver?.id ??
+        payload?.receiver?.userId ??
+        payload?.receiver?.user_id ??
+        ""
     );
     const contactIdForThread =
       senderId && senderId !== String(myUserId)
@@ -5380,7 +5464,7 @@ function useChatController() {
           : "";
     if (!contactIdForThread) return;
 
-    const text = String(payload?.text || "");
+    const text = String(payload?.text ?? payload?.message ?? payload?.content ?? payload?.body ?? "");
     const deleteTargetId = parseDeleteTargetId(text);
     if (deleteTargetId) {
       setMessagesByContact((prev) => {
@@ -5395,16 +5479,30 @@ function useChatController() {
       setTimeout(() => scrollThreadToBottom("smooth"), 50);
       return;
     }
+    const createdAt =
+      payload?.createdAt ??
+      payload?.created_at ??
+      payload?.sentAt ??
+      payload?.sent_at ??
+      payload?.timestamp ??
+      payload?.time ??
+      "";
     const nextMessage = normalizeMessage({
-      id: payload?.id || `${payload?.createdAt || Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      id:
+        payload?.id ||
+        payload?.messageId ||
+        payload?.message_id ||
+        payload?.chatId ||
+        payload?.chat_id ||
+        `${createdAt || Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       senderId: senderId || contactIdForThread,
       receiverId: receiverId || String(myUserId || ""),
       text,
-      audioUrl: payload?.audioUrl || "",
-      mediaUrl: payload?.mediaUrl || "",
-      mediaType: payload?.mediaType || "",
-      fileName: payload?.fileName || "",
-      createdAt: payload?.createdAt || new Date().toISOString()
+      audioUrl: payload?.audioUrl ?? payload?.audio_url ?? "",
+      mediaUrl: payload?.mediaUrl ?? payload?.media_url ?? "",
+      mediaType: payload?.mediaType ?? payload?.media_type ?? "",
+      fileName: payload?.fileName ?? payload?.file_name ?? "",
+      createdAt: createdAt || new Date().toISOString()
     }, contactIdForThread);
     const hiddenIds = getHiddenMessageSetForContact(contactIdForThread);
     if (hiddenIds.has(String(nextMessage.id || ""))) return;
@@ -5443,13 +5541,26 @@ function useChatController() {
       let next = prev;
       if (!found) {
         const name = normalizeDisplayName(
-          payload?.senderName || payload?.senderEmail || payload?.fromName || payload?.fromEmail || `User ${contactIdForThread}`
+          payload?.senderName ||
+            payload?.sender_name ||
+            payload?.senderEmail ||
+            payload?.sender_email ||
+            payload?.fromName ||
+            payload?.from_name ||
+            payload?.fromEmail ||
+            payload?.from_email ||
+            `User ${contactIdForThread}`
         );
         next = mergeContacts(prev, [
           {
             id: contactIdForThread,
             name,
-            email: payload?.senderEmail || payload?.fromEmail || "",
+            email:
+              payload?.senderEmail ||
+              payload?.sender_email ||
+              payload?.fromEmail ||
+              payload?.from_email ||
+              "",
             avatar: (name[0] || "U").toUpperCase(),
             lastMessage: preview || nextMessage.text
           }
@@ -7291,7 +7402,9 @@ function useChatController() {
         ]);
         if (disposed) return;
         const SockJS = sockjsModule?.default || sockjsModule;
-        const rawBase = resolveAbsoluteChatBase() || normalizeBaseCandidate(getApiBaseUrl());
+        // Prefer the configured API base (usually same-origin `/api` in production) for WebSockets.
+        // Stored absolute bases can be stale and may point at insecure `http://` URLs.
+        const rawBase = normalizeBaseCandidate(getApiBaseUrl()) || resolveAbsoluteChatBase();
         const origin = typeof window !== "undefined" ? String(window.location.origin || "") : "";
         const base = rawBase && rawBase.startsWith("/") ? `${origin}${rawBase}` : String(rawBase || "");
         if (!base) return;

@@ -24,7 +24,7 @@ const Jobs = () => {
   const navigate = useNavigate();
   const [searchInput, setSearchInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
-  const [hiddenTypes] = useState(() => parseList(HIDDEN_TYPES_KEY));
+  const [hiddenTypes, setHiddenTypes] = useState(() => parseList(HIDDEN_TYPES_KEY));
   const normalizedQuery = searchQuery.trim().toLowerCase();
   const companyProfile = useMemo(() => readCompanyProfile(), []);
   const [resume, setResume] = useState(() => readResumeSnapshot());
@@ -32,6 +32,7 @@ const Jobs = () => {
   const [allJobs, setAllJobs] = useState(() => getAllJobs());
 
   const visibleJobs = allJobs.filter((job) => !hiddenTypes.includes(job.track));
+  const hiddenJobsCount = Math.max(0, allJobs.length - visibleJobs.length);
 
   useEffect(() => {
     let mounted = true;
@@ -46,6 +47,9 @@ const Jobs = () => {
     const handleStorage = (event) => {
       if (!event || event.key === RESUME_KEY) {
         setResume(readResumeSnapshot());
+      }
+      if (!event || event.key === HIDDEN_TYPES_KEY) {
+        setHiddenTypes(parseList(HIDDEN_TYPES_KEY));
       }
     };
 
@@ -130,6 +134,19 @@ const Jobs = () => {
     navigate("/feed");
   };
 
+  const clearHiddenTypes = () => {
+    try {
+      localStorage.removeItem(HIDDEN_TYPES_KEY);
+    } catch {
+      // ignore storage failures
+    }
+    setHiddenTypes([]);
+  };
+
+  const hasOnlyHiddenJobs = allJobs.length > 0 && visibleJobs.length === 0;
+  const hasSearchNoMatch =
+    Boolean(normalizedQuery) && visibleJobs.length > 0 && filteredJobs.length === 0;
+
   return (
     <div className="job-page job-list-page">
       <header className="job-page-header">
@@ -142,7 +159,7 @@ const Jobs = () => {
             aria-label="Exit page"
             title="Exit"
           >
-            ←
+            {"<"}
           </button>
         </div>
         <p className="job-page-subtitle">Company info</p>
@@ -164,7 +181,20 @@ const Jobs = () => {
 
       <div className="job-list">
         {filteredJobs.length === 0 ? (
-          <p className="job-empty">No jobs available yet.</p>
+          hasOnlyHiddenJobs ? (
+            <div className="job-empty-wrap">
+              <p className="job-empty">
+                {hiddenJobsCount} {hiddenJobsCount === 1 ? "job is" : "jobs are"} hidden by your preferences.
+              </p>
+              <button type="button" className="job-page-edit" onClick={clearHiddenTypes}>
+                Show Hidden Jobs
+              </button>
+            </div>
+          ) : hasSearchNoMatch ? (
+            <p className="job-empty">No jobs match your search.</p>
+          ) : (
+            <p className="job-empty">No jobs available yet.</p>
+          )
         ) : (
           filteredJobs.map((item) => {
             const job = item.job;
