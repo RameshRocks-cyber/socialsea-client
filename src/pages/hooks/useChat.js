@@ -9662,6 +9662,8 @@ function useChatController() {
       ];
 
       let translated = "";
+      let translatedNote = "";
+      let translatedConfidence = NaN;
       let success = false;
       let onlyMissingRoutes = true;
 
@@ -9678,12 +9680,9 @@ function useChatController() {
               headers: { "Content-Type": "multipart/form-data" },
               suppressAuthRedirect: true
             });
-            translated = String(
-              res?.data?.text ||
-              res?.data?.translation ||
-              res?.data?.message ||
-              ""
-            ).trim();
+            translatedNote = String(res?.data?.note || "").trim().toLowerCase();
+            translatedConfidence = Number(res?.data?.confidence);
+            translated = String(res?.data?.text || res?.data?.translation || res?.data?.message || "").trim();
             success = true;
             signApiUnavailableRef.current = false;
             break;
@@ -9697,8 +9696,37 @@ function useChatController() {
       }
 
       if (translated) {
-        setSignAssistText(translated);
-        setSignAssistStatus("Sign translated. Review and send.");
+        const note = String(translatedNote || "").trim().toLowerCase();
+        const guidanceNotes = new Set([
+          "captured",
+          "low_light",
+          "low_contrast",
+          "invalid_image",
+          "io_error",
+          "not_configured",
+          "translate_error"
+        ]);
+        const looksLikeGuidance =
+          guidanceNotes.has(note) ||
+          /^sign captured\b/i.test(translated) ||
+          /^please (turn on|increase) (more )?light/i.test(translated) ||
+          /^move hand closer\b/i.test(translated);
+
+        if (!looksLikeGuidance) {
+          setSignAssistText(translated);
+          setSignAssistStatus("Sign translated. Review and send.");
+        } else {
+          setSignAssistText((prev) => String(prev || "").trim() || draft);
+          if (note === "not_configured") {
+            setSignAssistStatus("Sign translation is not configured on the server.");
+          } else if (note === "translate_error") {
+            setSignAssistStatus("Sign captured, but translation failed. Try again.");
+          } else if (translatedConfidence && Number.isFinite(translatedConfidence) && translatedConfidence < 0.35) {
+            setSignAssistStatus("No text detected. Try better lighting/hand visibility.");
+          } else {
+            setSignAssistStatus("Sign captured. Edit the draft and send.");
+          }
+        }
       } else {
         if (success) {
           setSignAssistStatus("No text detected. Try better lighting/hand visibility.");
