@@ -9721,7 +9721,7 @@ function useChatController() {
             setSignAssistStatus("Sign translation is not configured on the server.");
           } else if (note === "translate_error") {
             setSignAssistStatus("Sign captured, but translation failed. Try again.");
-          } else if (translatedConfidence && Number.isFinite(translatedConfidence) && translatedConfidence < 0.35) {
+          } else if (Number.isFinite(translatedConfidence) && translatedConfidence < 0.35) {
             setSignAssistStatus("No text detected. Try better lighting/hand visibility.");
           } else {
             setSignAssistStatus("Sign captured. Edit the draft and send.");
