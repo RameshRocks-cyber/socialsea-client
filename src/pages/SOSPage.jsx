@@ -191,10 +191,11 @@ const emergencyBaseCandidates = () => {
 const normalizeSocketBase = (rawBase) => {
   const base = String(rawBase || "").trim().replace(/\/+$/, "");
   if (!base) return "";
-  if (base === "/api") return "";
-  if (base.startsWith("/")) return base.replace(/\/api$/i, "") || base;
-  if (/\/api$/i.test(base)) return base.replace(/\/api$/i, "");
-  return base;
+  const origin =
+    typeof window !== "undefined" ? String(window.location.origin || "").trim().replace(/\/+$/, "") : "";
+  const absolutized = base.startsWith("/") && origin ? `${origin}${base}` : base;
+  if (/\/api$/i.test(absolutized)) return absolutized.replace(/\/api$/i, "");
+  return absolutized;
 };
 
 const sosSocketBaseCandidates = () => {
@@ -206,9 +207,15 @@ const sosSocketBaseCandidates = () => {
     getApiBaseUrl(),
     api.defaults.baseURL,
     storedBase,
-    import.meta.env.VITE_API_URL,
+    import.meta.env.VITE_API_URL
   ]);
-  return uniqueNonEmpty(raw.map(normalizeSocketBase).filter(Boolean));
+  const origin =
+    typeof window !== "undefined" ? String(window.location.origin || "").trim().replace(/\/+$/, "") : "";
+  const list = uniqueNonEmpty(raw.map(normalizeSocketBase).filter(Boolean));
+  if (origin) list.push(origin);
+  const isHttpsPage =
+    typeof window !== "undefined" && String(window.location.protocol || "").toLowerCase() === "https:";
+  return uniqueNonEmpty(list).filter((base) => !(isHttpsPage && /^http:\/\//i.test(String(base || ""))));
 };
 
 const buildEmergencyUrls = (suffix) => {
@@ -2607,7 +2614,14 @@ export default function SOSPage() {
             {isLiveView && !liveStreamAvailable && !!liveFrameUrl && (
               <img src={liveFrameUrl} alt="Live SOS preview" className="sos-preview-video" />
             )}
-            {!isLiveView && <video ref={previewVideoRef} className="sos-preview-video" playsInline muted />}
+            {!isLiveView && (
+              <video
+                ref={previewVideoRef}
+                className={cameraFacing === "user" ? "sos-preview-video is-mirrored" : "sos-preview-video"}
+                playsInline
+                muted
+              />
+            )}
             {!isLiveView && !(recordingInfo.video && (status === "arming" || status === "active" || status === "stopping")) && (
               <div className="sos-preview-empty">Camera preview will appear when SOS recording starts.</div>
             )}

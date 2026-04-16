@@ -163,6 +163,10 @@
   background: #000;
 }
 
+.sos-preview-video.is-mirrored {
+  transform: scaleX(-1);
+}
+
 .sos-preview-empty {
   position: absolute;
   inset: 0;

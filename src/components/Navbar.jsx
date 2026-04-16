@@ -19,6 +19,7 @@ import { FaGraduationCap } from "react-icons/fa";
 import api from "../api/axios";
 import { getApiBaseUrl } from "../api/baseUrl";
 import { pingChatPresence } from "../api/chatPresence";
+import { connectUserNotifications } from "../ws";
 import "./Navbar.css";
 
 const ITEMS = [
@@ -1867,6 +1868,81 @@ export default function Navbar() {
       clearInterval(timer);
     };
   }, [myEmail, myUserId]);
+
+  useEffect(() => {
+    const authToken =
+      sessionStorage.getItem("accessToken") ||
+      sessionStorage.getItem("token") ||
+      localStorage.getItem("accessToken") ||
+      localStorage.getItem("token") ||
+      "";
+    if (!authToken || authToken === "null" || authToken === "undefined") return undefined;
+    if (!myEmail) return undefined;
+    let disposed = false;
+
+    const stripTrailingPunct = (value) => String(value || "").replace(/[),.;]+$/g, "");
+    const extractFirstUrl = (text, predicate) => {
+      const urls = String(text || "").match(/https?:\/\/\S+/gi) || [];
+      for (const url of urls) {
+        const cleaned = stripTrailingPunct(url);
+        if (predicate(cleaned)) return cleaned;
+      }
+      return "";
+    };
+    const extractFirstEmail = (text) => {
+      const match = String(text || "").match(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/);
+      return match?.[0] ? String(match[0]).trim().toLowerCase() : "";
+    };
+
+    const disconnect = connectUserNotifications(myEmail, (payload) => {
+      if (disposed) return;
+      if (!payload || typeof payload !== "object") return;
+      if (!isEmergencyNotification(payload)) return;
+      if (payload?.read) return;
+      if (isTriggeredByCurrentBrowser()) return;
+
+      const notifId = String(payload?.id || "").trim();
+      if (notifId && notifId === lastEmergencyNotificationIdRef.current) return;
+
+      const createdAtMs = new Date(payload?.createdAt || 0).getTime();
+      if (Number.isFinite(createdAtMs) && Date.now() - createdAtMs > 30 * 60 * 1000) return;
+
+      const rawMessage = String(payload?.message || payload?.title || "").trim();
+      if (!rawMessage) return;
+
+      const liveUrl = extractFirstUrl(rawMessage, (url) => /\/sos\/live\//i.test(url));
+      const navigateUrl = extractFirstUrl(rawMessage, (url) => /\/sos\/navigate\//i.test(url));
+      const mapsUrl = extractFirstUrl(rawMessage, (url) => /maps\.google\.com|google\.com\/maps/i.test(url));
+      const reporterEmail = extractFirstEmail(rawMessage);
+      const alertId = extractAlertIdFromUrl(liveUrl) || extractAlertIdFromUrl(navigateUrl) || "";
+
+      lastEmergencyNotificationIdRef.current = notifId || "";
+      try {
+        sessionStorage.setItem(SOS_LAST_NOTIFICATION_ID_KEY, notifId || "");
+      } catch {
+        // ignore storage issues
+      }
+
+      showSosPopup("[EMERGENCY] SocialSea Emergengy SOS is asking for help", {
+        isEmergency: true,
+        alertId: alertId || undefined,
+        dedupeKey: alertId || notifId || undefined,
+        reporterEmail: reporterEmail || undefined,
+        liveUrl: liveUrl || undefined,
+        navigateUrl: navigateUrl || undefined,
+        mapsUrl: mapsUrl || undefined
+      });
+    });
+
+    return () => {
+      disposed = true;
+      try {
+        disconnect?.();
+      } catch {
+        // ignore teardown errors
+      }
+    };
+  }, [myEmail]);
 
   useEffect(() => {
     if (!trafficAlertsEnabled) return undefined;

@@ -61,3 +61,50 @@ export const connectAdminNotifications = (onMessage) => {
     }
   };
 };
+
+export const connectUserNotifications = (email, onMessage) => {
+  const token = String(getStoredToken() || "").trim();
+  const recipient = String(email || "").trim().toLowerCase();
+  if (!token || !recipient || typeof onMessage !== "function") return () => {};
+
+  const wsBase = resolveWsBase();
+  if (!wsBase) return () => {};
+
+  let disposed = false;
+  const client = new Client({
+    webSocketFactory: () => new SockJS(`${wsBase}/ws?token=${encodeURIComponent(token)}`),
+    connectHeaders: { Authorization: `Bearer ${token}` },
+    reconnectDelay: 3000,
+    debug: () => {}
+  });
+
+  const handleFrame = (frame) => {
+    try {
+      const payload = JSON.parse(frame?.body || "{}");
+      if (!disposed && payload && typeof payload === "object") {
+        onMessage(payload);
+      }
+    } catch {
+      // ignore malformed payloads
+    }
+  };
+
+  client.onConnect = () => {
+    client.subscribe("/user/queue/notifications", handleFrame);
+    client.subscribe(`/topic/notifications/${recipient}`, handleFrame);
+  };
+
+  client.onStompError = () => {};
+  client.onWebSocketError = () => {};
+  client.onWebSocketClose = () => {};
+  client.activate();
+
+  return () => {
+    disposed = true;
+    try {
+      client.deactivate();
+    } catch {
+      // ignore teardown errors
+    }
+  };
+};
