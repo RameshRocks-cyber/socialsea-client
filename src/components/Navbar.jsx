@@ -17,7 +17,7 @@ import {
 } from "react-icons/fi";
 import { FaGraduationCap } from "react-icons/fa";
 import api from "../api/axios";
-import { getApiBaseUrl } from "../api/baseUrl";
+import { getApiBaseUrl, toApiUrl } from "../api/baseUrl";
 import { pingChatPresence } from "../api/chatPresence";
 import { connectUserNotifications } from "../ws";
 import "./Navbar.css";
@@ -668,6 +668,7 @@ export default function Navbar() {
     }))
   );
   const [activeLensId, setActiveLensId] = useState("colorful");
+  const [profileNavPic, setProfileNavPic] = useState("");
   const seenSignalRef = useRef(new Set());
   const incomingCallRef = useRef(null);
   const sosTapRef = useRef({ count: 0, lastAt: 0 });
@@ -838,6 +839,38 @@ export default function Navbar() {
       document.removeEventListener("visibilitychange", onFocus);
     };
   }, [myUserId, myEmail]);
+
+  useEffect(() => {
+    if (!myUserId && !myEmail) {
+      setProfileNavPic("");
+      return undefined;
+    }
+
+    let cancelled = false;
+    const loadProfilePic = async () => {
+      try {
+        const res = await api.get("/api/profile/me");
+        const payload = res?.data || {};
+        const rawPic =
+          payload?.profilePicUrl ||
+          payload?.profilePic ||
+          payload?.avatarUrl ||
+          payload?.avatar ||
+          "";
+        const nextPic = rawPic ? toApiUrl(rawPic) : "";
+        if (!cancelled) setProfileNavPic(String(nextPic || "").trim());
+      } catch {
+        if (!cancelled) setProfileNavPic("");
+      }
+    };
+
+    loadProfilePic();
+    window.addEventListener("focus", loadProfilePic);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", loadProfilePic);
+    };
+  }, [myUserId, myEmail, location.pathname]);
 
   useEffect(() => {
     cameraHighResRef.current = cameraHighRes;
@@ -3018,6 +3051,8 @@ export default function Navbar() {
           {items.map((item) => {
             const Icon = item.icon;
             const active = item.match(location.pathname);
+            const isFeedItem = item.to === "/feed";
+            const isProfileItem = item.to === profileTarget;
             return (
               <Link
                 key={item.to}
@@ -3026,7 +3061,18 @@ export default function Navbar() {
                 title={item.label}
                 aria-current={active ? "page" : undefined}
               >
-                <Icon className="ss-link-icon" />
+                {isFeedItem ? (
+                  <img src="/logo.png?v=3" alt="" className="ss-link-logo" aria-hidden="true" />
+                ) : isProfileItem && profileNavPic ? (
+                  <img
+                    src={profileNavPic}
+                    alt="Profile"
+                    className="ss-link-avatar"
+                    onError={() => setProfileNavPic("")}
+                  />
+                ) : (
+                  <Icon className="ss-link-icon" />
+                )}
                 <span className="ss-link-text">{item.label}</span>
               </Link>
             );

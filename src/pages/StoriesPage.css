@@ -1,8 +1,8 @@
 .stories-page {
   min-height: 100vh;
   padding: 16px 14px 78px;
-  background: radial-gradient(circle at top, rgba(22, 35, 48, 0.35), transparent 45%), #05070b;
-  color: #e7eefb;
+  background: radial-gradient(circle at top, rgba(24, 24, 24, 0.35), transparent 45%), #050505;
+  color: #f3f3f3;
 }
 
 .stories-header {
@@ -26,16 +26,16 @@
 
 .stories-back,
 .stories-create {
-  border: 1px solid rgba(120, 170, 230, 0.35);
-  background: rgba(12, 18, 26, 0.9);
-  color: #e7eefb;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(12, 12, 12, 0.9);
+  color: #f3f3f3;
   border-radius: 999px;
   padding: 6px 12px;
   font-size: 0.78rem;
 }
 
 .stories-create {
-  background: linear-gradient(135deg, rgba(60, 136, 255, 0.4), rgba(20, 50, 120, 0.8));
+  background: linear-gradient(135deg, rgba(38, 38, 38, 0.9), rgba(8, 8, 8, 0.95));
 }
 
 .stories-error,
@@ -53,8 +53,8 @@
 }
 
 .stories-summary-card {
-  border: 1px solid rgba(110, 160, 220, 0.2);
-  background: rgba(10, 16, 24, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(10, 10, 10, 0.92);
   border-radius: 14px;
   padding: 10px;
   display: grid;
@@ -97,8 +97,8 @@
   min-width: 28px;
   height: 28px;
   border-radius: 999px;
-  border: 1px solid rgba(120, 170, 230, 0.25);
-  background: rgba(12, 18, 26, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(12, 12, 12, 0.82);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -113,8 +113,8 @@
 
 .stories-card {
   text-align: left;
-  border: 1px solid rgba(110, 160, 220, 0.2);
-  background: rgba(12, 16, 24, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(12, 12, 12, 0.92);
   border-radius: 14px;
   overflow: hidden;
   color: inherit;
@@ -179,15 +179,15 @@
   padding: 2px 8px;
   border-radius: 999px;
   font-size: 0.6rem;
-  color: #dbe8ff;
-  background: rgba(5, 10, 18, 0.72);
-  border: 1px solid rgba(120, 170, 230, 0.35);
+  color: #e9e9e9;
+  background: rgba(14, 14, 14, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.22);
 }
 
 .stories-type-badge.reel {
-  color: #bde9ff;
-  border-color: rgba(84, 190, 255, 0.45);
-  background: rgba(20, 54, 90, 0.55);
+  color: #f1f1f1;
+  border-color: rgba(255, 255, 255, 0.24);
+  background: rgba(24, 24, 24, 0.82);
 }
 
 .stories-meta {
@@ -217,8 +217,8 @@
 }
 
 .stories-viewer {
-  background: rgba(12, 16, 24, 0.96);
-  border: 1px solid rgba(120, 170, 230, 0.35);
+  background: rgba(12, 12, 12, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 16px;
   width: min(480px, 92vw);
   max-height: 90vh;

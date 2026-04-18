@@ -6,6 +6,7 @@ import {
   FiClock,
   FiImage,
   FiLink,
+  FiMic,
   FiMoreVertical,
   FiPhone,
   FiSearch,
@@ -15,7 +16,7 @@ import {
 } from "react-icons/fi";
 import { useChat, DISAPPEARING_MESSAGE_OPTIONS } from "./hooks/useChat";
 
-export default function ChatHeader() {
+export default function ChatHeader({ onOpenUtilityPanel, onOpenSearch }) {
   const {
     isConversationRoute,
     navigate,
@@ -52,12 +53,39 @@ export default function ChatHeader() {
     speechLangOptions,
     speechVoiceGender,
     setSpeechVoiceGender,
+    showSpeechTypingMic,
+    setShowSpeechTypingMic,
     translatorError,
     blockActiveContact,
     activeContactBlocked
   } = useChat();
 
   if (!activeContact) return null;
+
+  const openUtilityPanel = (panel) => {
+    if (typeof onOpenUtilityPanel === "function") {
+      onOpenUtilityPanel(panel);
+    } else {
+      setActiveUtilityPanel(panel);
+      setShowHeaderMenu(false);
+      setShowCallMenu(false);
+      setShowWallpaperPanel(false);
+    }
+  };
+
+  const handleUtilityRowMouseDown = (event, panel) => {
+    event.preventDefault();
+    event.stopPropagation();
+    openUtilityPanel(panel);
+  };
+
+  const openSearchPanel = () => {
+    if (typeof onOpenSearch === "function") {
+      onOpenSearch();
+      return;
+    }
+    openUtilityPanel("search");
+  };
 
   const exitChatPage = () => {
     setShowHeaderMenu(false);
@@ -146,6 +174,15 @@ export default function ChatHeader() {
         <button
           type="button"
           className="call-action"
+          title="Search in chat"
+          onClick={openSearchPanel}
+          aria-label="Search in chat"
+        >
+          <FiSearch />
+        </button>
+        <button
+          type="button"
+          className="call-action"
           title="More options"
           onClick={() => {
             setShowHeaderMenu((prev) => !prev);
@@ -174,30 +211,9 @@ export default function ChatHeader() {
             <button
               type="button"
               className="chat-header-menu-row chat-header-menu-link"
-              onClick={() => {
-                setActiveUtilityPanel("search");
-                setShowHeaderMenu(false);
-                setShowCallMenu(false);
-                setShowWallpaperPanel(false);
-              }}
-            >
-              <span className="chat-menu-action-start">
-                <span className="chat-menu-action-icon">
-                  <FiSearch />
-                </span>
-                <strong>Search</strong>
-              </span>
-              <FiChevronRight />
-            </button>
-            <button
-              type="button"
-              className="chat-header-menu-row chat-header-menu-link"
-              onClick={() => {
-                setActiveUtilityPanel("media");
-                setShowHeaderMenu(false);
-                setShowCallMenu(false);
-                setShowWallpaperPanel(false);
-              }}
+              data-panel="media"
+              onMouseDown={(event) => handleUtilityRowMouseDown(event, "media")}
+              onClick={() => openUtilityPanel("media")}
             >
               <span className="chat-menu-action-start">
                 <span className="chat-menu-action-icon">
@@ -210,12 +226,9 @@ export default function ChatHeader() {
             <button
               type="button"
               className="chat-header-menu-row chat-header-menu-link"
-              onClick={() => {
-                setActiveUtilityPanel("links-documents");
-                setShowHeaderMenu(false);
-                setShowCallMenu(false);
-                setShowWallpaperPanel(false);
-              }}
+              data-panel="links-documents"
+              onMouseDown={(event) => handleUtilityRowMouseDown(event, "links-documents")}
+              onClick={() => openUtilityPanel("links-documents")}
             >
               <span className="chat-menu-action-start">
                 <span className="chat-menu-action-icon">
@@ -287,6 +300,24 @@ export default function ChatHeader() {
                     type="checkbox"
                     checked={signAssistAutoSpeak}
                     onChange={(e) => setAutoSpeakEnabled(e.target.checked)}
+                  />
+                  <span className="chat-switch-track" />
+                </span>
+              </label>
+            </div>
+            <div className="chat-translate-card">
+              <label className="chat-header-menu-row chat-switch-row">
+                <span className="chat-menu-action-start">
+                  <span className="chat-menu-action-icon">
+                    <FiMic />
+                  </span>
+                  <strong>Speak-to-type mic</strong>
+                </span>
+                <span className="chat-switch">
+                  <input
+                    type="checkbox"
+                    checked={showSpeechTypingMic}
+                    onChange={(e) => setShowSpeechTypingMic(e.target.checked)}
                   />
                   <span className="chat-switch-track" />
                 </span>

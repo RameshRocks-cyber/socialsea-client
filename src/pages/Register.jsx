@@ -20,7 +20,7 @@ function parseErrorMessage(err, fallback) {
 export default function Register() {
   const navigate = useNavigate();
   const [username, setUsername] = useState("");
-  const [email, setEmail] = useState("");
+  const [contact, setContact] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -36,22 +36,32 @@ export default function Register() {
     setMsg("");
     setSuccess("");
     setOtpInfo("");
-    const cleanEmail = email.trim();
-    if (!cleanEmail) {
-      setMsg("Enter email to receive OTP.");
+    const cleanContact = contact.trim();
+    if (!cleanContact) {
+      setMsg("Enter email or mobile number to receive OTP.");
       return;
     }
 
     setOtpLoading(true);
     try {
-      const res = await sendOtp(cleanEmail);
+      const res = await sendOtp(cleanContact);
       const receivedOtp = String(res?.data?.debugOtp || "").trim();
       const deliveryFailed = Boolean(res?.data?.deliveryFailed);
+      const channel = String(res?.data?.channel || "").toLowerCase();
+      const channelLabel = channel === "sms" ? "SMS" : "email";
       if (receivedOtp) {
         setOtp(receivedOtp);
-        setOtpInfo(deliveryFailed ? `Email failed. Using fallback OTP: ${receivedOtp}` : `OTP sent. Debug OTP: ${receivedOtp}`);
+        setOtpInfo(
+          deliveryFailed
+            ? `${channelLabel} delivery failed. Using fallback OTP: ${receivedOtp}`
+            : `OTP sent via ${channelLabel}. Debug OTP: ${receivedOtp}`
+        );
       } else {
-        setOtpInfo(deliveryFailed ? "OTP generated but email delivery failed. Try again." : "OTP sent to your email.");
+        setOtpInfo(
+          deliveryFailed
+            ? `OTP generated but ${channelLabel} delivery failed. Try again.`
+            : `OTP sent via ${channelLabel}.`
+        );
       }
     } catch (err) {
       setMsg(parseErrorMessage(err, "Failed to send OTP."));
@@ -84,9 +94,12 @@ export default function Register() {
 
     setLoading(true);
     try {
+      const cleanedContact = contact.trim();
+      const looksLikeEmail = cleanedContact.includes("@");
       await registerWithPassword({
         username: username.trim(),
-        email: email.trim() || null,
+        email: cleanedContact ? (looksLikeEmail ? cleanedContact : null) : null,
+        phoneNumber: cleanedContact ? (!looksLikeEmail ? cleanedContact : null) : null,
         password,
         otp: otp.trim() || null
       });
@@ -122,14 +135,14 @@ export default function Register() {
             autoComplete="username"
           />
 
-          <label htmlFor="email">Email (optional)</label>
+          <label htmlFor="contact">Email or mobile number (optional)</label>
           <input
-            id="email"
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="name@email.com"
-            autoComplete="email"
+            id="contact"
+            type="text"
+            value={contact}
+            onChange={(e) => setContact(e.target.value)}
+            placeholder="name@email.com or mobile number"
+            autoComplete="on"
           />
 
           <div className="auth-inline-row">

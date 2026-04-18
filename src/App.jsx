@@ -50,6 +50,8 @@ import LiveRecordings from "./pages/LiveRecordings";
 import StorageVault from "./pages/StorageVault";
 import StorageVaultUnlock from "./pages/StorageVaultUnlock";
 import LiveStart from "./pages/LiveStart";
+import VideoCall from "./pages/VideoCall";
+import { ChatProvider } from "./pages/hooks/useChat";
 import StoryCreate from "./pages/StoryCreate";
 import StoriesPage from "./pages/StoriesPage";
 import Jobs from "./pages/Jobs";
@@ -196,7 +198,7 @@ function AppRoutes() {
   const isChatConversationRoute =
     location.pathname.startsWith("/chat/") && !location.pathname.startsWith("/chat/requests");
   const shouldMountUserNavbar = authed && !location.pathname.startsWith("/admin") && !isAuthScreen;
-  const showUserNavbar = shouldMountUserNavbar;
+  const showUserNavbar = shouldMountUserNavbar && !isChatConversationRoute;
   const appMainRef = useRef(null);
   const routeTimerRef = useRef({ pathname: "", startedAt: 0 });
   const swipeStateRef = useRef({
@@ -586,10 +588,10 @@ function AppRoutes() {
     };
   }, [authed, showUserNavbar, location.pathname, navigate]);
 
-  return (
+  const appShell = (
     <>
-      {shouldMountUserNavbar && <Navbar />}
-      {shouldMountUserNavbar && <NotificationBuddyBoundary enabled={showUserNavbar} />}
+      {showUserNavbar && <Navbar />}
+      {showUserNavbar && <NotificationBuddyBoundary enabled={showUserNavbar} />}
       <GestureCursor />
       <main
         ref={appMainRef}
@@ -708,6 +710,16 @@ function AppRoutes() {
         </div>
       </main>
     </>
+  );
+
+  if (!authed) return appShell;
+
+  return (
+    <ChatProvider>
+      <VideoCall placement="page" />
+      <VideoCall placement="thread" />
+      {appShell}
+    </ChatProvider>
   );
 }
 

@@ -6,6 +6,7 @@ export const COLOR_THEME_OPTIONS = [
   { id: "mankind", label: "Mankind" },
   { id: "ocean", label: "Ocean" },
   { id: "pink", label: "Pink" },
+  { id: "girlspink", label: "Girls Pink" },
   { id: "yellow", label: "Yellow" },
   { id: "blue", label: "Blue" },
   { id: "white", label: "Light" },
@@ -96,6 +97,7 @@ export const applyTheme = (value) => {
   body.classList.remove(
     "ss-themed",
     "ss-theme-pink",
+    "ss-theme-girlspink",
     "ss-theme-yellow",
     "ss-theme-black",
     "ss-theme-mankind",
@@ -109,7 +111,7 @@ export const applyTheme = (value) => {
     body.classList.add("ss-themed");
   }
 
-  if (["mankind", "pink", "yellow", "black", "white"].includes(id)) {
+  if (["mankind", "pink", "girlspink", "yellow", "black", "white"].includes(id)) {
     body.classList.add(`ss-theme-${id}`);
   }
 

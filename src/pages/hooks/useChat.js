@@ -1,5 +1,5 @@
 import { createContext, createElement, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { useLocation, useMatch, useNavigate } from "react-router-dom";
 import { Room, RoomEvent, createLocalTracks, VideoQuality } from "livekit-client";
 import api from "../../api/axios";
 import { pingChatPresence } from "../../api/chatPresence";
@@ -39,6 +39,9 @@ const CHAT_CONVO_POLL_MS = 10000;
 const CHAT_THREAD_POLL_BACKGROUND_MS = 15000;
 const CHAT_MESSAGE_ALERT_DEDUPE_MS = 10 * 60 * 1000;
 const ONLINE_WINDOW_MS = Number(import.meta.env.VITE_ONLINE_WINDOW_MS || 5 * 60 * 1000);
+const CHAT_TYPING_SIGNAL_THROTTLE_MS = 1200;
+const CHAT_TYPING_IDLE_MS = 7000;
+const CHAT_TYPING_VISIBLE_MS = 9000;
 const CHAT_REMOTE_DISABLE_MS = 5 * 60 * 1000;
 const STORY_FEED_DISABLE_MS = 5 * 60 * 1000;
 const STORY_IMAGE_DURATION_MS = 6500;
@@ -166,6 +169,7 @@ const CHAT_FAVORITES_KEY = "socialsea_chat_favorites_v1";
 const CHAT_CUSTOM_STICKERS_KEY = "socialsea_chat_custom_stickers_v1";
 const CHAT_TRANSLATOR_KEY = "socialsea_chat_translator_v1";
 const CHAT_AUTOSPEAK_KEY = "socialsea_chat_autospeak_v1";
+const CHAT_SPEECH_TYPING_UI_KEY = "socialsea_chat_speech_typing_ui_v1";
 const CHAT_WALLPAPER_KEY = "socialsea_chat_wallpaper_v1";
 const CHAT_MUTED_CONTACTS_KEY = "socialsea_chat_muted_contacts_v1";
 const CHAT_DISAPPEARING_KEY = "socialsea_chat_disappearing_v1";
@@ -807,10 +811,11 @@ const ChatContext = (() => {
 
 function useChatController() {
   const navigate = useNavigate();
-  const { contactId } = useParams();
   const location = useLocation();
-  const isConversationRoute = Boolean(contactId);
   const isRequestsRoute = location.pathname === "/chat/requests";
+  const conversationMatch = useMatch("/chat/:contactId");
+  const contactId = isRequestsRoute ? "" : String(conversationMatch?.params?.contactId || "").trim();
+  const isConversationRoute = Boolean(contactId);
 
   const safeGetItem = (key) => {
     try {
@@ -1174,6 +1179,7 @@ function useChatController() {
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [remoteIsScreenShare, setRemoteIsScreenShare] = useState(false);
   const [localVideoPos, setLocalVideoPos] = useState(null);
+  const [miniVideoPos, setMiniVideoPos] = useState(null);
   const [incomingCallPopupPos, setIncomingCallPopupPos] = useState(() => {
     try {
       const raw = localStorage.getItem(INCOMING_CALL_POPUP_POS_KEY);
@@ -1222,6 +1228,15 @@ function useChatController() {
   });
   const [isRecordingAudio, setIsRecordingAudio] = useState(false);
   const [isSpeechTyping, setIsSpeechTyping] = useState(false);
+  const [showSpeechTypingMic, setShowSpeechTypingMic] = useState(() => {
+    try {
+      const raw = localStorage.getItem(CHAT_SPEECH_TYPING_UI_KEY);
+      if (raw == null) return true;
+      return raw === "1" || raw === "true";
+    } catch {
+      return true;
+    }
+  });
   const [speechLang, setSpeechLang] = useState("en-IN");
   const [speechLangOptions, setSpeechLangOptions] = useState(() => buildSpeechLangOptions());
   const [showHeaderMenu, setShowHeaderMenu] = useState(false);
@@ -1480,20 +1495,24 @@ function useChatController() {
   const [pipEnabled, setPipEnabled] = useState(false);
   const [pipActive, setPipActive] = useState(false);
   const pipDismissedRef = useRef(false);
+  const [videoCallMinimized, setVideoCallMinimized] = useState(false);
   const groupPeersRef = useRef(new Map());
   const groupStreamsRef = useRef(new Map());
   const groupActiveRef = useRef(false);
   const rejoinAttemptedRef = useRef(false);
   const localVideoDragRef = useRef({ active: false, offsetX: 0, offsetY: 0 });
+  const miniVideoDragRef = useRef({ active: false, offsetX: 0, offsetY: 0 });
 
   const isScreenShareStream = useCallback((stream) => {
     if (!stream || typeof stream.getVideoTracks !== "function") return false;
-    const track = stream.getVideoTracks()[0];
-    if (!track) return false;
-    const label = String(track.label || "").toLowerCase();
-    const hint = String(track.contentHint || "").toLowerCase();
-    if (label.includes("screen") || label.includes("display") || label.includes("window") || label.includes("tab")) return true;
-    if (hint.includes("screen") || hint.includes("detail") || hint.includes("text")) return true;
+    const tracks = stream.getVideoTracks();
+    for (const track of tracks) {
+      if (!track) continue;
+      const label = String(track.label || "").toLowerCase();
+      const hint = String(track.contentHint || "").toLowerCase();
+      if (label.includes("screen") || label.includes("display") || label.includes("window") || label.includes("tab")) return true;
+      if (hint.includes("screen") || hint.includes("detail") || hint.includes("text")) return true;
+    }
     return false;
   }, []);
 
@@ -1604,6 +1623,7 @@ function useChatController() {
   const [showWallpaperEditor, setShowWallpaperEditor] = useState(false);
   const [wallpaperDraft, setWallpaperDraft] = useState(null);
   const [replyDraft, setReplyDraft] = useState(null);
+  const [typingByContact, setTypingByContact] = useState({});
 
   const stompRef = useRef(null);
   const peerRef = useRef(null);
@@ -1617,6 +1637,7 @@ function useChatController() {
   const livekitRoomRef = useRef(null);
   const livekitRoomIdRef = useRef("");
   const livekitConnectingRef = useRef(false);
+  const livekitScreenPreviewRef = useRef(null);
   const callTimeoutRef = useRef(null);
   const mediaConnectTimeoutRef = useRef(null);
   const callStateRef = useRef(callState);
@@ -1673,6 +1694,7 @@ function useChatController() {
   const readReceiptChannelRef = useRef(null);
   const messageChannelRef = useRef(null);
   const seenReadReceiptsRef = useRef(new Set());
+  const readProgressByContactRef = useRef({});
   const lastReadReceiptSentByContactRef = useRef({});
   const notifiedMessageKeysRef = useRef(new Map());
   const messagesByContactRef = useRef(messagesByContact);
@@ -1725,6 +1747,11 @@ function useChatController() {
   const signSequenceFramesRef = useRef([]);
   const signSequenceModelRef = useRef(null);
   const signSequenceModelLoadingRef = useRef(null);
+  const typingHideTimerByContactRef = useRef({});
+  const typingIdleTimerByContactRef = useRef({});
+  const typingLastSentAtByContactRef = useRef({});
+  const typingSentStateByContactRef = useRef({});
+  const typingContactRef = useRef("");
   const chatServerBaseRef = useRef(String(safeGetItem(CHAT_SERVER_BASE_KEY) || "").trim());
   const resolvingContactProfilesRef = useRef(new Set());
   const convoLoadingRef = useRef(false);
@@ -1822,6 +1849,14 @@ function useChatController() {
   useEffect(() => {
     safeSetItem(CHAT_CUSTOM_STICKERS_KEY, JSON.stringify(customStickers));
   }, [customStickers]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(CHAT_SPEECH_TYPING_UI_KEY, showSpeechTypingMic ? "1" : "0");
+    } catch {
+      // ignore
+    }
+  }, [showSpeechTypingMic]);
 
   useEffect(() => {
     try {
@@ -3723,23 +3758,15 @@ function useChatController() {
       userLike?.lastActiveAt ||
       userLike?.lastSeenAt ||
       userLike?.lastSeen ||
-      userLike?.locationUpdatedAt ||
       userLike?.presenceUpdatedAt ||
       userLike?.lastLoginAt ||
       userLike?.lastOnlineAt ||
-      userLike?.lastAt ||
-      userLike?.updatedAt ||
-      userLike?.timestamp ||
       u?.lastActiveAt ||
       u?.lastSeenAt ||
       u?.lastSeen ||
-      u?.locationUpdatedAt ||
       u?.presenceUpdatedAt ||
       u?.lastLoginAt ||
       u?.lastOnlineAt ||
-      u?.lastAt ||
-      u?.updatedAt ||
-      u?.timestamp ||
       "";
     let resolvedLastActiveAt = primaryLastActiveAt;
     if (lastMessageAt) {
@@ -3977,7 +4004,8 @@ function useChatController() {
     setGroupRemoteTiles(next);
   };
 
-  const sendSignal = async (targetUserId, payload) => {
+  const sendSignal = async (targetUserId, payload, options = {}) => {
+    const { allowRestFallback = true } = options || {};
     const client = stompRef.current;
     if (!targetUserId) return;
     const signalType = String(payload?.type || "").trim().toLowerCase();
@@ -3996,7 +4024,7 @@ function useChatController() {
     } catch {
       // ignore transient signaling failures
     }
-    if (!sentViaWs) {
+    if (!sentViaWs && allowRestFallback) {
       try {
         const encodedTargetId = encodeURIComponent(String(targetUserId));
         await requestChatMutation({
@@ -4047,6 +4075,81 @@ function useChatController() {
       window.setTimeout(() => setCallError(""), 2500);
     }
   };
+
+  const clearTypingHideTimer = useCallback((contactId) => {
+    const key = String(contactId || "").trim();
+    if (!key) return;
+    const timer = typingHideTimerByContactRef.current[key];
+    if (!timer) return;
+    clearTimeout(timer);
+    delete typingHideTimerByContactRef.current[key];
+  }, []);
+
+  const clearTypingIdleTimer = useCallback((contactId) => {
+    const key = String(contactId || "").trim();
+    if (!key) return;
+    const timer = typingIdleTimerByContactRef.current[key];
+    if (!timer) return;
+    clearTimeout(timer);
+    delete typingIdleTimerByContactRef.current[key];
+  }, []);
+
+  const setRemoteTypingState = useCallback((contactId, isTyping) => {
+    const key = String(contactId || "").trim();
+    if (!key) return;
+    clearTypingHideTimer(key);
+    if (!isTyping) {
+      setTypingByContact((prev) => {
+        if (!Object.prototype.hasOwnProperty.call(prev, key)) return prev;
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+      return;
+    }
+    setTypingByContact((prev) => (prev[key] ? prev : { ...prev, [key]: true }));
+    typingHideTimerByContactRef.current[key] = setTimeout(() => {
+      setTypingByContact((prev) => {
+        if (!Object.prototype.hasOwnProperty.call(prev, key)) return prev;
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+      delete typingHideTimerByContactRef.current[key];
+    }, CHAT_TYPING_VISIBLE_MS);
+  }, [clearTypingHideTimer]);
+
+  const emitTypingSignal = useCallback((contactId, isTyping, options = {}) => {
+    const key = String(contactId || "").trim();
+    if (!key || key === String(myUserId || "")) return;
+    const force = Boolean(options?.force);
+    const now = Date.now();
+    const lastAt = Number(typingLastSentAtByContactRef.current[key] || 0);
+    const lastState = typingSentStateByContactRef.current[key];
+    if (!force) {
+      if (lastState === Boolean(isTyping)) {
+        if (!isTyping) return;
+        if (now - lastAt < CHAT_TYPING_SIGNAL_THROTTLE_MS) return;
+      } else if (isTyping && now - lastAt < CHAT_TYPING_SIGNAL_THROTTLE_MS) {
+        return;
+      }
+    }
+    typingLastSentAtByContactRef.current[key] = now;
+    typingSentStateByContactRef.current[key] = Boolean(isTyping);
+    sendSignal(
+      key,
+      {
+        type: "typing",
+        typing: Boolean(isTyping),
+        fromUserId: Number(myUserId) || String(myUserId || ""),
+        fromId: Number(myUserId) || String(myUserId || ""),
+        fromEmail: myEmail || "",
+        timestamp: now,
+        at: new Date(now).toISOString()
+      },
+      { allowRestFallback: true }
+    );
+  }, [myUserId, myEmail, sendSignal]);
 
   const clearCallTimer = () => {
     if (callTimeoutRef.current) {
@@ -4155,10 +4258,11 @@ function useChatController() {
     const hasVideo = s.getVideoTracks().some((t) => t.readyState !== "ended");
     const hasAudio = s.getAudioTracks().some((t) => t.readyState !== "ended");
     const videoEl = remoteVideoRef.current;
+    const displayedStream = videoEl?.srcObject instanceof MediaStream ? videoEl.srcObject : null;
     const elHasVideo = Boolean(videoEl && videoEl.videoWidth > 0 && videoEl.videoHeight > 0);
     setHasRemoteVideo(hasVideo || elHasVideo);
     setHasRemoteAudio(hasAudio);
-    setRemoteIsScreenShare(isScreenShareStream(s));
+    setRemoteIsScreenShare(isScreenShareStream(displayedStream || s));
   }, [isScreenShareStream]);
 
   useEffect(() => {
@@ -4359,6 +4463,22 @@ function useChatController() {
           } catch {
             // ignore remove failures
           }
+          if (track.kind === "video") {
+            const el = remoteVideoRef.current;
+            const stream = remoteStreamRef.current;
+            if (el) {
+              try {
+                if (stream?.getVideoTracks?.()?.length) {
+                  el.srcObject = stream;
+                  el.play?.().catch(() => {});
+                } else {
+                  el.srcObject = null;
+                }
+              } catch {
+                // ignore reattach failures
+              }
+            }
+          }
           updateRemoteMediaFlags(remoteStreamRef.current);
         });
 
@@ -4472,6 +4592,7 @@ function useChatController() {
     stopStream(remoteStreamRef.current);
     localStreamRef.current = null;
     remoteStreamRef.current = null;
+    livekitScreenPreviewRef.current = null;
     if (localVideoRef.current) localVideoRef.current.srcObject = null;
     if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
     if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
@@ -5063,7 +5184,14 @@ function useChatController() {
   ]);
 
   const ensureSignalContact = (signal) => {
-    const fromId = String(signal?.fromUserId || "");
+    const fromId = String(
+      signal?.fromUserId ??
+      signal?.senderId ??
+      signal?.fromId ??
+      signal?.from_id ??
+      signal?.sender_id ??
+      ""
+    );
     if (!fromId || fromId === myUserId) return;
     const name = normalizeDisplayName(signal?.fromName || signal?.fromEmail || `User ${fromId}`);
     setContacts((prev) =>
@@ -5079,16 +5207,135 @@ function useChatController() {
     );
   };
 
+  const mergeReadProgress = useCallback((contactId, readUptoMs, readMessageIds) => {
+    const key = String(contactId || "").trim();
+    if (!key) return;
+    const current = readProgressByContactRef.current?.[key] || { readUptoMs: 0, ids: {} };
+    const nextReadUpto = Number.isFinite(readUptoMs) && readUptoMs > 0
+      ? Math.max(Number(current.readUptoMs || 0), readUptoMs)
+      : Number(current.readUptoMs || 0);
+    const nextIds = { ...(current.ids || {}) };
+    (Array.isArray(readMessageIds) ? readMessageIds : []).forEach((value) => {
+      const id = String(value || "").trim();
+      if (id) nextIds[id] = 1;
+    });
+    const idKeys = Object.keys(nextIds);
+    if (idKeys.length > 5000) {
+      const trimmed = {};
+      idKeys.slice(-3000).forEach((id) => { trimmed[id] = 1; });
+      readProgressByContactRef.current[key] = { readUptoMs: nextReadUpto, ids: trimmed };
+      return;
+    }
+    readProgressByContactRef.current[key] = { readUptoMs: nextReadUpto, ids: nextIds };
+  }, []);
+
+  const applyReadReceiptPacket = useCallback((packet) => {
+    if (!packet || typeof packet !== "object") return;
+    const readerId = String(packet.readerId || packet.fromUserId || packet.senderId || "");
+    const peerId = String(packet.peerId || packet.toUserId || "");
+    if (!readerId) return;
+    if (readerId === String(myUserId)) return;
+
+    const hasThreadForReader = Array.isArray(messagesByContactRef.current?.[readerId]);
+    if (peerId && peerId !== String(myUserId) && !hasThreadForReader) return;
+
+    const readUptoMs = Number(packet.readUptoMs || 0);
+    const rawMessageIds = Array.isArray(packet.readMessageIds)
+      ? packet.readMessageIds
+      : Array.isArray(packet.messageIds)
+        ? packet.messageIds
+        : [];
+    const readMessageIds = rawMessageIds.map((value) => String(value || "").trim()).filter(Boolean);
+    const readIdSet = new Set(readMessageIds);
+    const canMatchByTime = Number.isFinite(readUptoMs) && readUptoMs > 0;
+    const canMatchById = readIdSet.size > 0;
+    if (!canMatchByTime && !canMatchById) return;
+    mergeReadProgress(readerId, readUptoMs, readMessageIds);
+
+    const receiptId = String(
+      packet.receiptId ||
+      `${readerId}|${peerId}|${readUptoMs}|${String(packet.readAt || packet.at || "")}|${readMessageIds.slice(-8).join(",")}`
+    );
+    if (seenReadReceiptsRef.current.has(receiptId)) return;
+    seenReadReceiptsRef.current.add(receiptId);
+    if (seenReadReceiptsRef.current.size > 1200) {
+      seenReadReceiptsRef.current.clear();
+    }
+
+    const readAt = String(packet.readAt || packet.at || new Date().toISOString());
+    setMessagesByContact((prev) => {
+      const key = readerId;
+      const list = Array.isArray(prev[key]) ? prev[key] : [];
+      if (!list.length) return prev;
+      let changed = false;
+      const nextList = list.map((msg) => {
+        if (!msg?.mine) return msg;
+        const msgId = String(msg?.id || "").trim();
+        const matchedById = Boolean(msgId && readIdSet.has(msgId));
+        const msgMs = new Date(normalizeTimestamp(msg?.createdAt || 0)).getTime();
+        const matchedByTime =
+          canMatchByTime &&
+          (Number.isFinite(msgMs) ? (msgMs > 0 ? msgMs <= readUptoMs : true) : true);
+        if (!matchedById && !matchedByTime) return msg;
+        if (msg.read === true || msg.seen === true || msg.readAt || msg.seenAt || String(msg.status || "").toLowerCase() === "read") {
+          return msg;
+        }
+        changed = true;
+        return {
+          ...msg,
+          read: true,
+          seen: true,
+          readAt,
+          seenAt: readAt,
+          status: "read",
+          deliveryStatus: "read"
+        };
+      });
+      if (changed) return { ...prev, [key]: nextList };
+
+      // Fallback: if we received a valid read receipt but timestamp/id matching fails
+      // (e.g. mixed timestamp formats), mark mine messages in this thread as read.
+      let fallbackChanged = false;
+      const fallbackList = list.map((msg) => {
+        if (!msg?.mine) return msg;
+        if (msg.read === true || msg.seen === true || msg.readAt || msg.seenAt || String(msg.status || "").toLowerCase() === "read") {
+          return msg;
+        }
+        fallbackChanged = true;
+        return {
+          ...msg,
+          read: true,
+          seen: true,
+          readAt,
+          seenAt: readAt,
+          status: "read",
+          deliveryStatus: "read"
+        };
+      });
+      return fallbackChanged ? { ...prev, [key]: fallbackList } : prev;
+    });
+    setNowTick(Date.now());
+  }, [myUserId, setMessagesByContact, seenReadReceiptsRef, mergeReadProgress, setNowTick]);
+
   const onSignal = async (signal) => {
-    const type = String(signal?.type || "").toLowerCase();
-    const fromId = String(signal?.fromUserId || "");
+    const signalKind = String(signal?.kind || "").toLowerCase();
+    const type = String(signal?.type || (signalKind === "chat-read" ? "chat-read" : "")).toLowerCase();
+    const fromIdRaw = String(
+      signal?.fromUserId ??
+      signal?.senderId ??
+      signal?.fromId ??
+      signal?.from_id ??
+      signal?.sender_id ??
+      ""
+    );
+    const fromId = fromIdRaw || (type === "chat-read" ? String(signal?.readerId || "") : "");
     const rawTs = signal?.timestamp ?? signal?.at ?? signal?.createdAt ?? 0;
     const parsedTs = Number(rawTs);
     const signalMs = Number.isFinite(parsedTs)
       ? (parsedTs > 1000000000000 ? parsedTs : parsedTs * 1000)
       : new Date(String(rawTs || "")).getTime();
     const signalTime = Number.isFinite(signalMs) && signalMs > 0 ? signalMs : 0;
-    const signature = `${type}|${fromId}|${signal?.timestamp || ""}|${signal?.sdp || ""}|${signal?.candidate || ""}`;
+    const signature = `${type}|${fromId}|${signal?.timestamp || ""}|${signal?.sdp || ""}|${signal?.candidate || ""}|${signal?.readUptoMs || ""}|${signal?.receiptId || ""}`;
     if (seenSignalsRef.current.has(signature)) return;
     seenSignalsRef.current.add(signature);
     if (seenSignalsRef.current.size > 1000) {
@@ -5096,7 +5343,16 @@ function useChatController() {
     }
     if (!type || !fromId || fromId === myUserId) return;
 
+    if (type === "chat-read") {
+      applyReadReceiptPacket(signal);
+      return;
+    }
+
     ensureSignalContact(signal);
+    if (type === "typing") {
+      setRemoteTypingState(fromId, signal?.typing !== false);
+      return;
+    }
     const current = callStateRef.current;
     const incomingCallAt = Number(incomingCall?.at || 0);
     const terminalTypes = new Set(["hangup", "reject", "busy", "answer", "accepted", "ended"]);
@@ -5463,6 +5719,9 @@ function useChatController() {
           ? receiverId
           : "";
     if (!contactIdForThread) return;
+    if (senderId && senderId !== String(myUserId || "")) {
+      setRemoteTypingState(contactIdForThread, false);
+    }
 
     const text = String(payload?.text ?? payload?.message ?? payload?.content ?? payload?.body ?? "");
     const deleteTargetId = parseDeleteTargetId(text);
@@ -5530,8 +5789,16 @@ function useChatController() {
                 : nextMessage.text;
 
     setMessagesByContact((prev) => {
-      const existing = Array.isArray(prev[contactIdForThread]) ? prev[contactIdForThread] : [];
-      const next = { ...prev, [contactIdForThread]: [...existing, nextMessage] };
+      const threadKey = String(contactIdForThread);
+      const existing = Array.isArray(prev[threadKey]) ? prev[threadKey] : [];
+      const nextId = String(nextMessage?.id || "");
+      const alreadyInState = existing.some((message) => {
+        if (nextId && String(message?.id || "") === nextId) return true;
+        if (nextSig && messageFingerprint(message) === nextSig) return true;
+        return false;
+      });
+      if (alreadyInState) return prev;
+      const next = { ...prev, [threadKey]: [...existing, nextMessage] };
       messagesByContactRef.current = next;
       return next;
     });
@@ -6088,6 +6355,23 @@ function useChatController() {
   };
 
   const stopScreenShare = async () => {
+    if (callStateRef.current.provider === "livekit") {
+      screenStreamRef.current = null;
+      livekitScreenPreviewRef.current = null;
+      try {
+        await livekitRoomRef.current?.localParticipant?.setScreenShareEnabled(false);
+      } catch {
+        // ignore livekit screen share stop failures
+      }
+      const localStream = localStreamRef.current;
+      if (localVideoRef.current && localStream) {
+        localVideoRef.current.srcObject = localStream;
+        localVideoRef.current.play?.().catch(() => {});
+      }
+      setIsScreenSharing(false);
+      return;
+    }
+
     const screenStream = screenStreamRef.current;
     screenStreamRef.current = null;
     if (screenStream) {
@@ -6160,7 +6444,36 @@ function useChatController() {
     }
     if (callState.mode !== "video" || callState.phase === "idle") return;
     if (callState.provider === "livekit") {
-      setError("Screen share isn't supported in LiveKit calls yet.");
+      const room = livekitRoomRef.current;
+      if (!room) {
+        setError("Call is not ready for screen share.");
+        return;
+      }
+      try {
+        setError("");
+        await room.localParticipant.setScreenShareEnabled(true);
+        const screenPub = Array.from(room.localParticipant.trackPublications.values()).find(
+          (pub) => String(pub?.source || "") === "screen_share"
+        );
+        const screenTrack = screenPub?.track;
+        const screenMedia = screenTrack?.mediaStreamTrack;
+        if (screenMedia) {
+          const preview = new MediaStream();
+          preview.addTrack(screenMedia);
+          livekitScreenPreviewRef.current = preview;
+          if (localVideoRef.current) {
+            localVideoRef.current.srcObject = preview;
+            localVideoRef.current.play?.().catch(() => {});
+          }
+          screenMedia.onended = () => {
+            stopScreenShare();
+          };
+        }
+        setIsScreenSharing(true);
+      } catch {
+        setError("Screen share failed. Please try again.");
+        setIsScreenSharing(false);
+      }
       return;
     }
     if (!navigator.mediaDevices?.getDisplayMedia) {
@@ -6718,8 +7031,13 @@ function useChatController() {
       }
     }
     if (isChatApiDisabled()) {
-      setChatFallbackMode(true);
-      return;
+      const activeKey = String(activeContactIdRef.current || "");
+      const isActiveThread = String(otherId || "") === activeKey;
+      const canTryLiveFetch = Boolean(isConversationRouteRef.current && isActiveThread);
+      if (!canTryLiveFetch) {
+        setChatFallbackMode(true);
+        return;
+      }
     }
     try {
       const res = await requestChatArray({
@@ -6763,8 +7081,106 @@ function useChatController() {
           const old = oldById.get(String(m?.id || ""));
           if (!old) return m;
           const hasValidTime = toEpochMs(m?.createdAt || 0) > 0;
-          if (hasValidTime || !old?.createdAt) return m;
-          return { ...m, createdAt: old.createdAt };
+          const base = hasValidTime || !old?.createdAt ? m : { ...m, createdAt: old.createdAt };
+          if (!old?.mine) return base;
+
+          const baseStatus = String(base?.status || base?.deliveryStatus || "").toLowerCase();
+          const baseRead =
+            Boolean(
+              base?.readAt ||
+              base?.seenAt ||
+              base?.read_at ||
+              base?.seen_at ||
+              base?.readReceiptAt ||
+              base?.readTimestamp
+            ) ||
+            base?.read === true ||
+            base?.seen === true ||
+            base?.isRead === true ||
+            base?.isSeen === true ||
+            baseStatus === "read" ||
+            baseStatus === "seen" ||
+            baseStatus === "viewed";
+
+          const oldStatus = String(old?.status || old?.deliveryStatus || "").toLowerCase();
+          const oldRead =
+            Boolean(
+              old?.readAt ||
+              old?.seenAt ||
+              old?.read_at ||
+              old?.seen_at ||
+              old?.readReceiptAt ||
+              old?.readTimestamp
+            ) ||
+            old?.read === true ||
+            old?.seen === true ||
+            old?.isRead === true ||
+            old?.isSeen === true ||
+            oldStatus === "read" ||
+            oldStatus === "seen" ||
+            oldStatus === "viewed";
+
+          if (!baseRead && oldRead) {
+            const carryReadAt =
+              base?.readAt ||
+              base?.seenAt ||
+              old?.readAt ||
+              old?.seenAt ||
+              old?.read_at ||
+              old?.seen_at ||
+              old?.readReceiptAt ||
+              old?.readTimestamp ||
+              new Date().toISOString();
+            return {
+              ...base,
+              read: true,
+              seen: true,
+              readAt: carryReadAt,
+              seenAt: carryReadAt,
+              status: "read",
+              deliveryStatus: "read"
+            };
+          }
+
+          const baseDelivered =
+            Boolean(
+              base?.deliveredAt ||
+              base?.receivedAt ||
+              base?.delivered_at ||
+              base?.received_at ||
+              base?.receivedTimestamp
+            ) ||
+            base?.delivered === true ||
+            base?.received === true ||
+            baseStatus === "delivered" ||
+            baseStatus === "received";
+
+          const oldDelivered =
+            Boolean(
+              old?.deliveredAt ||
+              old?.receivedAt ||
+              old?.delivered_at ||
+              old?.received_at ||
+              old?.receivedTimestamp
+            ) ||
+            old?.delivered === true ||
+            old?.received === true ||
+            oldStatus === "delivered" ||
+            oldStatus === "received";
+
+          if (!baseDelivered && oldDelivered) {
+            return {
+              ...base,
+              delivered: true,
+              received: true,
+              deliveredAt: base?.deliveredAt || old?.deliveredAt || old?.receivedAt || old?.receivedTimestamp,
+              receivedAt: base?.receivedAt || old?.receivedAt || old?.deliveredAt || old?.delivered_at,
+              status: base?.status || old?.status || "delivered",
+              deliveryStatus: base?.deliveryStatus || old?.deliveryStatus || "delivered"
+            };
+          }
+
+          return base;
         });
         const pendingLocalMedia = oldList.filter((m) => String(m?.id || "").startsWith("local_media_"));
         const serverSignatureSet = new Set(stableList.map((m) => messageFingerprint(m)).filter(Boolean));
@@ -6971,58 +7387,12 @@ function useChatController() {
   useEffect(() => {
     if (!myUserId) return undefined;
 
-    const applyReadReceipt = (packet) => {
-      if (!packet || typeof packet !== "object") return;
-      const readerId = String(packet.readerId || "");
-      const peerId = String(packet.peerId || "");
-      if (!readerId || !peerId) return;
-      if (peerId !== String(myUserId)) return;
-      if (readerId === String(myUserId)) return;
-
-      const readUptoMs = Number(packet.readUptoMs || 0);
-      if (!Number.isFinite(readUptoMs) || readUptoMs <= 0) return;
-
-      const receiptId = String(packet.receiptId || `${readerId}|${peerId}|${readUptoMs}`);
-      if (seenReadReceiptsRef.current.has(receiptId)) return;
-      seenReadReceiptsRef.current.add(receiptId);
-      if (seenReadReceiptsRef.current.size > 1200) {
-        seenReadReceiptsRef.current.clear();
-      }
-
-      const readAt = String(packet.at || new Date().toISOString());
-      setMessagesByContact((prev) => {
-        const key = readerId;
-        const list = Array.isArray(prev[key]) ? prev[key] : [];
-        if (!list.length) return prev;
-        let changed = false;
-        const nextList = list.map((msg) => {
-          if (!msg?.mine) return msg;
-          const msgMs = new Date(normalizeTimestamp(msg?.createdAt || 0)).getTime();
-          if (!Number.isFinite(msgMs) || msgMs > readUptoMs) return msg;
-          if (msg.read === true || msg.seen === true || msg.readAt || msg.seenAt || String(msg.status || "").toLowerCase() === "read") {
-            return msg;
-          }
-          changed = true;
-          return {
-            ...msg,
-            read: true,
-            seen: true,
-            readAt,
-            seenAt: readAt,
-            status: "read",
-            deliveryStatus: "read"
-          };
-        });
-        return changed ? { ...prev, [key]: nextList } : prev;
-      });
-    };
-
     const onStorage = (event) => {
       if (event?.key !== CHAT_READ_RECEIPT_KEY || !event.newValue) return;
       try {
         const packet = JSON.parse(event.newValue);
         if (packet?.fromTab && packet.fromTab === tabIdRef.current) return;
-        applyReadReceipt(packet);
+        applyReadReceiptPacket(packet);
       } catch {
         // ignore malformed receipt packet
       }
@@ -7031,7 +7401,7 @@ function useChatController() {
     const onChannelMessage = (event) => {
       const packet = event?.data;
       if (packet?.fromTab && packet.fromTab === tabIdRef.current) return;
-      applyReadReceipt(packet);
+      applyReadReceiptPacket(packet);
     };
 
     window.addEventListener("storage", onStorage);
@@ -7052,7 +7422,7 @@ function useChatController() {
         readReceiptChannelRef.current = null;
       }
     };
-  }, [myUserId]);
+  }, [myUserId, applyReadReceiptPacket]);
 
   useEffect(() => {
     if (!myUserId || rejoinAttemptedRef.current || callStateRef.current.phase !== "idle") return;
@@ -7176,6 +7546,42 @@ function useChatController() {
       }
     };
   }, [myUserId]);
+
+  useEffect(() => {
+    const current = String(activeContactId || "").trim();
+    const prev = String(typingContactRef.current || "").trim();
+    if (prev && prev !== current) {
+      clearTypingIdleTimer(prev);
+      emitTypingSignal(prev, false, { force: true });
+    }
+    typingContactRef.current = current;
+  }, [activeContactId, clearTypingIdleTimer, emitTypingSignal]);
+
+  useEffect(() => {
+    const key = String(activeContactId || "").trim();
+    if (!key || key === String(myUserId || "")) return;
+    const hasText = String(inputText || "").trim().length > 0;
+    if (!hasText) {
+      clearTypingIdleTimer(key);
+      emitTypingSignal(key, false);
+      return;
+    }
+    emitTypingSignal(key, true);
+    clearTypingIdleTimer(key);
+    typingIdleTimerByContactRef.current[key] = setTimeout(() => {
+      emitTypingSignal(key, false, { force: true });
+      delete typingIdleTimerByContactRef.current[key];
+    }, CHAT_TYPING_IDLE_MS);
+  }, [inputText, activeContactId, myUserId, clearTypingIdleTimer, emitTypingSignal]);
+
+  useEffect(() => () => {
+    const hideTimers = typingHideTimerByContactRef.current || {};
+    Object.values(hideTimers).forEach((timer) => clearTimeout(timer));
+    typingHideTimerByContactRef.current = {};
+    const idleTimers = typingIdleTimerByContactRef.current || {};
+    Object.values(idleTimers).forEach((timer) => clearTimeout(timer));
+    typingIdleTimerByContactRef.current = {};
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -7449,6 +7855,32 @@ function useChatController() {
               }
             });
           }
+          client.subscribe("/user/queue/chat/read", (frame) => {
+            try {
+              const payload = JSON.parse(frame.body || "{}");
+              applyReadReceiptPacket(payload);
+            } catch {
+              // ignore malformed payload
+            }
+          });
+          client.subscribe(`/topic/chat/read/${myUserId}`, (frame) => {
+            try {
+              const payload = JSON.parse(frame.body || "{}");
+              applyReadReceiptPacket(payload);
+            } catch {
+              // ignore malformed payload
+            }
+          });
+          if (myEmail) {
+            client.subscribe(`/topic/chat/read/email/${encodeURIComponent(myEmail)}`, (frame) => {
+              try {
+                const payload = JSON.parse(frame.body || "{}");
+                applyReadReceiptPacket(payload);
+              } catch {
+                // ignore malformed payload
+              }
+            });
+          }
 
           client.subscribe("/user/queue/calls", (frame) => {
             try {
@@ -7504,7 +7936,7 @@ function useChatController() {
       stompRef.current = null;
       finishCall(false);
     };
-  }, [myUserId, myEmail]);
+  }, [myUserId, myEmail, applyReadReceiptPacket]);
 
   useEffect(() => {
     if (!myUserId) return undefined;
@@ -8324,9 +8756,7 @@ function useChatController() {
     const profileTs = clampFutureTimestamp(toEpochMs(contact?.lastActiveAt || 0));
     const contactId = String(contact?.id || "").trim();
     const peerMsgTs = getPeerMessageActivityTs(contactId);
-    const peerCallTs = getPeerCallActivityTs(contactId);
-    const fallbackTs = Math.max(peerMsgTs, peerCallTs);
-    const latest = Math.max(Number.isFinite(profileTs) ? profileTs : 0, Number.isFinite(fallbackTs) ? fallbackTs : 0);
+    const latest = Math.max(Number.isFinite(profileTs) ? profileTs : 0, Number.isFinite(peerMsgTs) ? peerMsgTs : 0);
     return Number.isFinite(latest) ? latest : 0;
   };
 
@@ -9204,7 +9634,8 @@ function useChatController() {
       const t = toEpochMs(m?.createdAt || 0);
       return Number.isFinite(t) && t > max ? t : max;
     }, 0);
-  const headerPresenceText = getContactPresence(activeContact).text;
+  const isActiveContactTyping = Boolean(typingByContact[activeContactKey]);
+  const headerPresenceText = isActiveContactTyping ? "typing..." : getContactPresence(activeContact).text;
 
   const sendTextPayload = async (text, options = {}) => {
     const cleanText = String(text || "").trim();
@@ -9348,6 +9779,10 @@ function useChatController() {
   const sendMessage = async () => {
     const text = inputText.trim();
     if (!text) return;
+    if (activeContactId) {
+      clearTypingIdleTimer(activeContactId);
+      emitTypingSignal(activeContactId, false, { force: true });
+    }
     const withReply = replyDraft?.id
       ? `${MESSAGE_REPLY_TOKEN}${JSON.stringify({
         id: replyDraft.id,
@@ -10232,6 +10667,12 @@ function useChatController() {
     }
   };
 
+  useEffect(() => {
+    if (!showSpeechTypingMic && isSpeechTyping) {
+      stopSpeechTyping();
+    }
+  }, [showSpeechTypingMic, isSpeechTyping]);
+
   const releaseRecordingStream = () => {
     const stream = recordingStreamRef.current;
     if (stream) {
@@ -10452,26 +10893,78 @@ function useChatController() {
   }, [callActive, isScreenSharing]);
 
   useEffect(() => {
-    if (!pipEnabled) return;
-    if (pipDismissedRef.current) return;
-    const shouldShow = callActive && (callState.mode === "video" || groupCallActive);
-    if (!shouldShow) {
-      pipDismissedRef.current = false;
+    if (!callActive) {
+      setVideoCallMinimized(false);
       return;
     }
-    const el = remoteVideoRef.current;
-    if (!el || typeof el.requestPictureInPicture !== "function") return;
-    if (document.pictureInPictureElement) return;
-    el.requestPictureInPicture?.().catch(() => {});
-  }, [pipEnabled, callActive, callState.mode, groupCallActive, hasRemoteVideo]);
-  const showVideoCallScreen = callActive && (callState.mode === "video" || groupCallActive);
+    if (callState.mode !== "video" && !groupCallActive) {
+      setVideoCallMinimized(false);
+    }
+  }, [callActive, callState.mode, groupCallActive]);
+
   useEffect(() => {
-    const shouldHideNavbar = Boolean(showVideoCallScreen || callActive || incomingCall);
+    if (!callActive) return;
+    if (callState.mode !== "video" && !groupCallActive) return;
+
+    const remoteStream = remoteStreamRef.current;
+    const localStream = localStreamRef.current;
+
+    const ensureLivekitScreenPreview = () => {
+      if (!isScreenSharing || callState.provider !== "livekit") return null;
+      const existing = livekitScreenPreviewRef.current;
+      if (existing instanceof MediaStream && existing.getTracks?.().length) return existing;
+      try {
+        const room = livekitRoomRef.current;
+        const pubs = Array.from(room?.localParticipant?.trackPublications?.values?.() || []);
+        const screenPub = pubs.find((pub) => String(pub?.source || "") === "screen_share");
+        const screenTrack = screenPub?.track;
+        const screenMedia = screenTrack?.mediaStreamTrack;
+        if (!screenMedia) return null;
+        const preview = new MediaStream();
+        preview.addTrack(screenMedia);
+        livekitScreenPreviewRef.current = preview;
+        return preview;
+      } catch {
+        return null;
+      }
+    };
+
+    const desiredLocalStream = ensureLivekitScreenPreview() || localStream;
+
+    const attachStream = (element, stream) => {
+      if (!element || !stream) return;
+      try {
+        if (element.srcObject !== stream) element.srcObject = stream;
+        element.play?.().catch(() => {});
+      } catch {
+        // ignore attach failures
+      }
+    };
+
+    attachStream(localVideoRef.current, desiredLocalStream);
+    attachStream(remoteVideoRef.current, remoteStream);
+    attachStream(remoteAudioRef.current, remoteStream);
+
+    if (remoteStream) updateRemoteMediaFlags(remoteStream);
+  }, [
+    callActive,
+    callState.mode,
+    callState.provider,
+    groupCallActive,
+    isScreenSharing,
+    videoCallMinimized,
+    updateRemoteMediaFlags
+  ]);
+
+  const showVideoCallScreen =
+    callActive && (callState.mode === "video" || groupCallActive) && !videoCallMinimized;
+  useEffect(() => {
+    const shouldHideNavbar = Boolean(showVideoCallScreen);
     document.body.classList.toggle("ss-call-active", shouldHideNavbar);
     return () => {
       document.body.classList.remove("ss-call-active");
     };
-  }, [showVideoCallScreen, callActive, incomingCall]);
+  }, [showVideoCallScreen]);
   const activeVideoFilter = useMemo(
     () => VIDEO_FILTER_PRESETS.find((preset) => preset.id === videoFilterId) || VIDEO_FILTER_PRESETS[0],
     [videoFilterId]
@@ -10482,6 +10975,12 @@ function useChatController() {
       localVideoDragRef.current.active = false;
     }
   }, [showVideoCallScreen]);
+
+  useEffect(() => {
+    if (!videoCallMinimized) {
+      miniVideoDragRef.current.active = false;
+    }
+  }, [videoCallMinimized]);
 
   const startLocalVideoDrag = useCallback(
     (event) => {
@@ -10537,6 +11036,67 @@ function useChatController() {
       window.removeEventListener("pointercancel", handleEnd);
     };
   }, []);
+
+  const getMiniVideoSize = useCallback(() => {
+    const width = window.innerWidth || 0;
+    if (width <= 520) return { width: 124, height: 172 };
+    if (width <= 768) return { width: 136, height: 188 };
+    return { width: 148, height: 204 };
+  }, []);
+
+  const startMiniVideoDrag = useCallback(
+    (event) => {
+      if (!videoCallMinimized) return;
+      const point = event?.touches?.[0] || event?.changedTouches?.[0] || event;
+      if (!point) return;
+      event.preventDefault?.();
+      event.stopPropagation?.();
+
+      const size = getMiniVideoSize();
+      const fallbackX = Math.max(10, window.innerWidth - size.width - 16);
+      const fallbackY = Math.max(10, window.innerHeight - size.height - 96);
+      const origin = miniVideoPos || { x: fallbackX, y: fallbackY };
+
+      miniVideoDragRef.current.active = true;
+      miniVideoDragRef.current.offsetX = point.clientX - origin.x;
+      miniVideoDragRef.current.offsetY = point.clientY - origin.y;
+
+      if (!miniVideoPos) {
+        setMiniVideoPos(origin);
+      }
+    },
+    [videoCallMinimized, miniVideoPos, getMiniVideoSize]
+  );
+
+  useEffect(() => {
+    const handleMove = (event) => {
+      if (!miniVideoDragRef.current.active) return;
+      const point = event?.touches?.[0] || event?.changedTouches?.[0] || event;
+      if (!point) return;
+      event.preventDefault?.();
+
+      const size = getMiniVideoSize();
+      const padding = 8;
+      const maxX = Math.max(padding, window.innerWidth - size.width - padding);
+      const maxY = Math.max(padding, window.innerHeight - size.height - padding);
+      const nextX = Math.min(maxX, Math.max(padding, point.clientX - miniVideoDragRef.current.offsetX));
+      const nextY = Math.min(maxY, Math.max(padding, point.clientY - miniVideoDragRef.current.offsetY));
+      setMiniVideoPos({ x: nextX, y: nextY });
+    };
+
+    const handleEnd = () => {
+      miniVideoDragRef.current.active = false;
+    };
+
+    window.addEventListener("pointermove", handleMove, { passive: false });
+    window.addEventListener("pointerup", handleEnd);
+    window.addEventListener("pointercancel", handleEnd);
+    return () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleEnd);
+      window.removeEventListener("pointercancel", handleEnd);
+    };
+  }, [getMiniVideoSize]);
 
   const persistPopupPos = useCallback((storageKey, pos) => {
     try {
@@ -10933,20 +11493,19 @@ function useChatController() {
       rawStatus === "viewed";
     if (isRead) return "read";
 
-    const messageTs = new Date(normalizeTimestamp(message.createdAt || 0)).getTime();
-    const hasPeerReplyAfter =
-      Number.isFinite(messageTs) &&
-      messageTs > 0 &&
-      Number.isFinite(peerLatestMessageTs) &&
-      peerLatestMessageTs >= messageTs;
-    if (hasPeerReplyAfter) return "read";
+    const contactKey = String(activeContactId || "").trim();
+    const readProgress = contactKey ? readProgressByContactRef.current?.[contactKey] : null;
+    if (readProgress) {
+      const msgId = String(message?.id || "").trim();
+      if (msgId && readProgress?.ids?.[msgId]) return "read";
+      const msgMs = toEpochMs(message?.createdAt || 0);
+      const readUptoMs = Number(readProgress?.readUptoMs || 0);
+      if (readUptoMs > 0) {
+        if (msgMs > 0 && msgMs <= readUptoMs) return "read";
+        if (!msgMs && !msgId) return "read";
+      }
+    }
 
-    const idText = String(message.id || "");
-    const isLocalPendingId =
-      idText.startsWith("local_") ||
-      idText.startsWith("tmp_") ||
-      idText.startsWith("temp_");
-    const oldEnough = Number.isFinite(messageTs) ? Date.now() - messageTs > 1500 : true;
     const isDelivered =
       Boolean(
         message.deliveredAt ||
@@ -10958,8 +11517,7 @@ function useChatController() {
       message.delivered === true ||
       message.received === true ||
       rawStatus === "delivered" ||
-      rawStatus === "received" ||
-      (idText && !isLocalPendingId && oldEnough);
+      rawStatus === "received";
     if (isDelivered) return "delivered";
 
     return "sent";
@@ -11292,10 +11850,10 @@ function useChatController() {
     if (!isConversationRoute) return;
     if (!myUserId || !activeContactId) return;
     const visibleIds = getVisibleThreadMessageIds();
-    if (!visibleIds.size) return;
     const incoming = (Array.isArray(activeMessages) ? activeMessages : []).filter((m) => {
       if (!m || m.mine) return false;
       const msgId = String(m.id || "").trim();
+      if (!visibleIds.size) return true;
       return msgId && visibleIds.has(msgId);
     });
     if (!incoming.length) return;
@@ -11304,21 +11862,37 @@ function useChatController() {
       const t = new Date(normalizeTimestamp(msg?.createdAt || 0)).getTime();
       return Number.isFinite(t) && t > max ? t : max;
     }, 0);
-    if (!readUptoMs) return;
+    const readMessageIds = incoming
+      .map((msg) => String(msg?.id || "").trim())
+      .filter(Boolean);
+    if (!readUptoMs && !readMessageIds.length) return;
 
     const key = String(activeContactId);
-    markThreadRead(key, readUptoMs);
-    const lastSent = Number(lastReadReceiptSentByContactRef.current[key] || 0);
-    if (lastSent >= readUptoMs) return;
-    lastReadReceiptSentByContactRef.current[key] = readUptoMs;
+    markThreadRead(key, readUptoMs || Date.now());
+    const receiptProgress = `${readUptoMs || 0}|${readMessageIds.slice(-4).join(",")}`;
+    const lastSent = lastReadReceiptSentByContactRef.current[key];
+    if (
+      lastSent &&
+      typeof lastSent === "object" &&
+      String(lastSent.sig || "") === receiptProgress &&
+      Number.isFinite(Number(lastSent.at || 0)) &&
+      Date.now() - Number(lastSent.at || 0) < 1500
+    ) {
+      return;
+    }
+    lastReadReceiptSentByContactRef.current[key] = { sig: receiptProgress, at: Date.now() };
+
+    const packetReadUptoMs = readUptoMs || Date.now();
 
     const packet = {
       kind: "chat-read",
+      type: "chat-read",
       receiptId: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       fromTab: tabIdRef.current,
       readerId: String(myUserId),
       peerId: key,
-      readUptoMs,
+      readUptoMs: packetReadUptoMs,
+      readMessageIds,
       at: new Date().toISOString()
     };
 
@@ -11332,7 +11906,20 @@ function useChatController() {
     } catch {
       // ignore broadcast failures
     }
-  }, [isConversationRoute, myUserId, activeContactId, activeMessages, markThreadRead]);
+    try {
+      sendSignal(key, packet);
+    } catch {
+      // ignore signaling failures; local receipt channels still apply
+    }
+    // Persist and broadcast canonical read state from backend.
+    void requestChatMutation({
+      method: "POST",
+      endpoints: [`/api/chat/${encodeURIComponent(key)}/mark-read`, `/chat/${encodeURIComponent(key)}/mark-read`],
+      data: {}
+    }).catch(() => {
+      // ignore mark-read fallback failures
+    });
+  }, [isConversationRoute, myUserId, activeContactId, activeMessages, markThreadRead, sendSignal, requestChatMutation]);
 
   useEffect(() => {
     if (!isConversationRoute) return;
@@ -11829,6 +12416,8 @@ function useChatController() {
     setRemoteIsScreenShare,
     localVideoPos,
     setLocalVideoPos,
+    miniVideoPos,
+    setMiniVideoPos,
     incomingCallPopupPos,
     setIncomingCallPopupPos,
     activeCallPopupPos,
@@ -11849,6 +12438,8 @@ function useChatController() {
     setIsRecordingAudio,
     isSpeechTyping,
     setIsSpeechTyping,
+    showSpeechTypingMic,
+    setShowSpeechTypingMic,
     speechLang,
     setSpeechLang,
     speechLangOptions,
@@ -11959,11 +12550,14 @@ function useChatController() {
     pipActive,
     setPipActive,
     pipDismissedRef,
+    videoCallMinimized,
+    setVideoCallMinimized,
     groupPeersRef,
     groupStreamsRef,
     groupActiveRef,
     rejoinAttemptedRef,
     localVideoDragRef,
+    miniVideoDragRef,
     isScreenShareStream,
     callPhaseNote,
     setCallPhaseNote,
@@ -12387,6 +12981,7 @@ function useChatController() {
     showVideoCallScreen,
     activeVideoFilter,
     startLocalVideoDrag,
+    startMiniVideoDrag,
     persistPopupPos,
     resetIncomingCallPopupPos,
     resetActiveCallPopupPos,

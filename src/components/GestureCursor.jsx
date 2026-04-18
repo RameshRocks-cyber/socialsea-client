@@ -11,14 +11,19 @@ const GESTURE_CLICK_HOLD_FRAMES = 3;
 const GESTURE_MOVE_GAIN = 1.0;
 const GESTURE_STICKY_MOVE_GAIN = 1.0;
 const GESTURE_MOVE_SENSITIVITY = 1.6;
-const GESTURE_FINGER_SMOOTH_MIN = 0.2;
-const GESTURE_FINGER_SMOOTH_MAX = 0.55;
-const GESTURE_FINGER_SMOOTH_DIST = 90;
-const GESTURE_DEADZONE_PX = 1.5;
+const GESTURE_FINGER_SMOOTH_MIN = 0.34;
+const GESTURE_FINGER_SMOOTH_MAX = 0.82;
+const GESTURE_FINGER_SMOOTH_DIST = 70;
+const GESTURE_DEADZONE_PX = 0.8;
 const GESTURE_CLICK_PINCH_RATIO = 0.22;
-const GESTURE_GRAB_PINCH_RATIO = 0.2;
+const GESTURE_GRAB_PINCH_START_RATIO = 0.26;
+const GESTURE_GRAB_PINCH_HOLD_RATIO = 0.34;
+const GESTURE_BUDDY_GRAB_SNAP_PX = 170;
 const GESTURE_FINGER_EXTEND_MARGIN = 0.08;
 const GESTURE_SCROLL_PX_PER_SEC = 900;
+const GESTURE_TARGET_FPS = 45;
+const GESTURE_CAMERA_WIDTH = 960;
+const GESTURE_CAMERA_HEIGHT = 540;
 
 const readGestureEnabled = () => {
   try {
@@ -53,6 +58,7 @@ export default function GestureCursor() {
   const grabActiveRef = useRef(false);
   const grabTargetRef = useRef(null);
   const grabPointerIdRef = useRef(10);
+  const lastDetectAtRef = useRef(0);
 
   const resolveSafeScreenPos = (screenPos) => {
     const fallbackX = cursorPosRef.current?.active ? cursorPosRef.current.x : screenPos?.x;
@@ -101,6 +107,22 @@ export default function GestureCursor() {
       const target = el.closest(".ss-shimeji-trigger");
       if (target) return target;
     }
+    const allTriggers = Array.from(document.querySelectorAll(".ss-shimeji-trigger"));
+    let nearest = null;
+    let nearestDist = Number.POSITIVE_INFINITY;
+    for (const node of allTriggers) {
+      if (!(node instanceof Element)) continue;
+      const rect = node.getBoundingClientRect?.();
+      if (!rect || !Number.isFinite(rect.left)) continue;
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+      const dist = Math.hypot(cx - pos.x, cy - pos.y);
+      if (dist < nearestDist) {
+        nearestDist = dist;
+        nearest = node;
+      }
+    }
+    if (nearest && nearestDist <= GESTURE_BUDDY_GRAB_SNAP_PX) return nearest;
     return null;
   };
 
@@ -169,7 +191,7 @@ export default function GestureCursor() {
     if (prev.active && dist < GESTURE_DEADZONE_PX) {
       return;
     }
-    const alpha = !prev.active ? 1 : clamp(dist / 160, 0.35, 1);
+    const alpha = !prev.active ? 1 : clamp(dist / 120, 0.55, 1);
     const nextX = prev.active ? prev.x + dx * alpha * gain : screenPos.x;
     const nextY = prev.active ? prev.y + dy * alpha * gain : screenPos.y;
     cursorPosRef.current = { x: nextX, y: nextY, active: true };
@@ -186,48 +208,6 @@ export default function GestureCursor() {
     cursorFlashTimerRef.current = setTimeout(() => {
       if (el) el.classList.remove("is-click");
     }, 200);
-  };
-
-  const scrollReelsBy = (direction) => {
-    const container = document.querySelector(".reels-container");
-    if (!container) return false;
-    const sections = Array.from(container.querySelectorAll(".reel-item"));
-    if (!sections.length) return false;
-    const currentTop = container.scrollTop;
-    let currentIdx = 0;
-    let bestDist = Number.POSITIVE_INFINITY;
-    sections.forEach((section, idx) => {
-      const dist = Math.abs((section?.offsetTop || 0) - currentTop);
-      if (dist < bestDist) {
-        bestDist = dist;
-        currentIdx = idx;
-      }
-    });
-    const nextIdx = Math.max(0, Math.min(sections.length - 1, currentIdx + direction));
-    const target = sections[nextIdx];
-    const nextTop = target ? target.offsetTop : nextIdx * container.clientHeight;
-    container.scrollTo({ top: nextTop, behavior: "smooth" });
-    return true;
-  };
-
-  const getActiveReelFrameRect = () => {
-    const container = document.querySelector(".reels-container");
-    if (!container) return null;
-    const sections = Array.from(container.querySelectorAll(".reel-item"));
-    if (!sections.length) return null;
-    const currentTop = container.scrollTop;
-    let currentIdx = 0;
-    let bestDist = Number.POSITIVE_INFINITY;
-    sections.forEach((section, idx) => {
-      const dist = Math.abs((section?.offsetTop || 0) - currentTop);
-      if (dist < bestDist) {
-        bestDist = dist;
-        currentIdx = idx;
-      }
-    });
-    const frame = sections[currentIdx]?.querySelector(".reel-frame");
-    if (!frame) return null;
-    return frame.getBoundingClientRect?.() || null;
   };
 
   const triggerClick = (screenPos) => {
@@ -285,29 +265,6 @@ export default function GestureCursor() {
       }
       return dispatched;
     };
-    const isReelsRoute = typeof window !== "undefined" && window.location?.pathname === "/reels";
-    if (isReelsRoute) {
-      const reelFrameRect = getActiveReelFrameRect();
-      if (reelFrameRect && Number.isFinite(reelFrameRect.height) && reelFrameRect.height > 0) {
-        const insideFrame =
-          safeX >= reelFrameRect.left &&
-          safeX <= reelFrameRect.right &&
-          safeY >= reelFrameRect.top &&
-          safeY <= reelFrameRect.bottom;
-        if (insideFrame) {
-          const relY = (safeY - reelFrameRect.top) / reelFrameRect.height;
-          if (relY <= 0.33) {
-            scrollReelsBy(-1);
-            return true;
-          }
-          if (relY >= 0.67) {
-            scrollReelsBy(1);
-            return true;
-          }
-          // Middle area: allow normal click handling (e.g., pause/play)
-        }
-      }
-    }
     const interactiveSelector = "button, a, [role=\"button\"], [role=\"link\"], input, textarea, select, label, video";
     for (const el of candidates || []) {
       if (!el || !(el instanceof Element)) continue;
@@ -362,9 +319,12 @@ export default function GestureCursor() {
     const thumbMiddleDist = Math.hypot(thumbTip[0] - middleTip[0], thumbTip[1] - middleTip[1]);
     const okMove = thumbIndexDist < handSize * 0.26;
     const clickPinch = thumbMiddleDist < handSize * GESTURE_CLICK_PINCH_RATIO;
-    const grabPinch =
-      thumbIndexDist < handSize * GESTURE_GRAB_PINCH_RATIO &&
-      thumbMiddleDist < handSize * GESTURE_GRAB_PINCH_RATIO;
+    const grabPinchStart =
+      thumbIndexDist < handSize * GESTURE_GRAB_PINCH_START_RATIO &&
+      thumbMiddleDist < handSize * GESTURE_GRAB_PINCH_START_RATIO;
+    const grabPinchHold =
+      thumbIndexDist < handSize * GESTURE_GRAB_PINCH_HOLD_RATIO &&
+      thumbMiddleDist < handSize * GESTURE_GRAB_PINCH_HOLD_RATIO;
     const extendMargin = handSize * GESTURE_FINGER_EXTEND_MARGIN;
     const isExtended = (tip, pip, mcp) =>
       tip[1] < pip[1] - extendMargin && pip[1] < mcp[1] - extendMargin * 0.5;
@@ -375,7 +335,8 @@ export default function GestureCursor() {
     return {
       okMove,
       clickPinch,
-      grabPinch,
+      grabPinchStart,
+      grabPinchHold,
       indexExtended,
       middleExtended,
       ringExtended,
@@ -462,6 +423,7 @@ export default function GestureCursor() {
     lastScrollAtRef.current = 0;
     grabActiveRef.current = false;
     grabTargetRef.current = null;
+    lastDetectAtRef.current = 0;
     hideCursor();
     if (detectFrameRef.current) {
       cancelAnimationFrame(detectFrameRef.current);
@@ -488,20 +450,20 @@ export default function GestureCursor() {
       const { FilesetResolver, HandLandmarker } = vision;
       const fileset = await FilesetResolver.forVisionTasks(GESTURE_MEDIAPIPE_WASM_BASE);
       handLandmarkerRef.current = await HandLandmarker.createFromOptions(fileset, {
-        baseOptions: { modelAssetPath: GESTURE_HAND_MODEL_ASSET },
+        baseOptions: { modelAssetPath: GESTURE_HAND_MODEL_ASSET, delegate: "GPU" },
         runningMode: "VIDEO",
         numHands: 1,
-        minHandDetectionConfidence: 0.7,
-        minHandPresenceConfidence: 0.6,
-        minTrackingConfidence: 0.6
+        minHandDetectionConfidence: 0.55,
+        minHandPresenceConfidence: 0.5,
+        minTrackingConfidence: 0.5
       });
     }
     const stream = await navigator.mediaDevices.getUserMedia({
       video: {
         facingMode: "user",
-        width: { ideal: 1920 },
-        height: { ideal: 1080 },
-        frameRate: { ideal: 30, max: 30 }
+        width: { ideal: GESTURE_CAMERA_WIDTH, max: 1280 },
+        height: { ideal: GESTURE_CAMERA_HEIGHT, max: 720 },
+        frameRate: { ideal: 60, max: 60 }
       },
       audio: false
     });
@@ -519,8 +481,15 @@ export default function GestureCursor() {
 
     const detect = () => {
       if (!runningRef.current || !cameraVideoRef.current || !handLandmarkerRef.current) return;
+      const nowPerf = performance.now();
+      const minFrameGap = 1000 / GESTURE_TARGET_FPS;
+      if (nowPerf - (lastDetectAtRef.current || 0) < minFrameGap) {
+        detectFrameRef.current = requestAnimationFrame(detect);
+        return;
+      }
+      lastDetectAtRef.current = nowPerf;
       try {
-        const results = handLandmarkerRef.current.detectForVideo(cameraVideoRef.current, performance.now());
+        const results = handLandmarkerRef.current.detectForVideo(cameraVideoRef.current, nowPerf);
         const landmarks = results?.landmarks?.[0];
         if (landmarks && landmarks.length) {
           const pixelLandmarks = toPixelLandmarks(landmarks, cameraVideoRef.current);
@@ -539,7 +508,6 @@ export default function GestureCursor() {
             !handState?.ringExtended &&
             !handState?.pinkyExtended &&
             !handState?.okMove;
-          const isReelsRoute = typeof window !== "undefined" && window.location?.pathname === "/reels";
           if (handState?.okMove && smoothPos) {
             if (!okMoveActiveRef.current) {
               okMoveActiveRef.current = true;
@@ -574,20 +542,16 @@ export default function GestureCursor() {
               cursorRef.current.classList.add("is-active");
             }
           }
-          if (!isReelsRoute) {
-            if (wantsScrollDown) {
-              scrollByDirection(1, screenPos);
-            } else if (wantsScrollUp) {
-              scrollByDirection(-1, screenPos);
-            } else {
-              lastScrollAtRef.current = 0;
-            }
+          if (wantsScrollDown) {
+            scrollByDirection(1, screenPos);
+          } else if (wantsScrollUp) {
+            scrollByDirection(-1, screenPos);
           } else {
             lastScrollAtRef.current = 0;
           }
           const now = Date.now();
-          const grabPinch = Boolean(handState?.grabPinch);
-          if (grabPinch) {
+          const shouldGrab = grabActiveRef.current ? Boolean(handState?.grabPinchHold) : Boolean(handState?.grabPinchStart);
+          if (shouldGrab) {
             clickHoldFramesRef.current = 0;
             prevClickPinchRef.current = false;
             const activePos = resolveSafeScreenPos(screenPos);
@@ -619,7 +583,7 @@ export default function GestureCursor() {
             grabTargetRef.current = null;
           }
 
-          if (!grabPinch && !grabActiveRef.current && handState?.clickPinch && !handState?.okMove && !wantsScrollDown && !wantsScrollUp) {
+          if (!shouldGrab && !grabActiveRef.current && handState?.clickPinch && !handState?.okMove && !wantsScrollDown && !wantsScrollUp) {
             clickHoldFramesRef.current += 1;
             if (
               !prevClickPinchRef.current &&

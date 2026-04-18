@@ -33,6 +33,16 @@ body.ss-theme-pink {
   --ss-theme-text: #f8eaf2;
 }
 
+body.ss-theme-girlspink,
+body.ss-theme-girlspink.ss-themed {
+  --ss-theme-accent: #ff4fa2;
+  --ss-theme-accent-2: #ff86c8;
+  --ss-theme-bg: #170611;
+  --ss-theme-bg-soft: #2d1024;
+  --ss-theme-border: rgba(255, 133, 199, 0.5);
+  --ss-theme-text: #ffecf8;
+}
+
 body.ss-theme-yellow {
   --ss-theme-accent: #c59a30;
   --ss-theme-accent-2: #cbb96d;
@@ -244,8 +254,6 @@ body.ss-theme-black .watch-quality-btn,
 body.ss-theme-black .watch-quality-menu,
 body.ss-theme-black .watch-comment-input-row input,
 body.ss-theme-black .watch-comment-input-row button,
-body.ss-theme-black .reel-action-btn,
-body.ss-theme-black .reel-follow-btn,
 body.ss-theme-black .ss-nav-icon-btn,
 body.ss-theme-black .ss-nav .ss-nav-item,
 body.ss-theme-black .ss-nav .ss-nav-link {
@@ -325,8 +333,6 @@ body.ss-theme-white .watch-quality-btn,
 body.ss-theme-white .watch-quality-menu,
 body.ss-theme-white .watch-comment-input-row input,
 body.ss-theme-white .watch-comment-input-row button,
-body.ss-theme-white .reel-action-btn,
-body.ss-theme-white .reel-follow-btn,
 body.ss-theme-white .ss-nav-icon-btn,
 body.ss-theme-white .ss-nav .ss-nav-item,
 body.ss-theme-white .ss-nav .ss-nav-link,
@@ -433,8 +439,6 @@ body.ss-theme-black .watch-quality-btn,
 body.ss-theme-black .watch-quality-menu,
 body.ss-theme-black .watch-comment-input-row input,
 body.ss-theme-black .watch-comment-input-row button,
-body.ss-theme-black .reel-action-btn,
-body.ss-theme-black .reel-follow-btn,
 body.ss-theme-black .ss-nav-icon-btn,
 body.ss-theme-black .ss-nav .ss-nav-item,
 body.ss-theme-black .ss-nav .ss-nav-link,
@@ -453,6 +457,88 @@ body.ss-theme-black .mic-fab {
   color: #f5f5f5 !important;
   border-color: rgba(255, 255, 255, 0.12) !important;
   box-shadow: none !important;
+}
+
+/* Girls Pink global skin */
+body.ss-theme-girlspink,
+body.ss-theme-girlspink .app-main,
+body.ss-theme-girlspink .app-content,
+body.ss-theme-girlspink .auth-screen,
+body.ss-theme-girlspink .feed-page,
+body.ss-theme-girlspink .reels-page,
+body.ss-theme-girlspink .watch-page,
+body.ss-theme-girlspink .yt-watch-page,
+body.ss-theme-girlspink .chat-page,
+body.ss-theme-girlspink .settings-page,
+body.ss-theme-girlspink .profile-page,
+body.ss-theme-girlspink .ss-nav {
+  background:
+    radial-gradient(65% 55% at 0% -10%, rgba(255, 95, 177, 0.2), transparent 68%),
+    radial-gradient(70% 60% at 100% 0%, rgba(255, 157, 210, 0.18), transparent 70%),
+    linear-gradient(160deg, #14040f, #1c0815 58%, #0f040d) !important;
+  color: var(--ss-theme-text) !important;
+}
+
+body.ss-theme-girlspink .ss-nav,
+body.ss-theme-girlspink .auth-card-new,
+body.ss-theme-girlspink .settings-section,
+body.ss-theme-girlspink .settings-panel,
+body.ss-theme-girlspink .chat-header-menu,
+body.ss-theme-girlspink .chat-bubble,
+body.ss-theme-girlspink .explore-tile,
+body.ss-theme-girlspink .long-feed-card,
+body.ss-theme-girlspink .yt-home-card,
+body.ss-theme-girlspink .watch-main,
+body.ss-theme-girlspink .watch-side,
+body.ss-theme-girlspink .watch-item,
+body.ss-theme-girlspink .watch-comments,
+body.ss-theme-girlspink .reel-frame,
+body.ss-theme-girlspink .post-view-card,
+body.ss-theme-girlspink .profile-shortcut-card {
+  background: color-mix(in srgb, var(--ss-theme-bg-soft) 86%, black) !important;
+  border-color: color-mix(in srgb, var(--ss-theme-border) 90%, #260c1f) !important;
+  box-shadow:
+    0 0 0 1px rgba(255, 158, 219, 0.08),
+    0 14px 32px rgba(0, 0, 0, 0.34) !important;
+}
+
+body.ss-theme-girlspink .feed-mode-btn,
+body.ss-theme-girlspink .yt-chip,
+body.ss-theme-girlspink .watch-action-btn,
+body.ss-theme-girlspink .watch-quality-btn,
+body.ss-theme-girlspink .watch-quality-menu,
+body.ss-theme-girlspink .watch-comment-input-row input,
+body.ss-theme-girlspink .watch-comment-input-row button,
+body.ss-theme-girlspink .ss-nav-icon-btn,
+body.ss-theme-girlspink .ss-nav .ss-nav-item,
+body.ss-theme-girlspink .ss-nav .ss-nav-link,
+body.ss-theme-girlspink .auth-primary-btn,
+body.ss-theme-girlspink .auth-secondary-btn,
+body.ss-theme-girlspink .new-chat-btn,
+body.ss-theme-girlspink .call-action,
+body.ss-theme-girlspink .settings-back,
+body.ss-theme-girlspink .settings-panel-head button,
+body.ss-theme-girlspink .settings-select-grid button,
+body.ss-theme-girlspink .watch-later-shortcut,
+body.ss-theme-girlspink .chat-send-btn,
+body.ss-theme-girlspink .mic-fab {
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--ss-theme-accent) 72%, black),
+    color-mix(in srgb, var(--ss-theme-accent-2) 66%, black)
+  ) !important;
+  border-color: color-mix(in srgb, var(--ss-theme-border) 90%, #1a0915) !important;
+  color: var(--ss-theme-text) !important;
+}
+
+body.ss-theme-girlspink .feed-mode-btn.is-active,
+body.ss-theme-girlspink .yt-chip.is-active,
+body.ss-theme-girlspink .watch-action-btn.is-active,
+body.ss-theme-girlspink .settings-page .settings-select-grid button.active,
+body.ss-theme-girlspink .settings-page .settings-theme-mode button.active {
+  background: linear-gradient(145deg, #ff4fa2, #ff79be) !important;
+  border-color: #ff90ca !important;
+  color: #220617 !important;
 }
 
 /* Google Translate: keep the widget hidden (language is controlled from Settings) */

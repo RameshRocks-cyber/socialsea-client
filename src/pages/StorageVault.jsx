@@ -84,6 +84,7 @@ const buildDocumentaryNotes = (title, notes) => {
 const FREE_CLOUD_GB = 2;
 const PRICE_PER_GB = 10;
 const CURRENCY_LABEL = "INR";
+const STORAGE_LAYOUT_PREFS_KEY = "socialsea_storage_layout_v1";
 const BANK_DETAILS = [
   { label: "Account Name", value: "Your Name" },
   { label: "Account Number", value: "000000000000" },
@@ -92,7 +93,29 @@ const BANK_DETAILS = [
   { label: "UPI ID", value: "yourname@upi" }
 ];
 
+const readStorageLayoutPrefs = () => {
+  try {
+    const raw = localStorage.getItem(STORAGE_LAYOUT_PREFS_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return {
+      showStorageOptions: typeof parsed?.showStorageOptions === "boolean" ? parsed.showStorageOptions : true,
+      showDocumentarySection:
+        typeof parsed?.showDocumentarySection === "boolean" ? parsed.showDocumentarySection : true,
+      showUploadPanel: typeof parsed?.showUploadPanel === "boolean" ? parsed.showUploadPanel : true,
+      showLibrary: typeof parsed?.showLibrary === "boolean" ? parsed.showLibrary : true
+    };
+  } catch {
+    return {
+      showStorageOptions: true,
+      showDocumentarySection: true,
+      showUploadPanel: true,
+      showLibrary: true
+    };
+  }
+};
+
 export default function StorageVault() {
+  const [layoutPrefs] = useState(() => readStorageLayoutPrefs());
   const navigate = useNavigate();
   const inputRef = useRef(null);
   const docVideoRef = useRef(null);
@@ -102,6 +125,8 @@ export default function StorageVault() {
   const docTimerRef = useRef(null);
   const docStartAtRef = useRef(0);
   const docSpeechRef = useRef(null);
+  const menuRef = useRef(null);
+  const menuButtonRef = useRef(null);
   const docSpeechWantedRef = useRef(false);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -130,6 +155,12 @@ export default function StorageVault() {
   const [docStatus, setDocStatus] = useState("");
   const [docError, setDocError] = useState("");
   const [docSaving, setDocSaving] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuStyle, setMenuStyle] = useState({});
+  const [showStorageOptions, setShowStorageOptions] = useState(layoutPrefs.showStorageOptions);
+  const [showDocumentarySection, setShowDocumentarySection] = useState(layoutPrefs.showDocumentarySection);
+  const [showUploadPanel, setShowUploadPanel] = useState(layoutPrefs.showUploadPanel);
+  const [showLibrary, setShowLibrary] = useState(layoutPrefs.showLibrary);
 
   const isVaultOpen = Boolean(lock && unlocked);
 
@@ -549,6 +580,64 @@ export default function StorageVault() {
     });
   }, [stopDocumentary, stopDocSpeech]);
 
+  const toggleMenu = () => {
+    if (menuOpen) {
+      setMenuOpen(false);
+      return;
+    }
+    const rect = menuButtonRef.current?.getBoundingClientRect();
+    if (!rect) {
+      setMenuOpen(true);
+      return;
+    }
+    const width = Math.max(250, Math.min(340, window.innerWidth - 16));
+    const left = Math.min(
+      window.innerWidth - width - 8,
+      Math.max(8, rect.right - width)
+    );
+    const top = rect.bottom + 8;
+    setMenuStyle({ left: `${left}px`, top: `${top}px`, width: `${width}px` });
+    setMenuOpen(true);
+  };
+
+  const openStorageOptionsFromMenu = () => {
+    setShowStorageOptions(true);
+    setMenuOpen(false);
+  };
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (!menuRef.current) return;
+      if (menuRef.current.contains(event.target)) return;
+      setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    if (showDocumentarySection) return;
+    setDocOpen(false);
+    stopDocumentary();
+    stopDocSpeech();
+  }, [showDocumentarySection, stopDocumentary, stopDocSpeech]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        STORAGE_LAYOUT_PREFS_KEY,
+        JSON.stringify({
+          showStorageOptions,
+          showDocumentarySection,
+          showUploadPanel,
+          showLibrary
+        })
+      );
+    } catch {
+      // ignore storage errors
+    }
+  }, [showStorageOptions, showDocumentarySection, showUploadPanel, showLibrary]);
+
   useEffect(() => {
     return () => {
       stopDocSpeech();
@@ -571,9 +660,6 @@ export default function StorageVault() {
           </button>
           <div className="storage-top-copy">
             <h1>Storage Vault</h1>
-            <p className="storage-subtitle">
-              Store private files on this device. Images, videos, docs, and more.
-            </p>
           </div>
           <div className="storage-top-actions">
             {isVaultOpen && (
@@ -586,60 +672,50 @@ export default function StorageVault() {
                 Reset Lock
               </button>
             )}
+            <div className="storage-menu-wrap" ref={menuRef}>
+              <button
+                type="button"
+                className="storage-menu-btn"
+                onClick={toggleMenu}
+                aria-label="Storage menu"
+                aria-expanded={menuOpen}
+                ref={menuButtonRef}
+              >
+                ⋮
+              </button>
+              {menuOpen && (
+                <div className="storage-menu-pop" style={menuStyle}>
+                  <button type="button" className="storage-menu-item" onClick={openStorageOptionsFromMenu}>
+                    Storage Options
+                  </button>
+                  <button type="button" className="storage-menu-item" onClick={() => setStoragePlan("local")}>
+                    Use Local Device {storagePlan === "local" ? "(Selected)" : ""}
+                  </button>
+                  <button type="button" className="storage-menu-item" onClick={() => setStoragePlan("cloud")}>
+                    Enable Cloud Storage {storagePlan === "cloud" ? "(Selected)" : ""}
+                  </button>
+                  <button type="button" className="storage-menu-item" onClick={() => setShowStorageOptions((v) => !v)}>
+                    Cloud Billing Panel: {showStorageOptions ? "On" : "Off"}
+                  </button>
+                  <button type="button" className="storage-menu-item" onClick={() => setShowDocumentarySection((v) => !v)}>
+                    Documentary Recorder: {showDocumentarySection ? "On" : "Off"}
+                  </button>
+                  <button type="button" className="storage-menu-item" onClick={() => setShowUploadPanel((v) => !v)}>
+                    Upload Panel: {showUploadPanel ? "On" : "Off"}
+                  </button>
+                  <button type="button" className="storage-menu-item" onClick={() => setShowLibrary((v) => !v)}>
+                    File Library: {showLibrary ? "On" : "Off"}
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </header>
 
-        <section className="storage-plans">
-          <div className="storage-plan-header">
-            <h2>Storage Options</h2>
-            <p>Choose where your files live. Local files stay only on this device.</p>
-          </div>
-          <div className="storage-plan-grid">
-            <article className={`storage-plan-card ${storagePlan === "local" ? "active" : ""}`}>
-              <div className="storage-plan-title">
-                <h3>Local Device</h3>
-                <span className="storage-plan-badge">Free</span>
-              </div>
-              <p className="storage-plan-copy">
-                Store files only on this device using the vault lock. Works offline and stays private.
-              </p>
-              <p className="storage-plan-detail">Best for personal storage on one device.</p>
-              <button
-                type="button"
-                className="storage-plan-btn"
-                onClick={() => setStoragePlan("local")}
-              >
-                {storagePlan === "local" ? "Selected" : "Use Local Storage"}
-              </button>
-            </article>
-
-            <article className={`storage-plan-card ${storagePlan === "cloud" ? "active" : ""}`}>
-              <div className="storage-plan-title">
-                <h3>Cloud Storage</h3>
-                <span className="storage-plan-badge">{FREE_CLOUD_GB} GB Free</span>
-              </div>
-              <p className="storage-plan-copy">
-                Get {FREE_CLOUD_GB} GB free. Pay only for extra storage beyond the free limit.
-              </p>
-              <p className="storage-plan-detail">
-                Extra storage is activated after payment verification.
-              </p>
-              <button
-                type="button"
-                className="storage-plan-btn"
-                onClick={() => setStoragePlan("cloud")}
-              >
-                {storagePlan === "cloud" ? "Selected" : "Enable Cloud Storage"}
-              </button>
-            </article>
-          </div>
-        </section>
-
-        {storagePlan === "cloud" && (
+        {showStorageOptions && storagePlan === "cloud" && (
           <section className="storage-billing">
             <div className="storage-billing-header">
               <h3>Cloud Storage Billing</h3>
-              <p>First {FREE_CLOUD_GB} GB is free. Choose extra GB and pay to extend.</p>
             </div>
             <div className="storage-billing-grid">
               <div className="storage-billing-card">
@@ -731,12 +807,12 @@ export default function StorageVault() {
           </section>
         )}
 
-        <section className="storage-doc">
-          <div className="storage-doc-header">
-            <div>
-              <h2>Documentary Recorder</h2>
-              <p>Record a private documentary with live speech-to-text notes.</p>
-            </div>
+        {showDocumentarySection && (
+          <section className="storage-doc">
+            <div className="storage-doc-header">
+              <div>
+                <h2>Documentary Recorder</h2>
+              </div>
             <button type="button" className="storage-doc-toggle" onClick={handleToggleDocumentary}>
               {docOpen ? "Close" : "Open"}
             </button>
@@ -829,13 +905,14 @@ export default function StorageVault() {
               </div>
             </div>
           )}
-        </section>
+          </section>
+        )}
 
-        <section className="storage-uploader">
+        {showUploadPanel && (
+          <section className="storage-uploader">
           <div className="storage-upload-row">
             <div>
               <h3>Upload files</h3>
-              <p>Files are private and stay on this device unless you share them.</p>
             </div>
             <div className="storage-upload-actions">
               <button type="button" className="storage-upload-btn" onClick={handlePick} disabled={busy || unsupported}>
@@ -847,9 +924,6 @@ export default function StorageVault() {
             </div>
             <input ref={inputRef} type="file" multiple onChange={handleFiles} />
           </div>
-          <p className="storage-tip">
-            Tip: hold Ctrl/Shift (Cmd on Mac) to select multiple files in the picker.
-          </p>
           {unsupported && (
             <p className="storage-error">Storage is not supported in this browser.</p>
           )}
@@ -859,9 +933,11 @@ export default function StorageVault() {
             </p>
           )}
           {error && <p className="storage-error">{error}</p>}
-        </section>
+          </section>
+        )}
 
-        <section className="storage-grid">
+        {showLibrary && (
+          <section className="storage-grid">
           {loading && <p className="storage-empty">Loading stored files...</p>}
           {!loading && !items.length && (
             <p className="storage-empty">No files yet. Upload anything you want to keep private.</p>
@@ -907,7 +983,8 @@ export default function StorageVault() {
                 </article>
               );
             })}
-        </section>
+          </section>
+        )}
       </div>
     </div>
   );

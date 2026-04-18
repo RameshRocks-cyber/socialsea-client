@@ -1,7 +1,10 @@
-import { MdSignLanguage } from "react-icons/md";
+import { useCallback, useEffect, useState } from "react";
+import { MdPictureInPictureAlt, MdSignLanguage } from "react-icons/md";
 import {
   FiMic,
   FiMicOff,
+  FiMaximize2,
+  FiMoreVertical,
   FiMonitor,
   FiPhone,
   FiPhoneOff,
@@ -13,19 +16,14 @@ import {
   FiVolumeX
 } from "react-icons/fi";
 import { useChat, FORCE_BEAUTY_FILTER, GROUP_CALL_MAX, VIDEO_FILTER_PRESETS, CALL_VIDEO_QUALITY_PRESETS } from "./hooks/useChat";
+import "./Chat.css";
 
 export default function VideoCall({ placement = "page" }) {
   const ctx = useChat();
 
   if (placement === "page") {
     const {
-      isConversationRoute,
-      callActive,
-      callState,
       groupCallActive,
-      navigate,
-      activeContactId,
-      pipActive,
       groupInviteOpen,
       contacts,
       myUserId,
@@ -39,21 +37,6 @@ export default function VideoCall({ placement = "page" }) {
 
     return (
       <>
-        {!isConversationRoute && callActive && (callState.mode === "video" || groupCallActive) && (
-          <button
-            type="button"
-            className="call-return-banner"
-            onClick={() => {
-              const targetId = callState.peerId && callState.peerId !== "group" ? callState.peerId : activeContactId;
-              if (targetId) {
-                navigate(`/chat/${targetId}`);
-              }
-            }}
-          >
-            Return to call {pipActive ? "(PiP closed)" : ""}
-          </button>
-        )}
-
         {groupInviteOpen && (
           <div className="group-call-overlay" role="dialog" aria-label="Start group call">
             <div className="group-call-card">
@@ -126,9 +109,8 @@ export default function VideoCall({ placement = "page" }) {
     groupCallActive,
     localVideoRef,
     remoteVideoRef,
-    pipDismissedRef,
-    pipEnabled,
-    navigate,
+    videoCallMinimized,
+    setVideoCallMinimized,
     showVideoFilters,
     setShowVideoFilters,
     videoFilterId,
@@ -154,6 +136,8 @@ export default function VideoCall({ placement = "page" }) {
     hasRemoteAudio,
     localVideoPos,
     startLocalVideoDrag,
+    miniVideoPos,
+    startMiniVideoDrag,
     signAssistEnabled,
     setSignAssistEnabled,
     signAssistAutoSpeak,
@@ -169,6 +153,59 @@ export default function VideoCall({ placement = "page" }) {
     sendSignAssistMessage,
     signAssistStatus
   } = ctx;
+
+  const [showCallMoreMenu, setShowCallMoreMenu] = useState(false);
+
+  useEffect(() => {
+    if (!showVideoCallScreen) setShowCallMoreMenu(false);
+  }, [showVideoCallScreen]);
+
+  const showVideoCallMini =
+    callActive && (callState.mode === "video" || groupCallActive) && Boolean(videoCallMinimized);
+
+  const setLocalVideoElement = useCallback(
+    (el) => {
+      if (!el) return;
+      const previous = localVideoRef.current;
+      if (
+        previous &&
+        previous !== el &&
+        previous.srcObject instanceof MediaStream &&
+        el.srcObject !== previous.srcObject
+      ) {
+        try {
+          el.srcObject = previous.srcObject;
+          el.play?.().catch(() => {});
+        } catch {
+          // ignore stream handoff failures
+        }
+      }
+      localVideoRef.current = el;
+    },
+    [localVideoRef]
+  );
+
+  const setRemoteVideoElement = useCallback(
+    (el) => {
+      if (!el) return;
+      const previous = remoteVideoRef.current;
+      if (
+        previous &&
+        previous !== el &&
+        previous.srcObject instanceof MediaStream &&
+        el.srcObject !== previous.srcObject
+      ) {
+        try {
+          el.srcObject = previous.srcObject;
+          el.play?.().catch(() => {});
+        } catch {
+          // ignore stream handoff failures
+        }
+      }
+      remoteVideoRef.current = el;
+    },
+    [remoteVideoRef]
+  );
 
   return (
     <>
@@ -263,7 +300,7 @@ export default function VideoCall({ placement = "page" }) {
           </div>
         </div>
       )}
-      {callActive && !incomingCall && !showVideoCallScreen && (
+      {callActive && callState.mode === "audio" && !incomingCall && (
         <button
           type="button"
           className="call-floating-end"
@@ -274,13 +311,141 @@ export default function VideoCall({ placement = "page" }) {
         </button>
       )}
 
+      {showVideoCallMini && (
+        <>
+          <button
+            type="button"
+            className="wa-call-mini-bar"
+            onClick={() => setVideoCallMinimized(false)}
+            title="Return to call"
+          >
+            <span className="wa-call-mini-bar-title">
+              {groupCallActive ? "Group video call" : "Video call"}
+            </span>
+            <span className="wa-call-mini-bar-sub">
+              {callStatusText} - {formatCallDuration(callDurationSec)} - Tap to return
+            </span>
+          </button>
+
+          <div
+            className="wa-video-mini"
+            role="button"
+            tabIndex={0}
+            onClick={() => setVideoCallMinimized(false)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                setVideoCallMinimized(false);
+              }
+            }}
+            aria-label="Return to video call"
+            title="Return to call"
+            style={
+              miniVideoPos
+                ? {
+                    left: `${miniVideoPos.x}px`,
+                    top: `${miniVideoPos.y}px`,
+                    right: "auto",
+                    bottom: "auto"
+                  }
+                : undefined
+            }
+          >
+            <div
+              className="wa-video-mini-drag"
+              onPointerDown={startMiniVideoDrag}
+              onClick={(event) => event.stopPropagation()}
+              title="Drag call window"
+              aria-hidden="true"
+            />
+            {groupCallActive ? (
+              <>
+                {groupRemoteTiles?.[0]?.stream ? (
+                  <video
+                    autoPlay
+                    playsInline
+                    muted
+                    className="wa-video-mini-remote"
+                    data-allow-simultaneous="true"
+                    ref={(el) => {
+                      const stream = groupRemoteTiles[0].stream;
+                      if (!el || !stream) return;
+                      if (el.srcObject !== stream) el.srcObject = stream;
+                      el.play?.().catch(() => {});
+                    }}
+                  />
+                ) : (
+                  <div className="wa-video-mini-fallback" aria-live="polite">
+                    Waiting...
+                  </div>
+                )}
+                <video
+                  ref={setLocalVideoElement}
+                  autoPlay
+                  playsInline
+                  muted
+                  className={`wa-video-mini-local ${isScreenSharing ? "is-screen" : "is-mirror"}`}
+                  style={{ filter: activeVideoFilter.css }}
+                  data-allow-simultaneous="true"
+                />
+              </>
+            ) : (
+              <>
+                <video
+                  ref={setRemoteVideoElement}
+                  autoPlay
+                  playsInline
+                  muted
+                  className={`wa-video-mini-remote ${remoteIsScreenShare ? "is-screen" : "is-mirror"}`}
+                  data-allow-simultaneous="true"
+                />
+                <video
+                  ref={setLocalVideoElement}
+                  autoPlay
+                  playsInline
+                  muted
+                  className={`wa-video-mini-local ${isScreenSharing ? "is-screen" : "is-mirror"}`}
+                  style={{ filter: activeVideoFilter.css }}
+                  data-allow-simultaneous="true"
+                />
+              </>
+            )}
+
+            <button
+              type="button"
+              className="wa-video-mini-hangup"
+              onClick={(event) => {
+                event.stopPropagation();
+                finishCall(true);
+              }}
+              title="End call"
+              aria-label="End call"
+            >
+              <FiPhoneOff />
+            </button>
+            <button
+              type="button"
+              className="wa-video-mini-expand"
+              onClick={(event) => {
+                event.stopPropagation();
+                setVideoCallMinimized(false);
+              }}
+              title="Return to call"
+              aria-label="Return to call"
+            >
+              <FiMaximize2 />
+            </button>
+          </div>
+        </>
+      )}
+
       {showVideoCallScreen && (
         <div className="wa-video-call-screen" role="dialog" aria-live="polite" aria-label="Video call screen">
           {groupCallActive ? (
             <div className="wa-video-grid">
               <div className="wa-video-tile is-local">
                 <video
-                  ref={localVideoRef}
+                  ref={setLocalVideoElement}
                   autoPlay
                   playsInline
                   muted
@@ -316,7 +481,7 @@ export default function VideoCall({ placement = "page" }) {
           ) : (
             <>
               <video
-                ref={remoteVideoRef}
+                ref={setRemoteVideoElement}
                 autoPlay
                 playsInline
                 muted
@@ -330,7 +495,7 @@ export default function VideoCall({ placement = "page" }) {
                 </div>
               )}
               <video
-                ref={localVideoRef}
+                ref={setLocalVideoElement}
                 autoPlay
                 playsInline
                 muted
@@ -351,16 +516,12 @@ export default function VideoCall({ placement = "page" }) {
               type="button"
               className="wa-video-exit"
               onClick={() => {
-                const el = remoteVideoRef.current;
-                pipDismissedRef.current = false;
-                if (pipEnabled && el && typeof el.requestPictureInPicture === "function") {
-                  el.requestPictureInPicture?.().catch(() => {});
-                }
-                navigate(-1);
+                setVideoCallMinimized(true);
               }}
-              title="Exit call"
+              title="Picture in picture"
+              aria-label="Picture in picture"
             >
-              Exit
+              <MdPictureInPictureAlt />
             </button>
             <p className="wa-video-peer">{callState.peerName || "User"}</p>
             <p className="wa-video-state">
@@ -481,67 +642,167 @@ export default function VideoCall({ placement = "page" }) {
               <div className="wa-filter-selected-label">{activeVideoFilter?.label || "Beauty"}</div>
             </div>
           )}
-          <div className="wa-video-controls">
-            {callActive && (
-              <button
-                type="button"
-                className="call-control"
-                onClick={openGroupInvite}
-                title="Add people"
+
+          {showCallMoreMenu && (
+            <div
+              className="wa-video-more-backdrop"
+              onClick={() => setShowCallMoreMenu(false)}
+              role="presentation"
+            >
+              <aside
+                className="wa-video-more-menu"
+                role="menu"
+                aria-label="Call options"
+                onClick={(event) => event.stopPropagation()}
               >
-                <FiUserPlus />
-              </button>
-            )}
+                <button
+                  type="button"
+                  className="wa-video-more-item"
+                  onClick={() => {
+                    setShowCallMoreMenu(false);
+                    openGroupInvite();
+                  }}
+                >
+                  <FiUserPlus /> Add people
+                </button>
+
+                <button
+                  type="button"
+                  className="wa-video-more-item"
+                  onClick={() => {
+                    setShowCallMoreMenu(false);
+                    toggleScreenShare();
+                  }}
+                  disabled={callState.mode !== "video" || callState.phase === "idle"}
+                >
+                  <FiMonitor /> {isScreenSharing ? "Stop screen share" : "Screen share"}
+                  <span className={`wa-video-more-meta ${isScreenSharing ? "is-on" : ""}`}>
+                    {isScreenSharing ? "On" : ""}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  className="wa-video-more-item"
+                  onClick={() => {
+                    setShowCallMoreMenu(false);
+                    setShowVideoFilters(false);
+                    setShowVideoQualityPanel((prev) => !prev);
+                  }}
+                  disabled={callState.mode !== "video" || callState.phase === "idle"}
+                >
+                  <span className="wa-video-more-pill">{callVideoQualityPreset?.short || "SD"}</span> Video quality
+                  <span className="wa-video-more-meta">{callVideoQualityLabel || ""}</span>
+                </button>
+
+                {!FORCE_BEAUTY_FILTER && (
+                  <button
+                    type="button"
+                    className="wa-video-more-item"
+                    onClick={() => {
+                      setShowCallMoreMenu(false);
+                      setShowVideoQualityPanel(false);
+                      setShowVideoFilters((prev) => !prev);
+                    }}
+                  >
+                    <FiSmile /> Video filters
+                    <span className={`wa-video-more-meta ${showVideoFilters ? "is-on" : ""}`}>
+                      {showVideoFilters ? "On" : ""}
+                    </span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  className="wa-video-more-item"
+                  onClick={() => {
+                    setShowCallMoreMenu(false);
+                    setSignAssistEnabled((prev) => !prev);
+                  }}
+                >
+                  <MdSignLanguage /> Sign assist
+                  <span className={`wa-video-more-meta ${signAssistEnabled ? "is-on" : ""}`}>
+                    {signAssistEnabled ? "On" : ""}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  className="wa-video-more-item"
+                  onClick={() => {
+                    setShowCallMoreMenu(false);
+                    toggleSpeaker();
+                  }}
+                >
+                  {isSpeakerOn ? <FiVolume2 /> : <FiVolumeX />} Speaker
+                  <span className={`wa-video-more-meta ${isSpeakerOn ? "is-on" : ""}`}>
+                    {isSpeakerOn ? "On" : "Off"}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  className="wa-video-more-item"
+                  onClick={() => {
+                    setShowCallMoreMenu(false);
+                    toggleCamera();
+                  }}
+                  disabled={callState.mode !== "video" || callState.phase === "idle"}
+                >
+                  {isCameraOff ? <FiVideoOff /> : <FiVideo />} Camera
+                  <span className={`wa-video-more-meta ${!isCameraOff ? "is-on" : ""}`}>
+                    {isCameraOff ? "Off" : "On"}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  className="wa-video-more-item"
+                  onClick={() => {
+                    setShowCallMoreMenu(false);
+                    toggleMute();
+                  }}
+                >
+                  {isMuted ? <FiMicOff /> : <FiMic />} Microphone
+                  <span className={`wa-video-more-meta ${!isMuted ? "is-on" : ""}`}>
+                    {isMuted ? "Muted" : "On"}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  className="wa-video-more-item is-danger"
+                  onClick={() => {
+                    setShowCallMoreMenu(false);
+                    finishCall(true);
+                  }}
+                >
+                  <FiPhoneOff /> End call
+                </button>
+              </aside>
+            </div>
+          )}
+          <div className="wa-video-controls">
             <button type="button" className="call-control" onClick={toggleMute} title="Mute mic">
               {isMuted ? <FiMicOff /> : <FiMic />}
             </button>
             <button type="button" className="call-control" onClick={toggleSpeaker} title="Speaker on/off">
               {isSpeakerOn ? <FiVolume2 /> : <FiVolumeX />}
             </button>
-            <button
-              type="button"
-              className={`call-control ${isScreenSharing ? "is-active" : ""}`}
-              onClick={toggleScreenShare}
-              title="Screen share"
-              disabled={callState.mode !== "video" || callState.phase === "idle"}
-            >
-              <FiMonitor />
-            </button>
             <button type="button" className="call-control" onClick={toggleCamera} title="Camera on/off">
               {isCameraOff ? <FiVideoOff /> : <FiVideo />}
             </button>
             <button
               type="button"
-              className={`call-control ${showVideoQualityPanel ? "is-active" : ""}`}
+              className={`call-control ${showCallMoreMenu ? "is-active" : ""}`}
               onClick={() => {
                 setShowVideoFilters(false);
-                setShowVideoQualityPanel((prev) => !prev);
+                setShowVideoQualityPanel(false);
+                setShowCallMoreMenu((prev) => !prev);
               }}
-              title={`Video quality${callVideoQualityLabel ? ` (${callVideoQualityLabel})` : ""}`}
-              disabled={callState.mode !== "video" || callState.phase === "idle"}
+              title="More options"
             >
-              <span className="wa-quality-chip">{callVideoQualityPreset?.short || "SD"}</span>
-            </button>
-            {!FORCE_BEAUTY_FILTER && (
-              <button
-                type="button"
-                className={`call-control ${showVideoFilters ? "is-active" : ""}`}
-                onClick={() => {
-                  setShowVideoQualityPanel(false);
-                  setShowVideoFilters((prev) => !prev);
-                }}
-                title="Video filters"
-              >
-                <FiSmile />
-              </button>
-            )}
-            <button
-              type="button"
-              className={`call-control ${signAssistEnabled ? "is-active" : ""}`}
-              onClick={() => setSignAssistEnabled((prev) => !prev)}
-              title="Sign assist"
-            >
-              <MdSignLanguage />
+              <FiMoreVertical />
             </button>
             <button
               type="button"

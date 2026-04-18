@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../api/axios";
+import { logout } from "../auth";
 import { DEFAULT_SOUND_PREFS, SETTINGS_KEY, getSoundLabel, readSoundPrefs } from "./soundPrefs";
 import {
   CONTENT_TYPE_OPTIONS,
@@ -41,6 +42,7 @@ const defaultPrefs = {
   notificationBuddyCharacter: "Cat",
   notificationBuddyHideWhenEmpty: false,
   notificationBuddyVoiceEnabled: true,
+  notificationBuddyVoiceGender: "auto",
   notificationBuddyVoiceName: "",
   notificationBuddyVoiceRate: 1,
   notificationBuddyVoicePitch: 1,
@@ -108,6 +110,13 @@ const normalizeNotificationCharacter = (value) =>
   NOTIFICATION_CHARACTERS.includes(value) ? value : defaultPrefs.notificationBuddyCharacter;
 const normalizeNotificationHideEmpty = (value) =>
   typeof value === "boolean" ? value : defaultPrefs.notificationBuddyHideWhenEmpty;
+const normalizeNotificationVoiceGender = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "male" || normalized === "female" || normalized === "auto") return normalized;
+  if (normalized === "m") return "male";
+  if (normalized === "f") return "female";
+  return defaultPrefs.notificationBuddyVoiceGender;
+};
 
 const readPrefs = () => {
   try {
@@ -119,6 +128,9 @@ const readPrefs = () => {
       normalized.notificationBuddyHideWhenEmpty = normalizeNotificationHideEmpty(
         normalized.notificationBuddyHideWhenEmpty
       );
+      normalized.notificationBuddyVoiceGender = normalizeNotificationVoiceGender(
+        normalized.notificationBuddyVoiceGender
+      );
       normalized.contentTypes = normalizeContentTypeList(normalized.contentTypes);
       return normalized;
     }
@@ -129,6 +141,9 @@ const readPrefs = () => {
     normalized.notificationBuddyHideWhenEmpty = normalizeNotificationHideEmpty(
       normalized.notificationBuddyHideWhenEmpty
     );
+    normalized.notificationBuddyVoiceGender = normalizeNotificationVoiceGender(
+      normalized.notificationBuddyVoiceGender
+    );
     normalized.contentTypes = normalizeContentTypeList(normalized.contentTypes);
     return normalized;
   } catch {
@@ -137,6 +152,9 @@ const readPrefs = () => {
     normalized.notificationBuddyCharacter = normalizeNotificationCharacter(normalized.notificationBuddyCharacter);
     normalized.notificationBuddyHideWhenEmpty = normalizeNotificationHideEmpty(
       normalized.notificationBuddyHideWhenEmpty
+    );
+    normalized.notificationBuddyVoiceGender = normalizeNotificationVoiceGender(
+      normalized.notificationBuddyVoiceGender
     );
     normalized.contentTypes = normalizeContentTypeList(normalized.contentTypes);
     return normalized;
@@ -888,6 +906,16 @@ export default function Settings() {
             </div>
           </section>
         )}
+
+        <div className="settings-logout-wrap">
+          <button
+            type="button"
+            className="settings-logout-btn"
+            onClick={logout}
+          >
+            Log out
+          </button>
+        </div>
       </div>
     </div>
   );

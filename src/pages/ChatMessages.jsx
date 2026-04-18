@@ -1,15 +1,19 @@
-﻿import {
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
   FiArrowLeft,
   FiChevronDown,
+  FiChevronUp,
   FiChevronRight,
   FiEye,
   FiFileText,
   FiHeart,
+  FiImage,
   FiMessageCircle,
   FiMic,
   FiMicOff,
   FiMonitor,
   FiMoreVertical,
+  FiMusic,
   FiSend,
   FiSmile,
   FiUsers,
@@ -20,6 +24,7 @@
   FiLink,
   FiPhone,
   FiPhoneOff,
+  FiSearch,
   FiVideo,
   FiVideoOff
 } from "react-icons/fi";
@@ -37,7 +42,13 @@ import {
 } from "./hooks/useChat";
 import ChatHeader from "./ChatHeader";
 import ChatInput from "./ChatInput";
-import VideoCall from "./VideoCall";
+
+const MEDIA_FILTER_OPTIONS = [
+  { value: "all", label: "All" },
+  { value: "image", label: "Images" },
+  { value: "video", label: "Videos" },
+  { value: "audio", label: "Audio" }
+];
 
 export default function ChatMessages() {
   const {
@@ -748,11 +759,139 @@ export default function ChatMessages() {
     deleteBubbleItemForEveryone,
     contactId,
   } = useChat();
+  const [mediaFilter, setMediaFilter] = useState("all");
+
+  const [inlineSearchOpen, setInlineSearchOpen] = useState(false);
+  const isInlineSearchOpen = inlineSearchOpen;
+
+  const getMediaItemType = useCallback((message) => {
+    const mediaType = String(message?.mediaType || (message?.audioUrl ? "audio" : "")).toLowerCase();
+    if (mediaType === "image" || mediaType === "video" || mediaType === "audio") return mediaType;
+    return "other";
+  }, []);
+
+  const filteredMediaPanelItems = useMemo(() => {
+    if (mediaFilter === "all") return mediaPanelItems;
+    return mediaPanelItems.filter((message) => getMediaItemType(message) === mediaFilter);
+  }, [mediaFilter, mediaPanelItems, getMediaItemType]);
+
+  const mediaFilterCounts = useMemo(() => {
+    const counts = { all: mediaPanelItems.length, image: 0, video: 0, audio: 0 };
+    mediaPanelItems.forEach((message) => {
+      const mediaType = getMediaItemType(message);
+      if (mediaType === "image" || mediaType === "video" || mediaType === "audio") {
+        counts[mediaType] += 1;
+      }
+    });
+    return counts;
+  }, [mediaPanelItems, getMediaItemType]);
+
+  const jumpToSearchResult = useCallback((messageId) => {
+    const key = String(messageId || "");
+    if (!key) return;
+    const thread = threadRef.current;
+    if (!thread?.querySelectorAll) return;
+    const target = Array.from(thread.querySelectorAll("[data-chat-msg-id]"))
+      .find((node) => String(node?.getAttribute?.("data-chat-msg-id") || "") === key);
+    if (!target) return;
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    setHighlightedMessageId(key);
+  }, [setHighlightedMessageId, threadRef]);
+
+  const activeSearchIndex = useMemo(
+    () => searchPanelItems.findIndex((item) => String(item?.id || "") === highlightedMessageId),
+    [searchPanelItems, highlightedMessageId]
+  );
+
+  useEffect(() => {
+    if (!isInlineSearchOpen) return;
+    const rafId = requestAnimationFrame(() => chatSearchInputRef.current?.focus?.());
+    return () => cancelAnimationFrame(rafId);
+  }, [isInlineSearchOpen, chatSearchInputRef]);
+
+  useEffect(() => {
+    if (!isInlineSearchOpen) return;
+    if (!normalizedChatSearchQuery || searchPanelItems.length === 0) {
+      setHighlightedMessageId("");
+      return;
+    }
+    if (activeSearchIndex >= 0) return;
+    jumpToSearchResult(searchPanelItems[0]?.id);
+  }, [
+    activeSearchIndex,
+    isInlineSearchOpen,
+    jumpToSearchResult,
+    normalizedChatSearchQuery,
+    searchPanelItems,
+    setHighlightedMessageId
+  ]);
+
+  const goToSearchMatch = useCallback((direction) => {
+    if (!searchPanelItems.length) return;
+    const baseIndex = activeSearchIndex >= 0 ? activeSearchIndex : 0;
+    const delta = direction === "prev" ? -1 : 1;
+    const nextIndex = (baseIndex + delta + searchPanelItems.length) % searchPanelItems.length;
+    jumpToSearchResult(searchPanelItems[nextIndex]?.id);
+  }, [activeSearchIndex, jumpToSearchResult, searchPanelItems]);
+
+  const closeInlineSearch = useCallback(() => {
+    setInlineSearchOpen(false);
+    setChatSearchQuery("");
+    setHighlightedMessageId("");
+    setActiveUtilityPanel("");
+  }, [setActiveUtilityPanel, setChatSearchQuery, setHighlightedMessageId]);
+
+  const openHeaderUtilityPanel = useCallback((panel) => {
+    if (panel === "search") {
+      setInlineSearchOpen(true);
+      setActiveUtilityPanel("");
+    } else {
+      setInlineSearchOpen(false);
+      setActiveUtilityPanel(panel);
+    }
+    setShowHeaderMenu(false);
+    setShowCallMenu(false);
+    setShowWallpaperPanel(false);
+  }, [setActiveUtilityPanel, setShowCallMenu, setShowHeaderMenu, setShowWallpaperPanel]);
+
+  const openInlineSearch = useCallback(() => {
+    if (isInlineSearchOpen) {
+      closeInlineSearch();
+      return;
+    }
+    openHeaderUtilityPanel("search");
+  }, [closeInlineSearch, isInlineSearchOpen, openHeaderUtilityPanel]);
+
+  useEffect(() => {
+    if (!activeContactId) {
+      setInlineSearchOpen(false);
+      return;
+    }
+    setInlineSearchOpen(false);
+  }, [activeContactId]);
+
+  useEffect(() => {
+    if (activeUtilityPanel !== "media") {
+      setMediaFilter("all");
+    }
+  }, [activeUtilityPanel]);
+
+  useEffect(() => {
+    const onHeaderMenuPointerDownCapture = (event) => {
+      const panelButton = event.target?.closest?.(".chat-header-menu-link[data-panel]");
+      if (!panelButton) return;
+      const panel = String(panelButton.getAttribute("data-panel") || "");
+      if (!panel) return;
+      openHeaderUtilityPanel(panel);
+    };
+    document.addEventListener("pointerdown", onHeaderMenuPointerDownCapture, true);
+    return () => {
+      document.removeEventListener("pointerdown", onHeaderMenuPointerDownCapture, true);
+    };
+  }, [openHeaderUtilityPanel]);
 
   return (
     <div className={`chat-page ${isConversationRoute ? "chat-single-pane" : "chat-list-only"}`}>
-      <VideoCall placement="page" />
-
       {!isConversationRoute && !isRequestsRoute && (
         <aside className="chat-sidebar">
         <div className="chat-sidebar-head">
@@ -1139,13 +1278,72 @@ export default function ChatMessages() {
 
       {isConversationRoute && (
       <section className={`chat-main ${showHeaderMenu ? "settings-open" : ""}`}>
-        <VideoCall placement="thread" />
-
         {!activeContact && <p className="chat-placeholder">{isConversationRoute ? "Loading conversation..." : "Select a conversation"}</p>}
 
         {activeContact && (
           <>
-            <ChatHeader />
+            <ChatHeader onOpenUtilityPanel={openHeaderUtilityPanel} onOpenSearch={openInlineSearch} />
+            {isInlineSearchOpen && (
+              <div className="chat-inline-search" data-no-page-swipe>
+                <label className="chat-inline-search-field">
+                  <FiSearch />
+                  <input
+                    ref={chatSearchInputRef}
+                    type="search"
+                    value={chatSearchQuery}
+                    onChange={(e) => setChatSearchQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        goToSearchMatch(e.shiftKey ? "prev" : "next");
+                      } else if (e.key === "Escape") {
+                        e.preventDefault();
+                        closeInlineSearch();
+                      }
+                    }}
+                    placeholder="Search in chat"
+                  />
+                  {!!chatSearchQuery && (
+                    <button
+                      type="button"
+                      className="chat-inline-search-icon-btn"
+                      onClick={() => setChatSearchQuery("")}
+                      title="Clear"
+                      aria-label="Clear search"
+                    >
+                      <FiX />
+                    </button>
+                  )}
+                </label>
+                <div className="chat-inline-search-controls">
+                  <small className="chat-inline-search-count">
+                    {normalizedChatSearchQuery
+                      ? `${searchPanelItems.length === 0 ? 0 : activeSearchIndex + 1} / ${searchPanelItems.length}`
+                      : "0 / 0"}
+                  </small>
+                  <button
+                    type="button"
+                    className="chat-inline-search-nav"
+                    onClick={() => goToSearchMatch("prev")}
+                    disabled={!searchPanelItems.length}
+                    title="Previous match"
+                    aria-label="Previous match"
+                  >
+                    <FiChevronUp />
+                  </button>
+                  <button
+                    type="button"
+                    className="chat-inline-search-nav"
+                    onClick={() => goToSearchMatch("next")}
+                    disabled={!searchPanelItems.length}
+                    title="Next match"
+                    aria-label="Next match"
+                  >
+                    <FiChevronDown />
+                  </button>
+                </div>
+              </div>
+            )}
             {showWallpaperPanel && (
               <div className="chat-wallpaper-panel-backdrop" onClick={() => setShowWallpaperPanel(false)}>
                 <div
@@ -1213,7 +1411,7 @@ export default function ChatMessages() {
                 </div>
               </div>
             )}
-            {activeUtilityPanel && (
+            {activeUtilityPanel && activeUtilityPanel !== "search" && (
               <div className="chat-utility-panel-backdrop" onClick={() => setActiveUtilityPanel("")}>
                 <div
                   className="chat-utility-panel"
@@ -1223,18 +1421,12 @@ export default function ChatMessages() {
                   <div className="chat-utility-panel-head">
                     <div className="chat-utility-panel-title">
                       <strong>
-                        {activeUtilityPanel === "search"
-                          ? "Search"
-                          : activeUtilityPanel === "media"
-                            ? "Media"
-                            : "Links and documents"}
+                        {activeUtilityPanel === "media" ? "Media" : "Links and documents"}
                       </strong>
                       <small>
-                        {activeUtilityPanel === "search"
-                          ? "Find messages in this chat"
-                          : activeUtilityPanel === "media"
-                            ? `${mediaPanelItems.length} shared item${mediaPanelItems.length === 1 ? "" : "s"}`
-                            : `${linkDocumentItems.length} link or document${linkDocumentItems.length === 1 ? "" : "s"}`}
+                        {activeUtilityPanel === "media"
+                          ? `${mediaPanelItems.length} shared item${mediaPanelItems.length === 1 ? "" : "s"}`
+                          : `${linkDocumentItems.length} link or document${linkDocumentItems.length === 1 ? "" : "s"}`}
                       </small>
                     </div>
                     <button
@@ -1246,66 +1438,41 @@ export default function ChatMessages() {
                     </button>
                   </div>
 
-                  {activeUtilityPanel === "search" && (
-                    <>
-                      <label className="chat-utility-search">
-                        <FiSearch />
-                        <input
-                          ref={chatSearchInputRef}
-                          type="search"
-                          value={chatSearchQuery}
-                          onChange={(e) => setChatSearchQuery(e.target.value)}
-                          placeholder="Search in this chat"
-                        />
-                      </label>
-                      <div className="chat-utility-list">
-                        {!normalizedChatSearchQuery ? (
-                          <p className="chat-utility-empty">Type a word to search this conversation.</p>
-                        ) : searchPanelItems.length === 0 ? (
-                          <p className="chat-utility-empty">No matching messages found.</p>
-                        ) : (
-                          searchPanelItems.map((message) => (
-                            <button
-                              key={String(message?.id || `${message?.createdAt || ""}_${message?.text || ""}`)}
-                              type="button"
-                              className="chat-utility-item"
-                              onClick={() => focusThreadMessage(message?.id)}
-                            >
-                              <span className="chat-utility-item-body">
-                                <strong>{trimReplyPreview(getMessagePreviewLabel(message), 90)}</strong>
-                                <small>
-                                  {new Date(message?.createdAt || Date.now()).toLocaleString([], {
-                                    day: "numeric",
-                                    month: "short",
-                                    hour: "numeric",
-                                    minute: "2-digit"
-                                  })}
-                                </small>
-                              </span>
-                              <FiChevronRight />
-                            </button>
-                          ))
-                        )}
-                      </div>
-                    </>
-                  )}
-
                   {activeUtilityPanel === "media" && (
                     <div className="chat-utility-list">
+                      <div className="chat-utility-filter-row" role="tablist" aria-label="Media type filter">
+                        {MEDIA_FILTER_OPTIONS.map((option) => (
+                          <button
+                            key={option.value}
+                            type="button"
+                            className={`chat-utility-filter-chip ${mediaFilter === option.value ? "is-active" : ""}`}
+                            onClick={() => setMediaFilter(option.value)}
+                            role="tab"
+                            aria-selected={mediaFilter === option.value}
+                          >
+                            <span>{option.label}</span>
+                            <small>{mediaFilterCounts[option.value] ?? 0}</small>
+                          </button>
+                        ))}
+                      </div>
                       {mediaPanelItems.length === 0 ? (
                         <p className="chat-utility-empty">No media shared in this chat yet.</p>
+                      ) : filteredMediaPanelItems.length === 0 ? (
+                        <p className="chat-utility-empty">No {mediaFilter} media found in this chat.</p>
                       ) : (
-                        mediaPanelItems.map((message) => {
+                        filteredMediaPanelItems.map((message) => {
                           const mediaType = String(message?.mediaType || (message?.audioUrl ? "audio" : "")).toLowerCase();
                           const mediaHref = message?.audioUrl ? toApiUrl(message.audioUrl) : resolveMediaUrl(message?.mediaUrl);
+                          const mediaTypeLabel =
+                            mediaType === "image" ? "Image" : mediaType === "video" ? "Video" : mediaType === "audio" ? "Audio" : "Media";
                           return (
                             <button
                               key={String(message?.id || mediaHref)}
                               type="button"
-                              className="chat-utility-item"
+                              className={`chat-utility-item chat-utility-media-item media-${mediaType || "other"}`}
                               onClick={() => focusThreadMessage(message?.id)}
                             >
-                              <span className="chat-utility-item-media">
+                              <span className={`chat-utility-item-media media-${mediaType || "other"}`}>
                                 {mediaType === "image" && mediaHref ? (
                                   <img src={mediaHref} alt={message?.fileName || "Media"} className="chat-utility-thumb" />
                                 ) : mediaType === "video" && mediaHref ? (
@@ -1315,19 +1482,29 @@ export default function ChatMessages() {
                                     <FiVolume2 />
                                   </span>
                                 )}
+                                <span className="chat-utility-thumb-overlay">{mediaTypeLabel}</span>
                               </span>
                               <span className="chat-utility-item-body">
-                                <strong>{trimReplyPreview(getMessagePreviewLabel(message), 84)}</strong>
-                                <small>
-                                  {new Date(message?.createdAt || Date.now()).toLocaleString([], {
-                                    day: "numeric",
-                                    month: "short",
-                                    hour: "numeric",
-                                    minute: "2-digit"
-                                  })}
-                                </small>
+                                <span className="chat-utility-item-meta">
+                                  <span className={`chat-utility-type-badge ${mediaType || "other"}`}>
+                                    {mediaType === "image" ? <FiImage /> : mediaType === "video" ? <FiVideo /> : mediaType === "audio" ? <FiMusic /> : <FiFileText />}
+                                    {mediaTypeLabel}
+                                  </span>
+                                  <small>
+                                    {new Date(message?.createdAt || Date.now()).toLocaleString([], {
+                                      day: "numeric",
+                                      month: "short",
+                                      hour: "numeric",
+                                      minute: "2-digit"
+                                    })}
+                                  </small>
+                                </span>
+                                <strong>{trimReplyPreview(getMessagePreviewLabel(message), 76)}</strong>
+                                <small className="chat-utility-item-hint">Tap to open in chat</small>
                               </span>
-                              <FiChevronRight />
+                              <span className="chat-utility-item-arrow" aria-hidden="true">
+                                <FiChevronRight />
+                              </span>
                             </button>
                           );
                         })
@@ -2114,3 +2291,4 @@ export default function ChatMessages() {
     </div>
   );
 }
+

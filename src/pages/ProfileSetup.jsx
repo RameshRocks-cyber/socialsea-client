@@ -126,7 +126,9 @@ export default function ProfileSetup() {
     setSaving(true);
     try {
       const form = new FormData();
-      if (userId) form.append("userId", userId);
+      // backend resolves current user from auth; only send userId when strictly numeric
+      const safeUserId = String(userId || "").trim();
+      if (/^\d+$/.test(safeUserId)) form.append("userId", safeUserId);
       form.append("name", name);
       form.append("bio", bio || "");
       if (photo) form.append("profilePic", photo);
@@ -147,7 +149,12 @@ export default function ProfileSetup() {
       localStorage.removeItem("socialsea_profile_cache_v1");
       navigate(buildProfilePath(savedProfile, savedId), { replace: true });
     } catch (err) {
-      const message = err?.response?.data?.message || "Failed to update profile";
+      const payload = err?.response?.data;
+      const message =
+        payload?.message ||
+        payload?.error ||
+        (typeof payload === "string" ? payload : "") ||
+        "Failed to update profile";
       const serverSuggestions = err?.response?.data?.suggestions;
       setError(String(message));
       if (Array.isArray(serverSuggestions)) setSuggestions(serverSuggestions);

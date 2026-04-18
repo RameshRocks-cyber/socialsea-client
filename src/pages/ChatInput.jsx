@@ -33,11 +33,9 @@ export default function ChatInput() {
     sendMessage,
     openAttachPicker,
     openCameraPicker,
-    speechLang,
-    setSpeechLang,
-    speechLangOptions,
     hasDraft,
     isSpeechTyping,
+    showSpeechTypingMic,
     toggleSpeechTyping,
     isRecordingAudio,
     toggleAudioRecording,
@@ -225,38 +223,28 @@ export default function ChatInput() {
       )}
 
       <div className="chat-input-row wa-input-row">
-        <button type="button" className="input-icon composer-emoji-btn" title="Emoji" onClick={toggleEmojiTray}>
-          <FiSmile />
-        </button>
-        <input
-          className="composer-input"
-          ref={composerInputRef}
-          type="text"
-          placeholder="Message..."
-          value={inputText}
-          onChange={(e) => setInputText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") sendMessage();
-          }}
-        />
-        <button type="button" className="input-icon composer-attach-btn" title="Attach" onClick={openAttachPicker}>
-          <FiPaperclip />
-        </button>
-        <button type="button" className="input-icon composer-camera-btn" title="Camera" onClick={openCameraPicker}>
-          <FiCamera />
-        </button>
-        <select
-          className="speech-lang-select composer-lang-select"
-          value={speechLang}
-          onChange={(e) => setSpeechLang(e.target.value)}
-          title="Speech language"
-        >
-          {speechLangOptions.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
+        <div className="composer-input-shell">
+          <button type="button" className="input-icon composer-emoji-btn" title="Emoji" onClick={toggleEmojiTray}>
+            <FiSmile />
+          </button>
+          <input
+            className="composer-input"
+            ref={composerInputRef}
+            type="text"
+            placeholder="Message..."
+            value={inputText}
+            onChange={(e) => setInputText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") sendMessage();
+            }}
+          />
+          <button type="button" className="input-icon composer-attach-btn" title="Attach" onClick={openAttachPicker}>
+            <FiPaperclip />
+          </button>
+          <button type="button" className="input-icon composer-camera-btn" title="Camera" onClick={openCameraPicker}>
+            <FiCamera />
+          </button>
+        </div>
         {hasDraft ? (
           <button
             type="button"
@@ -267,23 +255,25 @@ export default function ChatInput() {
             <FiSend />
           </button>
         ) : (
-          <div className="composer-voice-actions">
+          <div className="composer-actions-stack">
             <button
               type="button"
-              className={`mic-fab composer-send-btn ${isSpeechTyping ? "active" : ""}`}
-              title={isSpeechTyping ? "Stop speech typing" : "Mic: speak to type"}
-              onClick={toggleSpeechTyping}
-            >
-              {isSpeechTyping ? <FiMicOff /> : <FiMic />}
-            </button>
-            <button
-              type="button"
-              className={`mic-fab composer-send-btn ${isRecordingAudio ? "active" : ""}`}
+              className={`mic-fab composer-voice-note-btn ${isRecordingAudio ? "active" : ""}`}
               title={isRecordingAudio ? "Stop and send voice note" : "Speaker: record voice note"}
               onClick={toggleAudioRecording}
             >
               {isRecordingAudio ? <FiMicOff /> : <FiVolume2 />}
             </button>
+            {showSpeechTypingMic && (
+              <button
+                type="button"
+                className={`mic-fab composer-speech-btn ${isSpeechTyping ? "active" : ""}`}
+                title={isSpeechTyping ? "Stop speech typing" : "Mic: speak to type"}
+                onClick={toggleSpeechTyping}
+              >
+                {isSpeechTyping ? <FiMicOff /> : <FiMic />}
+              </button>
+            )}
           </div>
         )}
         <input
@@ -312,4 +302,3 @@ export default function ChatInput() {
     </>
   );
 }
-

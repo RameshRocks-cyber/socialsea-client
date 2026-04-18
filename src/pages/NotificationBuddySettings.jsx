@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import api from "../api/axios";
 import {
   getNotificationBuddyLabel,
   normalizeNotificationBuddyCharacter,
@@ -7,6 +8,35 @@ import {
 } from "../components/notificationBuddyConfig";
 import { SETTINGS_KEY } from "./soundPrefs";
 import "./Settings.css";
+
+const normalizeVoiceGender = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "male" || normalized === "female" || normalized === "auto") return normalized;
+  if (normalized === "m") return "male";
+  if (normalized === "f") return "female";
+  return "auto";
+};
+
+const normalizeLangCode = (value) => String(value || "").trim().replace(/_/g, "-");
+
+const pickGenderVoice = (voices, gender, targetLang = "en-US") => {
+  const voiceGender = normalizeVoiceGender(gender);
+  if (voiceGender === "auto") return null;
+  const list = Array.isArray(voices) ? voices : [];
+  if (!list.length) return null;
+
+  const target = normalizeLangCode(targetLang);
+  const base = target.split("-")[0]?.toLowerCase();
+  const exactLang = list.filter((v) => normalizeLangCode(v?.lang).toLowerCase() === target.toLowerCase());
+  const baseLang = list.filter((v) => normalizeLangCode(v?.lang).toLowerCase().startsWith(`${base}-`));
+  const langVoices = exactLang.length ? exactLang : (baseLang.length ? baseLang : list);
+
+  const femaleHints = ["female", "woman", "zira", "susan", "samantha", "heera", "kalpana"];
+  const maleHints = ["male", "man", "david", "mark", "alex", "ravi", "hemant"];
+  const hints = voiceGender === "female" ? femaleHints : maleHints;
+  const match = langVoices.find((v) => hints.some((h) => String(v?.name || "").toLowerCase().includes(h)));
+  return match || null;
+};
 
 const VOICE_RATE_OPTIONS = [
   { value: 0.85, label: "Slow" },
@@ -32,6 +62,7 @@ const DEFAULT_PREFS = {
   notificationBuddyHideWhenEmpty: false,
   notificationBuddySpeed: "medium",
   notificationBuddyVoiceEnabled: true,
+  notificationBuddyVoiceGender: "auto",
   notificationBuddyVoiceName: "",
   notificationBuddyVoiceRate: 1,
   notificationBuddyVoicePitch: 1
@@ -44,7 +75,8 @@ const readPrefs = () => {
     const merged = { ...DEFAULT_PREFS, ...(parsed || {}) };
     return {
       ...merged,
-      notificationBuddyCharacter: normalizeNotificationBuddyCharacter(merged.notificationBuddyCharacter)
+      notificationBuddyCharacter: normalizeNotificationBuddyCharacter(merged.notificationBuddyCharacter),
+      notificationBuddyVoiceGender: normalizeVoiceGender(merged.notificationBuddyVoiceGender)
     };
   } catch {
     return { ...DEFAULT_PREFS };
@@ -61,6 +93,9 @@ const writePrefs = (next) => {
       ...(next || {}),
       notificationBuddyCharacter: normalizeNotificationBuddyCharacter(
         next?.notificationBuddyCharacter ?? base?.notificationBuddyCharacter
+      ),
+      notificationBuddyVoiceGender: normalizeVoiceGender(
+        next?.notificationBuddyVoiceGender ?? base?.notificationBuddyVoiceGender
       )
     };
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(merged));
@@ -125,9 +160,10 @@ export default function NotificationBuddySettings() {
       synth.cancel();
       const text = `${displayName}, you have a new notification.`;
       const utter = new SpeechSynthesisUtterance(text);
-      const preferred = voiceOptions.find(
+      const preferredByName = voiceOptions.find(
         (voice) => voice.voiceURI === prefs.notificationBuddyVoiceName || voice.name === prefs.notificationBuddyVoiceName
       );
+      const preferred = preferredByName || pickGenderVoice(voiceOptions, prefs.notificationBuddyVoiceGender, "en-US");
       if (preferred) utter.voice = preferred;
       utter.rate = Number(prefs.notificationBuddyVoiceRate) || 1;
       utter.pitch = Number(prefs.notificationBuddyVoicePitch) || 1;
@@ -138,8 +174,16 @@ export default function NotificationBuddySettings() {
     }
   };
 
+  const setVoiceGender = (nextGender) => {
+    const normalized = normalizeVoiceGender(nextGender);
+    setPrefs((prev) => ({ ...prev, notificationBuddyVoiceGender: normalized }));
+    if (normalized === "male" || normalized === "female") {
+      api.post("/api/profile/me/notification-voice", { notificationVoice: normalized }).catch(() => {});
+    }
+  };
+
   return (
-    <div className="settings-page">
+    <div className="settings-page settings-notification-buddy-page">
       <div className="settings-shell">
         <header className="settings-top">
           <button type="button" className="settings-back" onClick={() => navigate("/settings")}>
@@ -251,6 +295,31 @@ export default function NotificationBuddySettings() {
               Voice Off
             </button>
           </div>
+
+          <div className="settings-select-grid">
+            <button
+              type="button"
+              className={prefs.notificationBuddyVoiceGender === "male" ? "active" : ""}
+              onClick={() => setVoiceGender("male")}
+            >
+              Male
+            </button>
+            <button
+              type="button"
+              className={prefs.notificationBuddyVoiceGender === "female" ? "active" : ""}
+              onClick={() => setVoiceGender("female")}
+            >
+              Female
+            </button>
+            <button
+              type="button"
+              className={prefs.notificationBuddyVoiceGender === "auto" ? "active" : ""}
+              onClick={() => setVoiceGender("auto")}
+            >
+              Auto
+            </button>
+          </div>
+          <p className="settings-note">Gender is used only when Voice is set to Auto (default).</p>
 
           <div className="settings-select-grid">
             <label className="settings-voice-select">

@@ -184,8 +184,9 @@ export const verifyOtp = (email, otp) => {
   return run();
 };
 
-export const registerWithPassword = ({ username, email, password, otp }) => {
+export const registerWithPassword = ({ username, email, phoneNumber, password, otp }) => {
   const body = { username, email, password };
+  if (phoneNumber && String(phoneNumber).trim()) body.phoneNumber = String(phoneNumber).trim();
   if (otp && String(otp).trim()) body.otp = String(otp).trim();
   return api.post("/api/auth/register", body);
 };

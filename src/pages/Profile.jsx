@@ -354,8 +354,16 @@ export default function Profile() {
   const { username } = useParams();
   const myUserId = sessionStorage.getItem("userId") || localStorage.getItem("userId");
   const myEmail = sessionStorage.getItem("email") || localStorage.getItem("email");
-  const myName = sessionStorage.getItem("name") || localStorage.getItem("name");
   const myUsername = sessionStorage.getItem("username") || localStorage.getItem("username");
+  const normalizedRouteUsername = String(username || "").trim().toLowerCase();
+  const normalizedMyUserId = String(myUserId || "").trim().toLowerCase();
+  const normalizedMyEmail = String(myEmail || "").trim().toLowerCase();
+  const normalizedMyUsername = String(myUsername || "").trim().toLowerCase();
+  const isOwnRouteRequest =
+    normalizedRouteUsername === "me" ||
+    (normalizedMyUserId && normalizedRouteUsername === normalizedMyUserId) ||
+    (normalizedMyUsername && normalizedRouteUsername === normalizedMyUsername) ||
+    (normalizedMyEmail && normalizedRouteUsername === normalizedMyEmail);
   const navigate = useNavigate();
   const [profile, setProfile] = useState(null);
   const [posts, setPosts] = useState([]);
@@ -368,6 +376,7 @@ export default function Profile() {
   const [requested, setRequested] = useState(false);
   const [followError, setFollowError] = useState("");
   const [postActionError, setPostActionError] = useState("");
+  const [coverImageBroken, setCoverImageBroken] = useState(false);
   const [deletingPostIds, setDeletingPostIds] = useState({});
   const [deleteRevealPostId, setDeleteRevealPostId] = useState(null);
   const [videoMetaByPost, setVideoMetaByPost] = useState({});
@@ -384,15 +393,11 @@ export default function Profile() {
   const deleteRevealHideTimerRef = useRef(null);
   const storyMediaSetRef = useRef(new Set());
   const cleanupStoryPostsRef = useRef(false);
-  const profileRouteKey = getProfileIdentifier(profile, username, myUsername, myName, myEmail, myUserId) || "me";
+  const profileRouteKey = getProfileIdentifier(profile, username) || String(username || "me");
 
   const isOwnProfile =
-    username === "me" ||
-    Number(username) === Number(myUserId) ||
-    String(username || "").trim().toLowerCase() === String(myUsername || "").trim().toLowerCase() ||
-    String(username || "").trim().toLowerCase() === String(myEmail || "").trim().toLowerCase() ||
-    String(username || "").trim().toLowerCase() === String(myName || "").trim().toLowerCase() ||
-    profile?.id === Number(myUserId);
+    isOwnRouteRequest ||
+    String(profile?.id || "").trim().toLowerCase() === normalizedMyUserId;
 
   useEffect(() => {
     const handleStorage = (event) => {
@@ -606,7 +611,6 @@ export default function Profile() {
         const { base, res, data } = payload;
         if (cancelled) return null;
         setProfile(data);
-        persistProfileIdentity(data);
 
         const followKeys = [data?.id, data?.email, data?.username, username];
         const extracted = extractFollowingFlag(res, data);
@@ -638,6 +642,9 @@ export default function Profile() {
 
         const ownProfile =
           username === "me" || Number(username) === Number(myUserId) || data?.id === Number(myUserId);
+        if (ownProfile) {
+          persistProfileIdentity(data);
+        }
 
         if (extracted === null && !ownProfile && myUserId) {
           const viewerCandidates = [myUserId, myEmail].filter(Boolean);
@@ -677,7 +684,7 @@ export default function Profile() {
       }
       // Cached/stale numeric profile ids can break after backend/db switch.
       // Fallback to current logged-in profile so app remains usable.
-      if (isNotFoundRequestError(lastError) && String(username || "").toLowerCase() !== "me") {
+      if (isNotFoundRequestError(lastError) && isOwnRouteRequest && String(username || "").toLowerCase() !== "me") {
         try {
           const meRes = await requestWithTimeout(
             "/api/profile/me",
@@ -847,7 +854,7 @@ export default function Profile() {
     return () => {
       cancelled = true;
     };
-  }, [username, navigate, myUserId, myEmail, myUsername, myName]);
+  }, [username, navigate, myUserId, myEmail, myUsername]);
 
   const handleFollow = async () => {
     if (loading) return;
@@ -952,6 +959,19 @@ export default function Profile() {
   };
   const resolveMediaUrl = (url) => {
     if (!url) return "";
+    const raw = String(url).trim();
+    if (!raw) return "";
+    if (
+      raw.startsWith("http://") ||
+      raw.startsWith("https://") ||
+      raw.startsWith("blob:") ||
+      raw.startsWith("data:")
+    ) {
+      return raw;
+    }
+    if (raw.startsWith("/default-avatar") || raw.startsWith("/assets/")) {
+      return raw;
+    }
     return toApiUrl(url);
   };
 
@@ -1070,6 +1090,9 @@ export default function Profile() {
     coverRaw && coverBust
       ? `${coverResolved}${coverResolved.includes("?") ? "&" : "?"}v=${encodeURIComponent(coverBust)}`
       : coverResolved;
+  useEffect(() => {
+    setCoverImageBroken(false);
+  }, [coverUrl]);
 
   const openCreateSheet = () => {
     setCreateSheetOpen(true);
@@ -1148,7 +1171,12 @@ export default function Profile() {
             <div className="profile-sidebar">
   <section className="profile-hero">
               <div className="profile-cover">
-                <img src={coverUrl} alt="Profile cover" className="profile-cover-img" />
+                <img
+                  src={coverImageBroken ? "/default-avatar.png" : coverUrl}
+                  alt="Profile cover"
+                  className="profile-cover-img"
+                  onError={() => setCoverImageBroken(true)}
+                />
                 <div className="profile-avatar-wrap">
                   <img src={profile.profilePicUrl || "/default-avatar.png"} alt="Profile" className="profile-avatar" />
                 </div>

@@ -46,12 +46,11 @@ const getStoryLabel = (story) => {
   return story?.sourceType === "reel-share" ? "Shared reel" : "Story";
 };
 
-const StorySection = ({ title, subtitle, emptyText, items, onOpen }) => (
+const StorySection = ({ title, emptyText, items, onOpen }) => (
   <section className="stories-section">
     <div className="stories-section-head">
       <div>
         <h3>{title}</h3>
-        <p>{subtitle}</p>
       </div>
       <span className="stories-count">{items.length}</span>
     </div>
@@ -190,7 +189,6 @@ export default function StoriesPage() {
         </button>
         <div className="stories-title-wrap">
           <h2>My Stories</h2>
-          <p>Active stories, expired stories, and shared reels in one place.</p>
         </div>
         <button type="button" className="stories-create" onClick={() => navigate("/story/create")}>
           + Create
@@ -217,7 +215,6 @@ export default function StoriesPage() {
 
       <StorySection
         title="Active Stories"
-        subtitle="Stories that are still live right now."
         emptyText="No active stories yet."
         items={activeStories}
         onOpen={setActiveStory}
@@ -225,7 +222,6 @@ export default function StoriesPage() {
 
       <StorySection
         title="Shared Reels"
-        subtitle="Reels you shared are saved here even after the story duration ends."
         emptyText="No shared reels yet."
         items={sharedReels}
         onOpen={setActiveStory}
@@ -233,7 +229,6 @@ export default function StoriesPage() {
 
       <StorySection
         title="Past Stories"
-        subtitle="Expired stories stay here as your story archive."
         emptyText="No past stories yet."
         items={pastStories}
         onOpen={setActiveStory}

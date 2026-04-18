@@ -267,13 +267,14 @@ const looksLikeHtmlPayload = (value) =>
 const requestLivekitToken = async ({ room, mode, identity }) => {
   const bases = emergencyBaseCandidates();
   let lastErr = null;
-  for (const baseURL of bases) {
+  const candidates = [null, ...bases];
+  for (const baseURL of candidates) {
     try {
       const res = await api.request({
         method: "POST",
         url: "/api/livekit/token",
         data: { room, mode, identity },
-        baseURL,
+        ...(baseURL ? { baseURL } : {}),
         timeout: 9000,
         allowCrossOriginAuth: true,
         suppressAuthRedirect: true
@@ -459,6 +460,7 @@ export default function SOSPage() {
   const [backendStatus, setBackendStatus] = useState("Not sent yet");
   const livekitEnabled = Boolean(LIVEKIT_URL);
   const [sosLivekitStatus, setSosLivekitStatus] = useState(livekitEnabled ? "idle" : "disabled");
+  const [sosLivekitError, setSosLivekitError] = useState("");
   const [liveFrameUrl, setLiveFrameUrl] = useState("");
   const [liveStreamAvailable, setLiveStreamAvailable] = useState(false);
   const [cameraFacing, setCameraFacing] = useState("user");
@@ -761,6 +763,9 @@ export default function SOSPage() {
     }
     setLiveStreamAvailable(false);
     setSosLivekitStatus(nextStatus);
+    if (nextStatus !== "error") {
+      setSosLivekitError("");
+    }
   };
 
   const publishSosSignal = (packet) => {
@@ -2059,6 +2064,7 @@ export default function SOSPage() {
         }
         sosLivekitConnectingRef.current = true;
         setSosLivekitStatus("connecting");
+        setSosLivekitError("");
         const roomId = `sos_${activeId}`;
         const token = await requestLivekitToken({
           room: roomId,
@@ -2085,7 +2091,13 @@ export default function SOSPage() {
           throw firstFailure?.reason || new Error("publish-failed");
         }
         setSosLivekitStatus("connected");
-      } catch {
+      } catch (err) {
+        const apiMsg =
+          err?.response?.data?.message ||
+          err?.response?.data?.error ||
+          err?.message ||
+          "Failed to connect";
+        setSosLivekitError(String(apiMsg));
         stopSosLivekit("error");
       } finally {
         sosLivekitConnectingRef.current = false;
@@ -2115,6 +2127,7 @@ export default function SOSPage() {
         }
         sosLivekitConnectingRef.current = true;
         setSosLivekitStatus("connecting");
+        setSosLivekitError("");
         const roomId = `sos_${routeId}`;
         const token = await requestLivekitToken({
           room: roomId,
@@ -2155,7 +2168,13 @@ export default function SOSPage() {
           return;
         }
         sosLivekitRoomRef.current = room;
-      } catch {
+      } catch (err) {
+        const apiMsg =
+          err?.response?.data?.message ||
+          err?.response?.data?.error ||
+          err?.message ||
+          "Failed to connect";
+        setSosLivekitError(String(apiMsg));
         stopSosLivekit("error");
       } finally {
         sosLivekitConnectingRef.current = false;
@@ -2584,7 +2603,10 @@ export default function SOSPage() {
           <p>Radius: {RADIUS_METERS / 1000} km</p>
           <p>Backend: {backendStatus}</p>
           <p>Signal: {sosSocketStatus}</p>
-          <p>LiveKit: {sosLivekitStatus}</p>
+          <p>
+            LiveKit: {sosLivekitStatus}
+            {sosLivekitError ? ` (${sosLivekitError})` : ""}
+          </p>
         </div>
 
         <div className="sos-preview-card">

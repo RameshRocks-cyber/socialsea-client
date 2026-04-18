@@ -821,9 +821,11 @@ export default function StudyMode() {
   const [uploadedFiles, setUploadedFiles] = useState([]);
   const [uploading, setUploading] = useState(false);
   const subjectScrollRef = useRef(null);
-  const realtimeRef = useRef({ pc: null, dc: null, stream: null, audioEl: null });
-  const assistantDraftRef = useRef("");
-  const transcriptRef = useRef("");
+  const speechRecRef = useRef(null);
+  const speechRecActiveRef = useRef(false);
+  const assistantHistoryRef = useRef([]);
+  const assistantRequestIdRef = useRef(0);
+  const voiceEnabledRef = useRef(false);
   const pendingActionRef = useRef(null);
 
   const searchMeta = useMemo(() => resolveSearchMeta(studyQuery), [studyQuery]);
@@ -873,288 +875,237 @@ export default function StudyMode() {
     setExamResults({});
   }, [selectedSubject]);
 
-  const disconnectRealtime = () => {
-    const current = realtimeRef.current;
-    if (current?.dc) {
-      try {
-        current.dc.close();
-      } catch {
-        // ignore close errors
-      }
+  useEffect(() => {
+    voiceEnabledRef.current = voiceEnabled;
+  }, [voiceEnabled]);
+
+  useEffect(() => {
+    assistantHistoryRef.current = assistantHistory;
+  }, [assistantHistory]);
+
+  const stopVoiceInput = () => {
+    speechRecActiveRef.current = false;
+    const rec = speechRecRef.current;
+    if (!rec) {
+      setLiveTranscript("");
+      return;
     }
-    if (current?.pc) {
-      try {
-        current.pc.close();
-      } catch {
-        // ignore close errors
-      }
+    try {
+      rec.onresult = null;
+      rec.onerror = null;
+      rec.onend = null;
+    } catch {
+      // ignore handler cleanup failures
     }
-    if (current?.stream) {
-      current.stream.getTracks().forEach((track) => track.stop());
+    try {
+      rec.stop();
+    } catch {
+      // ignore stop failures
     }
-    realtimeRef.current = { pc: null, dc: null, stream: null, audioEl: null };
-    setAssistantStatus("offline");
+    setLiveTranscript("");
   };
 
-  useEffect(() => () => disconnectRealtime(), []);
+  useEffect(() => () => stopVoiceInput(), []);
 
-  const setMicEnabled = (enabled) => {
-    const stream = realtimeRef.current.stream;
-    if (!stream) return;
-    stream.getAudioTracks().forEach((track) => {
-      track.enabled = Boolean(enabled);
-    });
+  const cancelAssistantSpeech = () => {
+    if (typeof window === "undefined") return;
+    const synth = window.speechSynthesis;
+    if (!synth) return;
+    try {
+      synth.cancel();
+    } catch {
+      // ignore synthesis cancel errors
+    }
   };
 
-  const resetAssistantDraft = () => {
-    assistantDraftRef.current = "";
+  const addAssistantHistory = (entry) => {
+    assistantHistoryRef.current = [...assistantHistoryRef.current, entry];
+    setAssistantHistory(assistantHistoryRef.current);
+  };
+
+  const appendToNotes = (text) => {
+    const clean = String(text || "").trim();
+    if (!clean) return;
+    setAssistantNotes((prev) => (prev ? `${prev}\n${clean}` : clean));
+  };
+
+  const finalizeAssistantText = (finalText) => {
+    const clean = String(finalText || "").trim();
     setAssistantDraft("");
-  };
-
-  const appendAssistantDraft = (delta) => {
-    if (!delta) return;
-    assistantDraftRef.current += delta;
-    setAssistantDraft(assistantDraftRef.current);
-  };
-
-  const finalizeAssistantDraft = () => {
-    const finalText = assistantDraftRef.current.trim();
-    assistantDraftRef.current = "";
-    setAssistantDraft("");
-    if (!finalText) {
+    if (!clean) {
       pendingActionRef.current = null;
       return;
     }
-    setAssistantHistory((prev) => [...prev, { role: "assistant", text: finalText }]);
+    addAssistantHistory({ role: "assistant", text: clean });
     if (pendingActionRef.current === "fix_dates" || pendingActionRef.current === "summary") {
-      setAssistantNotes(finalText);
+      setAssistantNotes(clean);
     }
     pendingActionRef.current = null;
   };
 
-  const appendTranscriptDelta = (delta) => {
-    if (!delta) return;
-    transcriptRef.current += delta;
-    setLiveTranscript(transcriptRef.current);
-  };
-
-  const commitTranscript = (finalText) => {
-    const text = (finalText || transcriptRef.current || "").trim();
-    transcriptRef.current = "";
-    setLiveTranscript("");
-    if (!text) return;
-    setAssistantNotes((prev) => (prev ? `${prev}\n${text}` : text));
-  };
-
-  const sendRealtimeEvent = (payload) => {
-    const dc = realtimeRef.current.dc;
-    if (!dc || dc.readyState !== "open") return;
-    dc.send(JSON.stringify(payload));
-  };
-
-  const sendTextMessage = (text, outputModalities) => {
-    const message = String(text || "").trim();
-    if (!message) return;
-    resetAssistantDraft();
-    setAssistantHistory((prev) => [...prev, { role: "user", text: message }]);
-    sendRealtimeEvent({
-      type: "conversation.item.create",
-      item: {
-        type: "message",
-        role: "user",
-        content: [{ type: "input_text", text: message }]
-      }
-    });
-    if (outputModalities) {
-      sendRealtimeEvent({ type: "response.create", response: { output_modalities: outputModalities } });
-    } else {
-      sendRealtimeEvent({ type: "response.create" });
-    }
-  };
-
-  const handleRealtimeMessage = (event) => {
-    if (!event?.data) return;
-    let payload;
-    try {
-      payload = JSON.parse(event.data);
-    } catch {
-      return;
-    }
-    if (!payload?.type) return;
-    if (payload.type === "error") {
-      setAssistantError(payload?.error?.message || "Voice assistant error");
-      return;
-    }
-    if (payload.type === "conversation.item.input_audio_transcription.delta") {
-      appendTranscriptDelta(payload.delta);
-      return;
-    }
-    if (payload.type === "conversation.item.input_audio_transcription.completed") {
-      commitTranscript(payload.transcript);
-      return;
-    }
-    if (payload.type === "response.output_text.delta") {
-      appendAssistantDraft(payload.delta);
-      return;
-    }
-    if (payload.type === "response.output_audio_transcript.delta") {
-      appendAssistantDraft(payload.delta);
-      return;
-    }
-    if (payload.type === "response.output_text.done" || payload.type === "response.output_audio_transcript.done") {
-      finalizeAssistantDraft();
-      return;
-    }
-    if (payload.type === "response.done") {
-      finalizeAssistantDraft();
-    }
-  };
-
-  const sendSessionUpdate = (outputModalities) => {
-    sendRealtimeEvent({
-      type: "session.update",
-      session: {
-        output_modalities: outputModalities || ["audio"],
-        audio: {
-          output: { voice: "alloy" },
-          input: {
-            transcription: { model: "gpt-4o-mini-transcribe" },
-            turn_detection: {
-              type: "server_vad",
-              create_response: true,
-              interrupt_response: true
-            }
-          }
-        }
-      }
-    });
-  };
-
-  const fetchRealtimeToken = async () => {
+  const fetchGeminiReply = async (messages) => {
     const topic = displayQuery || resolvedQuery || studyQuery || "";
-    const localBase = isLocalHost() ? getLocalApiBase() : null;
+    const baseURL = isLocalHost() ? getLocalApiBase() : undefined;
     try {
       const response = await api.post(
-        "/api/public/study-assistant/realtime-token",
+        "/api/public/study-assistant/gemini",
         {
           assistantName,
           subject: effectiveSubject,
-          topic
+          topic,
+          messages: (messages || []).slice(-20)
         },
-        { skipAuth: true, baseURL: localBase || undefined }
+        { skipAuth: true, baseURL }
       );
-      return response?.data?.value || response?.data?.client_secret?.value || "";
+      return String(response?.data?.text || "").trim();
     } catch (error) {
-      if (isLocalHost() && error?.response?.status === 404 && !localBase) {
-        const response = await api.post(
-          "/api/public/study-assistant/realtime-token",
-          {
-            assistantName,
-            subject: effectiveSubject,
-            topic
-          },
-          { baseURL: getLocalApiBase(), skipAuth: true }
-        );
-        return response?.data?.value || response?.data?.client_secret?.value || "";
-      }
       throw new Error(describeAxiosError(error));
     }
   };
 
-  const ensureRealtimeConnected = async (enableMic) => {
-    if (realtimeRef.current.pc) {
-      if (enableMic != null) setMicEnabled(enableMic);
-      return;
-    }
-    setAssistantError("");
-    setAssistantStatus("connecting");
-    let token = "";
+  const speakAssistantText = (text) => {
+    if (typeof window === "undefined") return;
+    const synth = window.speechSynthesis;
+    if (!synth) return;
+
+    stopVoiceInput();
+    cancelAssistantSpeech();
+
+    const utterance = new SpeechSynthesisUtterance(String(text || ""));
+    utterance.rate = 1;
+    utterance.pitch = 1;
+    utterance.lang = "en-US";
+    utterance.onend = () => {
+      if (voiceEnabledRef.current) startVoiceInput();
+    };
+    utterance.onerror = () => {
+      if (voiceEnabledRef.current) startVoiceInput();
+    };
+
     try {
-      token = await fetchRealtimeToken();
-    } catch (err) {
-      setAssistantError(err?.message || "Could not create a voice session.");
-      setAssistantStatus("offline");
-      return;
-    }
-    if (!token) {
-      setAssistantError("Realtime token was empty.");
-      setAssistantStatus("offline");
-      return;
-    }
-    try {
-      const pc = new RTCPeerConnection();
-      const audioEl = new Audio();
-      audioEl.autoplay = true;
-
-      pc.ontrack = (event) => {
-        const stream = event.streams?.[0];
-        if (stream) audioEl.srcObject = stream;
-      };
-
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      stream.getAudioTracks().forEach((track) => {
-        track.enabled = Boolean(enableMic);
-        pc.addTrack(track, stream);
-      });
-
-      const dc = pc.createDataChannel("oai-events");
-      const initialModalities = enableMic ? ["audio"] : ["text"];
-      dc.onmessage = handleRealtimeMessage;
-      dc.onopen = () => {
-        sendSessionUpdate(initialModalities);
-      };
-
-      pc.onconnectionstatechange = () => {
-        if (pc.connectionState === "connected") {
-          setAssistantStatus("ready");
-        } else if (pc.connectionState === "failed") {
-          setAssistantStatus("offline");
-        }
-      };
-
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-
-      const sdpResponse = await fetch("https://api.openai.com/v1/realtime/calls", {
-        method: "POST",
-        body: offer.sdp,
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/sdp"
-        }
-      });
-
-      if (!sdpResponse.ok) {
-        throw new Error("OpenAI realtime call failed");
-      }
-
-      const answerSdp = await sdpResponse.text();
-      await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
-
-      realtimeRef.current = { pc, dc, stream, audioEl };
-      setAssistantStatus("ready");
-    } catch (err) {
-      disconnectRealtime();
-      setAssistantError("Unable to connect the voice assistant.");
-      setAssistantStatus("offline");
+      synth.speak(utterance);
+    } catch {
+      // ignore speak failures
     }
   };
 
-  const handleVoiceToggle = async () => {
+  const sendTextMessage = async (text, options = {}) => {
+    const message = String(text || "").trim();
+    if (!message) return;
+
+    setAssistantError("");
+    setAssistantStatus("connecting");
+    setAssistantDraft("Thinking...");
+
+    const requestId = (assistantRequestIdRef.current || 0) + 1;
+    assistantRequestIdRef.current = requestId;
+
+    const nextMessages = [...assistantHistoryRef.current, { role: "user", text: message }];
+    addAssistantHistory({ role: "user", text: message });
+
+    try {
+      const reply = await fetchGeminiReply(nextMessages);
+      if (assistantRequestIdRef.current !== requestId) return;
+
+      setAssistantStatus("ready");
+      finalizeAssistantText(reply);
+      if (options?.speak && voiceEnabledRef.current) {
+        speakAssistantText(reply);
+      }
+    } catch (err) {
+      if (assistantRequestIdRef.current !== requestId) return;
+      setAssistantDraft("");
+      setAssistantError(err?.message || "Assistant error");
+      setAssistantStatus("offline");
+      pendingActionRef.current = null;
+    }
+  };
+
+  const startVoiceInput = () => {
+    if (typeof window === "undefined") return;
+    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!Recognition) {
+      setAssistantError("Voice input is not supported in this browser.");
+      setAssistantStatus("offline");
+      setVoiceEnabled(false);
+      return;
+    }
+
+    let rec = speechRecRef.current;
+    if (!rec) {
+      rec = new Recognition();
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.lang = "en-US";
+      speechRecRef.current = rec;
+    }
+
+    speechRecActiveRef.current = true;
+    setLiveTranscript("");
+
+    rec.onresult = (event) => {
+      if (!event?.results) return;
+      let interim = "";
+      let finalText = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results[i];
+        const text = result?.[0]?.transcript || "";
+        if (result?.isFinal) {
+          finalText += text;
+        } else {
+          interim += text;
+        }
+      }
+
+      const live = (finalText || interim).trim();
+      if (live) setLiveTranscript(live);
+
+      const cleanFinal = finalText.trim();
+      if (cleanFinal) {
+        setLiveTranscript("");
+        appendToNotes(cleanFinal);
+        sendTextMessage(cleanFinal, { speak: true });
+      }
+    };
+
+    rec.onerror = () => {
+      setAssistantError("Voice input failed. Please try again.");
+    };
+
+    rec.onend = () => {
+      if (!speechRecActiveRef.current) return;
+      if (!voiceEnabledRef.current) return;
+      try {
+        rec.start();
+      } catch {
+        // ignore restart failures
+      }
+    };
+
+    try {
+      rec.start();
+      setAssistantStatus("ready");
+    } catch {
+      // ignore start failures
+    }
+  };
+
+  const handleVoiceToggle = () => {
     const next = !voiceEnabled;
     setVoiceEnabled(next);
-    await ensureRealtimeConnected(next);
-    setMicEnabled(next);
-    if (realtimeRef.current.dc?.readyState === "open") {
-      sendSessionUpdate(next ? ["audio"] : ["text"]);
+    setAssistantError("");
+    if (next) {
+      startVoiceInput();
+    } else {
+      stopVoiceInput();
+      cancelAssistantSpeech();
     }
   };
 
   const handleSendChat = async () => {
     const message = chatInput.trim();
     if (!message) return;
-    await ensureRealtimeConnected(false);
-    sendTextMessage(message, voiceEnabled ? ["audio"] : ["text"]);
+    await sendTextMessage(message, { speak: voiceEnabled });
     setChatInput("");
   };
 
@@ -1172,9 +1123,36 @@ export default function StudyMode() {
       extraInstruction: ""
     });
     pendingActionRef.current = actionKey;
-    await ensureRealtimeConnected(false);
-    sendTextMessage(prompt, ["text"]);
+    await sendTextMessage(prompt, { speak: false });
   };
+
+  useEffect(() => {
+    let cancelled = false;
+    const baseURL = isLocalHost() ? getLocalApiBase() : undefined;
+    const loadStatus = async () => {
+      setAssistantStatus("connecting");
+      setAssistantError("");
+      try {
+        const response = await api.get("/api/public/study-assistant/gemini/status", { skipAuth: true, baseURL });
+        const configured = Boolean(response?.data?.configured);
+        if (cancelled) return;
+        if (configured) {
+          setAssistantStatus("ready");
+        } else {
+          setAssistantStatus("offline");
+          setAssistantError("Gemini API key is not configured on the server.");
+        }
+      } catch (error) {
+        if (cancelled) return;
+        setAssistantStatus("offline");
+        setAssistantError(describeAxiosError(error));
+      }
+    };
+    loadStatus();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleFilesSelected = async (event) => {
     const files = Array.from(event?.target?.files || []);

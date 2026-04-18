@@ -75,6 +75,35 @@ const CHARACTER_SHEETS = {
 
 const normalizeKey = (value) => String(value || "").trim().toLowerCase();
 
+const normalizeVoiceGender = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "male" || normalized === "female" || normalized === "auto") return normalized;
+  if (normalized === "m") return "male";
+  if (normalized === "f") return "female";
+  return "auto";
+};
+
+const normalizeLangCode = (value) => String(value || "").trim().replace(/_/g, "-");
+
+const pickGenderVoice = (voices, gender, targetLang = "en-US") => {
+  const voiceGender = normalizeVoiceGender(gender);
+  if (voiceGender === "auto") return null;
+  const list = Array.isArray(voices) ? voices : [];
+  if (!list.length) return null;
+
+  const target = normalizeLangCode(targetLang);
+  const base = target.split("-")[0]?.toLowerCase();
+  const exactLang = list.filter((v) => normalizeLangCode(v?.lang).toLowerCase() === target.toLowerCase());
+  const baseLang = list.filter((v) => normalizeLangCode(v?.lang).toLowerCase().startsWith(`${base}-`));
+  const langVoices = exactLang.length ? exactLang : (baseLang.length ? baseLang : list);
+
+  const femaleHints = ["female", "woman", "zira", "susan", "samantha", "heera", "kalpana"];
+  const maleHints = ["male", "man", "david", "mark", "alex", "ravi", "hemant"];
+  const hints = voiceGender === "female" ? femaleHints : maleHints;
+  const match = langVoices.find((v) => hints.some((h) => String(v?.name || "").toLowerCase().includes(h)));
+  return match || null;
+};
+
 const mapFollowRequestToNotification = (request) => {
   const sender = request?.sender || {};
   const senderName = sender?.name || sender?.email || "User";
@@ -174,6 +203,7 @@ const writeStoredCharacter = (value) => {
 };
 
 const clampValue = (value, min, max) => Math.min(Math.max(value, min), max);
+const isSyntheticPointerEvent = (event) => Boolean(event && event.isTrusted === false);
 
 const getPerimeterLength = (bounds) => {
   const width = Math.max(0, bounds.maxX - bounds.minX);
@@ -324,16 +354,18 @@ const readVoicePrefs = () => {
         ? parsed.notificationBuddyVoiceEnabled
         : true;
     const voiceName = String(parsed?.notificationBuddyVoiceName || "");
+    const voiceGender = normalizeVoiceGender(parsed?.notificationBuddyVoiceGender);
     const voiceRate = Number(parsed?.notificationBuddyVoiceRate);
     const voicePitch = Number(parsed?.notificationBuddyVoicePitch);
     return {
       enabled: voiceEnabled,
       name: voiceName,
+      gender: voiceGender,
       rate: Number.isFinite(voiceRate) && voiceRate > 0 ? voiceRate : DEFAULT_VOICE_RATE,
       pitch: Number.isFinite(voicePitch) && voicePitch > 0 ? voicePitch : DEFAULT_VOICE_PITCH
     };
   } catch {
-    return { enabled: true, name: "", rate: DEFAULT_VOICE_RATE, pitch: DEFAULT_VOICE_PITCH };
+    return { enabled: true, name: "", gender: "auto", rate: DEFAULT_VOICE_RATE, pitch: DEFAULT_VOICE_PITCH };
   }
 };
 
@@ -779,10 +811,11 @@ export default function NotificationBuddy({ enabled = true }) {
     try {
       const synth = window.speechSynthesis;
       const voices = typeof synth.getVoices === "function" ? synth.getVoices() : [];
-      const preferred =
+      const preferredByName =
         prefs?.name
           ? voices.find((voice) => voice.voiceURI === prefs.name || voice.name === prefs.name)
           : null;
+      const preferred = preferredByName || pickGenderVoice(voices, prefs?.gender, "en-US");
       window.speechSynthesis.cancel();
       const utter = new SpeechSynthesisUtterance(text);
       utter.rate = prefs?.rate || DEFAULT_VOICE_RATE;
@@ -829,6 +862,7 @@ export default function NotificationBuddy({ enabled = true }) {
   };
 
   const isPointerInHitbox = (event) => {
+    if (isSyntheticPointerEvent(event)) return true;
     const target = event.currentTarget;
     if (!target?.getBoundingClientRect) return true;
     const rect = target.getBoundingClientRect();
@@ -1073,6 +1107,7 @@ export default function NotificationBuddy({ enabled = true }) {
 
   const handlePointerDown = (event) => {
     if (event.button && event.button !== 0) return;
+    const synthetic = isSyntheticPointerEvent(event);
     if (!isPointerInHitbox(event)) {
       dragRef.current.active = false;
       dragRef.current.allowTap = false;
@@ -1088,10 +1123,14 @@ export default function NotificationBuddy({ enabled = true }) {
       originY: positionRef.current.y,
       lastX: positionRef.current.x,
       lastY: positionRef.current.y,
-      didDrag: false,
+      didDrag: synthetic,
       allowTap: true
     };
-    setDragging(false);
+    setDragging(synthetic);
+    if (synthetic) {
+      cancelLongPress();
+      setPanelOpen(false);
+    }
     startLongPress();
     if (event.currentTarget.setPointerCapture) {
       try {
@@ -1108,7 +1147,8 @@ export default function NotificationBuddy({ enabled = true }) {
     const dx = event.clientX - dragState.startX;
     const dy = event.clientY - dragState.startY;
     const distance = Math.hypot(dx, dy);
-    if (!dragState.didDrag && distance > DRAG_THRESHOLD_PX) {
+    const moveThreshold = isSyntheticPointerEvent(event) ? 0 : DRAG_THRESHOLD_PX;
+    if (!dragState.didDrag && distance > moveThreshold) {
       dragState.didDrag = true;
       cancelLongPress();
       setPanelOpen(false);

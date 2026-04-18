@@ -90,16 +90,12 @@
 
   .app-main.with-user-nav {
     padding-top: 6px;
-    padding-bottom: calc(82px + env(safe-area-inset-bottom));
+    padding-bottom: env(safe-area-inset-bottom);
   }
 
   .app-main.chat-main-route.with-user-nav {
     padding-top: 4px;
-    padding-bottom: calc(82px + env(safe-area-inset-bottom));
-  }
-
-  .app-main.chat-main-route.chat-conversation-route.with-user-nav {
-    padding-bottom: 0;
+    padding-bottom: env(safe-area-inset-bottom);
   }
 
   .app-main.reels-main-route.with-user-nav {
@@ -113,7 +109,7 @@
 
   .app-content {
     width: 100%;
-    padding: 4px var(--shell-gutter) 18px;
+    padding: 4px var(--shell-gutter) 0;
   }
 
   .app-content.reels-content {
@@ -140,16 +136,12 @@
 
   .app-main.with-user-nav {
     padding-top: 6px;
-    padding-bottom: 90px;
+    padding-bottom: env(safe-area-inset-bottom);
   }
 
   .app-main.chat-main-route.with-user-nav {
     padding-top: 4px;
-    padding-bottom: 90px;
-  }
-
-  .app-main.chat-main-route.chat-conversation-route.with-user-nav {
-    padding-bottom: 0;
+    padding-bottom: env(safe-area-inset-bottom);
   }
 
   .app-main.reels-main-route.with-user-nav {
@@ -163,7 +155,7 @@
 
   .app-content {
     max-width: 100%;
-    padding: 4px 8px 18px;
+    padding: 4px 8px 0;
   }
 
   .app-content.reels-content {

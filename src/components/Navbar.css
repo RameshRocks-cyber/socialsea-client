@@ -36,11 +36,6 @@
   backdrop-filter: blur(12px);
 }
 
-/* Hide navbar on chat conversation screen */
-.ss-nav-wrap.is-chat-conversation {
-  display: none;
-}
-
 /* Hide navbar during active call screens */
 body.ss-call-active .ss-nav-wrap {
   display: none;
@@ -222,6 +217,21 @@ body.ss-theme-white .ss-link:hover {
 
 .ss-link-icon {
   font-size: 0.95rem;
+}
+
+.ss-link-logo {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  object-fit: cover;
+}
+
+.ss-link-avatar {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  object-fit: cover;
+  border: 1px solid rgba(255, 255, 255, 0.2);
 }
 
 .ss-link-text {
@@ -1042,6 +1052,17 @@ body.ss-theme-white .ss-link:hover {
 
   .ss-link-icon {
     font-size: clamp(1.2rem, 6vw, 1.45rem);
+  }
+
+  .ss-link-logo {
+    width: clamp(1.2rem, 6vw, 1.45rem);
+    height: clamp(1.2rem, 6vw, 1.45rem);
+    border-radius: 5px;
+  }
+
+  .ss-link-avatar {
+    width: clamp(1.2rem, 6vw, 1.45rem);
+    height: clamp(1.2rem, 6vw, 1.45rem);
   }
 
   .ss-link.is-active {

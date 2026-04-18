@@ -80,7 +80,7 @@ const readStoredJobs = () => {
     const raw = localStorage.getItem(STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
     if (!Array.isArray(parsed)) return [];
-    return parsed.map(normalizeJob);
+    return mergeById(parsed);
   } catch {
     return [];
   }
@@ -99,7 +99,7 @@ const parseServerJobs = (payload) => {
   return list.map(normalizeJob);
 };
 
-const mergeById = (jobs) => {
+function mergeById(jobs) {
   const map = new Map();
   (Array.isArray(jobs) ? jobs : []).forEach((entry) => {
     const job = normalizeJob(entry);
@@ -112,7 +112,7 @@ const mergeById = (jobs) => {
     map.set(job.id, Number(job.updatedAt || 0) >= Number(prev?.updatedAt || 0) ? job : prev);
   });
   return Array.from(map.values()).sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
-};
+}
 
 export const getStoredJobs = () => readStoredJobs();
 export const JOBS_CHANGED_EVENT_NAME = JOBS_CHANGED_EVENT;

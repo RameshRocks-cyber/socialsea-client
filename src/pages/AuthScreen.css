@@ -288,6 +288,75 @@
   font-weight: 700;
 }
 
+/* Register page: use black/neutral surface instead of blue */
+.auth-register .auth-card-new {
+  border-color: rgba(74, 74, 74, 0.58);
+  background:
+    linear-gradient(178deg, rgba(10, 10, 10, 0.96), rgba(4, 4, 4, 0.98)),
+    repeating-linear-gradient(
+      -45deg,
+      rgba(255, 255, 255, 0.015) 0 10px,
+      rgba(255, 255, 255, 0.005) 10px 20px
+    );
+  box-shadow:
+    0 22px 52px rgba(0, 0, 0, 0.62),
+    0 1px 0 rgba(255, 255, 255, 0.09) inset;
+}
+
+.auth-register .auth-form-new input {
+  background: rgba(8, 8, 8, 0.92);
+  border-color: rgba(70, 70, 70, 0.62);
+}
+
+.auth-register .auth-form-new input::placeholder {
+  color: #b8b8b8;
+}
+
+.auth-register .auth-form-new label {
+  color: #cfcfcf;
+}
+
+.auth-register .auth-form-new input:focus {
+  border-color: #5a5a5a;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.08);
+  background: rgba(12, 12, 12, 0.95);
+}
+
+.auth-register .auth-password-toggle {
+  background: rgba(10, 10, 10, 0.92);
+  border-color: rgba(70, 70, 70, 0.62);
+}
+
+.auth-register .auth-secondary-btn {
+  background: #0f0f0f;
+  border: 1px solid rgba(82, 82, 82, 0.8);
+}
+
+/* Login page: match register's neutral black form styling */
+.auth-login .auth-form-new input {
+  background: rgba(8, 8, 8, 0.92);
+  border-color: rgba(70, 70, 70, 0.62);
+}
+
+.auth-login .auth-form-new input::placeholder {
+  color: #b8b8b8;
+}
+
+.auth-login .auth-form-new label {
+  color: #cfcfcf;
+}
+
+.auth-login .auth-form-new input:focus {
+  border-color: #5a5a5a;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.08);
+  background: rgba(12, 12, 12, 0.95);
+}
+
+.auth-login .auth-password-toggle {
+  background: rgba(10, 10, 10, 0.92);
+  border-color: rgba(70, 70, 70, 0.62);
+}
+
 @media (max-width: 560px) {
   .auth-screen {
     padding: 18px 10px;

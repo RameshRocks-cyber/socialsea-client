@@ -987,7 +987,17 @@ export default function LongVideos() {
     }
   };
 
-  const startSettingsAdjust = () => {
+  const startSettingsAdjust = (event) => {
+    if (event?.stopPropagation) event.stopPropagation();
+    const wrap = playerWrapRef.current;
+    if (wrap?.releasePointerCapture && gestureRef.current.pointerId != null) {
+      try {
+        wrap.releasePointerCapture(gestureRef.current.pointerId);
+      } catch {
+        // no-op
+      }
+    }
+    clearPlayerGestureState();
     setIsSettingsAdjusting(true);
     setControlsVisible(true);
     clearControlsHideTimer();
@@ -995,6 +1005,31 @@ export default function LongVideos() {
 
   const stopSettingsAdjust = () => {
     setIsSettingsAdjusting(false);
+  };
+
+  const isInteractivePlayerControlTarget = (target) => {
+    if (!target?.closest) return false;
+    return Boolean(
+      target.closest(".watch-overlay-controls") ||
+      target.closest(".watch-corner-fullscreen") ||
+      target.closest(".watch-quality-btn") ||
+      target.closest(".watch-quality-menu") ||
+      target.closest(".watch-progress-wrap")
+    );
+  };
+
+  const clearPlayerGestureState = () => {
+    swipeRef.current.tracking = false;
+    swipeRef.current.active = false;
+    gestureRef.current = {
+      active: false,
+      mode: "",
+      startX: 0,
+      startY: 0,
+      startValue: 0,
+      pointerId: null,
+      startedAt: 0
+    };
   };
 
   const showPlayerControls = (autoHide = true) => {
@@ -1057,13 +1092,8 @@ export default function LongVideos() {
   const handlePlayerPointerDown = (event) => {
     if (event.pointerType === "touch") return;
     if (event.pointerType === "mouse" && event.button !== 0) return;
-    if (
-      event.target?.closest?.(".watch-overlay-controls") ||
-      event.target?.closest?.(".watch-corner-fullscreen") ||
-      event.target?.closest?.(".watch-quality-btn") ||
-      event.target?.closest?.(".watch-quality-menu") ||
-      event.target?.closest?.(".watch-progress-wrap")
-    ) return;
+    if (isSettingsAdjusting) return;
+    if (isInteractivePlayerControlTarget(event.target)) return;
     showPlayerControls(true);
     const wrap = playerWrapRef.current;    if (!wrap) return;
     const rect = wrap.getBoundingClientRect();
@@ -1099,13 +1129,8 @@ export default function LongVideos() {
 
   const handlePlayerPointerMove = (event) => {
     if (event.pointerType === "touch") return;
-    if (
-      event.target?.closest?.(".watch-overlay-controls") ||
-      event.target?.closest?.(".watch-corner-fullscreen") ||
-      event.target?.closest?.(".watch-quality-btn") ||
-      event.target?.closest?.(".watch-quality-menu") ||
-      event.target?.closest?.(".watch-progress-wrap")
-    ) return;
+    if (isSettingsAdjusting) return;
+    if (isInteractivePlayerControlTarget(event.target)) return;
     showPlayerControls(true);    const meta = gestureRef.current;
     const wrap = playerWrapRef.current;    if (!meta.active || !wrap) return;    if (meta.pointerId != null && event.pointerId !== meta.pointerId) return;
 
@@ -1125,13 +1150,7 @@ export default function LongVideos() {
 
   const handlePlayerPointerUp = (event) => {
     if (event.pointerType === "touch") return;
-    if (
-      event.target?.closest?.(".watch-overlay-controls") ||
-      event.target?.closest?.(".watch-corner-fullscreen") ||
-      event.target?.closest?.(".watch-quality-btn") ||
-      event.target?.closest?.(".watch-quality-menu") ||
-      event.target?.closest?.(".watch-progress-wrap")
-    ) return;    const meta = gestureRef.current;
+    if (isInteractivePlayerControlTarget(event.target)) return;    const meta = gestureRef.current;
     const wrap = playerWrapRef.current;
     const dy = event.clientY - (meta.startY || event.clientY);
     const dx = event.clientX - (meta.startX || event.clientX);
@@ -1161,18 +1180,15 @@ export default function LongVideos() {
         // no-op
       }
     }
-    gestureRef.current = {
-      active: false,
-      mode: "",
-      startX: 0,
-      startY: 0,
-      startValue: 0,
-      pointerId: null,
-      startedAt: 0
-    };    if (event?.cancelable) event.preventDefault();
+    clearPlayerGestureState();    if (event?.cancelable) event.preventDefault();
   };
 
   const handlePlayerTouchStart = (event) => {
+    if (isSettingsAdjusting || isInteractivePlayerControlTarget(event.target)) {
+      swipeRef.current.tracking = false;
+      swipeRef.current.active = false;
+      return;
+    }
     showPlayerControls(true);
     const touches = event.touches;
     if (!touches) return;
@@ -1198,6 +1214,11 @@ export default function LongVideos() {
   };
 
   const handlePlayerTouchMove = (event) => {
+    if (isSettingsAdjusting || isInteractivePlayerControlTarget(event.target)) {
+      swipeRef.current.tracking = false;
+      swipeRef.current.active = false;
+      return;
+    }
     const touches = event.touches;
     if (!touches) return;
 
@@ -1230,6 +1251,11 @@ export default function LongVideos() {
   };
 
   const handlePlayerTouchEnd = (event) => {
+    if (isSettingsAdjusting || isInteractivePlayerControlTarget(event.target)) {
+      swipeRef.current.tracking = false;
+      swipeRef.current.active = false;
+      return;
+    }
     const swipe = swipeRef.current;
     const wasSwipe = swipe.tracking && swipe.active;
     if (wasSwipe) {

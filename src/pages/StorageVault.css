@@ -18,8 +18,17 @@ body.ss-theme-white .storage-page {
 .storage-top {
   display: flex;
   gap: 12px;
-  align-items: flex-start;
+  align-items: center;
   margin-bottom: 16px;
+  border: 1px solid #252525;
+  border-radius: 16px;
+  padding: 12px;
+  background:
+    radial-gradient(120% 120% at 5% -20%, rgba(255, 255, 255, 0.06), transparent 50%),
+    linear-gradient(150deg, #101010, #070707);
+  overflow: visible;
+  position: relative;
+  z-index: 5;
 }
 
 .storage-top-copy {
@@ -31,6 +40,9 @@ body.ss-theme-white .storage-page {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+  align-items: center;
+  margin-left: auto;
+  overflow: visible;
 }
 
 .storage-top-btn {
@@ -73,7 +85,8 @@ body.ss-theme-white .storage-back {
 
 .storage-top h1 {
   margin: 0;
-  font-size: 22px;
+  font-size: 24px;
+  letter-spacing: 0.2px;
 }
 
 .storage-subtitle {
@@ -84,6 +97,81 @@ body.ss-theme-white .storage-back {
 
 body.ss-theme-white .storage-subtitle {
   color: #7b5c44;
+}
+
+.storage-menu-wrap {
+  position: relative;
+  overflow: visible;
+}
+
+.storage-menu-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid #2f2f2f;
+  background: #101010;
+  color: #f5f5f5;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.storage-menu-pop {
+  position: fixed;
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid #2d2d2d;
+  border-radius: 12px;
+  background: #0f0f0f;
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.45);
+  z-index: 25000;
+}
+
+.storage-menu-item {
+  border: 1px solid #2f2f2f;
+  background: #141414;
+  color: #f5f5f5;
+  border-radius: 10px;
+  padding: 9px 10px;
+  text-align: left;
+  font-size: 13px;
+  line-height: 1.35;
+  white-space: normal;
+  word-break: break-word;
+  cursor: pointer;
+}
+
+.storage-menu-item:hover {
+  background: #1b1b1b;
+}
+
+body.ss-theme-white .storage-top {
+  border-color: rgba(159, 111, 74, 0.28);
+  background: #ffffff;
+  box-shadow: 0 12px 22px rgba(130, 92, 58, 0.08);
+}
+
+body.ss-theme-white .storage-menu-btn {
+  background: #ffffff;
+  border-color: rgba(159, 111, 74, 0.28);
+  color: #2b1d12;
+}
+
+body.ss-theme-white .storage-menu-pop {
+  background: #ffffff;
+  border-color: rgba(159, 111, 74, 0.28);
+  box-shadow: 0 12px 22px rgba(130, 92, 58, 0.1);
+}
+
+body.ss-theme-white .storage-menu-item {
+  background: #ffffff;
+  border-color: rgba(159, 111, 74, 0.28);
+  color: #2b1d12;
+}
+
+body.ss-theme-white .storage-menu-item:hover {
+  background: #fff7ee;
 }
 
 .storage-plans {
