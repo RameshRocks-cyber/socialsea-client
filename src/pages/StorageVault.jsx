@@ -3,12 +3,12 @@ import { Navigate, useNavigate } from "react-router-dom";
 import {
   addVaultFiles,
   clearVault,
-  clearVaultLock,
+  clearVaultLockSynced,
   clearVaultUnlocked,
   getVaultItems,
   isVaultUnlocked,
   isVaultSupported,
-  readVaultLock,
+  readVaultLockSynced,
   removeVaultItem
 } from "../services/vaultStorage";
 import "./StorageVault.css";
@@ -134,8 +134,9 @@ export default function StorageVault() {
   const [error, setError] = useState("");
   const [unsupported, setUnsupported] = useState(false);
   const [urlMap, setUrlMap] = useState({});
-  const [lock, setLock] = useState(() => readVaultLock());
-  const [unlocked, setUnlocked] = useState(() => (lock ? isVaultUnlocked(lock) : false));
+  const [lock, setLock] = useState(null);
+  const [lockLoaded, setLockLoaded] = useState(false);
+  const [unlocked, setUnlocked] = useState(false);
   const [storagePlan, setStoragePlan] = useState("local");
   const [extraGb, setExtraGb] = useState(0);
   const [paymentRef, setPaymentRef] = useState("");
@@ -181,9 +182,24 @@ export default function StorageVault() {
     if (!isVaultSupported()) {
       setUnsupported(true);
       setLoading(false);
+      setLockLoaded(true);
       return;
     }
     setUnsupported(false);
+    let cancelled = false;
+    (async () => {
+      try {
+        const synced = await readVaultLockSynced();
+        if (cancelled) return;
+        setLock(synced);
+        setUnlocked(synced ? isVaultUnlocked(synced) : false);
+      } finally {
+        if (!cancelled) setLockLoaded(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -299,11 +315,11 @@ export default function StorageVault() {
     navigate("/storage/unlock", { replace: true });
   };
 
-  const handleResetLock = () => {
+  const handleResetLock = async () => {
     const ok = window.confirm("Reset vault lock? Your stored files stay, but you must choose new pictures.");
     if (!ok) return;
     clearVaultUnlocked();
-    clearVaultLock();
+    await clearVaultLockSynced();
     setLock(null);
     setUnlocked(false);
     navigate("/storage/unlock", { replace: true });
@@ -646,6 +662,21 @@ export default function StorageVault() {
       stopDocStream();
     };
   }, [stopDocSpeech, stopDocumentary, stopDocTimer, stopDocStream]);
+
+  if (!lockLoaded) {
+    return (
+      <div className="storage-page">
+        <div className="storage-shell">
+          <header className="storage-top">
+            <div className="storage-top-copy">
+              <h1>Storage Vault</h1>
+              <p className="storage-subtitle">Loading your vault lock…</p>
+            </div>
+          </header>
+        </div>
+      </div>
+    );
+  }
 
   if (!lock || !unlocked) {
     return <Navigate to="/storage/unlock" replace />;

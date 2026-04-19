@@ -5161,7 +5161,7 @@ body.ss-theme-white .chat-page.chat-single-pane .chat-day-sep {
   position: fixed;
   inset: 0;
   z-index: 1260;
-  background: rgba(3, 8, 20, 0.72);
+  background: rgba(0, 0, 0, 0.76);
   display: grid;
   place-items: center;
   padding: 16px;
@@ -5171,10 +5171,10 @@ body.ss-theme-white .chat-page.chat-single-pane .chat-day-sep {
   width: min(92vw, 440px);
   border-radius: 16px;
   padding: 16px;
-  background: rgba(7, 18, 36, 0.98);
-  border: 1px solid rgba(90, 140, 230, 0.3);
-  color: #f2f7ff;
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.4);
+  background: linear-gradient(165deg, rgba(16, 16, 18, 0.98), rgba(5, 5, 6, 0.98));
+  border: 1px solid rgba(105, 105, 110, 0.34);
+  color: #f2f2f4;
+  box-shadow: 0 20px 44px rgba(0, 0, 0, 0.58);
 }
 
 .group-call-card h3 {
@@ -5184,8 +5184,36 @@ body.ss-theme-white .chat-page.chat-single-pane .chat-day-sep {
 
 .group-call-card p {
   margin: 0 0 12px;
-  color: #b7ccea;
+  color: #b7b7bc;
   font-size: 0.9rem;
+}
+
+.group-call-limit-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(98, 98, 104, 0.35);
+  background: rgba(22, 22, 24, 0.8);
+}
+
+.group-call-limit-row label {
+  color: #d7d7db;
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.group-call-limit-row select {
+  min-width: 100px;
+  border-radius: 8px;
+  border: 1px solid rgba(115, 115, 120, 0.48);
+  background: rgba(10, 10, 11, 0.96);
+  color: #f4f4f6;
+  padding: 7px 9px;
+  font-weight: 700;
 }
 
 .group-call-list {
@@ -5202,18 +5230,18 @@ body.ss-theme-white .chat-page.chat-single-pane .chat-day-sep {
   gap: 8px;
   padding: 8px 10px;
   border-radius: 10px;
-  background: rgba(9, 26, 52, 0.85);
-  border: 1px solid rgba(90, 140, 230, 0.2);
+  background: rgba(18, 18, 20, 0.86);
+  border: 1px solid rgba(88, 88, 94, 0.35);
   cursor: pointer;
 }
 
 .group-call-item input {
-  accent-color: #52a2ff;
+  accent-color: #efefef;
 }
 
 .group-call-empty {
   margin: 0;
-  color: #b7ccea;
+  color: #b7b7bc;
   font-size: 0.9rem;
 }
 
@@ -5234,13 +5262,20 @@ body.ss-theme-white .chat-page.chat-single-pane .chat-day-sep {
 }
 
 .group-call-start {
-  background: #2e9cff;
+  background: linear-gradient(140deg, #26262c, #151518);
   color: #fff;
+  border: 1px solid rgba(132, 132, 136, 0.45);
 }
 
 .group-call-cancel {
-  background: rgba(255, 255, 255, 0.08);
-  color: #e3efff;
+  background: rgba(255, 255, 255, 0.06);
+  color: #e5e5e8;
+  border: 1px solid rgba(110, 110, 116, 0.4);
+}
+
+.group-call-start:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 @media (max-width: 560px) {

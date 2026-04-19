@@ -7,7 +7,7 @@ import { buildProfilePath } from "../../utils/profileRoute";
 import { getApiBaseUrl, toApiUrl } from "../../api/baseUrl";
 import { clearAuthStorage } from "../../auth";
 import { readActiveStories, syncStoryCaches } from "../../services/storyStorage";
-import { SETTINGS_KEY, readSoundPrefs } from "../soundPrefs";
+import { SETTINGS_KEY, readSoundPrefs, NOTIFICATION_SOUND_URLS, RINGTONE_SOUND_URLS } from "../soundPrefs";
 
 const POLL_MS = 4000;
 const LOCAL_CHAT_KEY = "socialsea_chat_fallback_v1";
@@ -1679,6 +1679,8 @@ function useChatController() {
   const ringtoneTimerRef = useRef(null);
   const outgoingRingTimerRef = useRef(null);
   const customRingtoneAudioRef = useRef(null);
+  const presetRingtoneAudioRef = useRef(null);
+  const notificationAudioRef = useRef(null);
   const disconnectGuardTimerRef = useRef(null);
   const historyRef = useRef({});
   const storyLongPressTimeoutRef = useRef(null);
@@ -2052,41 +2054,66 @@ function useChatController() {
     osc.stop(now + durationMs / 1000);
   };
 
+  const stopAudioRef = (ref) => {
+    try {
+      if (ref?.current) {
+        ref.current.pause();
+        ref.current.currentTime = 0;
+      }
+    } catch {
+      // ignore audio stop errors
+    }
+  };
+
+  const playPresetAudioOnce = (url, ref, durationMs = 2200, volume = 0.95) => {
+    const src = String(url || "").trim();
+    if (!src) return false;
+    stopAudioRef(ref);
+    try {
+      const audio = new Audio(src);
+      ref.current = audio;
+      audio.volume = volume;
+      audio.currentTime = 0;
+      void audio.play();
+      window.setTimeout(() => {
+        try {
+          audio.pause();
+          audio.currentTime = 0;
+        } catch {
+          // ignore
+        }
+      }, Math.max(700, durationMs));
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const playPresetRingtoneLoop = (profile) => {
+    const url = RINGTONE_SOUND_URLS[String(profile || "").trim()];
+    if (!url) return false;
+    stopAudioRef(presetRingtoneAudioRef);
+    try {
+      const audio = new Audio(url);
+      presetRingtoneAudioRef.current = audio;
+      audio.loop = true;
+      audio.volume = 0.95;
+      audio.currentTime = 0;
+      void audio.play();
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   const playNotificationPattern = (profile) => {
     if (profile === "off") return;
-    if (profile === "soft") {
-      void playTone(620, 130, 0.06, "sine");
-      window.setTimeout(() => void playTone(760, 140, 0.06, "sine"), 150);
-      return;
+    const url = NOTIFICATION_SOUND_URLS[String(profile || "").trim()];
+    if (url) {
+      const played = playPresetAudioOnce(url, notificationAudioRef, 2000, 0.95);
+      if (played) return;
     }
-    if (profile === "digital") {
-      void playTone(980, 95, 0.08, "square");
-      window.setTimeout(() => void playTone(1240, 95, 0.08, "square"), 110);
-      return;
-    }
-    if (profile === "sparkle") {
-      void playTone(740, 90, 0.08, "triangle");
-      window.setTimeout(() => void playTone(980, 90, 0.08, "triangle"), 120);
-      window.setTimeout(() => void playTone(1320, 120, 0.06, "sine"), 240);
-      return;
-    }
-    if (profile === "bubble") {
-      void playTone(420, 80, 0.09, "sine");
-      window.setTimeout(() => void playTone(520, 85, 0.08, "sine"), 90);
-      window.setTimeout(() => void playTone(640, 95, 0.08, "triangle"), 180);
-      return;
-    }
-    if (profile === "twinkle") {
-      void playTone(880, 85, 0.08, "sine");
-      window.setTimeout(() => void playTone(1175, 85, 0.07, "sine"), 110);
-      window.setTimeout(() => void playTone(1568, 100, 0.06, "sine"), 220);
-      return;
-    }
-    if (profile === "pop") {
-      void playTone(360, 65, 0.09, "square");
-      window.setTimeout(() => void playTone(960, 105, 0.08, "triangle"), 90);
-      return;
-    }
+    // Fallback for old/unknown values.
     void playTone(820, 120, 0.08, "triangle");
     window.setTimeout(() => void playTone(980, 120, 0.07, "triangle"), 140);
   };
@@ -2119,14 +2146,8 @@ function useChatController() {
       clearInterval(ringtoneTimerRef.current);
       ringtoneTimerRef.current = null;
     }
-    try {
-      if (customRingtoneAudioRef.current) {
-        customRingtoneAudioRef.current.pause();
-        customRingtoneAudioRef.current.currentTime = 0;
-      }
-    } catch {
-      // ignore audio stop errors
-    }
+    stopAudioRef(customRingtoneAudioRef);
+    stopAudioRef(presetRingtoneAudioRef);
   };
 
   const stopOutgoingRing = () => {
@@ -2134,14 +2155,8 @@ function useChatController() {
       clearInterval(outgoingRingTimerRef.current);
       outgoingRingTimerRef.current = null;
     }
-    try {
-      if (customRingtoneAudioRef.current) {
-        customRingtoneAudioRef.current.pause();
-        customRingtoneAudioRef.current.currentTime = 0;
-      }
-    } catch {
-      // ignore audio stop errors
-    }
+    stopAudioRef(customRingtoneAudioRef);
+    stopAudioRef(presetRingtoneAudioRef);
   };
 
   const playCustomRingtoneLoop = () => {
@@ -2178,37 +2193,9 @@ function useChatController() {
     if (soundPrefs.ringtoneSound === "off") return;
     stopRingtone();
     if (playCustomRingtoneLoop()) return;
-    const ring = () => {
-      if (soundPrefs.ringtoneSound === "bell") {
-        void playTone(700, 200, 0.2, "sine");
-        window.setTimeout(() => void playTone(880, 200, 0.2, "sine"), 210);
-        return;
-      }
-      if (soundPrefs.ringtoneSound === "pulse") {
-        void playTone(560, 240, 0.2, "triangle");
-        window.setTimeout(() => void playTone(620, 240, 0.18, "triangle"), 260);
-        return;
-      }
-      if (soundPrefs.ringtoneSound === "marimba") {
-        void playTone(523, 180, 0.16, "sine");
-        window.setTimeout(() => void playTone(659, 180, 0.15, "sine"), 210);
-        window.setTimeout(() => void playTone(784, 220, 0.14, "sine"), 420);
-        return;
-      }
-      if (soundPrefs.ringtoneSound === "chime") {
-        void playTone(660, 220, 0.16, "triangle");
-        window.setTimeout(() => void playTone(990, 260, 0.14, "triangle"), 250);
-        return;
-      }
-      if (soundPrefs.ringtoneSound === "birdsong") {
-        void playTone(940, 120, 0.12, "sine");
-        window.setTimeout(() => void playTone(1260, 120, 0.11, "sine"), 140);
-        window.setTimeout(() => void playTone(1020, 140, 0.11, "sine"), 290);
-        return;
-      }
-      void playTone(640, 320, 0.22, "square");
-      window.setTimeout(() => void playTone(760, 360, 0.2, "square"), 280);
-    };
+    if (playPresetRingtoneLoop(soundPrefs.ringtoneSound)) return;
+    // Fallback for old/unknown values.
+    const ring = () => void playTone(640, 320, 0.22, "square");
     ring();
     ringtoneTimerRef.current = setInterval(ring, 1400);
   };
@@ -2217,37 +2204,9 @@ function useChatController() {
     if (soundPrefs.ringtoneSound === "off") return;
     stopOutgoingRing();
     if (playCustomRingtoneLoop()) return;
-    const ring = () => {
-      if (soundPrefs.ringtoneSound === "bell") {
-        void playTone(680, 190, 0.18, "sine");
-        window.setTimeout(() => void playTone(840, 190, 0.18, "sine"), 210);
-        return;
-      }
-      if (soundPrefs.ringtoneSound === "pulse") {
-        void playTone(540, 220, 0.18, "triangle");
-        window.setTimeout(() => void playTone(600, 220, 0.17, "triangle"), 250);
-        return;
-      }
-      if (soundPrefs.ringtoneSound === "marimba") {
-        void playTone(494, 170, 0.15, "sine");
-        window.setTimeout(() => void playTone(659, 180, 0.14, "sine"), 190);
-        window.setTimeout(() => void playTone(784, 200, 0.13, "sine"), 390);
-        return;
-      }
-      if (soundPrefs.ringtoneSound === "chime") {
-        void playTone(620, 210, 0.14, "triangle");
-        window.setTimeout(() => void playTone(930, 250, 0.13, "triangle"), 230);
-        return;
-      }
-      if (soundPrefs.ringtoneSound === "birdsong") {
-        void playTone(900, 110, 0.11, "sine");
-        window.setTimeout(() => void playTone(1180, 110, 0.1, "sine"), 120);
-        window.setTimeout(() => void playTone(980, 130, 0.1, "sine"), 260);
-        return;
-      }
-      void playTone(520, 320, 0.2, "triangle");
-      window.setTimeout(() => void playTone(620, 320, 0.18, "triangle"), 280);
-    };
+    if (playPresetRingtoneLoop(soundPrefs.ringtoneSound)) return;
+    // Fallback for old/unknown values.
+    const ring = () => void playTone(520, 320, 0.2, "triangle");
     ring();
     outgoingRingTimerRef.current = setInterval(ring, 1500);
   };
@@ -5905,10 +5864,8 @@ function useChatController() {
   };
 
   const openGroupInvite = () => {
-    const base = groupCallActive
-      ? groupMembers.filter((id) => String(id) && String(id) !== String(myUserId))
-      : (activeContactId ? [String(activeContactId)] : []);
-    setGroupInviteIds(base);
+    // Keep invite selection user-driven; do not auto-select participants.
+    setGroupInviteIds([]);
     setGroupInviteOpen(true);
     setCallError("");
   };
@@ -5925,13 +5882,7 @@ function useChatController() {
     setGroupInviteIds((prev) => {
       const set = new Set(prev);
       if (set.has(key)) set.delete(key);
-      else {
-        if (set.size >= GROUP_CALL_MAX - 1) {
-          setCallError(`Group calls support up to ${GROUP_CALL_MAX} people.`);
-          return Array.from(set);
-        }
-        set.add(key);
-      }
+      else set.add(key);
       return Array.from(set);
     });
   };
@@ -5951,7 +5902,7 @@ function useChatController() {
     const anchorContactId =
       normalizedActiveId && selected.includes(normalizedActiveId) ? normalizedActiveId : selected[0] || normalizedActiveId;
     const currentPeerId = callStateRef.current.phase !== "idle" ? String(callStateRef.current.peerId || "") : "";
-    const members = Array.from(new Set([String(myUserId || ""), ...selected, currentPeerId].filter(Boolean))).slice(0, GROUP_CALL_MAX);
+    const members = Array.from(new Set([String(myUserId || ""), ...selected, currentPeerId].filter(Boolean)));
     const roomId = buildGroupRoomId();
     setCallError("");
     setGroupRoomId(roomId);
@@ -6014,10 +5965,6 @@ function useChatController() {
 
     const currentMembers = Array.isArray(groupMembers) ? groupMembers.map((id) => String(id)) : [];
     const merged = Array.from(new Set([String(myUserId || ""), ...currentMembers, ...selected].filter(Boolean)));
-    if (merged.length > GROUP_CALL_MAX) {
-      setCallError(`Group calls support up to ${GROUP_CALL_MAX} people.`);
-      return;
-    }
     const roomId = groupRoomId || buildGroupRoomId();
     setGroupRoomId(roomId);
     setGroupMembers(merged);

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import api from "../api/axios";
 import { getApiBaseUrl } from "../api/baseUrl";
@@ -25,6 +25,14 @@ const WATCH_CATEGORIES = [
 ];
 
 const WATCH_RAIL_ITEMS = ["Home", "Trending", "Subscriptions", "History", "Playlists", "Watch Later", "Liked Videos"];
+const QUALITY_OPTIONS = [
+  { value: "auto", label: "Auto" },
+  { value: "1080", label: "1080p" },
+  { value: "720", label: "720p" },
+  { value: "480", label: "480p" },
+  { value: "360", label: "360p" }
+];
+const PLAYBACK_SPEED_OPTIONS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
 const readCachedWatchPosts = () => {
   try {
@@ -92,14 +100,34 @@ export default function LongVideos() {
   const [playerBufferedUntil, setPlayerBufferedUntil] = useState(0);
   const [isSeeking, setIsSeeking] = useState(false);
   const [playerZoom, setPlayerZoom] = useState({ scale: 1, x: 0, y: 0 });
+  const playerZoomRef = useRef({ scale: 1, x: 0, y: 0 });
   const [playerVolume, setPlayerVolume] = useState(1);
+  const [selectedQuality, setSelectedQuality] = useState("auto");
+  const [audioTrackOptions, setAudioTrackOptions] = useState([{ value: "default", label: "Default" }]);
+  const [selectedAudioTrack, setSelectedAudioTrack] = useState("default");
+  const [subtitleTrackOptions, setSubtitleTrackOptions] = useState([{ value: "off", label: "Off" }]);
+  const [selectedSubtitleTrack, setSelectedSubtitleTrack] = useState("off");
+  const [activeSettingsPanel, setActiveSettingsPanel] = useState("");
+  const [isScreenLocked, setIsScreenLocked] = useState(false);
+  const [playerPlaybackSpeed, setPlayerPlaybackSpeed] = useState(1);
+  const [isLoopVideo, setIsLoopVideo] = useState(false);
   const swipeRef = useRef({
     tracking: false,
     active: false,
+    mode: "fullscreen",
     startX: 0,
     startY: 0,
     lastX: 0,
     lastY: 0
+  });
+  const pinchRef = useRef({
+    active: false,
+    startDistance: 0,
+    startScale: 1,
+    startCenterX: 0,
+    startCenterY: 0,
+    startTranslateX: 0,
+    startTranslateY: 0
   });
 
   useEffect(() => {
@@ -690,8 +718,8 @@ export default function LongVideos() {
 
   const activeVideoUrl = useMemo(() => {
     const url = resolveUrl(mediaUrlFor(activeVideo));
-    return withCloudinaryQuality(url, "auto");
-  }, [activeVideo]);
+    return withCloudinaryQuality(url, selectedQuality);
+  }, [activeVideo, selectedQuality]);
 
   useEffect(() => {
     if (!activeVideo?.id) return;
@@ -866,11 +894,12 @@ export default function LongVideos() {
   const relativeFrom = (value) => {    if (!value) return "recently";
     const d = new Date(value);    if (!Number.isFinite(d.getTime())) return "recently";
     const diffMs = Date.now() - d.getTime();
-    const minutes = Math.max(1, Math.floor(diffMs / 60000));    if (minutes < 60) return `${minutes} min ago`;
-    const hours = Math.floor(minutes / 60);    if (hours < 24) return `${hours} hr ago`;
-    const days = Math.floor(hours / 24);    if (days < 30) return `${days} day ago`;
-    const months = Math.floor(days / 30);    if (months < 12) return `${months} month ago`;
-    return `${Math.floor(months / 12)} year ago`;
+    const minutes = Math.max(1, Math.floor(diffMs / 60000));    if (minutes < 60) return `${minutes} ${minutes === 1 ? "minute" : "minutes"} ago`;
+    const hours = Math.floor(minutes / 60);    if (hours < 24) return `${hours} ${hours === 1 ? "hour" : "hours"} ago`;
+    const days = Math.floor(hours / 24);    if (days < 30) return `${days} ${days === 1 ? "day" : "days"} ago`;
+    const months = Math.floor(days / 30);    if (months < 12) return `${months} ${months === 1 ? "month" : "months"} ago`;
+    const years = Math.floor(months / 12);
+    return `${years} ${years === 1 ? "year" : "years"} ago`;
   };
 
   const selectVideo = (id) => {    if (!id) return;
@@ -892,11 +921,138 @@ export default function LongVideos() {
   };
 
   const togglePlayPause = () => {
+    if (isScreenLocked) return;
     const video = playerRef.current;    if (!video) return;    if (video.paused) {
       video.play().catch(() => {});
     } else {
       video.pause();
     }
+  };
+
+  const refreshPlayerTrackOptions = () => {
+    const video = playerRef.current;
+    if (!video) return;
+    const rawAudioTracks = video.audioTracks;
+    const nextAudioOptions = [{ value: "default", label: "Default" }];
+    if (rawAudioTracks && Number(rawAudioTracks.length) > 0) {
+      for (let i = 0; i < rawAudioTracks.length; i += 1) {
+        const track = rawAudioTracks[i];
+        const label = String(track?.label || track?.language || "").trim() || `Track ${i + 1}`;
+        nextAudioOptions.push({ value: `audio-${i}`, label });
+      }
+    }
+    setAudioTrackOptions(nextAudioOptions);
+    if (!nextAudioOptions.some((item) => item.value === selectedAudioTrack)) {
+      setSelectedAudioTrack("default");
+    }
+
+    const tracks = video?.textTracks;
+    const nextSubtitleOptions = [{ value: "off", label: "Off" }];
+    if (tracks && Number(tracks.length) > 0) {
+      for (let i = 0; i < tracks.length; i += 1) {
+        const track = tracks[i];
+        const kind = String(track?.kind || "").toLowerCase();
+        const isCaptionTrack = kind === "subtitles" || kind === "captions";
+        if (!isCaptionTrack) continue;
+        const label = String(track?.label || track?.language || "").trim() || `Subtitle ${i + 1}`;
+        nextSubtitleOptions.push({ value: `sub-${i}`, label });
+      }
+    }
+    setSubtitleTrackOptions(nextSubtitleOptions);
+    if (!nextSubtitleOptions.some((item) => item.value === selectedSubtitleTrack)) {
+      setSelectedSubtitleTrack("off");
+    }
+  };
+
+  const handleSelectAudioTrack = (value) => {
+    const next = String(value || "default");
+    const video = playerRef.current;
+    const rawAudioTracks = video?.audioTracks;
+    if (!rawAudioTracks || Number(rawAudioTracks.length) === 0) {
+      setSelectedAudioTrack("default");
+      showGestureHud("Audio language unavailable");
+      return;
+    }
+    const index = next.startsWith("audio-") ? Number(next.replace("audio-", "")) : -1;
+    for (let i = 0; i < rawAudioTracks.length; i += 1) {
+      const track = rawAudioTracks[i];
+      try {
+        track.enabled = i === index;
+      } catch {
+        // no-op
+      }
+    }
+    setSelectedAudioTrack(next);
+    const active = audioTrackOptions.find((item) => item.value === next);
+    showGestureHud(active ? `Audio: ${active.label}` : "Audio changed");
+  };
+
+  const handleSelectSubtitleTrack = (value) => {
+    const next = String(value || "off");
+    const video = playerRef.current;
+    const tracks = video?.textTracks;
+    if (!tracks || Number(tracks.length) === 0) {
+      setSelectedSubtitleTrack("off");
+      showGestureHud("Subtitles unavailable");
+      return;
+    }
+    const index = next.startsWith("sub-") ? Number(next.replace("sub-", "")) : -1;
+    let foundAny = false;
+    for (let i = 0; i < tracks.length; i += 1) {
+      const track = tracks[i];
+      const kind = String(track?.kind || "").toLowerCase();
+      const isCaptionTrack = kind === "subtitles" || kind === "captions";
+      if (!isCaptionTrack) continue;
+      foundAny = true;
+      try {
+        track.mode = i === index ? "showing" : "hidden";
+      } catch {
+        // no-op
+      }
+    }
+    if (!foundAny) {
+      setSelectedSubtitleTrack("off");
+      showGestureHud("Subtitles unavailable");
+      return;
+    }
+    setSelectedSubtitleTrack(next);
+    if (next === "off") {
+      showGestureHud("Subtitles off");
+      return;
+    }
+    const active = subtitleTrackOptions.find((item) => item.value === next);
+    showGestureHud(active ? `Subtitles: ${active.label}` : "Subtitles changed");
+  };
+
+  const handleChangePlaybackSpeed = (speed) => {
+    const next = Number(speed) || 1;
+    const video = playerRef.current;
+    if (video) video.playbackRate = next;
+    setPlayerPlaybackSpeed(next);
+    showGestureHud(`Speed ${next}x`);
+  };
+
+  const handleToggleLoopVideo = () => {
+    const next = !isLoopVideo;
+    const video = playerRef.current;
+    if (video) video.loop = next;
+    setIsLoopVideo(next);
+    showGestureHud(next ? "Loop on" : "Loop off");
+  };
+
+  const handleToggleScreenLock = () => {
+    setShowQualityMenu(false);
+    setIsSettingsAdjusting(false);
+    setIsScreenLocked((prev) => {
+      const next = !prev;
+      if (next) {
+        setControlsVisible(false);
+      } else {
+        showPlayerControls(true);
+      }
+      showGestureHud(next ? "Screen locked" : "Screen unlocked");
+      return next;
+    });
   };
 
   const syncPlayerTime = () => {
@@ -1013,6 +1169,7 @@ export default function LongVideos() {
       target.closest(".watch-overlay-controls") ||
       target.closest(".watch-corner-fullscreen") ||
       target.closest(".watch-quality-btn") ||
+      target.closest(".watch-lock-btn") ||
       target.closest(".watch-quality-menu") ||
       target.closest(".watch-progress-wrap")
     );
@@ -1021,6 +1178,8 @@ export default function LongVideos() {
   const clearPlayerGestureState = () => {
     swipeRef.current.tracking = false;
     swipeRef.current.active = false;
+    swipeRef.current.mode = "fullscreen";
+    pinchRef.current.active = false;
     gestureRef.current = {
       active: false,
       mode: "",
@@ -1043,6 +1202,39 @@ export default function LongVideos() {
   };
 
   const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+  const getTouchDistance = (a, b) => {
+    const dx = Number(a?.clientX || 0) - Number(b?.clientX || 0);
+    const dy = Number(a?.clientY || 0) - Number(b?.clientY || 0);
+    return Math.hypot(dx, dy);
+  };
+  const getTouchCenter = (a, b) => ({
+    x: (Number(a?.clientX || 0) + Number(b?.clientX || 0)) / 2,
+    y: (Number(a?.clientY || 0) + Number(b?.clientY || 0)) / 2
+  });
+  const clampZoomOffset = (scale, x, y) => {
+    const wrap = playerWrapRef.current;
+    if (!wrap || scale <= 1.001) return { x: 0, y: 0 };
+    const rect = wrap.getBoundingClientRect();
+    const maxX = Math.max(0, (rect.width * (scale - 1)) / 2);
+    const maxY = Math.max(0, (rect.height * (scale - 1)) / 2);
+    return {
+      x: clamp(x, -maxX, maxX),
+      y: clamp(y, -maxY, maxY)
+    };
+  };
+  const applyPlayerZoom = (nextScale, nextX, nextY) => {
+    const scale = clamp(Number(nextScale || 1), 1, 3.5);
+    if (scale <= 1.001) {
+      const reset = { scale: 1, x: 0, y: 0 };
+      playerZoomRef.current = reset;
+      setPlayerZoom(reset);
+      return;
+    }
+    const clamped = clampZoomOffset(scale, Number(nextX || 0), Number(nextY || 0));
+    const next = { scale, x: clamped.x, y: clamped.y };
+    playerZoomRef.current = next;
+    setPlayerZoom(next);
+  };
 
   const enterPlayerFullscreen = async () => {
     const wrap = playerWrapRef.current;    if (!wrap || document.fullscreenElement === wrap) return;
@@ -1092,6 +1284,10 @@ export default function LongVideos() {
   const handlePlayerPointerDown = (event) => {
     if (event.pointerType === "touch") return;
     if (event.pointerType === "mouse" && event.button !== 0) return;
+    if (isScreenLocked) {
+      if (event?.cancelable) event.preventDefault();
+      return;
+    }
     if (isSettingsAdjusting) return;
     if (isInteractivePlayerControlTarget(event.target)) return;
     showPlayerControls(true);
@@ -1129,6 +1325,7 @@ export default function LongVideos() {
 
   const handlePlayerPointerMove = (event) => {
     if (event.pointerType === "touch") return;
+    if (isScreenLocked) return;
     if (isSettingsAdjusting) return;
     if (isInteractivePlayerControlTarget(event.target)) return;
     showPlayerControls(true);    const meta = gestureRef.current;
@@ -1150,6 +1347,10 @@ export default function LongVideos() {
 
   const handlePlayerPointerUp = (event) => {
     if (event.pointerType === "touch") return;
+    if (isScreenLocked) {
+      if (event?.cancelable) event.preventDefault();
+      return;
+    }
     if (isInteractivePlayerControlTarget(event.target)) return;    const meta = gestureRef.current;
     const wrap = playerWrapRef.current;
     const dy = event.clientY - (meta.startY || event.clientY);
@@ -1184,9 +1385,19 @@ export default function LongVideos() {
   };
 
   const handlePlayerTouchStart = (event) => {
+    if (isScreenLocked) {
+      swipeRef.current.tracking = false;
+      swipeRef.current.active = false;
+      swipeRef.current.mode = "fullscreen";
+      pinchRef.current.active = false;
+      if (event?.cancelable) event.preventDefault();
+      return;
+    }
     if (isSettingsAdjusting || isInteractivePlayerControlTarget(event.target)) {
       swipeRef.current.tracking = false;
       swipeRef.current.active = false;
+      swipeRef.current.mode = "fullscreen";
+      pinchRef.current.active = false;
       return;
     }
     showPlayerControls(true);
@@ -1197,7 +1408,19 @@ export default function LongVideos() {
     swipeRef.current.active = false;
 
     if (touches.length >= 2) {
-      // Keep long-video player in fit mode only; ignore pinch zoom gestures.
+      const first = touches[0];
+      const second = touches[1];
+      const distance = getTouchDistance(first, second);
+      const center = getTouchCenter(first, second);
+      pinchRef.current = {
+        active: distance > 0,
+        startDistance: Math.max(distance, 1),
+        startScale: Number(playerZoom.scale || 1),
+        startCenterX: center.x,
+        startCenterY: center.y,
+        startTranslateX: Number(playerZoom.x || 0),
+        startTranslateY: Number(playerZoom.y || 0)
+      };
       if (event.cancelable) event.preventDefault();
       return;
     }
@@ -1205,7 +1428,8 @@ export default function LongVideos() {
     if (touches.length === 1) {
       const touch = touches[0];
       swipeRef.current.tracking = true;
-      swipeRef.current.active = false;
+      swipeRef.current.active = Number(playerZoom.scale || 1) > 1.001;
+      swipeRef.current.mode = swipeRef.current.active ? "pan" : "fullscreen";
       swipeRef.current.startX = Number(touch.clientX || 0);
       swipeRef.current.startY = Number(touch.clientY || 0);
       swipeRef.current.lastX = Number(touch.clientX || 0);
@@ -1214,6 +1438,10 @@ export default function LongVideos() {
   };
 
   const handlePlayerTouchMove = (event) => {
+    if (isScreenLocked) {
+      if (event?.cancelable) event.preventDefault();
+      return;
+    }
     if (isSettingsAdjusting || isInteractivePlayerControlTarget(event.target)) {
       swipeRef.current.tracking = false;
       swipeRef.current.active = false;
@@ -1223,6 +1451,31 @@ export default function LongVideos() {
     if (!touches) return;
 
     if (touches.length >= 2) {
+      const first = touches[0];
+      const second = touches[1];
+      const pinch = pinchRef.current;
+      if (pinch.active) {
+        const distance = getTouchDistance(first, second);
+        const center = getTouchCenter(first, second);
+        const baseScale = Math.max(1, Number(pinch.startScale || 1));
+        const nextScale = clamp((distance / Math.max(1, pinch.startDistance)) * baseScale, 1, 3.5);
+        const wrap = playerWrapRef.current;
+        if (wrap) {
+          const rect = wrap.getBoundingClientRect();
+          const centerXFromWrap = pinch.startCenterX - (rect.left + rect.width / 2);
+          const centerYFromWrap = pinch.startCenterY - (rect.top + rect.height / 2);
+          const ratio = nextScale / Math.max(1, baseScale);
+          const nextX =
+            Number(pinch.startTranslateX || 0) +
+            (center.x - pinch.startCenterX) +
+            centerXFromWrap * (1 - ratio);
+          const nextY =
+            Number(pinch.startTranslateY || 0) +
+            (center.y - pinch.startCenterY) +
+            centerYFromWrap * (1 - ratio);
+          applyPlayerZoom(nextScale, nextX, nextY);
+        }
+      }
       if (event.cancelable) event.preventDefault();
       return;
     }
@@ -1231,6 +1484,21 @@ export default function LongVideos() {
       const touch = touches[0];
       const x = Number(touch.clientX || 0);
       const y = Number(touch.clientY || 0);
+      if (swipeRef.current.mode === "pan" && Number(playerZoom.scale || 1) > 1.001) {
+        const dxFromLast = x - Number(swipeRef.current.lastX || x);
+        const dyFromLast = y - Number(swipeRef.current.lastY || y);
+        swipeRef.current.lastX = x;
+        swipeRef.current.lastY = y;
+        const currentZoom = playerZoomRef.current;
+        applyPlayerZoom(
+          Number(currentZoom.scale || 1),
+          Number(currentZoom.x || 0) + dxFromLast,
+          Number(currentZoom.y || 0) + dyFromLast
+        );
+        swipeRef.current.active = true;
+        if (event.cancelable) event.preventDefault();
+        return;
+      }
       const dx = x - Number(swipeRef.current.startX || 0);
       const dy = y - Number(swipeRef.current.startY || 0);
       swipeRef.current.lastX = x;
@@ -1251,14 +1519,39 @@ export default function LongVideos() {
   };
 
   const handlePlayerTouchEnd = (event) => {
+    if (isScreenLocked) {
+      if (event?.cancelable) event.preventDefault();
+      return;
+    }
     if (isSettingsAdjusting || isInteractivePlayerControlTarget(event.target)) {
       swipeRef.current.tracking = false;
       swipeRef.current.active = false;
+      swipeRef.current.mode = "fullscreen";
+      pinchRef.current.active = false;
       return;
+    }
+    if (pinchRef.current.active) {
+      pinchRef.current.active = false;
+      if (event?.touches?.length === 1 && Number(playerZoomRef.current.scale || 1) > 1.001) {
+        const touch = event.touches[0];
+        swipeRef.current.tracking = true;
+        swipeRef.current.active = true;
+        swipeRef.current.mode = "pan";
+        swipeRef.current.startX = Number(touch.clientX || 0);
+        swipeRef.current.startY = Number(touch.clientY || 0);
+        swipeRef.current.lastX = Number(touch.clientX || 0);
+        swipeRef.current.lastY = Number(touch.clientY || 0);
+      } else {
+        swipeRef.current.tracking = false;
+        swipeRef.current.active = false;
+        swipeRef.current.mode = "fullscreen";
+      }
+      if (event.cancelable) event.preventDefault();
+      if (event?.touches?.length) return;
     }
     const swipe = swipeRef.current;
     const wasSwipe = swipe.tracking && swipe.active;
-    if (wasSwipe) {
+    if (wasSwipe && swipe.mode !== "pan") {
       const dx = Number(swipe.lastX || 0) - Number(swipe.startX || 0);
       const dy = Number(swipe.lastY || 0) - Number(swipe.startY || 0);
       const absX = Math.abs(dx);
@@ -1299,6 +1592,7 @@ export default function LongVideos() {
     }
     swipeRef.current.tracking = false;
     swipeRef.current.active = false;
+    swipeRef.current.mode = "fullscreen";
 
     if (!wasSwipe && event?.changedTouches?.length) {
       const touch = event.changedTouches[0];
@@ -1317,6 +1611,10 @@ export default function LongVideos() {
       }
     }
   };
+  useEffect(() => {
+    playerZoomRef.current = playerZoom;
+  }, [playerZoom]);
+
   useEffect(() => {
     const onFullscreenChange = () => {
       const wrap = playerWrapRef.current;
@@ -1337,13 +1635,13 @@ export default function LongVideos() {
   }, []);
 
   useEffect(() => {
-    if (showQualityMenu || isSettingsAdjusting) {
+    if (showQualityMenu || isSettingsAdjusting || isScreenLocked) {
       setControlsVisible(true);
       clearControlsHideTimer();
       return;
     }
     showPlayerControls(true);
-  }, [showQualityMenu, isSettingsAdjusting]);
+  }, [showQualityMenu, isSettingsAdjusting, isScreenLocked]);
 
   useEffect(() => {
     const video = playerRef.current;
@@ -1383,13 +1681,33 @@ export default function LongVideos() {
   }, [activeVideo?.id]);
 
   useEffect(() => {
+    const video = playerRef.current;
+    if (!video) return;
+    video.playbackRate = Number(playerPlaybackSpeed || 1);
+  }, [playerPlaybackSpeed, activeVideo?.id]);
+
+  useEffect(() => {
+    const video = playerRef.current;
+    if (!video) return;
+    video.loop = Boolean(isLoopVideo);
+  }, [isLoopVideo, activeVideo?.id]);
+
+  useEffect(() => {
+    refreshPlayerTrackOptions();
+  }, [activeVideo?.id]);
+
+  useEffect(() => {
     setPlayerCurrentTime(0);
     setPlayerDuration(0);
     setPlayerBufferedUntil(0);
     setIsSeeking(false);
     setPlayerVolume(1);
+    setSelectedAudioTrack("default");
+    setSelectedSubtitleTrack("off");
+    setActiveSettingsPanel("");
     setIsPlayerMinimized(false);
     setIsPlayerInPip(false);
+    setIsScreenLocked(false);
     setPlayerZoom({ scale: 1, x: 0, y: 0 });
   }, [activeVideo?.id]);
 
@@ -1422,6 +1740,46 @@ export default function LongVideos() {
 
   const relatedVideos = watchableVideos.filter((item) => String(item.id) !== String(activeVideo?.id));
   const showSide = Boolean(activeVideo) || relatedVideos.length > 0;
+  const overlayVisible = controlsVisible && !isScreenLocked;
+  const settingsMenuVisible = showQualityMenu && overlayVisible;
+  const selectedQualityLabel = QUALITY_OPTIONS.find((opt) => opt.value === selectedQuality)?.label || "Auto";
+  const selectedAudioLabel = audioTrackOptions.find((opt) => opt.value === selectedAudioTrack)?.label || "Default";
+  const selectedSubtitleLabel = subtitleTrackOptions.find((opt) => opt.value === selectedSubtitleTrack)?.label || "Off";
+  const selectedSpeedLabel = `${playerPlaybackSpeed}x`;
+  const selectedLoopLabel = isLoopVideo ? "On" : "Off";
+  const selectedLockLabel = isScreenLocked ? "On" : "Off";
+  const selectedBrightnessLabel = `${Math.round(playerBrightness * 100)}%`;
+  const selectedVolumeLabel = `${Math.round(playerVolume * 100)}%`;
+  const settingsRows = [
+    { key: "quality", label: "Quality", value: selectedQualityLabel },
+    { key: "audio", label: "Audio language", value: selectedAudioLabel },
+    { key: "subtitles", label: "Subtitles", value: selectedSubtitleLabel },
+    { key: "lock", label: "Lock Screen", value: selectedLockLabel },
+    { key: "speed", label: "Playback speed", value: selectedSpeedLabel },
+    { key: "loop", label: "Loop video", value: selectedLoopLabel },
+    { key: "brightness", label: "Brightness", value: selectedBrightnessLabel },
+    { key: "volume", label: "Volume", value: selectedVolumeLabel }
+  ];
+  const settingsPanelTitles = {
+    quality: "Quality",
+    audio: "Audio language",
+    subtitles: "Subtitles",
+    lock: "Lock Screen",
+    speed: "Playback speed",
+    loop: "Loop video",
+    brightness: "Brightness",
+    volume: "Volume"
+  };
+  const openSettingsPanel = (key) => setActiveSettingsPanel(key);
+  const closeSettingsPanel = () => setActiveSettingsPanel("");
+
+  const toggleSettingsMenu = () => {
+    setShowQualityMenu((prev) => {
+      const next = !prev;
+      if (next) setActiveSettingsPanel("");
+      return next;
+    });
+  };
 
   return (
     <div className={`yt-watch-page ${isWatchMode ? "is-watch-mode" : ""}`}>
@@ -1445,8 +1803,7 @@ export default function LongVideos() {
             <div>
               <p className="watch-live-title">Live now</p>
               <p className="watch-live-sub">
-                {liveBroadcast.title || `${liveBroadcast.hostName || "Creator"} is live`} •{" "}
-                {formatLiveElapsed(liveBroadcast.startedAt)}
+                {liveBroadcast.title || `${liveBroadcast.hostName || "Creator"} is live`} - {formatLiveElapsed(liveBroadcast.startedAt)}
               </p>
             </div>
           </div>
@@ -1520,7 +1877,7 @@ export default function LongVideos() {
                       <div className="yt-home-meta-text">
                         <h4>{captionFor(video)}</h4>
                         <p>{owner}</p>
-                        <small>{formatCompact(likeCounts[video.id] || 0)} views • {relativeFrom(video?.createdAt)}</small>
+                        <small>{formatCompact(likeCounts[video.id] || 0)} views | {relativeFrom(video?.createdAt)}</small>
                       </div>
                     </div>
                   </article>
@@ -1540,7 +1897,9 @@ export default function LongVideos() {
                 <div
                   className={`watch-player-wrap${isPlayerMinimized ? " is-minimized" : ""}${isPlayerInPip ? " is-pip" : ""}`}
                   ref={playerWrapRef}
-                  onMouseMove={() => showPlayerControls(true)}
+                  onMouseMove={() => {
+                    if (!isScreenLocked) showPlayerControls(true);
+                  }}
                   onPointerDown={handlePlayerPointerDown}
                   onPointerMove={handlePlayerPointerMove}
                   onPointerUp={handlePlayerPointerUp}
@@ -1563,7 +1922,7 @@ export default function LongVideos() {
                       "--watch-player-brightness": playerBrightness,
                       transform: `translate3d(${playerZoom.x}px, ${playerZoom.y}px, 0) scale(${playerZoom.scale})`,
                       transformOrigin: "center center",
-                      objectFit: "contain"
+                      objectFit: playerZoom.scale > 1.001 ? "cover" : "contain"
                     }}
                     onPlay={() => {
                       setIsPlayerPaused(false);
@@ -1580,14 +1939,17 @@ export default function LongVideos() {
                       showPlayerControls(false);
                       syncPlayerTime();
                     }}
-                    onLoadedMetadata={syncPlayerTime}
+                    onLoadedMetadata={() => {
+                      syncPlayerTime();
+                      refreshPlayerTrackOptions();
+                    }}
                     onDurationChange={syncPlayerTime}
                     onTimeUpdate={syncPlayerTime}
                     onProgress={syncPlayerTime}
                     onVolumeChange={() => setPlayerVolume(Number(playerRef.current?.volume ?? 1))}
                   />
                   <div
-                    className={`watch-overlay-controls ${controlsVisible ? "" : "is-hidden"}`}
+                    className={`watch-overlay-controls ${overlayVisible ? "" : "is-hidden"}`}
                     aria-label="Playback controls"
                   >
                     <button
@@ -1635,59 +1997,192 @@ export default function LongVideos() {
                   </div>
                   <button
                     type="button"
-                    className={`watch-quality-btn ${controlsVisible ? "" : "is-hidden"}`}
+                    className={`watch-quality-btn ${overlayVisible ? "" : "is-hidden"}`}
                     onPointerDown={(e) => e.stopPropagation()}
-                    onClick={() => setShowQualityMenu((s) => !s)}
+                    onClick={toggleSettingsMenu}
                     title="Settings"
                     aria-label="Settings"
                   >
                     {"\u2699"}
                   </button>
-                  {showQualityMenu && controlsVisible && (
+                  {settingsMenuVisible && (
                     <div
                       className={`watch-quality-menu${isSettingsAdjusting ? " is-adjusting" : ""}`}
                       onPointerDown={(e) => e.stopPropagation()}
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <div className="watch-settings-section">
-                        <p className="watch-settings-title">Brightness</p>
-                        <input
-                          type="range"
-                          min="50"
-                          max="170"
-                          step="1"
-                          value={Math.round(playerBrightness * 100)}
-                          className="watch-settings-range"
-                          onPointerDown={startSettingsAdjust}
-                          onPointerUp={stopSettingsAdjust}
-                          onPointerCancel={stopSettingsAdjust}
-                          onBlur={stopSettingsAdjust}
-                          onFocus={startSettingsAdjust}
-                          onChange={(e) => setPlayerBrightness(clamp((Number(e.target.value) || 100) / 100, 0.5, 1.7))}
-                        />
-                      </div>
-                      <div className="watch-settings-section">
-                        <p className="watch-settings-title">Volume</p>
-                        <input
-                          type="range"
-                          min="0"
-                          max="100"
-                          step="1"
-                          value={Math.round(playerVolume * 100)}
-                          className="watch-settings-range"
-                          onPointerDown={startSettingsAdjust}
-                          onPointerUp={stopSettingsAdjust}
-                          onPointerCancel={stopSettingsAdjust}
-                          onBlur={stopSettingsAdjust}
-                          onFocus={startSettingsAdjust}
-                          onChange={(e) => handleVolumeChange(e.target.value)}
-                        />
-                      </div>
+                      {!activeSettingsPanel ? (
+                        <div className="watch-settings-home">
+                          {settingsRows.map((row) => (
+                            <button
+                              key={row.key}
+                              type="button"
+                              className="watch-settings-row"
+                              onClick={() => openSettingsPanel(row.key)}
+                            >
+                              <span className="watch-settings-row-main">{row.label}</span>
+                              <span className="watch-settings-row-value">{row.value}</span>
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="watch-settings-subpage">
+                          <div className="watch-settings-subheader">
+                            <button type="button" className="watch-settings-back" onClick={closeSettingsPanel}>
+                              {"\u2039"}
+                            </button>
+                          </div>
+
+                          {activeSettingsPanel === "quality" && (
+                            <div className="watch-settings-options">
+                              {QUALITY_OPTIONS.map((opt) => (
+                                <button
+                                  key={opt.value}
+                                  type="button"
+                                  className={`watch-settings-option ${selectedQuality === opt.value ? "is-active" : ""}`}
+                                  onClick={() => setSelectedQuality(opt.value)}
+                                >
+                                  {opt.label}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+
+                          {activeSettingsPanel === "audio" && (
+                            <div className="watch-settings-options">
+                              {audioTrackOptions.map((opt) => (
+                                <button
+                                  key={opt.value}
+                                  type="button"
+                                  className={`watch-settings-option ${selectedAudioTrack === opt.value ? "is-active" : ""}`}
+                                  onClick={() => handleSelectAudioTrack(opt.value)}
+                                >
+                                  {opt.label}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+
+                          {activeSettingsPanel === "subtitles" && (
+                            <div className="watch-settings-options">
+                              {subtitleTrackOptions.map((opt) => (
+                                <button
+                                  key={opt.value}
+                                  type="button"
+                                  className={`watch-settings-option ${selectedSubtitleTrack === opt.value ? "is-active" : ""}`}
+                                  onClick={() => handleSelectSubtitleTrack(opt.value)}
+                                >
+                                  {opt.label}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+
+                          {activeSettingsPanel === "speed" && (
+                            <div className="watch-settings-options">
+                              {PLAYBACK_SPEED_OPTIONS.map((speed) => (
+                                <button
+                                  key={speed}
+                                  type="button"
+                                  className={`watch-settings-option ${Number(playerPlaybackSpeed) === Number(speed) ? "is-active" : ""}`}
+                                  onClick={() => handleChangePlaybackSpeed(speed)}
+                                >
+                                  {speed}x
+                                </button>
+                              ))}
+                            </div>
+                          )}
+
+                          {activeSettingsPanel === "lock" && (
+                            <div className="watch-settings-options">
+                              <button
+                                type="button"
+                                className={`watch-settings-option ${!isScreenLocked ? "is-active" : ""}`}
+                                onClick={() => {
+                                  if (isScreenLocked) handleToggleScreenLock();
+                                }}
+                              >
+                                Off
+                              </button>
+                              <button
+                                type="button"
+                                className={`watch-settings-option ${isScreenLocked ? "is-active" : ""}`}
+                                onClick={() => {
+                                  if (!isScreenLocked) handleToggleScreenLock();
+                                }}
+                              >
+                                On
+                              </button>
+                            </div>
+                          )}
+
+                          {activeSettingsPanel === "loop" && (
+                            <div className="watch-settings-options">
+                              <button
+                                type="button"
+                                className={`watch-settings-option ${!isLoopVideo ? "is-active" : ""}`}
+                                onClick={() => {
+                                  if (isLoopVideo) handleToggleLoopVideo();
+                                }}
+                              >
+                                Off
+                              </button>
+                              <button
+                                type="button"
+                                className={`watch-settings-option ${isLoopVideo ? "is-active" : ""}`}
+                                onClick={() => {
+                                  if (!isLoopVideo) handleToggleLoopVideo();
+                                }}
+                              >
+                                On
+                              </button>
+                            </div>
+                          )}
+
+                          {activeSettingsPanel === "brightness" && (
+                            <div className="watch-settings-subcontent">
+                              <input
+                                type="range"
+                                min="50"
+                                max="170"
+                                step="1"
+                                value={Math.round(playerBrightness * 100)}
+                                className="watch-settings-range"
+                                onPointerDown={startSettingsAdjust}
+                                onPointerUp={stopSettingsAdjust}
+                                onPointerCancel={stopSettingsAdjust}
+                                onBlur={stopSettingsAdjust}
+                                onFocus={startSettingsAdjust}
+                                onChange={(e) => setPlayerBrightness(clamp((Number(e.target.value) || 100) / 100, 0.5, 1.7))}
+                              />
+                            </div>
+                          )}
+
+                          {activeSettingsPanel === "volume" && (
+                            <div className="watch-settings-subcontent">
+                              <input
+                                type="range"
+                                min="0"
+                                max="100"
+                                step="1"
+                                value={Math.round(playerVolume * 100)}
+                                className="watch-settings-range"
+                                onPointerDown={startSettingsAdjust}
+                                onPointerUp={stopSettingsAdjust}
+                                onPointerCancel={stopSettingsAdjust}
+                                onBlur={stopSettingsAdjust}
+                                onFocus={startSettingsAdjust}
+                                onChange={(e) => handleVolumeChange(e.target.value)}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
                   <button
                     type="button"
-                    className={`watch-corner-fullscreen ${controlsVisible ? "" : "is-hidden"}`}
+                    className={`watch-corner-fullscreen ${overlayVisible ? "" : "is-hidden"}`}
                     onPointerDown={(e) => e.stopPropagation()}
                     onClick={togglePlayerFullscreen}
                     title={isPlayerFullscreen ? "Exit fullscreen" : "Fullscreen"}
@@ -1704,8 +2199,18 @@ export default function LongVideos() {
                       />
                     </svg>
                   </button>
+                  <button
+                    type="button"
+                    className={`watch-lock-btn ${isScreenLocked ? "" : "is-hidden"}`}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={handleToggleScreenLock}
+                    title="Unlock screen"
+                    aria-label="Unlock screen"
+                  >
+                    {"\ud83d\udd12 Unlock"}
+                  </button>
                   <div
-                    className="watch-progress-wrap"
+                    className={`watch-progress-wrap ${overlayVisible ? "" : "is-hidden"}`}
                     onPointerDown={(e) => e.stopPropagation()}
                     onClick={(e) => e.stopPropagation()}
                   >
@@ -1747,7 +2252,7 @@ export default function LongVideos() {
 
                 <h1 className="watch-title">{captionFor(activeVideo)}</h1>
                 <p className="watch-owner">
-                  {usernameFor(activeVideo)} â€¢ {formatCompact(likeCounts[activeVideo.id] || 0)} likes â€¢ {relativeFrom(activeVideo?.createdAt)}
+                  Posted by {usernameFor(activeVideo)}. {formatCompact(likeCounts[activeVideo.id] || 0)} likes. Uploaded {relativeFrom(activeVideo?.createdAt)}.
                 </p>
 
                 <div className="watch-actions-row">
@@ -1864,7 +2369,7 @@ export default function LongVideos() {
                       <div className="watch-item-text">
                         <p>{captionFor(v)}</p>
                         <small>{usernameFor(v)}</small>
-                        <small>{formatCompact(likeCounts[v.id] || 0)} likes â€¢ {relativeFrom(v?.createdAt)}</small>
+                        <small>{formatCompact(likeCounts[v.id] || 0)} likes | {relativeFrom(v?.createdAt)}</small>
                       </div>
                     </article>
                   );
@@ -1878,6 +2383,8 @@ export default function LongVideos() {
     </div>
   );
 }
+
+
 
 
 

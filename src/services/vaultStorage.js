@@ -1,3 +1,5 @@
+import api from "../api/axios";
+
 const DB_NAME = "socialsea_vault_v1";
 const STORE_NAME = "vault_items";
 const DB_VERSION = 1;
@@ -94,6 +96,53 @@ export const saveVaultLock = (lock) => {
 
 export const clearVaultLock = () => {
   safeLocalRemove(VAULT_LOCK_KEY);
+};
+
+const normalizeLock = (value) => {
+  const imageIds = sanitizeImageIds(value?.imageIds);
+  if (!imageIds.length) return null;
+  return {
+    imageIds,
+    createdAt: Number(value?.createdAt || Date.now())
+  };
+};
+
+export const readVaultLockSynced = async () => {
+  try {
+    const res = await api.get("/api/vault/lock");
+    const data = res?.data || {};
+    if (!data?.configured) {
+      clearVaultLock();
+      return null;
+    }
+    const lock = normalizeLock(data);
+    if (!lock) {
+      clearVaultLock();
+      return null;
+    }
+    saveVaultLock(lock);
+    return lock;
+  } catch {
+    return readVaultLock();
+  }
+};
+
+export const saveVaultLockSynced = async (lock) => {
+  const normalized = normalizeLock(lock);
+  if (!normalized) {
+    throw new Error("Invalid vault lock");
+  }
+  await api.post("/api/vault/lock", normalized);
+  saveVaultLock(normalized);
+  return normalized;
+};
+
+export const clearVaultLockSynced = async () => {
+  try {
+    await api.delete("/api/vault/lock");
+  } finally {
+    clearVaultLock();
+  }
 };
 
 const buildVaultSig = (lock) => {

@@ -141,7 +141,7 @@ export default function Feed() {
   const retryCountRef = useRef(0);
   const inFlightLoadRef = useRef(false);
   const lastLoadAtRef = useRef(0);
-  const postsCountRef = useRef(0);
+  const postsCountRef = useRef(Array.isArray(posts) ? posts.length : 0);
   const menuRef = useRef(null);
   const feedMenuRef = useRef(null);
   const postViewBackdropRef = useRef(null);
@@ -380,7 +380,7 @@ export default function Feed() {
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onVisibility);
 
-    void load(false);
+    void load(postsCountRef.current > 0);
     return () => {
       mounted = false;
       clearRetryTimer();
@@ -1237,7 +1237,11 @@ export default function Feed() {
 
 
       {error && <p>{error}</p>}
-      {!error && isLoading && <p className="feed-empty">Loading videos...</p>}
+      {!error && isLoading && (
+        <div className="feed-loading" role="status" aria-live="polite" aria-label="Loading feed">
+          <span className="feed-loading-spinner" />
+        </div>
+      )}
       {!error && !isLoading && typeFilteredPosts.length === 0 && <p className="feed-empty">No posts found</p>}
       {!error && !isLoading && feedMode === "long" && !longVideoFeedPosts.length && !liveBroadcast && (
         <p className="feed-empty">No long videos found</p>
@@ -1298,7 +1302,7 @@ export default function Feed() {
                 </span>
                 <div className="long-feed-text">
                   <p className="long-feed-title">{liveTitle}</p>
-                  <p className="long-feed-sub">{liveHostName} • {liveSubtitle}</p>
+                  <p className="long-feed-sub">{liveHostName} - {liveSubtitle}</p>
                 </div>
               </div>
             </article>
@@ -1347,7 +1351,7 @@ export default function Feed() {
                   )}
                   <div className="long-feed-text">
                     <p className="long-feed-title">{captionFor(post)}</p>
-                    <p className="long-feed-sub">{user} • {(likeCounts[post.id] || 0).toLocaleString()} likes</p>
+                    <p className="long-feed-sub">{user} | {(likeCounts[post.id] || 0).toLocaleString()} likes</p>
                   </div>
                   <div className="long-feed-menu-wrap" ref={menuOpenPostId === post.id ? menuRef : null}>
                     <button
@@ -1491,7 +1495,7 @@ export default function Feed() {
                     )}
                     <div className="ig-user-meta">
                       <p className="feed-username">{usernameFor(post)}</p>
-                      <small>{usernameFor(post)} â€¢ Original audio</small>
+                      <small>{usernameFor(post)} | Original audio</small>
                     </div>
                     <div className="ig-user-actions">
                       <button type="button" className="ig-follow-btn">Follow</button>

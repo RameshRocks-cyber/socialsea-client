@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom";
 import {
   NOTIFICATION_SOUND_OPTIONS,
   RINGTONE_OPTIONS,
+  NOTIFICATION_SOUND_URLS,
+  RINGTONE_SOUND_URLS,
   getSoundLabel,
   readSoundPrefs,
   writeSoundPrefs
@@ -52,41 +54,48 @@ export default function SettingsSounds() {
     }, Math.max(0, delayMs));
   };
 
+  const stopPreviewAudio = () => {
+    try {
+      if (customPreviewAudioRef.current) {
+        customPreviewAudioRef.current.pause();
+        customPreviewAudioRef.current.currentTime = 0;
+      }
+    } catch {
+      // ignore preview playback errors
+    }
+  };
+
+  const playPresetPreview = (url, durationMs = 2200, volume = 0.95) => {
+    const src = String(url || "").trim();
+    if (!src) return;
+    stopPreviewAudio();
+    try {
+      const audio = new Audio(src);
+      customPreviewAudioRef.current = audio;
+      audio.volume = volume;
+      audio.currentTime = 0;
+      void audio.play();
+      window.setTimeout(() => {
+        try {
+          audio.pause();
+          audio.currentTime = 0;
+        } catch {
+          // ignore
+        }
+      }, Math.max(700, durationMs));
+    } catch {
+      // ignore preview playback errors
+    }
+  };
+
   const previewNotificationSound = (profile) => {
     if (profile === "off") return;
-    if (profile === "soft") {
-      void playTone(620, 130, 0.06, "sine", 0);
-      void playTone(760, 140, 0.06, "sine", 150);
+    const url = NOTIFICATION_SOUND_URLS[String(profile || "").trim()];
+    if (url) {
+      playPresetPreview(url, 2000, 0.95);
       return;
     }
-    if (profile === "digital") {
-      void playTone(980, 95, 0.08, "square", 0);
-      void playTone(1240, 95, 0.08, "square", 110);
-      return;
-    }
-    if (profile === "sparkle") {
-      void playTone(740, 90, 0.08, "triangle", 0);
-      void playTone(980, 90, 0.08, "triangle", 120);
-      void playTone(1320, 120, 0.06, "sine", 240);
-      return;
-    }
-    if (profile === "bubble") {
-      void playTone(420, 80, 0.09, "sine", 0);
-      void playTone(520, 85, 0.08, "sine", 90);
-      void playTone(640, 95, 0.08, "triangle", 180);
-      return;
-    }
-    if (profile === "twinkle") {
-      void playTone(880, 85, 0.08, "sine", 0);
-      void playTone(1175, 85, 0.07, "sine", 110);
-      void playTone(1568, 100, 0.06, "sine", 220);
-      return;
-    }
-    if (profile === "pop") {
-      void playTone(360, 65, 0.09, "square", 0);
-      void playTone(960, 105, 0.08, "triangle", 90);
-      return;
-    }
+    // Fallback for unknown old profiles.
     void playTone(820, 120, 0.08, "triangle", 0);
     void playTone(980, 120, 0.07, "triangle", 140);
   };
@@ -118,33 +127,12 @@ export default function SettingsSounds() {
       }
       return;
     }
-    if (profile === "bell") {
-      void playTone(700, 200, 0.2, "sine", 0);
-      void playTone(880, 200, 0.2, "sine", 210);
+    const url = RINGTONE_SOUND_URLS[String(profile || "").trim()];
+    if (url) {
+      playPresetPreview(url, 5200, 0.95);
       return;
     }
-    if (profile === "pulse") {
-      void playTone(560, 240, 0.2, "triangle", 0);
-      void playTone(620, 240, 0.18, "triangle", 260);
-      return;
-    }
-    if (profile === "marimba") {
-      void playTone(523, 180, 0.16, "sine", 0);
-      void playTone(659, 180, 0.15, "sine", 210);
-      void playTone(784, 220, 0.14, "sine", 420);
-      return;
-    }
-    if (profile === "chime") {
-      void playTone(660, 220, 0.16, "triangle", 0);
-      void playTone(990, 260, 0.14, "triangle", 250);
-      return;
-    }
-    if (profile === "birdsong") {
-      void playTone(940, 120, 0.12, "sine", 0);
-      void playTone(1260, 120, 0.11, "sine", 140);
-      void playTone(1020, 140, 0.11, "sine", 290);
-      return;
-    }
+    // Fallback for unknown old profiles.
     void playTone(640, 320, 0.22, "square", 0);
     void playTone(760, 360, 0.2, "square", 280);
   };
@@ -208,7 +196,7 @@ export default function SettingsSounds() {
           </button>
           <div>
             <h1>Sounds</h1>
-            <p className="settings-subtitle">Choose cute notification tones and your ringtone. Saved in localStorage.</p>
+            <p className="settings-subtitle">Craft your signature vibe with premium notification tones and cinematic ringtones.</p>
           </div>
         </header>
 
@@ -226,7 +214,7 @@ export default function SettingsSounds() {
 
         <section className="settings-panel">
           <header className="settings-panel-head">
-            <h3>Cute Notification Sounds</h3>
+            <h3>Notification Sound Pack</h3>
           </header>
           <div className="settings-select-grid">
             {NOTIFICATION_SOUND_OPTIONS.map((opt) => (
@@ -251,7 +239,7 @@ export default function SettingsSounds() {
 
         <section className="settings-panel">
           <header className="settings-panel-head">
-            <h3>Ringtone</h3>
+            <h3>Ringtone Collection</h3>
           </header>
           <div className="settings-custom-ringtone-row">
             <label className="settings-custom-ringtone-upload">

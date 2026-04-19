@@ -377,6 +377,27 @@ body.feed-no-swipe-back {
   margin: 16px 2px;
 }
 
+.feed-loading {
+  min-height: 42vh;
+  display: grid;
+  place-items: center;
+}
+
+.feed-loading-spinner {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.18);
+  border-top-color: #f1f1f1;
+  animation: feed-spin 0.8s linear infinite;
+}
+
+@keyframes feed-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .feed-yt-shell {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);

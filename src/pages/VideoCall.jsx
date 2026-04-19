@@ -15,7 +15,7 @@ import {
   FiVolume2,
   FiVolumeX
 } from "react-icons/fi";
-import { useChat, FORCE_BEAUTY_FILTER, GROUP_CALL_MAX, VIDEO_FILTER_PRESETS, CALL_VIDEO_QUALITY_PRESETS } from "./hooks/useChat";
+import { useChat, FORCE_BEAUTY_FILTER, VIDEO_FILTER_PRESETS, CALL_VIDEO_QUALITY_PRESETS } from "./hooks/useChat";
 import "./Chat.css";
 
 export default function VideoCall({ placement = "page" }) {
@@ -41,7 +41,7 @@ export default function VideoCall({ placement = "page" }) {
           <div className="group-call-overlay" role="dialog" aria-label="Start group call">
             <div className="group-call-card">
               <h3>Start group video call</h3>
-              <p>Select up to {GROUP_CALL_MAX} people</p>
+              <p>Select people for the call</p>
               <div className="group-call-list">
                 {contacts
                   .filter((c) => String(c?.id || "") !== String(myUserId))
@@ -65,7 +65,12 @@ export default function VideoCall({ placement = "page" }) {
                 <button
                   type="button"
                   className="group-call-start"
-                  onClick={groupCallActive ? addPeopleToGroupCall : startGroupCall}
+                  disabled={groupInviteIds.length === 0}
+                  onClick={() =>
+                    groupCallActive
+                      ? addPeopleToGroupCall()
+                      : startGroupCall()
+                  }
                 >
                   {groupCallActive ? "Add people" : "Start call"}
                 </button>

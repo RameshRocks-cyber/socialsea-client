@@ -5,26 +5,49 @@ export const DEFAULT_CUSTOM_RINGTONE_START_SEC = 18;
 export const DEFAULT_CUSTOM_RINGTONE_DURATION_SEC = 20;
 
 export const NOTIFICATION_SOUND_OPTIONS = [
-  { value: "classic", label: "Classic" },
-  { value: "soft", label: "Soft" },
-  { value: "digital", label: "Digital" },
-  { value: "sparkle", label: "Sparkle" },
-  { value: "bubble", label: "Bubble Pop" },
-  { value: "twinkle", label: "Twinkle" },
-  { value: "pop", label: "Candy Pop" },
+  { value: "classic", label: "Aurora Ping" },
+  { value: "soft", label: "Velvet Chime" },
+  { value: "digital", label: "Circuit Glow" },
+  { value: "sparkle", label: "Diamond Spark" },
+  { value: "bubble", label: "Skyline Rise" },
+  { value: "twinkle", label: "Choir Lift" },
+  { value: "pop", label: "Birdsong Grove" },
+  { value: "zen", label: "Water Garden" },
   { value: "off", label: "Off" }
 ];
 
 export const RINGTONE_OPTIONS = [
-  { value: "classic", label: "Classic Ring" },
-  { value: "bell", label: "Bell Ring" },
-  { value: "pulse", label: "Pulse Ring" },
-  { value: "marimba", label: "Marimba" },
-  { value: "chime", label: "Dream Chime" },
-  { value: "birdsong", label: "Birdsong" },
+  { value: "classic", label: "Midnight Pulse" },
+  { value: "bell", label: "Cinematic Descent" },
+  { value: "pulse", label: "Ocean Breeze" },
+  { value: "marimba", label: "Dawn Chorus" },
+  { value: "chime", label: "Waterfall Haven" },
+  { value: "birdsong", label: "Calm Signature" },
+  { value: "cinematic", label: "Nebula Rise" },
   { value: "custom", label: "My Song" },
   { value: "off", label: "Off" }
 ];
+
+export const NOTIFICATION_SOUND_URLS = {
+  classic: "/sounds/premium-pack/calm-piano-logo.mp3",
+  soft: "/sounds/premium-pack/elegant-logo-chime.mp3",
+  digital: "/sounds/premium-pack/neon-circuit-hum.mp3",
+  sparkle: "/sounds/premium-pack/diamond-cinematic-hit.mp3",
+  bubble: "/sounds/premium-pack/corporate-rise-whoosh.mp3",
+  twinkle: "/sounds/premium-pack/heavenly-choir-swell.mp3",
+  pop: "/sounds/premium-pack/little-birds-grove.wav",
+  zen: "/sounds/premium-pack/water-birds-ambience.wav"
+};
+
+export const RINGTONE_SOUND_URLS = {
+  classic: "/sounds/premium-pack/midnight-pulse-loop.mp3",
+  bell: "/sounds/premium-pack/cinematic-descent-whoosh.mp3",
+  pulse: "/sounds/premium-pack/ocean-birds-loop.wav",
+  marimba: "/sounds/premium-pack/little-birds-grove.wav",
+  chime: "/sounds/premium-pack/water-birds-ambience.wav",
+  birdsong: "/sounds/premium-pack/calm-piano-logo.mp3",
+  cinematic: "/sounds/premium-pack/diamond-cinematic-hit.mp3"
+};
 
 export const DEFAULT_SOUND_PREFS = {
   notificationSound: "classic",

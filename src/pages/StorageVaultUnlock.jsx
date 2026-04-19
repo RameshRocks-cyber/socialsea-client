@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  clearVaultLock,
+  clearVaultLockSynced,
   clearVaultUnlocked,
   isVaultSupported,
   isVaultUnlocked,
-  readVaultLock,
-  saveVaultLock,
+  readVaultLockSynced,
+  saveVaultLockSynced,
   setVaultUnlocked
 } from "../services/vaultStorage";
 import { VAULT_GALLERY, VAULT_GALLERY_TOTAL } from "../data/vaultGallery";
@@ -34,8 +34,9 @@ const VAULT_IMAGE_MAP = VAULT_GALLERY.reduce((acc, item) => {
 
 export default function StorageVaultUnlock() {
   const navigate = useNavigate();
-  const [lock, setLock] = useState(() => readVaultLock());
-  const [unlocked, setUnlocked] = useState(() => (lock ? isVaultUnlocked(lock) : false));
+  const [lock, setLock] = useState(null);
+  const [lockLoaded, setLockLoaded] = useState(false);
+  const [unlocked, setUnlocked] = useState(false);
   const [lockBusy, setLockBusy] = useState(false);
   const [lockError, setLockError] = useState("");
   const [selectedImageIds, setSelectedImageIds] = useState([]);
@@ -50,9 +51,24 @@ export default function StorageVaultUnlock() {
   useEffect(() => {
     if (!isVaultSupported()) {
       setUnsupported(true);
+      setLockLoaded(true);
       return;
     }
     setUnsupported(false);
+    let cancelled = false;
+    (async () => {
+      try {
+        const synced = await readVaultLockSynced();
+        if (cancelled) return;
+        setLock(synced);
+        setUnlocked(synced ? isVaultUnlocked(synced) : false);
+      } finally {
+        if (!cancelled) setLockLoaded(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -104,7 +120,7 @@ export default function StorageVaultUnlock() {
     setSelectedImageIds((prev) => prev.filter((_, idx) => idx !== index));
   };
 
-  const handleCreateLock = () => {
+  const handleCreateLock = async () => {
     if (lockBusy) return;
     const normalized = sanitizeSelection(selectedImageIds);
     if (normalized.length !== LOCK_PICK_COUNT) {
@@ -132,9 +148,9 @@ export default function StorageVaultUnlock() {
         imageIds: normalized,
         createdAt: Date.now()
       };
-      saveVaultLock(nextLock);
-      setVaultUnlocked(nextLock);
-      setLock(nextLock);
+      const persisted = await saveVaultLockSynced(nextLock);
+      setVaultUnlocked(persisted);
+      setLock(persisted);
       setUnlocked(true);
       navigate("/storage", { replace: true });
     } catch (err) {
@@ -168,16 +184,36 @@ export default function StorageVaultUnlock() {
     }
   };
 
-  const handleResetLock = () => {
+  const handleResetLock = async () => {
     const ok = window.confirm(
       `Reset vault lock? Your stored files stay, but you must choose ${LOCK_PICK_COUNT} new pictures.`
     );
     if (!ok) return;
+    setLockBusy(true);
     clearVaultUnlocked();
-    clearVaultLock();
-    setLock(null);
-    setUnlocked(false);
+    try {
+      await clearVaultLockSynced();
+      setLock(null);
+      setUnlocked(false);
+    } finally {
+      setLockBusy(false);
+    }
   };
+
+  if (!lockLoaded) {
+    return (
+      <div className="storage-page">
+        <div className="storage-shell">
+          <header className="storage-top">
+            <div className="storage-top-copy">
+              <h1>Storage Vault</h1>
+              <p className="storage-subtitle">Loading your vault lock…</p>
+            </div>
+          </header>
+        </div>
+      </div>
+    );
+  }
 
   const selectionCount = `${selectedImageIds.length}/${LOCK_PICK_COUNT}`;
   const selectionHint = isSetupMode
