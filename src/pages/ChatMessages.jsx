@@ -1027,6 +1027,14 @@ export default function ChatMessages() {
              const unreadCount = contactId
                ? Math.max(0, Math.floor(Number(threadReadState?.[contactId]?.unread || 0)))
                : 0;
+             const threadMessages = contactId && Array.isArray(messagesByContact?.[contactId])
+               ? messagesByContact[contactId]
+               : [];
+             const threadLast = threadMessages.length ? threadMessages[threadMessages.length - 1] : null;
+             const previewText =
+               String(c?.lastMessage || "").trim() ||
+               String(getMessagePreviewLabel(threadLast) || "").trim() ||
+               "Tap to start chatting";
              const showUnread = unreadCount > 0 && !isActive;
              const showActions = Boolean(contactId) && String(contactActionId) === contactId;
              const contactKey = contactId || c?.email || displayName;
@@ -1057,8 +1065,8 @@ export default function ChatMessages() {
                         {presence.text}
                       </span>
                      </span>
-                     <small>{c.lastMessage || "Tap to start chatting"}</small>
-                   </span>
+                     <small>{previewText}</small>
+                    </span>
                    <span className="chat-contact-right" aria-hidden={!showUnread}>
                      {showUnread && (
                        <span className="chat-unread-badge" aria-label={`${unreadCount} unread messages`}>

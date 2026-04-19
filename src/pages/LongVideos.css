@@ -421,14 +421,14 @@
   width: 100%;
   height: 100%;
   max-height: none;
-  object-fit: cover;
+  object-fit: contain;
 }
 
 .watch-player-wrap:-webkit-full-screen .watch-player {
   width: 100%;
   height: 100%;
   max-height: none;
-  object-fit: cover;
+  object-fit: contain;
 }
 
 .watch-overlay-controls {
@@ -1085,7 +1085,7 @@
     height: 100%;
     max-height: none;
     aspect-ratio: auto;
-    object-fit: cover;
+    object-fit: contain;
     background: #000;
   }
 

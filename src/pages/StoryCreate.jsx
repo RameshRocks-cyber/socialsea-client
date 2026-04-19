@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { FiCamera } from "react-icons/fi";
 import api from "../api/axios";
+import { getApiBaseUrl } from "../api/baseUrl";
 import { addStoryEntry } from "../services/storyStorage";
 import "./StoryCreate.css";
 
@@ -40,6 +41,10 @@ function parseUploadError(err) {
   }
   if (typeof err?.message === "string" && err.message.trim()) return err.message;
   return "Story upload failed";
+}
+
+function normalizeBase(rawValue) {
+  return String(rawValue || "").trim().replace(/\/+$/, "");
 }
 
 export default function StoryCreate() {
@@ -142,6 +147,44 @@ export default function StoryCreate() {
     return form;
   };
 
+  const tryPublishStory = async () => {
+    const defaultBase = normalizeBase(api?.defaults?.baseURL);
+    const envBase = normalizeBase(getApiBaseUrl());
+    const baseCandidates = [defaultBase, envBase, "https://api.socialsea.co.in"]
+      .filter((value, index, all) => value && all.indexOf(value) === index);
+    const endpointCandidates = [
+      "/api/stories/upload",
+      "/stories/upload",
+      "/api/posts/upload",
+      "/posts/upload"
+    ];
+
+    let lastError = null;
+    for (const baseURL of baseCandidates) {
+      for (const endpoint of endpointCandidates) {
+        try {
+          const res = await api.post(endpoint, buildStoryForm(), {
+            baseURL,
+            timeout: 30000,
+            suppressAuthRedirect: true
+          });
+          if (res && Number(res.status || 0) >= 200 && Number(res.status || 0) < 300) {
+            return res;
+          }
+          lastError = new Error(`Unexpected response (${res?.status || "unknown"})`);
+        } catch (err) {
+          lastError = err;
+          const status = Number(err?.response?.status || 0);
+          // keep trying fallback routes for route-miss/network cases
+          if (status === 404 || status === 405 || status === 0) continue;
+          // auth/config/server errors should stop and surface immediately
+          throw err;
+        }
+      }
+    }
+    throw lastError || new Error("Story upload failed on all endpoints");
+  };
+
   const publishStory = async () => {
     setMsg("");
     if (!file) {
@@ -155,8 +198,7 @@ export default function StoryCreate() {
 
     setLoading(true);
     try {
-      const form = buildStoryForm();
-      const res = await api.post("/api/stories/upload", form, { timeout: 20000 });
+      const res = await tryPublishStory();
 
       const mediaUrl =
         res?.data?.mediaUrl ||
@@ -232,6 +274,7 @@ export default function StoryCreate() {
             {loading ? "Publishing..." : "Publish"}
           </button>
         </header>
+        {msg && <p className="story-msg story-msg-top">{msg}</p>}
 
         <section className="story-create-body">
           {previewUrl && (

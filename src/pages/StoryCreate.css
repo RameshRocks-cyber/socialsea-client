@@ -350,6 +350,10 @@
   font-size: 0.8rem;
 }
 
+.story-msg-top {
+  margin: -4px 0 10px;
+}
+
 .story-audio-toggle {
   position: absolute;
   right: 10px;

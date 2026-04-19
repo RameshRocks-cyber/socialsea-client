@@ -1543,6 +1543,24 @@ function useChatController() {
   const [signAssistContinuousMode, setSignAssistContinuousMode] = useState(false);
   const [signAssistBusy, setSignAssistBusy] = useState(false);
   const [signAssistStatus, setSignAssistStatus] = useState("");
+  const [signAssistDebugOpen, setSignAssistDebugOpen] = useState(false);
+  const [signAssistDebug, setSignAssistDebug] = useState({
+    localModelStatus: "idle",
+    sequenceModelStatus: "idle",
+    apiStatus: "idle",
+    lastDetection: "",
+    lastDetectionSource: "",
+    lastDetectionAt: 0,
+    lastError: "",
+    lastUpdateAt: 0
+  });
+  const updateSignAssistDebug = useCallback((patch = {}) => {
+    setSignAssistDebug((prev) => ({
+      ...prev,
+      ...patch,
+      lastUpdateAt: Date.now()
+    }));
+  }, []);
   useEffect(() => {
     if (!signAssistEnabled) return;
     if (callState.mode !== "video" || callState.phase === "idle") return;
@@ -5328,7 +5346,25 @@ function useChatController() {
       signal?.sender_id ??
       ""
     );
-    const fromId = fromIdRaw || (type === "chat-read" ? String(signal?.readerId || "") : "");
+    const fromEmail = String(
+      signal?.fromEmail ??
+      signal?.senderEmail ??
+      signal?.from_email ??
+      signal?.sender_email ??
+      signal?.email ??
+      ""
+    )
+      .trim()
+      .toLowerCase();
+    let fromId = fromIdRaw || (type === "chat-read" ? String(signal?.readerId || "") : "");
+    if (!fromId && fromEmail) {
+      const matched = (contactsRef.current || []).find(
+        (contact) => String(contact?.email || "").trim().toLowerCase() === fromEmail
+      );
+      if (matched?.id != null) {
+        fromId = String(matched.id).trim();
+      }
+    }
     const rawTs = signal?.timestamp ?? signal?.at ?? signal?.createdAt ?? 0;
     const parsedTs = Number(rawTs);
     const signalMs = Number.isFinite(parsedTs)
@@ -7946,8 +7982,11 @@ function useChatController() {
       if (disposed || busy) return;
       busy = true;
       try {
-        const res = await api.get("/api/calls/inbox");
-        const list = Array.isArray(res.data) ? res.data : [];
+        const res = await requestChatArray({
+          endpoints: ["/api/calls/inbox", "/calls/inbox"],
+          timeoutMs: 6500
+        });
+        const list = Array.isArray(res?.list) ? res.list : [];
         list.forEach((signal) => {
           onSignal(signal);
         });
@@ -7963,7 +8002,7 @@ function useChatController() {
       disposed = true;
       clearInterval(timer);
     };
-  }, [myUserId]);
+  }, [myUserId, requestChatArray]);
 
   useEffect(() => {
     setSidebarSearchUsers([]);
@@ -8776,6 +8815,10 @@ function useChatController() {
 
   const getContactPresence = (contact) => {
     if (!contact) return { online: false, text: "lastseen at --" };
+    const contactId = String(contact?.id || "").trim();
+    if (contactId && typingByContact?.[contactId]) {
+      return { online: true, text: "typing..." };
+    }
     const latest = getContactActivityTs(contact);
     const presenceTs = getContactPresenceTs(contact);
     const explicitOnline = getExplicitOnlineValue(contact);
@@ -9829,9 +9872,16 @@ function useChatController() {
 
   const ensureSequenceModel = useCallback(async () => {
     const modelUrl = String(import.meta.env.VITE_SIGN_SEQUENCE_MODEL_URL || "").trim();
-    if (!modelUrl) return null;
-    if (signSequenceModelRef.current) return signSequenceModelRef.current;
+    if (!modelUrl) {
+      updateSignAssistDebug({ sequenceModelStatus: "not-configured" });
+      return null;
+    }
+    if (signSequenceModelRef.current) {
+      updateSignAssistDebug({ sequenceModelStatus: "loaded" });
+      return signSequenceModelRef.current;
+    }
     if (!signSequenceModelLoadingRef.current) {
+      updateSignAssistDebug({ sequenceModelStatus: "loading" });
       signSequenceModelLoadingRef.current = (async () => {
         await loadExternalScript(modelUrl, "sign-sequence-model");
         const model =
@@ -9846,9 +9896,21 @@ function useChatController() {
         return model;
       })();
     }
-    signSequenceModelRef.current = await signSequenceModelLoadingRef.current;
-    return signSequenceModelRef.current;
-  }, []);
+    try {
+      signSequenceModelRef.current = await signSequenceModelLoadingRef.current;
+      updateSignAssistDebug({
+        sequenceModelStatus: signSequenceModelRef.current ? "loaded" : "unavailable"
+      });
+      return signSequenceModelRef.current;
+    } catch (err) {
+      signSequenceModelLoadingRef.current = null;
+      updateSignAssistDebug({
+        sequenceModelStatus: "failed",
+        lastError: String(err?.message || "Failed to load sequence model")
+      });
+      return null;
+    }
+  }, [updateSignAssistDebug]);
 
   const pushSequenceFrame = (landmarks) => {
     if (!Array.isArray(landmarks) || !landmarks.length) return;
@@ -9868,30 +9930,60 @@ function useChatController() {
       const payload = frames.map((f) => f.landmarks);
       if (typeof model.predict === "function") {
         const result = await model.predict(payload);
-        return String(result?.text || result || "").trim();
+        const text = String(result?.text || result || "").trim();
+        if (text) {
+          updateSignAssistDebug({
+            lastDetection: text,
+            lastDetectionSource: "sequence",
+            lastDetectionAt: Date.now()
+          });
+        }
+        return text;
       }
       if (typeof model.infer === "function") {
         const result = await model.infer(payload);
-        return String(result?.text || result || "").trim();
+        const text = String(result?.text || result || "").trim();
+        if (text) {
+          updateSignAssistDebug({
+            lastDetection: text,
+            lastDetectionSource: "sequence",
+            lastDetectionAt: Date.now()
+          });
+        }
+        return text;
       }
       return "";
-    } catch {
+    } catch (err) {
+      updateSignAssistDebug({
+        sequenceModelStatus: "error",
+        lastError: String(err?.message || "Sequence detection failed")
+      });
       return "";
     }
-  }, [ensureSequenceModel]);
+  }, [ensureSequenceModel, updateSignAssistDebug]);
 
   const detectLocalSignText = useCallback(async (videoEl) => {
     if (!videoEl || !videoEl.videoWidth || !videoEl.videoHeight) return "";
     try {
+      if (!signLocalModelRef.current && !signLocalModelLoadingRef.current) {
+        updateSignAssistDebug({ localModelStatus: "loading" });
+      }
       await loadExternalScript(SIGN_LOCAL_TF_SCRIPT, "tfjs-chat-sign");
       await loadExternalScript(SIGN_LOCAL_HANDPOSE_SCRIPT, "handpose-chat-sign");
-      if (!window?.handpose) return "";
+      if (!window?.handpose) {
+        updateSignAssistDebug({
+          localModelStatus: "unavailable",
+          lastError: "handpose library missing"
+        });
+        return "";
+      }
 
       if (!signLocalModelRef.current) {
         if (!signLocalModelLoadingRef.current) {
           signLocalModelLoadingRef.current = window.handpose.load();
         }
         signLocalModelRef.current = await signLocalModelLoadingRef.current;
+        updateSignAssistDebug({ localModelStatus: "loaded", lastError: "" });
       }
 
       const predictions = await signLocalModelRef.current.estimateHands(videoEl, true);
@@ -9899,12 +9991,44 @@ function useChatController() {
       const landmarks = predictions[0]?.landmarks || [];
       pushSequenceFrame(landmarks);
       const sequenceText = await detectSequenceSignText();
-      if (sequenceText) return sequenceText;
-      return inferLocalSignText(landmarks);
-    } catch {
+      if (sequenceText) {
+        updateSignAssistDebug({
+          lastDetection: sequenceText,
+          lastDetectionSource: "sequence",
+          lastDetectionAt: Date.now()
+        });
+        return sequenceText;
+      }
+      const localText = inferLocalSignText(landmarks);
+      if (localText) {
+        updateSignAssistDebug({
+          lastDetection: localText,
+          lastDetectionSource: "local",
+          lastDetectionAt: Date.now()
+        });
+      }
+      return localText;
+    } catch (err) {
+      updateSignAssistDebug({
+        localModelStatus: "error",
+        lastError: String(err?.message || "Local detection failed")
+      });
       return "";
     }
-  }, [detectSequenceSignText]);
+  }, [detectSequenceSignText, updateSignAssistDebug]);
+
+  const captureLocalSignBurst = useCallback(async (videoEl, attempts = 6, delayMs = 180) => {
+    if (!videoEl) return "";
+    const total = Math.max(1, Math.floor(Number(attempts) || 1));
+    for (let i = 0; i < total; i += 1) {
+      const detected = String(await detectLocalSignText(videoEl)).trim();
+      if (detected) return detected;
+      if (i < total - 1) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+    return "";
+  }, [detectLocalSignText]);
 
   const resetSignLiveBuffer = () => {
     const buffer = signLiveBufferRef.current;
@@ -10031,11 +10155,19 @@ function useChatController() {
     const video = localVideoRef.current;
     if (!video || !video.videoWidth || !video.videoHeight) {
       setSignAssistStatus("Camera feed not ready. Keep camera on and try again.");
+      updateSignAssistDebug({
+        apiStatus: "camera-not-ready",
+        lastError: "Camera feed not ready"
+      });
       return;
     }
 
     setSignAssistBusy(true);
     setSignAssistStatus("Capturing sign frame...");
+    updateSignAssistDebug({
+      apiStatus: signApiUnavailableRef.current ? "local-fallback" : "requesting",
+      lastError: ""
+    });
 
     try {
       const canvas = document.createElement("canvas");
@@ -10063,13 +10195,15 @@ function useChatController() {
             : "I am signing a message. Please review and respond.";
 
       if (signApiUnavailableRef.current) {
-        const localDetected = await detectLocalSignText(video);
+        const localDetected = await captureLocalSignBurst(video);
         if (localDetected) {
           setSignAssistText(localDetected);
           setSignAssistStatus("Sign detected locally. Review and send.");
+          updateSignAssistDebug({ apiStatus: "local-fallback", lastError: "" });
         } else {
           setSignAssistText((prev) => String(prev || "").trim() || draft);
           setSignAssistStatus("Sign draft ready. Edit and send.");
+          updateSignAssistDebug({ apiStatus: "local-fallback" });
         }
         return;
       }
@@ -10120,6 +10254,7 @@ function useChatController() {
             translated = String(res?.data?.text || res?.data?.translation || res?.data?.message || "").trim();
             success = true;
             signApiUnavailableRef.current = false;
+            updateSignAssistDebug({ apiStatus: "online", lastError: "" });
             break;
           } catch (err) {
             const status = Number(err?.response?.status || 0);
@@ -10166,7 +10301,7 @@ function useChatController() {
         if (success) {
           setSignAssistStatus("No text detected. Try better lighting/hand visibility.");
         } else {
-          const localDetected = await detectLocalSignText(video);
+          const localDetected = await captureLocalSignBurst(video);
           if (localDetected) {
             setSignAssistText(localDetected);
             setSignAssistStatus("Sign detected locally. Review and send.");
@@ -10176,12 +10311,21 @@ function useChatController() {
           if (onlyMissingRoutes) {
             signApiUnavailableRef.current = true;
             setSignAssistStatus("Sign draft ready. Edit and send.");
+            updateSignAssistDebug({ apiStatus: "missing-route" });
           } else {
             setSignAssistStatus("Sign draft ready. Edit and send.");
+            updateSignAssistDebug({
+              apiStatus: "error",
+              lastError: "Sign API request failed"
+            });
           }
         }
       }
-    } catch {
+    } catch (err) {
+      updateSignAssistDebug({
+        apiStatus: "error",
+        lastError: String(err?.message || "Capture failed")
+      });
       setSignAssistStatus("Capture complete. Edit the draft and send.");
     } finally {
       setSignAssistBusy(false);
@@ -12578,6 +12722,9 @@ function useChatController() {
     setSignAssistBusy,
     signAssistStatus,
     setSignAssistStatus,
+    signAssistDebugOpen,
+    setSignAssistDebugOpen,
+    signAssistDebug,
     blockedUsers,
     setBlockedUsers,
     chatWallpaper,

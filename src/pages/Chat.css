@@ -5301,6 +5301,7 @@ body.ss-theme-white .chat-page.chat-single-pane .chat-day-sep {
 .wa-sign-assist-capture,
 .wa-sign-assist-send,
 .wa-sign-assist-toggle,
+.wa-sign-assist-debug-toggle,
 .wa-sign-assist-gender {
   border: 1px solid rgba(78, 78, 78, 0.75);
   border-radius: 10px;
@@ -5312,8 +5313,45 @@ body.ss-theme-white .chat-page.chat-single-pane .chat-day-sep {
 
 .wa-sign-assist-capture,
 .wa-sign-assist-send,
-.wa-sign-assist-toggle {
+.wa-sign-assist-toggle,
+.wa-sign-assist-debug-toggle {
   cursor: pointer;
+}
+
+.wa-sign-assist-debug-toggle {
+  font-size: 0.72rem;
+  padding: 6px 10px;
+}
+
+.wa-sign-assist-debug {
+  margin: 8px 0;
+  padding: 8px 10px;
+  border: 1px solid rgba(72, 72, 72, 0.74);
+  border-radius: 10px;
+  background: rgba(10, 10, 10, 0.94);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 10px;
+  font-size: 0.72rem;
+}
+
+.wa-sign-assist-debug > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.wa-sign-assist-debug > div > span {
+  color: #9a9a9a;
+}
+
+.wa-sign-assist-debug > div > strong {
+  color: #efefef;
+  max-width: 52%;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .wa-sign-assist-input {

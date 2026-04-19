@@ -151,7 +151,10 @@ export default function VideoCall({ placement = "page" }) {
     signAssistText,
     setSignAssistText,
     sendSignAssistMessage,
-    signAssistStatus
+    signAssistStatus,
+    signAssistDebugOpen,
+    setSignAssistDebugOpen,
+    signAssistDebug
   } = ctx;
 
   const [showCallMoreMenu, setShowCallMoreMenu] = useState(false);
@@ -162,6 +165,9 @@ export default function VideoCall({ placement = "page" }) {
 
   const showVideoCallMini =
     callActive && (callState.mode === "video" || groupCallActive) && Boolean(videoCallMinimized);
+  const signDebugTime = signAssistDebug?.lastDetectionAt
+    ? new Date(signAssistDebug.lastDetectionAt).toLocaleTimeString()
+    : "--";
 
   const setLocalVideoElement = useCallback(
     (el) => {
@@ -549,7 +555,25 @@ export default function VideoCall({ placement = "page" }) {
                   />
                   Continuous mode
                 </label>
+                <button
+                  type="button"
+                  className="wa-sign-assist-debug-toggle"
+                  onClick={() => setSignAssistDebugOpen((prev) => !prev)}
+                >
+                  {signAssistDebugOpen ? "Hide Debug" : "Debug"}
+                </button>
               </div>
+              {signAssistDebugOpen && (
+                <div className="wa-sign-assist-debug" role="status" aria-live="polite">
+                  <div><span>Local model</span><strong>{signAssistDebug?.localModelStatus || "idle"}</strong></div>
+                  <div><span>Sequence model</span><strong>{signAssistDebug?.sequenceModelStatus || "idle"}</strong></div>
+                  <div><span>API</span><strong>{signAssistDebug?.apiStatus || "idle"}</strong></div>
+                  <div><span>Last detect</span><strong>{signAssistDebug?.lastDetection || "--"}</strong></div>
+                  <div><span>Source</span><strong>{signAssistDebug?.lastDetectionSource || "--"}</strong></div>
+                  <div><span>At</span><strong>{signDebugTime}</strong></div>
+                  <div><span>Error</span><strong>{signAssistDebug?.lastError || "--"}</strong></div>
+                </div>
+              )}
               <div className="wa-sign-assist-row">
                 <button
                   type="button"

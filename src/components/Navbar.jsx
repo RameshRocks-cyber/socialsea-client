@@ -33,6 +33,7 @@ const CALL_ACCEPT_TARGET_KEY = "socialsea_call_accept_target_v1";
 const CALL_SIGNAL_LOCAL_KEY = "socialsea_call_signal_local_v1";
 const CALL_SIGNAL_CHANNEL = "socialsea-call-signal";
 const CALL_SIGNAL_MAX_AGE_MS = 45000;
+const CHAT_THREAD_READ_STATE_KEY = "socialsea_chat_thread_read_state_v1";
 const SETTINGS_KEY = "socialsea_settings_v1";
 const SOS_SIGNAL_KEY = "socialsea_sos_signal_v1";
 const SOS_SIGNAL_CHANNEL = "socialsea_sos_signal_channel_v1";
@@ -310,6 +311,52 @@ const readSessionValue = (key) => {
     return "";
   }
 };
+
+const toArrayPayload = (payload, depth = 0) => {
+  if (Array.isArray(payload)) return payload;
+  if (!payload || typeof payload !== "object" || depth > 3) return [];
+  const keys = ["content", "items", "users", "conversations", "messages", "results", "data", "result", "payload"];
+  for (const key of keys) {
+    const value = payload?.[key];
+    if (Array.isArray(value)) return value;
+    if (value && typeof value === "object") {
+      const nested = toArrayPayload(value, depth + 1);
+      if (nested.length > 0) return nested;
+    }
+  }
+  const values = Object.values(payload);
+  for (const value of values) {
+    if (Array.isArray(value)) return value;
+  }
+  return [];
+};
+
+const readChatUnreadFromThreadState = () => {
+  try {
+    const raw = localStorage.getItem(CHAT_THREAD_READ_STATE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    if (!parsed || typeof parsed !== "object") return 0;
+    return Object.values(parsed).reduce((sum, entry) => {
+      const unread = Math.max(0, Math.floor(Number(entry?.unread || 0)));
+      return sum + unread;
+    }, 0);
+  } catch {
+    return 0;
+  }
+};
+
+const sumUnreadFromConversations = (rows) =>
+  (Array.isArray(rows) ? rows : []).reduce((sum, item) => {
+    const unread = Number(
+      item?.unreadCount ??
+        item?.unread ??
+        item?.unreadMessages ??
+        item?.unreadMessageCount ??
+        item?.unread_message_count ??
+        0
+    );
+    return sum + (Number.isFinite(unread) && unread > 0 ? Math.floor(unread) : 0);
+  }, 0);
 
 const toEpochMs = (value) => {
   if (value == null || value === "") return 0;
@@ -629,6 +676,7 @@ export default function Navbar() {
     }
   });
   const [trafficPopup, setTrafficPopup] = useState(null);
+  const [chatUnreadCount, setChatUnreadCount] = useState(() => readChatUnreadFromThreadState());
   const [sosUserLocation, setSosUserLocation] = useState(null);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraError, setCameraError] = useState("");
@@ -724,6 +772,56 @@ export default function Navbar() {
   useEffect(() => {
     incomingCallRef.current = incomingCall;
   }, [incomingCall]);
+
+  useEffect(() => {
+    const syncLocalUnread = () => {
+      setChatUnreadCount(readChatUnreadFromThreadState());
+    };
+    syncLocalUnread();
+    const onStorage = (event) => {
+      if (!event || !event.key || event.key === CHAT_THREAD_READ_STATE_KEY) {
+        syncLocalUnread();
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    window.addEventListener("focus", syncLocalUnread);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener("focus", syncLocalUnread);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!myUserId) return undefined;
+    let disposed = false;
+    let busy = false;
+    const pollUnread = async () => {
+      if (disposed || busy) return;
+      busy = true;
+      try {
+        const res = await api.get("/api/chat/conversations", {
+          params: { page: 0, size: 200 },
+          timeout: 6500,
+          suppressAuthRedirect: true,
+        });
+        const conversations = toArrayPayload(res?.data);
+        const serverUnread = sumUnreadFromConversations(conversations);
+        const localUnread = readChatUnreadFromThreadState();
+        const nextCount = Math.max(localUnread, serverUnread);
+        if (!disposed) setChatUnreadCount(nextCount);
+      } catch {
+        if (!disposed) setChatUnreadCount(readChatUnreadFromThreadState());
+      } finally {
+        busy = false;
+      }
+    };
+    pollUnread();
+    const timer = setInterval(pollUnread, 12000);
+    return () => {
+      disposed = true;
+      clearInterval(timer);
+    };
+  }, [myUserId]);
 
   useEffect(() => {
     sosPopupPosRef.current = sosPopupPos;
@@ -3053,26 +3151,35 @@ export default function Navbar() {
             const active = item.match(location.pathname);
             const isFeedItem = item.to === "/feed";
             const isProfileItem = item.to === profileTarget;
+            const isChatItem = item.to === "/chat";
+            const showChatUnread = isChatItem && chatUnreadCount > 0;
             return (
               <Link
                 key={item.to}
                 to={item.to}
                 className={`ss-link ${active ? "is-active" : ""}`}
-                title={item.label}
+                title={showChatUnread ? `${item.label} (${chatUnreadCount > 99 ? "99+" : chatUnreadCount} unread)` : item.label}
                 aria-current={active ? "page" : undefined}
               >
-                {isFeedItem ? (
-                  <img src="/logo.png?v=3" alt="" className="ss-link-logo" aria-hidden="true" />
-                ) : isProfileItem && profileNavPic ? (
-                  <img
-                    src={profileNavPic}
-                    alt="Profile"
-                    className="ss-link-avatar"
-                    onError={() => setProfileNavPic("")}
-                  />
-                ) : (
-                  <Icon className="ss-link-icon" />
-                )}
+                <span className="ss-link-icon-wrap">
+                  {isFeedItem ? (
+                    <img src="/logo.png?v=3" alt="" className="ss-link-logo" aria-hidden="true" />
+                  ) : isProfileItem && profileNavPic ? (
+                    <img
+                      src={profileNavPic}
+                      alt="Profile"
+                      className="ss-link-avatar"
+                      onError={() => setProfileNavPic("")}
+                    />
+                  ) : (
+                    <Icon className="ss-link-icon" />
+                  )}
+                  {showChatUnread && (
+                    <span className="ss-link-chat-badge" aria-label={`${chatUnreadCount} unread chats`}>
+                      {chatUnreadCount > 99 ? "99+" : chatUnreadCount}
+                    </span>
+                  )}
+                </span>
                 <span className="ss-link-text">{item.label}</span>
               </Link>
             );
