@@ -498,7 +498,11 @@ export default function Feed() {
       }
     };
     document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
+    document.addEventListener("touchstart", onDocClick, { passive: true });
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("touchstart", onDocClick);
+    };
   }, [menuOpenPostId]);
 
   const selectContentType = (value) => {
@@ -1154,6 +1158,12 @@ export default function Feed() {
     setMenuOpenPostId(null);
   };
 
+  const handleMenuItemClick = async (event, action, post) => {
+    if (event?.preventDefault) event.preventDefault();
+    if (event?.stopPropagation) event.stopPropagation();
+    await onMenuAction(action, post);
+  };
+
   const liveHostName = liveBroadcast?.hostName || "Creator";
   const liveTitle = liveBroadcast?.title || `${liveHostName} is live`;
   const liveSubtitle = liveBroadcast?.startedAt ? formatLiveElapsed(liveBroadcast.startedAt) : "Live now";
@@ -1261,19 +1271,6 @@ export default function Feed() {
           </aside>
 
           <div className="feed-yt-main">
-            <div className="feed-yt-categories">
-              {FEED_CONTENT_TYPES.map((chip) => (
-                <button
-                  key={`chip-${chip.value}`}
-                  type="button"
-                  className={`feed-yt-chip ${contentTypeFilter === chip.value ? "is-active" : ""}`}
-                  onClick={() => setContentTypeFilter(chip.value)}
-                >
-                  {chip.label}
-                </button>
-              ))}
-            </div>
-
             <div className="long-video-feed">
           {liveBroadcast && (
             <article
@@ -1352,6 +1349,7 @@ export default function Feed() {
                   <div className="long-feed-text">
                     <p className="long-feed-title">{captionFor(post)}</p>
                     <p className="long-feed-sub">{user} | {(likeCounts[post.id] || 0).toLocaleString()} likes</p>
+                    {shareMessageByPost[post.id] && <p className="long-feed-status">{shareMessageByPost[post.id]}</p>}
                   </div>
                   <div className="long-feed-menu-wrap" ref={menuOpenPostId === post.id ? menuRef : null}>
                     <button
@@ -1360,15 +1358,12 @@ export default function Feed() {
                       aria-label="More options"
                       aria-expanded={menuOpenPostId === post.id}
                       onPointerDown={(e) => {
-                        e.preventDefault();
                         e.stopPropagation();
                       }}
                       onTouchStart={(e) => {
-                        e.preventDefault();
                         e.stopPropagation();
                       }}
                       onClick={(e) => {
-                        e.preventDefault();
                         e.stopPropagation();
                         setMenuOpenPostId((prev) => (prev === post.id ? null : post.id));
                       }}
@@ -1380,16 +1375,18 @@ export default function Feed() {
                         className="long-feed-menu"
                         onPointerDown={(e) => e.stopPropagation()}
                         onTouchStart={(e) => e.stopPropagation()}
+                        onTouchMove={(e) => e.stopPropagation()}
+                        onWheel={(e) => e.stopPropagation()}
                         onClick={(e) => e.stopPropagation()}
                       >
-                        <button type="button" onClick={() => onMenuAction("share", post)}>Share video</button>
-                        <button type="button" onClick={() => onMenuAction("playlist", post)}>Save to playlist</button>
-                        <button type="button" onClick={() => onMenuAction("not_interested", post)}>Not interested</button>
-                        <button type="button" onClick={() => onMenuAction("dont_recommend", post)}>Don't recommend this video</button>
-                        <button type="button" onClick={() => onMenuAction("report", post)}>Report</button>
-                        <button type="button" onClick={() => onMenuAction("watch_later", post)}>Save to Watch Later</button>
-                        <button type="button" onClick={() => onMenuAction("play_next", post)}>Play next</button>
-                        <button type="button" onClick={() => onMenuAction("queue", post)}>In queue</button>
+                        <button type="button" onClick={(e) => void handleMenuItemClick(e, "share", post)}>Share video</button>
+                        <button type="button" onClick={(e) => void handleMenuItemClick(e, "playlist", post)}>Save to playlist</button>
+                        <button type="button" onClick={(e) => void handleMenuItemClick(e, "not_interested", post)}>Not interested</button>
+                        <button type="button" onClick={(e) => void handleMenuItemClick(e, "dont_recommend", post)}>Don't recommend this video</button>
+                        <button type="button" onClick={(e) => void handleMenuItemClick(e, "report", post)}>Report</button>
+                        <button type="button" onClick={(e) => void handleMenuItemClick(e, "watch_later", post)}>Save to Watch Later</button>
+                        <button type="button" onClick={(e) => void handleMenuItemClick(e, "play_next", post)}>Play next</button>
+                        <button type="button" onClick={(e) => void handleMenuItemClick(e, "queue", post)}>In queue</button>
                       </div>
                     )}
                   </div>

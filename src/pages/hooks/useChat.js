@@ -601,6 +601,35 @@ export const extractReelShare = (value) => {
   };
 };
 
+export const extractFeedShare = (value) => {
+  if (typeof window === "undefined") return null;
+  const text = String(value || "");
+  if (!text) return null;
+  const match = text.match(/(https?:\/\/[^\s]+\/feed[^\s]*|\/feed\?[^\s]+)/i);
+  if (!match) return null;
+  const rawLink = match[1].replace(/[)\],.!?]+$/, "");
+  let url = null;
+  try {
+    url = new URL(rawLink, window.location.origin);
+  } catch {
+    return null;
+  }
+  if (!String(url.pathname || "").toLowerCase().includes("/feed")) return null;
+  const id =
+    url.searchParams.get("post") ||
+    url.searchParams.get("postId") ||
+    url.searchParams.get("id") ||
+    "";
+  if (!String(id).trim()) return null;
+  const href = `/feed?post=${encodeURIComponent(String(id).trim())}`;
+  return {
+    href,
+    id: String(id).trim(),
+    match: rawLink,
+    raw: text
+  };
+};
+
 const normalizeReelCandidate = (value) =>
   value?.post || value?.reel || value?.item || value;
 
@@ -1104,6 +1133,7 @@ function useChatController() {
   const [pendingShareDraft, setPendingShareDraft] = useState("");
   const [shareHint, setShareHint] = useState("");
   const [reelPreviewById, setReelPreviewById] = useState({});
+  const [feedPreviewById, setFeedPreviewById] = useState({});
   const [reelPosterBySrc, setReelPosterBySrc] = useState({});
 
   useEffect(() => {
@@ -1178,6 +1208,7 @@ function useChatController() {
   }, [callVideoQualityId]);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [remoteIsScreenShare, setRemoteIsScreenShare] = useState(false);
+  const [isLocalVideoPrimary, setIsLocalVideoPrimary] = useState(false);
   const [localVideoPos, setLocalVideoPos] = useState(null);
   const [miniVideoPos, setMiniVideoPos] = useState(null);
   const [incomingCallPopupPos, setIncomingCallPopupPos] = useState(() => {
@@ -1344,6 +1375,7 @@ function useChatController() {
   const storyUsernamesRef = useRef({ byId: {}, byEmail: {} });
   const storyProfileLookupRef = useRef(new Set());
   const reelPreviewLoadingRef = useRef(new Set());
+  const feedPreviewLoadingRef = useRef(new Set());
   const reelPosterLoadingRef = useRef(new Set());
   useEffect(() => {
     storyUsernamesRef.current = { byId: storyUsernamesById, byEmail: storyUsernamesByEmail };
@@ -1510,6 +1542,20 @@ function useChatController() {
       if (!track) continue;
       const label = String(track.label || "").toLowerCase();
       const hint = String(track.contentHint || "").toLowerCase();
+      const settings = track.getSettings?.() || {};
+      const displaySurface = String(settings.displaySurface || "").toLowerCase();
+      const cursor = String(settings.cursor || "").toLowerCase();
+      const logicalSurface = settings.logicalSurface;
+      if (
+        displaySurface === "browser" ||
+        displaySurface === "window" ||
+        displaySurface === "monitor" ||
+        displaySurface === "application"
+      ) {
+        return true;
+      }
+      if (cursor === "always" || cursor === "motion") return true;
+      if (logicalSurface === true) return true;
       if (label.includes("screen") || label.includes("display") || label.includes("window") || label.includes("tab")) return true;
       if (hint.includes("screen") || hint.includes("detail") || hint.includes("text")) return true;
     }
@@ -1656,6 +1702,7 @@ function useChatController() {
   const livekitRoomIdRef = useRef("");
   const livekitConnectingRef = useRef(false);
   const livekitScreenPreviewRef = useRef(null);
+  const livekitRemoteScreenTrackRef = useRef(null);
   const callTimeoutRef = useRef(null);
   const mediaConnectTimeoutRef = useRef(null);
   const callStateRef = useRef(callState);
@@ -1681,6 +1728,7 @@ function useChatController() {
   const customRingtoneAudioRef = useRef(null);
   const presetRingtoneAudioRef = useRef(null);
   const notificationAudioRef = useRef(null);
+  const remoteScreenShareSignalRef = useRef(false);
   const disconnectGuardTimerRef = useRef(null);
   const historyRef = useRef({});
   const storyLongPressTimeoutRef = useRef(null);
@@ -2122,8 +2170,25 @@ function useChatController() {
     playNotificationPattern(soundPrefs.notificationSound);
   };
 
+  const readMessageAnnouncementMode = () => {
+    try {
+      const raw = localStorage.getItem(SETTINGS_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      const mode = String(parsed?.notificationBuddyMessageSpeechMode || "count").trim().toLowerCase();
+      return mode === "off" || mode === "count" || mode === "sender" || mode === "sender_message"
+        ? mode
+        : "count";
+    } catch {
+      return "count";
+    }
+  };
+
+  const shouldMuteMessageNotificationSound = () => readMessageAnnouncementMode() !== "off";
+
   const playMessageAlert = () => {
-    playNotificationPattern(soundPrefs.notificationSound);
+    if (!shouldMuteMessageNotificationSound()) {
+      playNotificationPattern(soundPrefs.notificationSound);
+    }
     if (typeof navigator !== "undefined" && typeof navigator.vibrate === "function") {
       navigator.vibrate([40, 40, 40]);
     }
@@ -3986,6 +4051,22 @@ function useChatController() {
     const client = stompRef.current;
     if (!targetUserId) return;
     const signalType = String(payload?.type || "").trim().toLowerCase();
+    const attachScreenShareState = new Set([
+      "offer",
+      "answer",
+      "connected",
+      "ringing",
+      "refreshing",
+      "accepted"
+    ]).has(signalType);
+    const outboundScreenShare = Boolean(
+      isScreenSharing ||
+      isScreenShareStream(screenStreamRef.current) ||
+      isScreenShareStream(localStreamRef.current)
+    );
+    const signalPayload = attachScreenShareState
+      ? { ...(payload || {}), screenShare: outboundScreenShare }
+      : { ...(payload || {}) };
     const shouldSurfaceFailure = ["offer", "answer", "livekit-invite", "livekit-accept", "ringing"].includes(signalType);
     let sentViaWs = false;
     let sentViaRest = false;
@@ -3994,7 +4075,7 @@ function useChatController() {
       if (client?.connected) {
         client.publish({
           destination: `/app/call.signal/${targetUserId}`,
-          body: JSON.stringify(payload || {})
+          body: JSON.stringify(signalPayload)
         });
         sentViaWs = true;
       }
@@ -4007,7 +4088,7 @@ function useChatController() {
         await requestChatMutation({
           method: "POST",
           endpoints: [`/api/calls/signal/${encodedTargetId}`, `/calls/signal/${encodedTargetId}`],
-          data: payload || {}
+          data: signalPayload
         });
         sentViaRest = true;
       } catch (err) {
@@ -4019,7 +4100,7 @@ function useChatController() {
       const target = contacts.find((c) => String(c?.id || "") === String(targetUserId));
       const targetEmail = String(target?.email || "");
       const signalPacket = {
-        ...(payload || {}),
+        ...signalPayload,
         fromUserId: Number(myUserId) || null,
         fromEmail: myEmail || "",
         toUserId: Number(targetUserId) || null,
@@ -4229,6 +4310,7 @@ function useChatController() {
     if (!s) {
       setHasRemoteVideo(false);
       setHasRemoteAudio(false);
+      remoteScreenShareSignalRef.current = false;
       setRemoteIsScreenShare(false);
       return;
     }
@@ -4239,11 +4321,13 @@ function useChatController() {
     const elHasVideo = Boolean(videoEl && videoEl.videoWidth > 0 && videoEl.videoHeight > 0);
     setHasRemoteVideo(hasVideo || elHasVideo);
     setHasRemoteAudio(hasAudio);
-    setRemoteIsScreenShare(isScreenShareStream(displayedStream || s));
+    const detectedScreenShare = isScreenShareStream(displayedStream || s);
+    setRemoteIsScreenShare(remoteScreenShareSignalRef.current || detectedScreenShare);
   }, [isScreenShareStream]);
 
   useEffect(() => {
     if (callState.phase === "idle" || callState.mode !== "video") {
+      remoteScreenShareSignalRef.current = false;
       setRemoteIsScreenShare(false);
     }
   }, [callState.phase, callState.mode]);
@@ -4255,9 +4339,15 @@ function useChatController() {
       if (el.videoWidth > 0 && el.videoHeight > 0) {
         setHasRemoteVideo(true);
       }
+      const currentStream = el.srcObject instanceof MediaStream ? el.srcObject : remoteStreamRef.current;
+      const detectedScreenShare = isScreenShareStream(currentStream);
+      setRemoteIsScreenShare(remoteScreenShareSignalRef.current || detectedScreenShare);
     };
     const markVideoInactive = () => {
       setHasRemoteVideo(false);
+      const currentStream = el.srcObject instanceof MediaStream ? el.srcObject : remoteStreamRef.current;
+      const detectedScreenShare = isScreenShareStream(currentStream);
+      setRemoteIsScreenShare(remoteScreenShareSignalRef.current || detectedScreenShare);
     };
     el.addEventListener("loadeddata", markVideoActive);
     el.addEventListener("playing", markVideoActive);
@@ -4393,10 +4483,18 @@ function useChatController() {
             stream = new MediaStream();
             remoteStreamRef.current = stream;
           }
+          const source = String(publication?.source || "").toLowerCase();
+          const isScreenVideo =
+            track.kind === "video" && (source === "screen_share" || source === "screenshare");
           try {
             stream.addTrack(track.mediaStreamTrack);
           } catch {
             // ignore duplicate tracks
+          }
+          if (isScreenVideo) {
+            livekitRemoteScreenTrackRef.current = track;
+            remoteScreenShareSignalRef.current = true;
+            setRemoteIsScreenShare(true);
           }
           if (track.kind === "video") {
             try {
@@ -4408,16 +4506,20 @@ function useChatController() {
             }
             try {
               const el = remoteVideoRef.current;
-              if (el && typeof track.attach === "function") {
-                track.attach(el);
-                el.play?.().catch(() => {});
-              } else if (el) {
-                el.srcObject = stream;
-                el.play?.().catch(() => {});
+              const shouldAttachThisTrack = isScreenVideo || !livekitRemoteScreenTrackRef.current;
+              if (el && shouldAttachThisTrack) {
+                if (typeof track.attach === "function") {
+                  track.attach(el);
+                  el.play?.().catch(() => {});
+                } else {
+                  el.srcObject = stream;
+                  el.play?.().catch(() => {});
+                }
               }
             } catch {
               const el = remoteVideoRef.current;
-              if (el) {
+              const shouldAttachThisTrack = isScreenVideo || !livekitRemoteScreenTrackRef.current;
+              if (el && shouldAttachThisTrack) {
                 el.srcObject = stream;
                 el.play?.().catch(() => {});
               }
@@ -4433,12 +4535,20 @@ function useChatController() {
           markLivekitConnected();
         });
 
-        room.on(RoomEvent.TrackUnsubscribed, (track) => {
+        room.on(RoomEvent.TrackUnsubscribed, (track, publication) => {
           if (!track || !remoteStreamRef.current) return;
+          const source = String(publication?.source || "").toLowerCase();
+          const isScreenVideo =
+            track.kind === "video" && (source === "screen_share" || source === "screenshare");
           try {
             remoteStreamRef.current.removeTrack(track.mediaStreamTrack);
           } catch {
             // ignore remove failures
+          }
+          if (isScreenVideo || track === livekitRemoteScreenTrackRef.current) {
+            livekitRemoteScreenTrackRef.current = null;
+            remoteScreenShareSignalRef.current = false;
+            setRemoteIsScreenShare(false);
           }
           if (track.kind === "video") {
             const el = remoteVideoRef.current;
@@ -4583,6 +4693,8 @@ function useChatController() {
     remoteAudioSourceRef.current = null;
     remoteAudioGainRef.current = null;
     remoteAudioCtxRef.current = null;
+    livekitRemoteScreenTrackRef.current = null;
+    remoteScreenShareSignalRef.current = false;
     setHasRemoteVideo(false);
     setHasRemoteAudio(false);
     setCallPhaseNote("");
@@ -5337,6 +5449,11 @@ function useChatController() {
       seenSignalsRef.current.clear();
     }
     if (!type || !fromId || fromId === myUserId) return;
+    const hasScreenShareFlag = signal && Object.prototype.hasOwnProperty.call(signal, "screenShare");
+    if (hasScreenShareFlag) {
+      remoteScreenShareSignalRef.current = Boolean(signal?.screenShare);
+      setRemoteIsScreenShare(remoteScreenShareSignalRef.current);
+    }
 
     if (type === "chat-read") {
       applyReadReceiptPacket(signal);
@@ -6465,11 +6582,77 @@ function useChatController() {
     }
 
     try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: {
+          cursor: "always",
+          selfBrowserSurface: "exclude",
+          surfaceSwitching: "include"
+        },
+        audio: false
+      });
       const track = stream.getVideoTracks?.()[0];
       if (!track) {
         setError("Screen share failed to start.");
         return;
+      }
+
+      const displaySettings = track.getSettings?.() || {};
+      const displaySurface = String(displaySettings?.displaySurface || "").toLowerCase();
+      const trackLabel = String(track.label || "").toLowerCase();
+      const host = String(window?.location?.host || "").toLowerCase();
+      const pageTitle = String(document?.title || "").toLowerCase();
+      const browserHints = ["chrome", "edge", "firefox", "brave", "opera", "safari", "browser"];
+      const isBrowserSurfaceByLabel = browserHints.some((hint) => trackLabel.includes(hint));
+
+      if (displaySurface === "browser") {
+        stream.getTracks().forEach((t) => {
+          try {
+            t.stop();
+          } catch {
+            // ignore stop errors
+          }
+        });
+        setError("Tab share is disabled to avoid tiny/loop view. Please choose Entire Screen or an app window.");
+        setIsScreenSharing(false);
+        return;
+      }
+
+      if (displaySurface === "window" && isBrowserSurfaceByLabel) {
+        stream.getTracks().forEach((t) => {
+          try {
+            t.stop();
+          } catch {
+            // ignore stop errors
+          }
+        });
+        setError("Browser window share can loop. Please choose Entire Screen or a non-browser app window.");
+        setIsScreenSharing(false);
+        return;
+      }
+      const looksLikeThisAppWindow =
+        (trackLabel.includes("socialsea") || (pageTitle && trackLabel.includes(pageTitle))) &&
+        (trackLabel.includes("chrome") || trackLabel.includes("edge") || trackLabel.includes("browser"));
+      const isThisCallSurface =
+        (displaySurface === "browser" || displaySurface === "window") &&
+        host &&
+        (trackLabel.includes(host) || trackLabel.includes("localhost:5173") || looksLikeThisAppWindow);
+      if (isThisCallSurface) {
+        stream.getTracks().forEach((t) => {
+          try {
+            t.stop();
+          } catch {
+            // ignore stop errors
+          }
+        });
+        setError("You selected this same call window/tab. Share another app window or full screen to avoid tiny loop view.");
+        setIsScreenSharing(false);
+        return;
+      }
+
+      try {
+        track.contentHint = "detail";
+      } catch {
+        // ignore unsupported contentHint
       }
 
       screenStreamRef.current = stream;
@@ -6529,6 +6712,9 @@ function useChatController() {
 
       setIsScreenSharing(true);
       setError("");
+      if (displaySurface === "monitor") {
+        setVideoCallMinimized(true);
+      }
     } catch {
       setError("Screen share failed. Please try again.");
       setIsScreenSharing(false);
@@ -10994,6 +11180,24 @@ function useChatController() {
   }, [callActive, callState.mode, groupCallActive]);
 
   useEffect(() => {
+    if (!callActive || groupCallActive || callState.mode !== "video") {
+      setIsLocalVideoPrimary(false);
+    }
+  }, [callActive, callState.mode, groupCallActive]);
+
+  const setLocalVideoAsPrimary = useCallback(() => {
+    setIsLocalVideoPrimary(true);
+    setLocalVideoPos(null);
+    localVideoDragRef.current.active = false;
+  }, []);
+
+  const setRemoteVideoAsPrimary = useCallback(() => {
+    setIsLocalVideoPrimary(false);
+    setLocalVideoPos(null);
+    localVideoDragRef.current.active = false;
+  }, []);
+
+  useEffect(() => {
     if (!callActive) return;
     if (callState.mode !== "video" && !groupCallActive) return;
 
@@ -11044,6 +11248,44 @@ function useChatController() {
     groupCallActive,
     isScreenSharing,
     videoCallMinimized,
+    updateRemoteMediaFlags
+  ]);
+
+  useEffect(() => {
+    if (!callActive || callState.mode !== "video" || groupCallActive) return;
+
+    const syncRemotePlayback = () => {
+      const stream = remoteStreamRef.current;
+      const videoEl = remoteVideoRef.current;
+      const audioEl = remoteAudioRef.current;
+      if (stream && videoEl) {
+        if (videoEl.srcObject !== stream) {
+          videoEl.srcObject = stream;
+        }
+        videoEl.muted = true;
+        videoEl.volume = 0;
+        videoEl.play?.().catch(() => {});
+      }
+      if (stream && audioEl) {
+        if (audioEl.srcObject !== stream) {
+          audioEl.srcObject = stream;
+        }
+        audioEl.play?.().catch(() => {});
+      }
+      applySpeakerState(isSpeakerOn);
+      if (stream) updateRemoteMediaFlags(stream);
+    };
+
+    syncRemotePlayback();
+    const delayed = setTimeout(syncRemotePlayback, 120);
+    return () => clearTimeout(delayed);
+  }, [
+    callActive,
+    callState.mode,
+    groupCallActive,
+    videoCallMinimized,
+    applySpeakerState,
+    isSpeakerOn,
     updateRemoteMediaFlags
   ]);
 
@@ -11130,9 +11372,9 @@ function useChatController() {
 
   const getMiniVideoSize = useCallback(() => {
     const width = window.innerWidth || 0;
-    if (width <= 520) return { width: 124, height: 172 };
-    if (width <= 768) return { width: 136, height: 188 };
-    return { width: 148, height: 204 };
+    if (width <= 520) return { width: 114, height: 140 };
+    if (width <= 768) return { width: 126, height: 154 };
+    return { width: 144, height: 176 };
   }, []);
 
   const startMiniVideoDrag = useCallback(
@@ -11855,21 +12097,173 @@ function useChatController() {
   useEffect(() => {
     const messages = Array.isArray(activeMessages) ? activeMessages : [];
     if (!messages.length) return undefined;
-    const pendingSrcs = new Set();
+    const pendingIds = new Set();
+    const directPreviewById = {};
 
     messages.forEach((msg) => {
-      const share = extractReelShare(msg?.raw?.text || msg?.text || "");
-      if (!share) return;
+      const share = extractFeedShare(msg?.raw?.text || msg?.text || "");
       const id = String(share?.id || "").trim();
+      if (!id) return;
       const directFields = pickReelPreviewFields(msg?.raw || msg);
       const directSrc = resolveMediaUrl(directFields.video);
       const directPoster = resolveMediaUrl(directFields.poster);
-      const preview = id ? reelPreviewById[id] : null;
-      const src = directSrc || preview?.src || "";
-      const poster = directPoster || preview?.poster || "";
-      if (!src || poster) return;
-      if (Object.prototype.hasOwnProperty.call(reelPosterBySrc, src)) return;
-      pendingSrcs.add(src);
+      const directTitle = trimReplyPreview(
+        String(msg?.raw?.text || msg?.text || "")
+          .replace(String(share?.match || ""), "")
+          .trim()
+      );
+      if (directSrc || directPoster || directTitle) {
+        directPreviewById[id] = {
+          src: directSrc,
+          poster: directPoster,
+          title: directTitle
+        };
+      }
+      if (Object.prototype.hasOwnProperty.call(feedPreviewById, id)) return;
+      pendingIds.add(id);
+    });
+
+    if (Object.keys(directPreviewById).length) {
+      setFeedPreviewById((prev) => {
+        let changed = false;
+        const next = { ...prev };
+        Object.entries(directPreviewById).forEach(([id, preview]) => {
+          const current = prev[id] || {};
+          const merged = {
+            src: preview?.src || current?.src || "",
+            poster: preview?.poster || current?.poster || "",
+            title: preview?.title || current?.title || ""
+          };
+          if (
+            !prev[id] ||
+            current.src !== merged.src ||
+            current.poster !== merged.poster ||
+            current.title !== merged.title
+          ) {
+            next[id] = merged;
+            changed = true;
+          }
+        });
+        return changed ? next : prev;
+      });
+    }
+
+    if (!pendingIds.size) return undefined;
+
+    let cancelled = false;
+    const buildPreviewPayload = (post) => {
+      const { video, poster } = pickReelPreviewFields(post);
+      const src = resolveMediaUrl(video);
+      const posterUrl = resolveMediaUrl(poster);
+      const title = trimReplyPreview(
+        String(
+          post?.description ||
+            post?.content ||
+            post?.title ||
+            post?.caption ||
+            ""
+        ).trim()
+      );
+      if (!src && !posterUrl && !title) return null;
+      return { src, poster: posterUrl, title };
+    };
+    const findPostInList = (items, targetId) => {
+      if (!Array.isArray(items)) return null;
+      return (
+        items.find((item) => getReelIdValue(item) === targetId) ||
+        items.find((item) => {
+          const candidate = normalizeReelCandidate(item);
+          const altId = getReelIdValue(candidate);
+          return altId === targetId;
+        }) ||
+        null
+      );
+    };
+    const fetchPostById = async (id) => {
+      const listEndpoints = [
+        ["/api/feed"],
+        ["/api/reels"],
+        ["/api/profile/me/posts"],
+        ["/api/profile/posts"]
+      ];
+      for (const endpoints of listEndpoints) {
+        try {
+          const res = await requestChatArray({
+            endpoints,
+            params: { _: Date.now() },
+            maxAttempts: 2
+          });
+          const match = findPostInList(res?.list || [], id);
+          if (match) return match;
+        } catch {
+          // ignore list lookup failures
+        }
+      }
+      return null;
+    };
+
+    const run = async () => {
+      for (const id of pendingIds) {
+        if (cancelled) return;
+        if (feedPreviewLoadingRef.current.has(id)) continue;
+        feedPreviewLoadingRef.current.add(id);
+        try {
+          const post = await fetchPostById(id);
+          if (cancelled) return;
+          const preview = post ? buildPreviewPayload(post) : null;
+          setFeedPreviewById((prev) => {
+            if (Object.prototype.hasOwnProperty.call(prev, id)) return prev;
+            return { ...prev, [id]: preview };
+          });
+        } catch {
+          if (cancelled) return;
+          setFeedPreviewById((prev) => {
+            if (Object.prototype.hasOwnProperty.call(prev, id)) return prev;
+            return { ...prev, [id]: null };
+          });
+        } finally {
+          feedPreviewLoadingRef.current.delete(id);
+        }
+      }
+    };
+
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeMessages, feedPreviewById]);
+
+  useEffect(() => {
+    const messages = Array.isArray(activeMessages) ? activeMessages : [];
+    if (!messages.length) return undefined;
+    const pendingSrcs = new Set();
+
+    messages.forEach((msg) => {
+      const directFields = pickReelPreviewFields(msg?.raw || msg);
+      const directSrc = resolveMediaUrl(directFields.video);
+      const directPoster = resolveMediaUrl(directFields.poster);
+
+      const reelShare = extractReelShare(msg?.raw?.text || msg?.text || "");
+      if (reelShare) {
+        const reelId = String(reelShare?.id || "").trim();
+        const reelPreview = reelId ? reelPreviewById[reelId] : null;
+        const reelSrc = directSrc || reelPreview?.src || "";
+        const reelPoster = directPoster || reelPreview?.poster || "";
+        if (reelSrc && !reelPoster && !Object.prototype.hasOwnProperty.call(reelPosterBySrc, reelSrc)) {
+          pendingSrcs.add(reelSrc);
+        }
+      }
+
+      const feedShare = extractFeedShare(msg?.raw?.text || msg?.text || "");
+      if (feedShare) {
+        const feedId = String(feedShare?.id || "").trim();
+        const feedPreview = feedId ? feedPreviewById[feedId] : null;
+        const feedSrc = directSrc || feedPreview?.src || "";
+        const feedPoster = directPoster || feedPreview?.poster || "";
+        if (feedSrc && !feedPoster && !Object.prototype.hasOwnProperty.call(reelPosterBySrc, feedSrc)) {
+          pendingSrcs.add(feedSrc);
+        }
+      }
     });
 
     if (!pendingSrcs.size) return undefined;
@@ -11897,7 +12291,7 @@ function useChatController() {
     return () => {
       cancelled = true;
     };
-  }, [activeMessages, reelPreviewById, reelPosterBySrc]);
+  }, [activeMessages, reelPreviewById, feedPreviewById, reelPosterBySrc]);
 
   useEffect(() => {
     if (!translatorEnabled) return;
@@ -12458,6 +12852,8 @@ function useChatController() {
     setShareHint,
     reelPreviewById,
     setReelPreviewById,
+    feedPreviewById,
+    setFeedPreviewById,
     reelPosterBySrc,
     setReelPosterBySrc,
     incomingCall,
@@ -12505,6 +12901,9 @@ function useChatController() {
     setIsScreenSharing,
     remoteIsScreenShare,
     setRemoteIsScreenShare,
+    isLocalVideoPrimary,
+    setLocalVideoAsPrimary,
+    setRemoteVideoAsPrimary,
     localVideoPos,
     setLocalVideoPos,
     miniVideoPos,
@@ -12625,6 +13024,7 @@ function useChatController() {
     storyUsernamesRef,
     storyProfileLookupRef,
     reelPreviewLoadingRef,
+    feedPreviewLoadingRef,
     reelPosterLoadingRef,
     storyContactIndex,
     resolveStoryUsername,

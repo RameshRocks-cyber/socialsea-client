@@ -36,34 +36,34 @@ body.ss-theme-white .settings-top {
 body.ss-theme-white .settings-section,
 body.ss-theme-white .settings-panel {
   background: #ffffff !important;
-  box-shadow: 0 8px 16px rgba(130, 92, 58, 0.08) !important;
+  box-shadow: 0 8px 16px rgba(30, 77, 130, 0.12) !important;
 }
 
 body.ss-theme-white .settings-section h2 {
-  color: #2b1d12;
+  color: #173c65;
   border-bottom: none;
   background: #ffffff;
 }
 
 body.ss-theme-white .settings-row {
   background: #ffffff;
-  color: #2b1d12;
+  color: #173c65;
 }
 
 body.ss-theme-white .settings-row:hover {
-  background: #f7f4f0;
+  background: #f2f7ff;
 }
 
 body.ss-theme-white .settings-row-title {
-  color: #2b1d12;
+  color: #173c65;
 }
 
 body.ss-theme-white .settings-row-value {
-  color: #7b5c44;
+  color: #4a6f98;
 }
 
 body.ss-theme-white .settings-note {
-  color: #8d6a4a;
+  color: #5a7fa9;
 }
 
 body.ss-theme-white .settings-page {
@@ -71,9 +71,10 @@ body.ss-theme-white .settings-page {
 }
 
 body.ss-theme-white .settings-row-icon {
-  border-color: rgba(120, 140, 170, 0.5);
-  background: linear-gradient(145deg, #ffffff, #e7eef6);
-  color: #1a1f2b;
+  border-color: rgba(94, 136, 184, 0.52) !important;
+  background: linear-gradient(145deg, #739dca, #5f88b6) !important;
+  color: #f5f9ff !important;
+  box-shadow: 0 6px 14px rgba(49, 84, 129, 0.22);
 }
 
 body.ss-theme-white .settings-back,
@@ -210,9 +211,9 @@ body.ss-theme-white .settings-page .settings-theme-mode button.active:focus-visi
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
-  letter-spacing: 0.2px;
+  letter-spacing: 0;
   line-height: 1;
 }
 
@@ -849,7 +850,9 @@ body.ss-theme-white .settings-logout-btn {
 }
 
 .settings-page.settings-notification-buddy-page .settings-select-grid {
-  gap: 8px;
+  gap: 5px;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 150px));
+  justify-content: center;
 }
 
 .settings-page.settings-notification-buddy-page .settings-back {
@@ -863,11 +866,35 @@ body.ss-theme-white .settings-logout-btn {
   border: none !important;
   background: linear-gradient(145deg, var(--ss-accent), var(--ss-accent-2));
   color: var(--ss-text);
-  border-radius: 12px;
-  padding: 9px 12px;
+  border-radius: 8px;
+  padding: 4px 8px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  min-height: 30px;
+  line-height: 1.1;
   box-shadow:
     0 1px 0 rgba(255, 255, 255, 0.08) inset,
     0 10px 20px rgba(0, 0, 0, 0.34);
+}
+
+.settings-page.settings-notification-buddy-page .watch-later-shortcut {
+  width: min(220px, 100%);
+  margin-inline: auto;
+  display: block;
+}
+
+/* Make top toggle rows (Buddy Switch / Hide When Empty) compact */
+.settings-page.settings-notification-buddy-page .settings-section .buddy-character-grid {
+  grid-template-columns: repeat(2, minmax(88px, 140px));
+  justify-content: center;
+}
+
+.settings-page.settings-notification-buddy-page .settings-section .buddy-character-grid button {
+  width: 100%;
+  min-height: 24px;
+  padding: 2px 8px;
+  font-size: 0.68rem;
+  border-radius: 6px;
 }
 
 .settings-page.settings-notification-buddy-page .settings-select-grid button:hover,
@@ -898,4 +925,141 @@ body.ss-theme-white .settings-logout-btn {
   box-shadow:
     0 1px 0 rgba(255, 255, 255, 0.08) inset,
     0 10px 20px rgba(0, 0, 0, 0.34);
+}
+
+/* Notification Character page layout refresh */
+.settings-page.settings-notification-buddy-page .settings-shell {
+  max-width: 760px;
+  gap: 12px;
+  padding-bottom: calc(78px + env(safe-area-inset-bottom));
+}
+
+.settings-page.settings-notification-buddy-page .settings-top {
+  padding: 12px 14px;
+  border-radius: 14px;
+}
+
+.settings-page.settings-notification-buddy-page .nb-card {
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 14px;
+  padding: 12px;
+  background: linear-gradient(180deg, rgba(12, 12, 12, 0.95), rgba(6, 6, 6, 0.95)) !important;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28) !important;
+}
+
+.settings-page.settings-notification-buddy-page .settings-section h2,
+.settings-page.settings-notification-buddy-page .settings-panel-head h3 {
+  font-size: 1.02rem;
+  font-weight: 700;
+  margin: 0 0 10px;
+  letter-spacing: 0.15px;
+}
+
+.settings-page.settings-notification-buddy-page .settings-select-grid {
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  justify-content: stretch;
+}
+
+.settings-page.settings-notification-buddy-page .nb-grid-toggle {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  justify-content: stretch !important;
+}
+
+.settings-page.settings-notification-buddy-page .nb-grid-character {
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+}
+
+.settings-page.settings-notification-buddy-page .nb-grid-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+}
+
+.settings-page.settings-notification-buddy-page .nb-grid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+}
+
+.settings-page.settings-notification-buddy-page .nb-grid-full {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+.settings-page.settings-notification-buddy-page .settings-select-grid button,
+.settings-page.settings-notification-buddy-page .watch-later-shortcut {
+  min-height: 38px;
+  padding: 7px 10px;
+  border-radius: 10px;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.settings-page.settings-notification-buddy-page .nb-grid-toggle button {
+  min-height: 38px;
+  padding: 7px 10px;
+  font-size: 0.82rem;
+  border-radius: 10px;
+}
+
+.settings-page.settings-notification-buddy-page .watch-later-shortcut {
+  width: min(260px, 100%);
+}
+
+.settings-page.settings-notification-buddy-page .settings-note {
+  margin-top: 8px;
+  font-size: 0.8rem;
+  color: #9ba6b8;
+}
+
+.settings-page.settings-notification-buddy-page .settings-voice-select {
+  width: 100%;
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.settings-page.settings-notification-buddy-page .settings-voice-select select {
+  min-width: 200px;
+}
+
+.settings-page.settings-notification-buddy-page .nb-pet-name-row {
+  align-items: center;
+}
+
+.settings-page.settings-notification-buddy-page .nb-pet-name-input {
+  min-width: 180px;
+  border-radius: 8px;
+  border: 1px solid rgba(90, 90, 90, 0.6);
+  background: rgba(6, 6, 6, 0.95);
+  color: #f1f1f1;
+  padding: 6px 8px;
+  font-size: 0.8rem;
+}
+
+.settings-page.settings-notification-buddy-page .nb-pet-name-input::placeholder {
+  color: rgba(186, 196, 212, 0.62);
+}
+
+@media (max-width: 900px) {
+  .settings-page.settings-notification-buddy-page .nb-grid-character {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .settings-page.settings-notification-buddy-page .settings-shell {
+    gap: 10px;
+  }
+
+  .settings-page.settings-notification-buddy-page .nb-card {
+    padding: 10px;
+    border-radius: 12px;
+  }
+
+  .settings-page.settings-notification-buddy-page .nb-grid-character,
+  .settings-page.settings-notification-buddy-page .nb-grid-3 {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .settings-page.settings-notification-buddy-page .settings-select-grid button,
+  .settings-page.settings-notification-buddy-page .watch-later-shortcut {
+    min-height: 36px;
+    font-size: 0.8rem;
+  }
 }

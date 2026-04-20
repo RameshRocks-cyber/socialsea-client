@@ -6,6 +6,35 @@
   --story-accent-2: #cfcfcf;
   --story-text: #f5f5f5;
   --story-muted: rgba(245, 245, 245, 0.65);
+  --story-shell-bg: linear-gradient(180deg, rgba(14, 14, 14, 0.98), rgba(5, 5, 5, 0.98));
+  --story-shell-border: rgba(255, 255, 255, 0.08);
+  --story-shell-shadow: 0 18px 44px rgba(0, 0, 0, 0.55);
+  --story-panel-bg: rgba(255, 255, 255, 0.03);
+  --story-frame-bg:
+    linear-gradient(150deg, rgba(255, 255, 255, 0.06), transparent 55%),
+    #050505;
+  --story-frame-border: rgba(255, 255, 255, 0.12);
+  --story-back-bg: #0f0f0f;
+  --story-back-border: rgba(255, 255, 255, 0.18);
+  --story-publish-bg: #f5f5f5;
+  --story-publish-text: #0a0a0a;
+  --story-input-bg: #0b0b0b;
+  --story-input-border: rgba(255, 255, 255, 0.12);
+  --story-input-placeholder: rgba(245, 245, 245, 0.5);
+  --story-upload-bg: rgba(255, 255, 255, 0.05);
+  --story-upload-border: rgba(255, 255, 255, 0.2);
+  --story-icon-btn-bg: #202020;
+  --story-icon-btn-border: #4d4d4d;
+  --story-chip-bg: #0d0d0d;
+  --story-chip-border: rgba(255, 255, 255, 0.16);
+  --story-chip-active-bg: rgba(255, 255, 255, 0.14);
+  --story-chip-active-border: rgba(255, 255, 255, 0.5);
+  --story-msg-bg: rgba(255, 255, 255, 0.08);
+  --story-msg-border: rgba(255, 255, 255, 0.2);
+  --story-audio-bg: rgba(0, 0, 0, 0.6);
+  --story-audio-border: rgba(255, 255, 255, 0.22);
+  --story-range-track: rgba(255, 255, 255, 0.22);
+  --story-range-fill: #26d0e0;
   font-family: "Sora", "Manrope", "Segoe UI", sans-serif;
   color: var(--story-text);
   min-height: 100vh;
@@ -13,14 +42,53 @@
   background: var(--story-bg);
 }
 
+body.ss-theme-white .story-create-page {
+  --story-bg: #f3f7fd;
+  --story-card: #ffffff;
+  --story-border: rgba(131, 163, 202, 0.32);
+  --story-accent: #21558f;
+  --story-accent-2: #5d7ea2;
+  --story-text: #152a45;
+  --story-muted: rgba(21, 42, 69, 0.62);
+  --story-shell-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(242, 248, 255, 0.98));
+  --story-shell-border: rgba(154, 184, 218, 0.48);
+  --story-shell-shadow: 0 18px 40px rgba(26, 67, 116, 0.12);
+  --story-panel-bg: linear-gradient(180deg, #f9fcff 0%, #eef5ff 100%);
+  --story-frame-bg:
+    linear-gradient(150deg, rgba(29, 90, 160, 0.08), transparent 55%),
+    #e8f1fd;
+  --story-frame-border: rgba(130, 165, 205, 0.48);
+  --story-back-bg: linear-gradient(145deg, #ffffff 0%, #eef5ff 100%);
+  --story-back-border: rgba(136, 169, 208, 0.58);
+  --story-publish-bg: linear-gradient(145deg, #2f7bcf 0%, #2668b2 100%);
+  --story-publish-text: #f4f9ff;
+  --story-input-bg: #f8fbff;
+  --story-input-border: rgba(149, 178, 211, 0.5);
+  --story-input-placeholder: rgba(52, 82, 118, 0.54);
+  --story-upload-bg: linear-gradient(145deg, #f8fbff 0%, #eaf2ff 100%);
+  --story-upload-border: rgba(121, 158, 200, 0.58);
+  --story-icon-btn-bg: linear-gradient(145deg, #f4f9ff 0%, #e6f0fd 100%);
+  --story-icon-btn-border: rgba(121, 158, 200, 0.6);
+  --story-chip-bg: linear-gradient(145deg, #f7fbff 0%, #eaf2ff 100%);
+  --story-chip-border: rgba(121, 158, 200, 0.58);
+  --story-chip-active-bg: linear-gradient(145deg, #e5f0ff 0%, #d5e7ff 100%);
+  --story-chip-active-border: rgba(76, 124, 182, 0.8);
+  --story-msg-bg: rgba(43, 112, 188, 0.1);
+  --story-msg-border: rgba(68, 129, 196, 0.45);
+  --story-audio-bg: rgba(20, 69, 126, 0.84);
+  --story-audio-border: rgba(170, 208, 248, 0.42);
+  --story-range-track: rgba(87, 123, 165, 0.3);
+  --story-range-fill: #1cb9d2;
+}
+
 .story-shell {
   max-width: 820px;
   margin: 0 auto;
   border-radius: 18px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: linear-gradient(180deg, rgba(14, 14, 14, 0.98), rgba(5, 5, 5, 0.98));
+  border: 1px solid var(--story-shell-border);
+  background: var(--story-shell-bg);
   padding: clamp(12px, 2vw, 18px);
-  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.55);
+  box-shadow: var(--story-shell-shadow);
 }
 
 .story-create-header {
@@ -34,8 +102,8 @@
 .story-back,
 .story-publish {
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  background: #0f0f0f;
+  border: 1px solid var(--story-back-border);
+  background: var(--story-back-bg);
   color: var(--story-text);
   padding: 6px 10px;
   font-weight: 600;
@@ -47,13 +115,13 @@
 .story-back:hover,
 .story-publish:hover {
   transform: translateY(-1px);
-  border-color: rgba(255, 255, 255, 0.2);
+  border-color: var(--story-accent);
 }
 
 .story-publish {
-  background: #f5f5f5;
-  border: none;
-  color: #0a0a0a;
+  background: var(--story-publish-bg);
+  border-color: transparent;
+  color: var(--story-publish-text);
 }
 
 .story-publish:disabled {
@@ -81,7 +149,7 @@
 }
 
 .story-preview-panel {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--story-panel-bg);
   border: 1px solid var(--story-border);
   border-radius: 16px;
   padding: clamp(12px, 1.8vw, 16px);
@@ -98,10 +166,8 @@
   aspect-ratio: 9 / 16;
   width: min(100%, 320px);
   margin: 0 auto;
-  background:
-    linear-gradient(150deg, rgba(255, 255, 255, 0.06), transparent 55%),
-    #050505;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--story-frame-bg);
+  border: 1px solid var(--story-frame-border);
   box-shadow: 0 14px 32px rgba(0, 0, 0, 0.45);
 }
 
@@ -145,7 +211,7 @@
   right: 10px;
   height: 3px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--story-range-track);
   overflow: hidden;
 }
 
@@ -153,7 +219,7 @@
   display: block;
   height: 100%;
   width: 70%;
-  background: linear-gradient(90deg, #fff, rgba(255, 255, 255, 0.5));
+  background: linear-gradient(90deg, var(--story-range-fill), color-mix(in srgb, var(--story-range-fill) 42%, transparent));
 }
 
 .story-preview-footer {
@@ -177,10 +243,10 @@
 }
 
 .story-card {
-  background: var(--story-card);
-  border: 1px solid var(--story-border);
-  border-radius: 14px;
-  padding: 10px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
   display: grid;
   gap: 8px;
 }
@@ -192,12 +258,24 @@
 
 .story-card textarea,
 .story-card input[type="text"] {
-  background: #0b0b0b;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--story-input-bg);
+  border: 1px solid var(--story-input-border);
   color: var(--story-text);
   border-radius: 10px;
   padding: 8px 10px;
   font-size: 0.85rem;
+}
+
+.story-card textarea::placeholder,
+.story-card input[type="text"]::placeholder {
+  color: var(--story-input-placeholder);
+}
+
+.story-card textarea:focus,
+.story-card input[type="text"]:focus {
+  outline: none;
+  border-color: var(--story-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--story-accent) 20%, transparent);
 }
 
 .story-upload-btn {
@@ -207,11 +285,16 @@
   gap: 8px;
   padding: 8px 12px;
   border-radius: 999px;
-  border: 1px dashed rgba(255, 255, 255, 0.2);
+  border: 1px dashed var(--story-upload-border);
   color: var(--story-text);
   cursor: pointer;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--story-upload-bg);
   font-size: 0.85rem;
+}
+
+.story-upload-btn:hover {
+  border-color: var(--story-accent);
+  transform: translateY(-1px);
 }
 
 .story-upload-btn input {
@@ -226,9 +309,9 @@
 }
 
 .story-camera-pick {
-  border: 1px solid #4d4d4d;
-  background: #202020;
-  color: #fff;
+  border: 1px solid var(--story-icon-btn-border);
+  background: var(--story-icon-btn-bg);
+  color: var(--story-text);
   border-radius: 12px;
   width: 40px;
   height: 40px;
@@ -238,6 +321,10 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+
+.story-camera-pick:hover {
+  border-color: var(--story-accent);
 }
 
 .story-note {
@@ -255,8 +342,8 @@
 .story-style-row button,
 .story-privacy-row button {
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  background: #0d0d0d;
+  border: 1px solid var(--story-chip-border);
+  background: var(--story-chip-bg);
   padding: 5px 10px;
   color: var(--story-text);
   font-size: 0.78rem;
@@ -265,8 +352,14 @@
 
 .story-style-row button.active,
 .story-privacy-row button.active {
-  border-color: rgba(255, 255, 255, 0.5);
-  background: rgba(255, 255, 255, 0.12);
+  border-color: var(--story-chip-active-border);
+  background: var(--story-chip-active-bg);
+}
+
+.story-style-row button:hover,
+.story-privacy-row button:hover,
+.story-text-style-btn:hover {
+  border-color: var(--story-accent);
 }
 
 .story-text-controls {
@@ -293,6 +386,7 @@
 
 .story-text-control input[type="range"] {
   width: 100%;
+  accent-color: var(--story-range-fill);
 }
 
 .story-text-control strong {
@@ -309,8 +403,8 @@
 
 .story-text-style-btn {
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  background: #0d0d0d;
+  border: 1px solid var(--story-chip-border);
+  background: var(--story-chip-bg);
   padding: 5px 9px;
   color: var(--story-text);
   font-size: 0.74rem;
@@ -318,12 +412,12 @@
 }
 
 .story-text-style-btn.active {
-  border-color: rgba(255, 255, 255, 0.5);
-  background: rgba(255, 255, 255, 0.12);
+  border-color: var(--story-chip-active-border);
+  background: var(--story-chip-active-bg);
 }
 
 .story-card-mini {
-  background: rgba(255, 255, 255, 0.04);
+  background: transparent;
 }
 
 .story-chip-row {
@@ -335,8 +429,8 @@
 .story-chip-row span {
   padding: 5px 9px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: var(--story-chip-bg);
+  border: 1px solid var(--story-chip-border);
   font-size: 0.72rem;
   color: var(--story-muted);
 }
@@ -344,9 +438,9 @@
 .story-msg {
   padding: 8px 10px;
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  color: #f5f5f5;
+  background: var(--story-msg-bg);
+  border: 1px solid var(--story-msg-border);
+  color: var(--story-text);
   font-size: 0.8rem;
 }
 
@@ -360,9 +454,9 @@
   top: 10px;
   padding: 5px 8px;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  background: rgba(0, 0, 0, 0.6);
-  color: #f5f5f5;
+  border: 1px solid var(--story-audio-border);
+  background: var(--story-audio-bg);
+  color: var(--story-text);
   font-size: 0.7rem;
   font-weight: 600;
   cursor: pointer;

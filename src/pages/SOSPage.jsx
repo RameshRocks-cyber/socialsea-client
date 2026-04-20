@@ -831,9 +831,6 @@ export default function SOSPage() {
 
   const callEmergency = async (method, suffix, data = undefined, extraConfig = {}) => {
     const urls = buildEmergencyUrls(suffix);
-    const suffixText = String(suffix || "").toLowerCase();
-    const isPublicEmergencyEndpoint =
-      suffixText === "trigger" || suffixText === "active";
     let lastErr = null;
     for (const url of urls) {
       try {
@@ -853,23 +850,7 @@ export default function SOSPage() {
       } catch (err) {
         lastErr = err;
         const status = Number(err?.response?.status || 0);
-        if ((status === 401 || status === 403) && isPublicEmergencyEndpoint) {
-          try {
-            return await api.request({
-              method,
-              url,
-              data,
-              timeout: 9000,
-              skipAuth: true,
-              skipRefresh: true,
-              suppressAuthRedirect: true,
-              ...extraConfig
-            });
-          } catch (retryErr) {
-            lastErr = retryErr;
-          }
-        }
-        if ((status === 401 || status === 403) && !isPublicEmergencyEndpoint) throw err;
+        if (status === 401 || status === 403) throw err;
       }
     }
     throw lastErr || new Error("Emergency request failed");
@@ -995,8 +976,6 @@ export default function SOSPage() {
         if (lastLocation?.latitude != null && lastLocation?.longitude != null) {
           params.lat = lastLocation.latitude;
           params.lon = lastLocation.longitude;
-          params.latitude = lastLocation.latitude;
-          params.longitude = lastLocation.longitude;
         }
         const res = await callEmergency("get", "active", undefined, {
           params,
@@ -1437,7 +1416,6 @@ export default function SOSPage() {
             longitude: initialLocation.longitude,
             accuracyMeters: initialLocation.accuracy,
             radiusMeters: RADIUS_METERS,
-            reporterUserId,
             frontCameraEnabled: media.video && cameraFacing === "user",
             backCameraEnabled: media.video && cameraFacing === "environment",
             audioActive: media.audio,
@@ -2459,7 +2437,7 @@ export default function SOSPage() {
       }
     };
     poll();
-    const timer = setInterval(poll, isLiveView ? 800 : HEARTBEAT_MS);
+    const timer = setInterval(poll, isLiveView ? 2500 : HEARTBEAT_MS);
     return () => {
       cancelled = true;
       clearInterval(timer);

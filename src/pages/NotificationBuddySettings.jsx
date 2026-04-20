@@ -56,6 +56,19 @@ const MOVE_SPEED_OPTIONS = [
   { value: "fast", label: "Fast" }
 ];
 
+const normalizeMessageSpeechMode = (value) => {
+  const mode = String(value || "").trim().toLowerCase();
+  if (mode === "off" || mode === "sender" || mode === "sender_message" || mode === "count") return mode;
+  return "count";
+};
+
+const normalizePetName = (value) =>
+  String(value || "")
+    .replace(/\s+/g, " ")
+    .replace(/[^\w\s.-]/g, "")
+    .trim()
+    .slice(0, 32);
+
 const DEFAULT_PREFS = {
   notificationBuddy: true,
   notificationBuddyCharacter: "Cat",
@@ -65,7 +78,9 @@ const DEFAULT_PREFS = {
   notificationBuddyVoiceGender: "auto",
   notificationBuddyVoiceName: "",
   notificationBuddyVoiceRate: 1,
-  notificationBuddyVoicePitch: 1
+  notificationBuddyVoicePitch: 1,
+  notificationBuddyMessageSpeechMode: "count",
+  notificationBuddyMessagePetName: ""
 };
 
 const readPrefs = () => {
@@ -76,7 +91,9 @@ const readPrefs = () => {
     return {
       ...merged,
       notificationBuddyCharacter: normalizeNotificationBuddyCharacter(merged.notificationBuddyCharacter),
-      notificationBuddyVoiceGender: normalizeVoiceGender(merged.notificationBuddyVoiceGender)
+      notificationBuddyVoiceGender: normalizeVoiceGender(merged.notificationBuddyVoiceGender),
+      notificationBuddyMessageSpeechMode: normalizeMessageSpeechMode(merged.notificationBuddyMessageSpeechMode),
+      notificationBuddyMessagePetName: normalizePetName(merged.notificationBuddyMessagePetName)
     };
   } catch {
     return { ...DEFAULT_PREFS };
@@ -96,6 +113,12 @@ const writePrefs = (next) => {
       ),
       notificationBuddyVoiceGender: normalizeVoiceGender(
         next?.notificationBuddyVoiceGender ?? base?.notificationBuddyVoiceGender
+      ),
+      notificationBuddyMessageSpeechMode: normalizeMessageSpeechMode(
+        next?.notificationBuddyMessageSpeechMode ?? base?.notificationBuddyMessageSpeechMode
+      ),
+      notificationBuddyMessagePetName: normalizePetName(
+        next?.notificationBuddyMessagePetName ?? base?.notificationBuddyMessagePetName
       )
     };
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(merged));
@@ -158,8 +181,19 @@ export default function NotificationBuddySettings() {
     const synth = window.speechSynthesis;
     try {
       synth.cancel();
-      const text = `${displayName}, you have a new notification.`;
-      const utter = new SpeechSynthesisUtterance(text);
+      const petName = normalizePetName(prefs.notificationBuddyMessagePetName);
+      const listenerName = petName || displayName;
+      const text = `${listenerName}, you have a new notification.`;
+      const mode = normalizeMessageSpeechMode(prefs.notificationBuddyMessageSpeechMode);
+      const previewText =
+        mode === "off"
+          ? `${listenerName}, message announcement is off.`
+          : mode === "sender_message"
+          ? `${listenerName}, new message from Ramesh. Are you free now?`
+          : mode === "sender"
+            ? `${listenerName}, new message from Ramesh.`
+            : text;
+      const utter = new SpeechSynthesisUtterance(previewText);
       const preferredByName = voiceOptions.find(
         (voice) => voice.voiceURI === prefs.notificationBuddyVoiceName || voice.name === prefs.notificationBuddyVoiceName
       );
@@ -195,9 +229,9 @@ export default function NotificationBuddySettings() {
           </div>
         </header>
 
-        <section className="settings-section">
+        <section className="settings-section nb-card">
           <h2>Buddy Switch</h2>
-          <div className="settings-select-grid buddy-character-grid">
+          <div className="settings-select-grid buddy-character-grid nb-grid-toggle">
             <button
               type="button"
               className={prefs.notificationBuddy ? "active" : ""}
@@ -215,9 +249,9 @@ export default function NotificationBuddySettings() {
           </div>
         </section>
 
-        <section className="settings-section">
+        <section className="settings-section nb-card">
           <h2>Hide When Empty</h2>
-          <div className="settings-select-grid buddy-character-grid">
+          <div className="settings-select-grid buddy-character-grid nb-grid-toggle">
             <button
               type="button"
               className={prefs.notificationBuddyHideWhenEmpty ? "active" : ""}
@@ -236,11 +270,11 @@ export default function NotificationBuddySettings() {
           <p className="settings-note">Hide the buddy when there are no unread notifications.</p>
         </section>
 
-        <section className="settings-panel">
+        <section className="settings-panel nb-card">
           <header className="settings-panel-head">
             <h3>Choose Character</h3>
           </header>
-          <div className="settings-select-grid">
+          <div className="settings-select-grid nb-grid-character">
             {NOTIFICATION_BUDDY_CHARACTERS.map((opt) => (
               <button
                 key={opt}
@@ -256,11 +290,11 @@ export default function NotificationBuddySettings() {
           <p className="settings-note">Place sprites in `public/shimeji` to match your exact art.</p>
         </section>
 
-        <section className="settings-panel">
+        <section className="settings-panel nb-card">
           <header className="settings-panel-head">
             <h3>Movement Speed</h3>
           </header>
-          <div className="settings-select-grid">
+          <div className="settings-select-grid nb-grid-3">
             {MOVE_SPEED_OPTIONS.map((opt) => (
               <button
                 key={opt.value}
@@ -275,11 +309,11 @@ export default function NotificationBuddySettings() {
           <p className="settings-note">Controls how fast the buddy walks around the screen.</p>
         </section>
 
-        <section className="settings-panel">
+        <section className="settings-panel nb-card">
           <header className="settings-panel-head">
             <h3>Voice</h3>
           </header>
-          <div className="settings-select-grid">
+          <div className="settings-select-grid nb-grid-2">
             <button
               type="button"
               className={prefs.notificationBuddyVoiceEnabled ? "active" : ""}
@@ -296,7 +330,7 @@ export default function NotificationBuddySettings() {
             </button>
           </div>
 
-          <div className="settings-select-grid">
+          <div className="settings-select-grid nb-grid-3">
             <button
               type="button"
               className={prefs.notificationBuddyVoiceGender === "male" ? "active" : ""}
@@ -321,7 +355,7 @@ export default function NotificationBuddySettings() {
           </div>
           <p className="settings-note">Gender is used only when Voice is set to Auto (default).</p>
 
-          <div className="settings-select-grid">
+          <div className="settings-select-grid nb-grid-full">
             <label className="settings-voice-select">
               <span>Voice</span>
               <select
@@ -343,7 +377,7 @@ export default function NotificationBuddySettings() {
             </label>
           </div>
 
-          <div className="settings-select-grid">
+          <div className="settings-select-grid nb-grid-3">
             {VOICE_RATE_OPTIONS.map((opt) => (
               <button
                 key={opt.value}
@@ -356,7 +390,7 @@ export default function NotificationBuddySettings() {
             ))}
           </div>
 
-          <div className="settings-select-grid">
+          <div className="settings-select-grid nb-grid-3">
             {VOICE_PITCH_OPTIONS.map((opt) => (
               <button
                 key={opt.value}
@@ -373,6 +407,61 @@ export default function NotificationBuddySettings() {
             Preview Voice
           </button>
           <p className="settings-note">Tip: browsers require one tap to allow speech audio.</p>
+        </section>
+
+        <section className="settings-panel nb-card">
+          <header className="settings-panel-head">
+            <h3>Message Announcement</h3>
+          </header>
+          <div className="settings-select-grid nb-grid-3">
+            <button
+              type="button"
+              className={prefs.notificationBuddyMessageSpeechMode === "off" ? "active" : ""}
+              onClick={() => setPrefs((prev) => ({ ...prev, notificationBuddyMessageSpeechMode: "off" }))}
+            >
+              Off
+            </button>
+            <button
+              type="button"
+              className={prefs.notificationBuddyMessageSpeechMode === "count" ? "active" : ""}
+              onClick={() => setPrefs((prev) => ({ ...prev, notificationBuddyMessageSpeechMode: "count" }))}
+            >
+              Count only
+            </button>
+            <button
+              type="button"
+              className={prefs.notificationBuddyMessageSpeechMode === "sender" ? "active" : ""}
+              onClick={() => setPrefs((prev) => ({ ...prev, notificationBuddyMessageSpeechMode: "sender" }))}
+            >
+              Say sender
+            </button>
+            <button
+              type="button"
+              className={prefs.notificationBuddyMessageSpeechMode === "sender_message" ? "active" : ""}
+              onClick={() => setPrefs((prev) => ({ ...prev, notificationBuddyMessageSpeechMode: "sender_message" }))}
+            >
+              Say sender + msg
+            </button>
+          </div>
+          <div className="settings-select-grid nb-grid-full">
+            <label className="settings-voice-select nb-pet-name-row">
+              <span>Pet Name</span>
+              <input
+                type="text"
+                className="nb-pet-name-input"
+                value={prefs.notificationBuddyMessagePetName || ""}
+                onChange={(event) =>
+                  setPrefs((prev) => ({
+                    ...prev,
+                    notificationBuddyMessagePetName: normalizePetName(event.target.value)
+                  }))
+                }
+                placeholder="Example: Sweetheart"
+                maxLength={32}
+              />
+            </label>
+          </div>
+          <p className="settings-note">Choose Off to disable message announcement. Any other mode mutes message notification sound.</p>
         </section>
       </div>
     </div>

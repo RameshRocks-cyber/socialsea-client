@@ -513,172 +513,157 @@ export default function Settings() {
         <section className="settings-section">
           <h2>Jobs</h2>
           <Row
-            icon={"J"}
+            icon={"💼"}
             title="Jobs on profile"
             value={jobMode === "profile" ? "On" : "Off"}
-            onClick={() => {
-              setJobMode(jobMode === "profile" ? "off" : "profile");
-              setActivePanel("");
-            }}
+            onClick={() => navigate("/settings/manage/jobs-profile")}
           />
           <Row
-            icon={"PJ"}
+            icon={"📝"}
             title="Post a Job"
             value={jobMode === "post" ? "On" : "Off"}
-            onClick={() => {
-              setJobMode(jobMode === "post" ? "off" : "post");
-              setActivePanel("");
-            }}
+            onClick={() => navigate("/settings/manage/jobs-post")}
           />
           <Row
-            icon={"SV"}
+            icon={"🔐"}
             title="Storage Vault"
             value={jobMode === "storage" ? "On" : "Off"}
-            onClick={() => {
-              setJobMode(jobMode === "storage" ? "off" : "storage");
-              setActivePanel("");
-            }}
+            onClick={() => navigate("/settings/manage/jobs-storage")}
           />
           <p className="settings-note">Turn one on, or keep all off to hide.</p>
         </section>
 
         <section className="settings-section">
           <h2>How you use SocialSea</h2>
-          <Row icon={"AP"} title="Appearance" value={colorThemeLabel} onClick={() => navigate("/settings/appearance")} />
+          <Row icon={"🎨"} title="Appearance" value={colorThemeLabel} onClick={() => navigate("/settings/appearance")} />
           <Row
-            icon={"CT"}
+            icon={"🧩"}
             title="Content types"
             value={contentTypeSummary}
             onClick={() => navigate("/settings/content-types")}
           />
-          <Row icon={"LG"} title="Language" value={preferredLanguageLabel} onClick={() => navigate("/settings/language")} />
+          <Row icon={"🌐"} title="Language" value={preferredLanguageLabel} onClick={() => navigate("/settings/language")} />
           <Row
-            icon={"ST"}
+            icon={"🎓"}
             title="Study mode (hide Reels)"
             value={prefs.studyModeReels ? "On" : "Off"}
-            onClick={() => setToggle("studyModeReels")}
+            onClick={() => navigate("/settings/manage/study-mode")}
           />
           <Row
-            icon={"HG"}
+            icon={"✋"}
             title="Hand gesture cursor"
             value={prefs.gestureCursorEnabled ? "On" : "Off"}
-            onClick={() => setToggle("gestureCursorEnabled")}
+            onClick={() => navigate("/settings/manage/gesture-cursor")}
           />
-          <Row icon={"B"} title="Saved" value={savedIds.length} onClick={() => navigate("/saved")} />
-          <Row icon={"A"} title="Archive" value={archiveIds.length} onClick={() => setActivePanel("archive")} />
-          <Row icon={"Y"} title="Your activity" onClick={() => navigate("/settings/activity")} />
-          <Row icon={"LA"} title="Login activity" value="Open" onClick={() => navigate("/settings/login-activity")} />
+          <Row icon={"🔖"} title="Saved" value={savedIds.length} onClick={() => navigate("/saved")} />
+          <Row icon={"🗃️"} title="Archive" value={archiveIds.length} onClick={() => navigate("/settings/manage/archive")} />
+          <Row icon={"📈"} title="Your activity" onClick={() => navigate("/settings/activity")} />
+          <Row icon={"🕘"} title="Login activity" value="Open" onClick={() => navigate("/settings/login-activity")} />
           <Row
-            icon={"SOS"}
+            icon={"🆘"}
             title="SOS on Navbar"
             value={prefs.showSosInNavbar ? "On" : "Off"}
-            onClick={() => setToggle("showSosInNavbar")}
+            onClick={() => navigate("/settings/manage/sos-navbar")}
           />
           <Row
-            icon={"!"}
+            icon={"🚨"}
             title="SOS Control Center"
             value="Open"
             onClick={() => navigate("/sos")}
           />
           <Row
-            icon={"N"}
+            icon={"🔔"}
             title="Notifications"
             value={prefs.notifications ? "On" : "Off"}
             onClick={() => navigate("/notifications")}
           />
           <Row
-            icon={"TA"}
+            icon={"🚦"}
             title="Traffic Alerts"
             value={prefs.trafficAlerts ? "On" : "Off"}
-            onClick={() => setToggle("trafficAlerts")}
+            onClick={() => navigate("/settings/manage/traffic-alerts")}
           />
           <Row
-            icon={"AMB"}
+            icon={"🚑"}
             title="Ambulance Navigation"
             value={ambulanceApproved ? (prefs.ambulanceNavigation ? "On" : "Off") : "Request access"}
-            onClick={() => {
-              if (!ambulanceApproved) {
-                navigate("/ambulance");
-                return;
-              }
-              setToggle("ambulanceNavigation");
-            }}
+            onClick={() => navigate("/settings/manage/ambulance-navigation")}
           />
           <Row
-            icon={"MS"}
+            icon={"📸"}
             title="My Stories on profile"
             value={prefs.showMyStoriesOnProfile ? "On" : "Off"}
-            onClick={() => setToggle("showMyStoriesOnProfile")}
+            onClick={() => navigate("/settings/manage/stories-profile")}
           />
           <Row
-            icon={"NC"}
+            icon={"🐾"}
             title="Notification Character"
             value={prefs.notificationBuddy ? `On - ${prefs.notificationBuddyCharacter}` : "Off"}
             onClick={() => navigate("/settings/notification-buddy")}
           />
           <Row
-            icon={"NS"}
+            icon={"🔊"}
             title="Notification sound"
             value={getSoundLabel("notification", prefs.notificationSound)}
             onClick={() => navigate("/settings/sounds")}
           />
           <Row
-            icon={"R"}
+            icon={"📳"}
             title="Ringtone"
             value={getSoundLabel("ringtone", prefs.ringtoneSound)}
             onClick={() => navigate("/settings/sounds")}
           />
-          <Row icon={"T"} title="Time management" value={prefs.dailyTimeLimit} onClick={() => setActivePanel("time")} />
+          <Row icon={"⏱️"} title="Time management" value={prefs.dailyTimeLimit} onClick={() => navigate("/settings/manage/time-management")} />
         </section>
 
         <section className="settings-section">
           <h2>Who can see your content</h2>
           <Row
-            icon={"P"}
+            icon={"🔒"}
             title="Account privacy"
             value={prefs.accountPrivate ? "Private" : "Public"}
             onClick={() => navigate("/settings/privacy")}
           />
-          <Row icon={"C"} title="Close Friends" value={String(closeFriends.length)} onClick={() => setActivePanel("closeFriends")} />
+          <Row icon={"👥"} title="Close Friends" value={String(closeFriends.length)} onClick={() => navigate("/settings/manage/close-friends")} />
           <Row
-            icon={"X"}
+            icon={"🔁"}
             title="Crossposting"
             value={prefs.crossposting ? "On" : "Off"}
-            onClick={() => setToggle("crossposting")}
+            onClick={() => navigate("/settings/manage/crossposting")}
           />
-          <Row icon={"B"} title="Blocked" value={String(blockedUsers.length)} onClick={() => setActivePanel("blocked")} />
+          <Row icon={"⛔"} title="Blocked" value={String(blockedUsers.length)} onClick={() => navigate("/settings/manage/blocked")} />
           <Row
-            icon={"S"}
+            icon={"📍"}
             title="Story, live and location"
             value={prefs.storyLocationEnabled ? "On" : "Off"}
-            onClick={() => setToggle("storyLocationEnabled")}
+            onClick={() => navigate("/settings/manage/story-live-location")}
           />
           <Row
-            icon={"L"}
+            icon={"🧭"}
             title="My exact location"
             value="Open"
             onClick={() => navigate("/settings/location")}
           />
           <Row
-            icon={"F"}
+            icon={"🤝"}
             title="Activity in Friends tab"
             value={prefs.activityInFriendsTab ? "On" : "Off"}
-            onClick={() => setToggle("activityInFriendsTab")}
+            onClick={() => navigate("/settings/manage/activity-friends")}
           />
         </section>
 
         <section className="settings-section">
           <h2>How others can interact with you</h2>
-          <Row icon={"AP"} title="Appearance" value={colorThemeLabel} onClick={() => navigate("/settings/appearance")} />
-          <Row icon={"M"} title="Messages and story replies" value={prefs.messageReplies} onClick={() => setActivePanel("messages")} />
-          <Row icon={"@"} title="Tags and mentions" value={prefs.tagsMentions} onClick={() => setActivePanel("tags")} />
-          <Row icon={"C"} title="Comments" value={prefs.comments} onClick={() => setActivePanel("comments")} />
+          <Row icon={"🎨"} title="Appearance" value={colorThemeLabel} onClick={() => navigate("/settings/appearance")} />
+          <Row icon={"💬"} title="Messages and story replies" value={prefs.messageReplies} onClick={() => navigate("/settings/manage/message-replies")} />
+          <Row icon={"🏷️"} title="Tags and mentions" value={prefs.tagsMentions} onClick={() => navigate("/settings/manage/tags-mentions")} />
+          <Row icon={"🗨️"} title="Comments" value={prefs.comments} onClick={() => navigate("/settings/manage/comments")} />
         </section>
 
         <section className="settings-section">
           <h2>Anonymous Space</h2>
-          <Row icon={"U"} title="Anonymous Upload" onClick={() => navigate("/anonymous/upload")} />
-          <Row icon={"F"} title="Anonymous Feed" onClick={() => navigate("/anonymous-feed")} />
+          <Row icon={"📤"} title="Anonymous Upload" onClick={() => navigate("/anonymous/upload")} />
+          <Row icon={"🕶️"} title="Anonymous Feed" onClick={() => navigate("/anonymous-feed")} />
         </section>
 
         {(activePanel === "saved" || activePanel === "watchLater" || activePanel === "archive") && (

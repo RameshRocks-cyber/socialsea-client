@@ -33,6 +33,7 @@ import { toApiUrl } from "../api/baseUrl";
 import {
   CHAT_WALLPAPER_PRESETS,
   decodeSignAssistText,
+  extractFeedShare,
   extractReelShare,
   formatStoryCount,
   getStoryUserEmailValue,
@@ -119,6 +120,7 @@ export default function ChatMessages() {
     shareHint,
     setShareHint,
     reelPreviewById,
+    feedPreviewById,
     setReelPreviewById,
     reelPosterBySrc,
     setReelPosterBySrc,
@@ -1631,10 +1633,16 @@ export default function ChatMessages() {
                   );
                 }
                 const reelShare = item.kind === "message" ? extractReelShare(item.raw?.text || item.text) : null;
+                const feedShare = item.kind === "message" ? extractFeedShare(item.raw?.text || item.text) : null;
                 const senderName = item.mine
                   ? "You"
                   : String(activeContact?.name || activeContact?.username || "User").trim();
                 const senderInitial = senderName ? senderName.charAt(0).toUpperCase() : "U";
+                const shareCaption = (rawText, matchedLink) =>
+                  String(rawText || "")
+                    .replace(String(matchedLink || ""), "")
+                    .replace(/\s+/g, " ")
+                    .trim();
                 const renderReelShareCard = (mediaUrl) => {
                   if (!reelShare) return null;
                   const openReel = () => {
@@ -1673,6 +1681,60 @@ export default function ChatMessages() {
                           </div>
                         </button>
                       </div>
+                    </div>
+                  );
+                };
+                const renderFeedShareCard = (mediaUrl) => {
+                  if (!feedShare) return null;
+                  const openSharedPost = () => {
+                    if (feedShare?.id) {
+                      navigate(`/feed?post=${encodeURIComponent(feedShare.id)}`);
+                      return;
+                    }
+                    if (feedShare?.href) navigate(feedShare.href);
+                  };
+                  const preview = feedShare?.id ? feedPreviewById[feedShare.id] : null;
+                  const previewSrc = mediaUrl || preview?.src || "";
+                  const previewPoster = preview?.poster || reelPosterBySrc[previewSrc] || "";
+                  const title =
+                    preview?.title ||
+                    trimReplyPreview(shareCaption(item.raw?.text || item.text, feedShare?.match) || "Shared video");
+                  return (
+                    <div className="chat-feed-share-wrap">
+                      <button
+                        type="button"
+                        className={`chat-feed-share-card ${item.mine ? "mine" : "their"}`}
+                        onClick={openSharedPost}
+                      >
+                        <div className="chat-feed-share-media">
+                          {previewSrc && previewPoster ? (
+                            <video
+                              className="chat-feed-share-video"
+                              src={previewSrc}
+                              poster={previewPoster || undefined}
+                              muted
+                              playsInline
+                              preload="metadata"
+                            />
+                          ) : previewPoster ? (
+                            <img
+                              className="chat-feed-share-video"
+                              src={previewPoster}
+                              alt="Shared post preview"
+                              loading="lazy"
+                            />
+                          ) : previewSrc ? (
+                            <div className="chat-feed-share-video chat-reel-placeholder">Loading...</div>
+                          ) : (
+                            <div className="chat-feed-share-video chat-reel-placeholder">VIDEO</div>
+                          )}
+                          <span className="chat-feed-share-play">▶</span>
+                        </div>
+                        <div className="chat-feed-share-meta">
+                          <strong>{title || "Shared video"}</strong>
+                          <small>Open in Feed</small>
+                        </div>
+                      </button>
                     </div>
                   );
                 };
@@ -1755,6 +1817,9 @@ export default function ChatMessages() {
                             if (reelShare) {
                               return renderReelShareCard(mediaUrl);
                             }
+                            if (feedShare) {
+                              return renderFeedShareCard(mediaUrl);
+                            }
                             return (
                               <video controls preload="metadata" className="chat-media-video" src={mediaUrl} />
                             );
@@ -1767,6 +1832,8 @@ export default function ChatMessages() {
                         })()
                       ) : item.kind === "message" && reelShare ? (
                         renderReelShareCard("")
+                      ) : item.kind === "message" && feedShare ? (
+                        renderFeedShareCard("")
                       ) : item.kind === "message" && /^\[Attachment:\s*.+\]$/i.test(String(item.raw?.text || "")) ? (
                         <span className="chat-attachment-text">{String(item.raw?.text || "")}</span>
                       ) : item.kind === "call" ? (

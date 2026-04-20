@@ -37,6 +37,7 @@ import SettingsPrivacy from "./pages/SettingsPrivacy";
 import SettingsLanguage from "./pages/SettingsLanguage";
 import SettingsLoginActivity from "./pages/SettingsLoginActivity";
 import NotificationBuddySettings from "./pages/NotificationBuddySettings";
+import SettingsManage from "./pages/SettingsManage";
 import SOSPage from "./pages/SOSPage";
 import SOSNavigate from "./pages/SOSNavigate";
 import AmbulanceNavigation from "./pages/AmbulanceNavigation";
@@ -679,6 +680,7 @@ function AppRoutes() {
               <Route path="/settings/privacy" element={<ProtectedRoute><SettingsPrivacy /></ProtectedRoute>} />
               <Route path="/settings/login-activity" element={<ProtectedRoute><SettingsLoginActivity /></ProtectedRoute>} />
               <Route path="/settings/notification-buddy" element={<ProtectedRoute><NotificationBuddySettings /></ProtectedRoute>} />
+              <Route path="/settings/manage/:optionId" element={<ProtectedRoute><SettingsManage /></ProtectedRoute>} />
               <Route path="/sos" element={<ProtectedRoute><SOSPage /></ProtectedRoute>} />
               <Route path="/sos/live/:alertId" element={<ProtectedRoute><SOSPage /></ProtectedRoute>} />
               <Route path="/sos/navigate/:alertId" element={<ProtectedRoute><SOSNavigate /></ProtectedRoute>} />

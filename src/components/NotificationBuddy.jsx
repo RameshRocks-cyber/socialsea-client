@@ -34,6 +34,7 @@ const EDGE_EPS = 0.75;
 const EDGE_PAD = 0;
 const CHARACTER_STORAGE_KEY = "socialsea_shimeji_character_v1";
 const POSITION_STORAGE_KEY = "socialsea_shimeji_position_v1";
+const CHAT_THREAD_READ_STATE_KEY = "socialsea_chat_thread_read_state_v1";
 const DEFAULT_VOICE_RATE = 1;
 const DEFAULT_VOICE_PITCH = 1;
 const DEFAULT_BUDDY_SPEED = "medium";
@@ -82,6 +83,19 @@ const normalizeVoiceGender = (value) => {
   if (normalized === "f") return "female";
   return "auto";
 };
+
+const normalizeMessageSpeechMode = (value) => {
+  const mode = String(value || "").trim().toLowerCase();
+  if (mode === "off" || mode === "sender" || mode === "sender_message" || mode === "count") return mode;
+  return "count";
+};
+
+const normalizePetName = (value) =>
+  String(value || "")
+    .replace(/\s+/g, " ")
+    .replace(/[^\w\s.-]/g, "")
+    .trim()
+    .slice(0, 32);
 
 const normalizeLangCode = (value) => String(value || "").trim().replace(/_/g, "-");
 
@@ -147,6 +161,154 @@ const mergeFollowRequestsWithNotifications = (notifications, followRequests) => 
 
   if (!mapped.length) return base;
   return [...mapped, ...base];
+};
+
+const toArrayPayload = (payload, depth = 0) => {
+  if (Array.isArray(payload)) return payload;
+  if (!payload || typeof payload !== "object" || depth > 3) return [];
+  const keys = ["content", "items", "users", "conversations", "messages", "results", "data", "result", "payload"];
+  for (const key of keys) {
+    const value = payload?.[key];
+    if (Array.isArray(value)) return value;
+    if (value && typeof value === "object") {
+      const nested = toArrayPayload(value, depth + 1);
+      if (nested.length > 0) return nested;
+    }
+  }
+  const values = Object.values(payload);
+  for (const value of values) {
+    if (Array.isArray(value)) return value;
+  }
+  return [];
+};
+
+const readConversationContactId = (item) =>
+  String(
+    item?.otherUserId ??
+      item?.userId ??
+      item?.contactId ??
+      item?.peerId ??
+      item?.id ??
+      ""
+  ).trim();
+
+const readLocalThreadUnreadMap = () => {
+  try {
+    const raw = localStorage.getItem(CHAT_THREAD_READ_STATE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const next = {};
+    Object.entries(parsed).forEach(([key, value]) => {
+      const contactId = String(key || "").trim();
+      if (!contactId) return;
+      const unread = Number(value?.unread || 0);
+      next[contactId] = Number.isFinite(unread) && unread > 0 ? Math.floor(unread) : 0;
+    });
+    return next;
+  } catch {
+    return {};
+  }
+};
+
+const readConversationUnreadCount = (item, localUnreadByContact = null) => {
+  const unread = Number(
+    item?.unreadCount ??
+      item?.unread ??
+      item?.unreadMessages ??
+      item?.unreadMessageCount ??
+      item?.unread_message_count ??
+      0
+  );
+  const serverUnread = Number.isFinite(unread) && unread > 0 ? Math.floor(unread) : 0;
+  const contactId = readConversationContactId(item);
+  const localUnread = contactId && localUnreadByContact && localUnreadByContact[contactId]
+    ? Number(localUnreadByContact[contactId])
+    : 0;
+  return Math.max(serverUnread, Number.isFinite(localUnread) ? Math.max(0, Math.floor(localUnread)) : 0);
+};
+
+const readConversationSenderName = (item) => {
+  const raw =
+    item?.otherUserName ??
+    item?.otherName ??
+    item?.username ??
+    item?.name ??
+    item?.userName ??
+    item?.contactName ??
+    item?.recipientName ??
+    item?.peerName ??
+    item?.otherUserEmail ??
+    item?.email ??
+    item?.peerEmail ??
+    "User";
+  const safe = String(raw || "").replace(/[^\w\s.@-]/g, "").trim();
+  if (!safe) return "User";
+  return safe.includes("@") ? safe.split("@")[0] : safe;
+};
+
+const readConversationLastText = (item) => {
+  const raw = String(
+    item?.lastMessageText ??
+      item?.lastMessage ??
+      item?.lastMessageContent ??
+      item?.message ??
+      item?.preview ??
+      item?.content ??
+      ""
+  ).replace(/\s+/g, " ").trim();
+  if (!raw) return "sent you a message";
+  return raw.length > 120 ? `${raw.slice(0, 117)}...` : raw;
+};
+
+const readConversationUpdatedAt = (item) => {
+  const candidate =
+    item?.updatedAt ??
+    item?.lastMessageAt ??
+    item?.lastUpdatedAt ??
+    item?.timestamp ??
+    item?.at;
+  const asNum = Number(candidate);
+  if (Number.isFinite(asNum)) return asNum > 1000000000000 ? asNum : asNum * 1000;
+  const parsed = new Date(String(candidate || "")).getTime();
+  return Number.isFinite(parsed) ? parsed : Date.now();
+};
+
+const mapConversationToMessageNotification = (item, localUnreadByContact = null) => {
+  const unread = readConversationUnreadCount(item, localUnreadByContact);
+  if (!unread) return null;
+  const senderName = readConversationSenderName(item);
+  const text = readConversationLastText(item);
+  const idSeed =
+    item?.conversationId ??
+    item?.chatId ??
+    item?.id ??
+    item?.otherUserId ??
+    senderName;
+  return {
+    id: `chat-${String(idSeed)}`,
+    kind: "message",
+    read: false,
+    actorName: senderName,
+    senderName,
+    messageText: text,
+    message: `${senderName}: ${text}`,
+    unreadCount: unread,
+    createdAt: readConversationUpdatedAt(item)
+  };
+};
+
+const mergeConversationsWithNotifications = (notifications, conversations) => {
+  const base = Array.isArray(notifications) ? notifications : [];
+  const rows = Array.isArray(conversations) ? conversations : [];
+  if (!rows.length) return base;
+  const localUnreadByContact = readLocalThreadUnreadMap();
+  const mapped = rows.map((row) => mapConversationToMessageNotification(row, localUnreadByContact)).filter(Boolean);
+  if (!mapped.length) return base;
+
+  const existing = new Set(base.map((item) => String(item?.id || "").trim()).filter(Boolean));
+  const uniques = mapped.filter((item) => !existing.has(String(item.id)));
+  if (!uniques.length) return base;
+  return [...uniques, ...base];
 };
 
 const readDisplayName = () => {
@@ -380,6 +542,26 @@ const readBuddySpeed = () => {
   }
 };
 
+const readMessageSpeechMode = () => {
+  try {
+    const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return normalizeMessageSpeechMode(parsed?.notificationBuddyMessageSpeechMode);
+  } catch {
+    return "count";
+  }
+};
+
+const readMessagePetName = () => {
+  try {
+    const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return normalizePetName(parsed?.notificationBuddyMessagePetName);
+  } catch {
+    return "";
+  }
+};
+
 const deriveKind = (item) => {
   const explicit = String(item?.kind || "").trim().toLowerCase();
   if (explicit) return explicit;
@@ -396,6 +578,67 @@ const deriveKind = (item) => {
 const buildSpeechText = (name, count) => {
   const label = count === 1 ? "notification" : "notifications";
   return `${name}, you have ${count} new ${label}.`;
+};
+
+const readItemTimestampMs = (item) => {
+  const candidate =
+    item?.createdAt ??
+    item?.updatedAt ??
+    item?.time ??
+    item?.timestamp ??
+    item?.at;
+  const numeric = Number(candidate);
+  if (Number.isFinite(numeric)) return numeric > 1000000000000 ? numeric : numeric * 1000;
+  const parsed = new Date(String(candidate || "")).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const extractSenderName = (item) => {
+  const raw =
+    item?.actorName ??
+    item?.senderName ??
+    item?.fromName ??
+    item?.name ??
+    item?.username ??
+    item?.actorEmail ??
+    item?.fromEmail ??
+    "";
+  const safe = String(raw || "").replace(/[^\w\s.@-]/g, "").trim();
+  if (!safe) return "someone";
+  return safe.includes("@") ? safe.split("@")[0] : safe;
+};
+
+const extractMessageText = (item) => {
+  const raw = String(
+    item?.messageText ??
+      item?.preview ??
+      item?.body ??
+      item?.content ??
+      item?.text ??
+      item?.message ??
+      ""
+  ).replace(/\s+/g, " ").trim();
+  if (!raw) return "";
+  const cleaned = raw
+    .replace(/^new message from\s+.+?:\s*/i, "")
+    .replace(/^.+?\s+sent you a message[:\s-]*/i, "")
+    .trim();
+  const compact = cleaned || raw;
+  return compact.length > 120 ? `${compact.slice(0, 117)}...` : compact;
+};
+
+const buildMessageSpeechText = (name, unreadItems, mode, petName = "") => {
+  const nextMode = normalizeMessageSpeechMode(mode);
+  const messages = (Array.isArray(unreadItems) ? unreadItems : []).filter((item) => deriveKind(item) === "message");
+  if (!messages.length || nextMode === "off" || nextMode === "count") return "";
+  const latest = [...messages].sort((a, b) => readItemTimestampMs(b) - readItemTimestampMs(a))[0] || messages[0];
+  const listenerName = normalizePetName(petName) || name;
+  const sender = extractSenderName(latest);
+  if (nextMode === "sender_message") {
+    const message = extractMessageText(latest);
+    return message ? `${listenerName}, new message from ${sender}. ${message}` : `${listenerName}, new message from ${sender}.`;
+  }
+  return `${listenerName}, new message from ${sender}.`;
 };
 
 const getCharacterStyle = (character) => {
@@ -637,6 +880,8 @@ export default function NotificationBuddy({ enabled = true }) {
   const [sheetStatus, setSheetStatus] = useState({});
   const [voicePrefs, setVoicePrefs] = useState(readVoicePrefs);
   const [buddySpeed, setBuddySpeed] = useState(readBuddySpeed);
+  const [messageSpeechMode, setMessageSpeechMode] = useState(readMessageSpeechMode);
+  const [messagePetName, setMessagePetName] = useState(readMessagePetName);
   const initialPosition = useMemo(() => readStoredPosition(), []);
   const [position, setPosition] = useState(() => initialPosition || { x: 40, y: 0 });
   const positionRef = useRef(position);
@@ -666,12 +911,15 @@ export default function NotificationBuddy({ enabled = true }) {
   const speechTimerRef = useRef(null);
   const longPressRef = useRef({ timer: null, triggered: false });
   const lastUnreadRef = useRef(0);
+  const lastMessageSpeechRef = useRef("");
   const hiddenUntilUnreadRef = useRef(null);
   const didInitRef = useRef(false);
   const canSpeakRef = useRef(false);
   const displayName = useMemo(() => readDisplayName(), []);
   const voicePrefsRef = useRef(voicePrefs);
   const buddySpeedRef = useRef(buddySpeed);
+  const messageSpeechModeRef = useRef(messageSpeechMode);
+  const messagePetNameRef = useRef(messagePetName);
 
   useEffect(() => {
     voicePrefsRef.current = voicePrefs;
@@ -679,6 +927,12 @@ export default function NotificationBuddy({ enabled = true }) {
   useEffect(() => {
     buddySpeedRef.current = buddySpeed;
   }, [buddySpeed]);
+  useEffect(() => {
+    messageSpeechModeRef.current = messageSpeechMode;
+  }, [messageSpeechMode]);
+  useEffect(() => {
+    messagePetNameRef.current = messagePetName;
+  }, [messagePetName]);
   useEffect(() => {
     positionRef.current = position;
   }, [position]);
@@ -904,6 +1158,8 @@ export default function NotificationBuddy({ enabled = true }) {
       setVoicePrefs(readVoicePrefs());
       setBuddySpeed(readBuddySpeed());
       setHideWhenEmpty(readHideWhenEmpty());
+      setMessageSpeechMode(readMessageSpeechMode());
+      setMessagePetName(readMessagePetName());
     };
     window.addEventListener("storage", refresh);
     window.addEventListener("ss-settings-update", refresh);
@@ -934,9 +1190,14 @@ export default function NotificationBuddy({ enabled = true }) {
     const load = async () => {
       if (document.visibilityState === "hidden") return;
       try {
-        const [notifResult, followResult] = await Promise.allSettled([
+        const [notifResult, followResult, convoResult] = await Promise.allSettled([
           api.get("/api/notifications", { params: { limit: 120 } }),
-          fetchFollowRequests()
+          fetchFollowRequests(),
+          api.get("/api/chat/conversations", {
+            params: { page: 0, size: 100 },
+            timeout: 6500,
+            suppressAuthRedirect: true
+          })
         ]);
 
         const list = notifResult.status === "fulfilled" && Array.isArray(notifResult.value?.data)
@@ -945,7 +1206,10 @@ export default function NotificationBuddy({ enabled = true }) {
         const followRequests = followResult.status === "fulfilled" && Array.isArray(followResult.value)
           ? followResult.value
           : [];
-        const merged = mergeFollowRequestsWithNotifications(list, followRequests);
+        const conversations =
+          convoResult.status === "fulfilled" ? toArrayPayload(convoResult.value?.data) : [];
+        const withFollows = mergeFollowRequestsWithNotifications(list, followRequests);
+        const merged = mergeConversationsWithNotifications(withFollows, conversations);
         if (!active) return;
         setItems(merged);
         setLoaded(true);
@@ -1000,21 +1264,33 @@ export default function NotificationBuddy({ enabled = true }) {
   useEffect(() => {
     if (!isEnabled) return;
     if (!loaded) return;
+    const mode = messageSpeechModeRef.current;
+    const petName = messagePetNameRef.current;
+    const listenerName = normalizePetName(petName) || displayName;
+    const msgText = buildMessageSpeechText(displayName, unreadItems, mode, petName);
     if (!didInitRef.current) {
       didInitRef.current = true;
       lastUnreadRef.current = unreadCount;
+      lastMessageSpeechRef.current = msgText || "";
       if (unreadCount > 0) {
-        const text = buildSpeechText(displayName, unreadCount);
+        const text = msgText || buildSpeechText(listenerName, unreadCount);
         showSpeech(text, 4200);
       }
       return;
     }
     if (unreadCount > lastUnreadRef.current) {
-      const text = buildSpeechText(displayName, unreadCount);
+      const text = msgText || buildSpeechText(listenerName, unreadCount);
       triggerAlert(text, true);
+      if (msgText) lastMessageSpeechRef.current = msgText;
+    } else if (msgText && msgText !== lastMessageSpeechRef.current) {
+      // Also announce when a new message arrives in the same unread thread.
+      triggerAlert(msgText, true);
+      lastMessageSpeechRef.current = msgText;
+    } else if (!msgText) {
+      lastMessageSpeechRef.current = "";
     }
     lastUnreadRef.current = unreadCount;
-  }, [loaded, unreadCount, displayName, isEnabled]);
+  }, [loaded, unreadCount, unreadItems, displayName, isEnabled]);
 
   useEffect(() => {
     if (!softHidden) return;

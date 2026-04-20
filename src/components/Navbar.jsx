@@ -338,7 +338,7 @@ const readChatUnreadFromThreadState = () => {
     if (!parsed || typeof parsed !== "object") return 0;
     return Object.values(parsed).reduce((sum, entry) => {
       const unread = Math.max(0, Math.floor(Number(entry?.unread || 0)));
-      return sum + unread;
+      return sum + (unread > 0 ? 1 : 0);
     }, 0);
   } catch {
     return 0;
@@ -355,7 +355,7 @@ const sumUnreadFromConversations = (rows) =>
         item?.unread_message_count ??
         0
     );
-    return sum + (Number.isFinite(unread) && unread > 0 ? Math.floor(unread) : 0);
+    return sum + (Number.isFinite(unread) && unread > 0 ? 1 : 0);
   }, 0);
 
 const toEpochMs = (value) => {
@@ -3113,7 +3113,7 @@ export default function Navbar() {
     <header className={`ss-nav-wrap ${onChatConversationRoute ? "is-chat-conversation" : ""}`}>
       <nav className="ss-nav" aria-label="Main navigation">
         <Link to="/feed" className="ss-brand" aria-label="Go to feed">
-          <img src="/logo.png?v=3" alt="SocialSea" className="ss-brand-logo" />
+          <img src="/logo-light.png?v=1" alt="SocialSea" className="ss-brand-logo" />
           <span className="ss-brand-text">SocialSea</span>
           <button
             type="button"
@@ -3163,7 +3163,7 @@ export default function Navbar() {
               >
                 <span className="ss-link-icon-wrap">
                   {isFeedItem ? (
-                    <img src="/logo.png?v=3" alt="" className="ss-link-logo" aria-hidden="true" />
+                    <img src="/logo-light.png?v=1" alt="" className="ss-link-logo" aria-hidden="true" />
                   ) : isProfileItem && profileNavPic ? (
                     <img
                       src={profileNavPic}

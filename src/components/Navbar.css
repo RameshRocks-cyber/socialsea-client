@@ -96,6 +96,23 @@ body.ss-theme-white .ss-link:hover {
   background: #f2f4f7 !important;
 }
 
+body.ss-theme-white .ss-brand-logo {
+  border-color: rgba(60, 80, 110, 0.24) !important;
+  box-shadow: 0 6px 14px rgba(36, 50, 72, 0.16) !important;
+  background: #ffffff;
+}
+
+body.ss-theme-white .ss-brand-text {
+  color: #101622 !important;
+  text-shadow: none;
+}
+
+body.ss-theme-white .ss-link-logo {
+  border: 1px solid rgba(60, 80, 110, 0.22);
+  background: #ffffff;
+  box-shadow: 0 2px 6px rgba(36, 50, 72, 0.14);
+}
+
 .ss-brand {
   display: inline-flex;
   align-items: center;

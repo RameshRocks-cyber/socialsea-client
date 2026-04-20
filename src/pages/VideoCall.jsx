@@ -137,6 +137,9 @@ export default function VideoCall({ placement = "page" }) {
     groupRemoteTiles,
     isScreenShareStream,
     remoteIsScreenShare,
+    isLocalVideoPrimary,
+    setLocalVideoAsPrimary,
+    setRemoteVideoAsPrimary,
     hasRemoteVideo,
     hasRemoteAudio,
     localVideoPos,
@@ -163,13 +166,38 @@ export default function VideoCall({ placement = "page" }) {
   } = ctx;
 
   const [showCallMoreMenu, setShowCallMoreMenu] = useState(false);
+  const isLocalPrimaryView = !groupCallActive && isLocalVideoPrimary;
+  const remoteDisplayedStream =
+    remoteVideoRef.current?.srcObject instanceof MediaStream ? remoteVideoRef.current.srcObject : null;
+  const remoteShouldUseScreenStyle = remoteIsScreenShare || isScreenShareStream(remoteDisplayedStream);
+  const keepVideoPlaying = useCallback((event) => {
+    event?.currentTarget?.play?.().catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!showVideoCallScreen) setShowCallMoreMenu(false);
   }, [showVideoCallScreen]);
 
+  useEffect(() => {
+    if (groupCallActive) return;
+    if (remoteShouldUseScreenStyle) {
+      setRemoteVideoAsPrimary();
+      return;
+    }
+    if (isScreenSharing) {
+      setLocalVideoAsPrimary();
+    }
+  }, [
+    groupCallActive,
+    remoteShouldUseScreenStyle,
+    isScreenSharing,
+    setRemoteVideoAsPrimary,
+    setLocalVideoAsPrimary
+  ]);
+
   const showVideoCallMini =
     callActive && (callState.mode === "video" || groupCallActive) && Boolean(videoCallMinimized);
+  const canSwapPrimaryViews = !groupCallActive && !remoteShouldUseScreenStyle && !isScreenSharing;
   const signDebugTime = signAssistDebug?.lastDetectionAt
     ? new Date(signAssistDebug.lastDetectionAt).toLocaleTimeString()
     : "--";
@@ -376,7 +404,9 @@ export default function VideoCall({ placement = "page" }) {
                     autoPlay
                     playsInline
                     muted
-                    className="wa-video-mini-remote"
+                    className={`wa-video-mini-remote ${
+                      isScreenShareStream(groupRemoteTiles[0].stream) ? "is-screen" : "is-mirror"
+                    }`}
                     data-allow-simultaneous="true"
                     ref={(el) => {
                       const stream = groupRemoteTiles[0].stream;
@@ -407,7 +437,9 @@ export default function VideoCall({ placement = "page" }) {
                   autoPlay
                   playsInline
                   muted
-                  className={`wa-video-mini-remote ${remoteIsScreenShare ? "is-screen" : "is-mirror"}`}
+                  onLoadedMetadata={keepVideoPlaying}
+                  onCanPlay={keepVideoPlaying}
+                  className={`wa-video-mini-remote ${remoteShouldUseScreenStyle ? "is-screen" : "is-mirror"}`}
                   data-allow-simultaneous="true"
                 />
                 <video
@@ -415,6 +447,8 @@ export default function VideoCall({ placement = "page" }) {
                   autoPlay
                   playsInline
                   muted
+                  onLoadedMetadata={keepVideoPlaying}
+                  onCanPlay={keepVideoPlaying}
                   className={`wa-video-mini-local ${isScreenSharing ? "is-screen" : "is-mirror"}`}
                   style={{ filter: activeVideoFilter.css }}
                   data-allow-simultaneous="true"
@@ -451,7 +485,12 @@ export default function VideoCall({ placement = "page" }) {
       )}
 
       {showVideoCallScreen && (
-        <div className="wa-video-call-screen" role="dialog" aria-live="polite" aria-label="Video call screen">
+        <div
+          className={`wa-video-call-screen ${isLocalPrimaryView ? "is-local-primary" : ""}`}
+          role="dialog"
+          aria-live="polite"
+          aria-label="Video call screen"
+        >
           {groupCallActive ? (
             <div className="wa-video-grid">
               <div className="wa-video-tile is-local">
@@ -460,6 +499,8 @@ export default function VideoCall({ placement = "page" }) {
                   autoPlay
                   playsInline
                   muted
+                  onLoadedMetadata={keepVideoPlaying}
+                  onCanPlay={keepVideoPlaying}
                   className={`wa-video-local ${isScreenSharing ? "is-screen" : "is-mirror"}`}
                   style={{ filter: activeVideoFilter.css }}
                   data-allow-simultaneous="true"
@@ -471,6 +512,8 @@ export default function VideoCall({ placement = "page" }) {
                   <video
                     autoPlay
                     playsInline
+                    onLoadedMetadata={keepVideoPlaying}
+                    onCanPlay={keepVideoPlaying}
                     className={`wa-video-remote ${isScreenShareStream(tile.stream) ? "is-screen" : "is-mirror"}`}
                     data-allow-simultaneous="true"
                     ref={(el) => {
@@ -496,7 +539,14 @@ export default function VideoCall({ placement = "page" }) {
                 autoPlay
                 playsInline
                 muted
-                className={`wa-video-remote ${remoteIsScreenShare ? "is-screen" : "is-mirror"}`}
+                onClick={() => {
+                  if (isLocalPrimaryView && canSwapPrimaryViews) setRemoteVideoAsPrimary();
+                }}
+                onLoadedMetadata={keepVideoPlaying}
+                onCanPlay={keepVideoPlaying}
+                className={`wa-video-remote ${remoteShouldUseScreenStyle ? "is-screen" : "is-mirror"} ${
+                  isLocalPrimaryView && canSwapPrimaryViews ? "is-thumbnail is-tappable" : isLocalPrimaryView ? "is-thumbnail" : "is-main"
+                }`}
                 data-allow-simultaneous="true"
               />
               {!hasRemoteVideo && !hasRemoteAudio && (
@@ -505,19 +555,26 @@ export default function VideoCall({ placement = "page" }) {
                   <span className="wa-video-remote-indicator-text">Camera off</span>
                 </div>
               )}
-              <video
-                ref={setLocalVideoElement}
-                autoPlay
-                playsInline
-                muted
-                className={`wa-video-local ${isScreenSharing ? "is-screen" : "is-mirror"} ${localVideoPos ? "is-dragged" : ""}`}
+                <video
+                  ref={setLocalVideoElement}
+                  autoPlay
+                  playsInline
+                  muted
+                  onClick={() => {
+                    if (!isLocalPrimaryView && canSwapPrimaryViews) setLocalVideoAsPrimary();
+                  }}
+                  onLoadedMetadata={keepVideoPlaying}
+                  onCanPlay={keepVideoPlaying}
+                  className={`wa-video-local ${isScreenSharing ? "is-screen" : "is-mirror"} ${
+                    isLocalPrimaryView ? "is-main" : canSwapPrimaryViews ? "is-thumbnail is-tappable" : "is-thumbnail"
+                  } ${localVideoPos ? "is-dragged" : ""}`}
                 style={{
                   filter: activeVideoFilter.css,
-                  ...(localVideoPos
+                  ...(!isLocalPrimaryView && localVideoPos
                     ? { left: `${localVideoPos.x}px`, top: `${localVideoPos.y}px`, right: "auto", bottom: "auto" }
                     : {})
                 }}
-                onPointerDown={startLocalVideoDrag}
+                onPointerDown={isLocalPrimaryView ? undefined : startLocalVideoDrag}
                 data-allow-simultaneous="true"
               />
             </>

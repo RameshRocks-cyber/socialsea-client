@@ -17,7 +17,6 @@ export const NOTIFICATION_SOUND_OPTIONS = [
 ];
 
 export const RINGTONE_OPTIONS = [
-  { value: "classic", label: "Midnight Pulse" },
   { value: "bell", label: "Cinematic Descent" },
   { value: "pulse", label: "Ocean Breeze" },
   { value: "marimba", label: "Dawn Chorus" },
@@ -51,7 +50,7 @@ export const RINGTONE_SOUND_URLS = {
 
 export const DEFAULT_SOUND_PREFS = {
   notificationSound: "classic",
-  ringtoneSound: "classic",
+  ringtoneSound: "bell",
   customRingtoneDataUrl: "",
   customRingtoneName: DEFAULT_CUSTOM_RINGTONE_NAME,
   customRingtoneUrl: DEFAULT_CUSTOM_RINGTONE_URL,
@@ -74,8 +73,9 @@ export const readSoundPrefs = () => {
       String(parsed?.customRingtoneDataUrl || "").trim() || String(parsed?.customRingtoneUrl || "").trim()
     );
     const rawRingtoneSound = String(parsed?.ringtoneSound || DEFAULT_SOUND_PREFS.ringtoneSound);
+    const normalizedRingtoneSound = rawRingtoneSound === "classic" ? "bell" : rawRingtoneSound;
     const ringtoneSound =
-      rawRingtoneSound === "custom" && !hasAnyCustomSource ? "classic" : rawRingtoneSound;
+      normalizedRingtoneSound === "custom" && !hasAnyCustomSource ? "bell" : normalizedRingtoneSound;
     const customRingtoneDataUrl = String(parsed?.customRingtoneDataUrl || "");
     const customRingtoneName = String(parsed?.customRingtoneName || DEFAULT_CUSTOM_RINGTONE_NAME);
     const customRingtoneUrl = String(parsed?.customRingtoneUrl || DEFAULT_CUSTOM_RINGTONE_URL);
