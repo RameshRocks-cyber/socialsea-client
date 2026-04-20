@@ -138,6 +138,43 @@ body.ss-theme-white .profile-vault-link {
   color: #2a629c !important;
 }
 
+body.ss-theme-white .profile-job-button {
+  background: linear-gradient(145deg, #ffffff, #edf4ff);
+  border-color: rgba(96, 142, 191, 0.36);
+  color: #173c65;
+  box-shadow: 0 8px 18px rgba(30, 77, 130, 0.1);
+}
+
+body.ss-theme-white .profile-job-button small {
+  color: #4a6f98;
+}
+
+body.ss-theme-white .profile-job-empty {
+  color: #4a6f98;
+}
+
+body.ss-theme-white .profile-job-item {
+  background: #ffffff;
+  border-color: rgba(96, 142, 191, 0.32);
+  color: #173c65;
+  box-shadow: 0 8px 18px rgba(30, 77, 130, 0.08);
+}
+
+body.ss-theme-white .profile-job-item small {
+  color: #4a6f98;
+}
+
+body.ss-theme-white .profile-job-link,
+body.ss-theme-white .profile-job-remove {
+  background: #f7fbff;
+  border-color: rgba(96, 142, 191, 0.34);
+  color: #173c65;
+}
+
+body.ss-theme-white .profile-job-remove {
+  color: #b33f5b;
+}
+
 .profile-header {
   position: relative;
   overflow: hidden;

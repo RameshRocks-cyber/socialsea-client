@@ -516,19 +516,19 @@ export default function Settings() {
             icon={"💼"}
             title="Jobs on profile"
             value={jobMode === "profile" ? "On" : "Off"}
-            onClick={() => navigate("/settings/manage/jobs-profile")}
+            onClick={() => setJobMode("profile")}
           />
           <Row
             icon={"📝"}
             title="Post a Job"
             value={jobMode === "post" ? "On" : "Off"}
-            onClick={() => navigate("/settings/manage/jobs-post")}
+            onClick={() => setJobMode("post")}
           />
           <Row
             icon={"🔐"}
             title="Storage Vault"
             value={jobMode === "storage" ? "On" : "Off"}
-            onClick={() => navigate("/settings/manage/jobs-storage")}
+            onClick={() => setJobMode("storage")}
           />
           <p className="settings-note">Turn one on, or keep all off to hide.</p>
         </section>

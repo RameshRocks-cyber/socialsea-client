@@ -680,6 +680,9 @@ function AppRoutes() {
               <Route path="/settings/privacy" element={<ProtectedRoute><SettingsPrivacy /></ProtectedRoute>} />
               <Route path="/settings/login-activity" element={<ProtectedRoute><SettingsLoginActivity /></ProtectedRoute>} />
               <Route path="/settings/notification-buddy" element={<ProtectedRoute><NotificationBuddySettings /></ProtectedRoute>} />
+              <Route path="/settings/manage/jobs-profile" element={<Navigate to="/settings" replace />} />
+              <Route path="/settings/manage/jobs-post" element={<Navigate to="/settings" replace />} />
+              <Route path="/settings/manage/jobs-storage" element={<Navigate to="/settings" replace />} />
               <Route path="/settings/manage/:optionId" element={<ProtectedRoute><SettingsManage /></ProtectedRoute>} />
               <Route path="/sos" element={<ProtectedRoute><SOSPage /></ProtectedRoute>} />
               <Route path="/sos/live/:alertId" element={<ProtectedRoute><SOSPage /></ProtectedRoute>} />

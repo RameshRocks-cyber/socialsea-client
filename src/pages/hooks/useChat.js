@@ -4180,6 +4180,13 @@ function useChatController() {
   const emitTypingSignal = useCallback((contactId, isTyping, options = {}) => {
     const key = String(contactId || "").trim();
     if (!key || key === String(myUserId || "")) return;
+    const wsConnected = Boolean(stompRef.current?.connected);
+    if (!wsConnected && !Boolean(isTyping)) {
+      // With REST inbox polling, `typing=true` and `typing=false` can be drained together
+      // and cancel each other before UI paints. Let timeout-based hiding handle "stop typing".
+      typingSentStateByContactRef.current[key] = false;
+      return;
+    }
     const force = Boolean(options?.force);
     const now = Date.now();
     const lastAt = Number(typingLastSentAtByContactRef.current[key] || 0);
@@ -8120,7 +8127,40 @@ function useChatController() {
           timeoutMs: 6500
         });
         const list = Array.isArray(res?.list) ? res.list : [];
+        const coalesced = [];
+        const typingIndexBySender = new Map();
         list.forEach((signal) => {
+          const signalType = String(signal?.type || "").trim().toLowerCase();
+          if (signalType !== "typing") {
+            coalesced.push(signal);
+            return;
+          }
+          const senderKey = String(
+            signal?.fromUserId ??
+            signal?.senderId ??
+            signal?.fromId ??
+            signal?.from_id ??
+            signal?.sender_id ??
+            ""
+          ).trim();
+          if (!senderKey) {
+            coalesced.push(signal);
+            return;
+          }
+          const currentIndex = typingIndexBySender.get(senderKey);
+          if (currentIndex == null) {
+            typingIndexBySender.set(senderKey, coalesced.length);
+            coalesced.push(signal);
+            return;
+          }
+          const prev = coalesced[currentIndex];
+          const prevTyping = prev?.typing !== false;
+          const nextTyping = signal?.typing !== false;
+          if (nextTyping || !prevTyping) {
+            coalesced[currentIndex] = signal;
+          }
+        });
+        coalesced.forEach((signal) => {
           onSignal(signal);
         });
       } catch {

@@ -3023,7 +3023,8 @@ body.ss-theme-white .chat-page.chat-single-pane .chat-translate-select option:ch
 }
 
 .chat-read-ticks {
-  display: none;
+  display: inline-flex;
+  align-items: center;
   font-size: 0.72rem;
   line-height: 1;
   letter-spacing: -1px;
@@ -5502,13 +5503,13 @@ body.ss-theme-white .chat-feed-share-play {
   }
 
   .chat-page.chat-single-pane .wa-thread {
-    padding: 10px 10px calc(12px + env(safe-area-inset-bottom));
+    padding: 10px 10px 12px;
   }
 
   .chat-page.chat-single-pane .chat-input-row.wa-input-row {
     position: sticky;
     bottom: 0;
-    padding: 10px 10px calc(10px + env(safe-area-inset-bottom));
+    padding: 10px 10px calc(10px + min(env(safe-area-inset-bottom), 8px));
     z-index: 30;
     grid-template-columns: auto minmax(0, 1fr) auto auto auto;
     grid-template-areas: "emoji input attach camera send";
@@ -5563,7 +5564,7 @@ body.ss-theme-white .chat-feed-share-play {
   }
 
   .chat-page.chat-single-pane .wa-header {
-    padding: 8px 10px;
+    padding: max(8px, env(safe-area-inset-top)) 10px 8px;
   }
 }
 

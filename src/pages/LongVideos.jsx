@@ -1386,6 +1386,7 @@ export default function LongVideos() {
 
   const handlePlayerTouchStart = (event) => {
     if (isScreenLocked) {
+      if (isInteractivePlayerControlTarget(event.target)) return;
       swipeRef.current.tracking = false;
       swipeRef.current.active = false;
       swipeRef.current.mode = "fullscreen";
@@ -1439,6 +1440,7 @@ export default function LongVideos() {
 
   const handlePlayerTouchMove = (event) => {
     if (isScreenLocked) {
+      if (isInteractivePlayerControlTarget(event.target)) return;
       if (event?.cancelable) event.preventDefault();
       return;
     }
@@ -1520,6 +1522,7 @@ export default function LongVideos() {
 
   const handlePlayerTouchEnd = (event) => {
     if (isScreenLocked) {
+      if (isInteractivePlayerControlTarget(event.target)) return;
       if (event?.cancelable) event.preventDefault();
       return;
     }
@@ -1770,7 +1773,13 @@ export default function LongVideos() {
     brightness: "Brightness",
     volume: "Volume"
   };
-  const openSettingsPanel = (key) => setActiveSettingsPanel(key);
+  const openSettingsPanel = (key) => {
+    if (key === "lock") {
+      handleToggleScreenLock();
+      return;
+    }
+    setActiveSettingsPanel(key);
+  };
   const closeSettingsPanel = () => setActiveSettingsPanel("");
 
   const toggleSettingsMenu = () => {
@@ -2010,6 +2019,10 @@ export default function LongVideos() {
                       className={`watch-quality-menu${isSettingsAdjusting ? " is-adjusting" : ""}`}
                       onPointerDown={(e) => e.stopPropagation()}
                       onClick={(e) => e.stopPropagation()}
+                      onWheel={(e) => e.stopPropagation()}
+                      onTouchStart={(e) => e.stopPropagation()}
+                      onTouchMove={(e) => e.stopPropagation()}
+                      onTouchEnd={(e) => e.stopPropagation()}
                     >
                       {!activeSettingsPanel ? (
                         <div className="watch-settings-home">
@@ -2090,29 +2103,6 @@ export default function LongVideos() {
                                   {speed}x
                                 </button>
                               ))}
-                            </div>
-                          )}
-
-                          {activeSettingsPanel === "lock" && (
-                            <div className="watch-settings-options">
-                              <button
-                                type="button"
-                                className={`watch-settings-option ${!isScreenLocked ? "is-active" : ""}`}
-                                onClick={() => {
-                                  if (isScreenLocked) handleToggleScreenLock();
-                                }}
-                              >
-                                Off
-                              </button>
-                              <button
-                                type="button"
-                                className={`watch-settings-option ${isScreenLocked ? "is-active" : ""}`}
-                                onClick={() => {
-                                  if (!isScreenLocked) handleToggleScreenLock();
-                                }}
-                              >
-                                On
-                              </button>
                             </div>
                           )}
 
@@ -2203,6 +2193,9 @@ export default function LongVideos() {
                     type="button"
                     className={`watch-lock-btn ${isScreenLocked ? "" : "is-hidden"}`}
                     onPointerDown={(e) => e.stopPropagation()}
+                    onTouchStart={(e) => e.stopPropagation()}
+                    onTouchMove={(e) => e.stopPropagation()}
+                    onTouchEnd={(e) => e.stopPropagation()}
                     onClick={handleToggleScreenLock}
                     title="Unlock screen"
                     aria-label="Unlock screen"

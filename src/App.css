@@ -94,8 +94,8 @@
   }
 
   .app-main.chat-main-route.with-user-nav {
-    padding-top: 4px;
-    padding-bottom: env(safe-area-inset-bottom);
+    padding-top: 0;
+    padding-bottom: 0;
   }
 
   .app-main.reels-main-route.with-user-nav {
@@ -140,8 +140,8 @@
   }
 
   .app-main.chat-main-route.with-user-nav {
-    padding-top: 4px;
-    padding-bottom: env(safe-area-inset-bottom);
+    padding-top: 0;
+    padding-bottom: 0;
   }
 
   .app-main.reels-main-route.with-user-nav {
