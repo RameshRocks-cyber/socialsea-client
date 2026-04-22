@@ -762,6 +762,11 @@ export default function ChatMessages() {
     contactId,
   } = useChat();
   const [mediaFilter, setMediaFilter] = useState("all");
+  const [storyInsightsOpen, setStoryInsightsOpen] = useState(false);
+  const [storyInsightsTab, setStoryInsightsTab] = useState("engagement");
+  const [storyInsightsLoading, setStoryInsightsLoading] = useState(false);
+  const [storyInsightsError, setStoryInsightsError] = useState("");
+  const [storyInsightsItems, setStoryInsightsItems] = useState([]);
 
   const [inlineSearchOpen, setInlineSearchOpen] = useState(false);
   const isInlineSearchOpen = inlineSearchOpen;
@@ -892,6 +897,158 @@ export default function ChatMessages() {
     };
   }, [openHeaderUtilityPanel]);
 
+  const closeStoryInsights = useCallback(() => {
+    setStoryInsightsOpen(false);
+    setStoryInsightsLoading(false);
+    setStoryInsightsError("");
+    setStoryInsightsItems([]);
+    resumeStoryPlayback();
+  }, [resumeStoryPlayback]);
+
+  const openStoryInsights = useCallback(async (tab, story) => {
+    const storyId = Number(story?.id || 0);
+    if (!storyId) return;
+    pauseStoryPlayback();
+    setStoryInsightsTab(tab);
+    setStoryInsightsOpen(true);
+    setStoryInsightsLoading(true);
+    setStoryInsightsError("");
+    setStoryInsightsItems([]);
+    try {
+      const toItems = (payload) => (Array.isArray(payload) ? payload : (Array.isArray(payload?.items) ? payload.items : []));
+      const toUserKey = (entry, idx, prefix) => {
+        const id = String(entry?.userId ?? entry?.id ?? "").trim();
+        if (id) return `id:${id}`;
+        const email = String(entry?.email ?? entry?.userEmail ?? "").trim().toLowerCase();
+        if (email) return `email:${email}`;
+        const username = String(entry?.username ?? entry?.name ?? "").trim().toLowerCase();
+        if (username) return `name:${username}`;
+        return `${prefix}:${idx}`;
+      };
+      const toTs = (value) => {
+        const n = Number(value);
+        if (Number.isFinite(n)) return n > 1000000000000 ? n : n * 1000;
+        const parsed = new Date(String(value || "")).getTime();
+        return Number.isFinite(parsed) ? parsed : 0;
+      };
+
+      if (tab === "engagement") {
+        const [viewsResult, likesResult] = await Promise.allSettled([
+          api.get(`/api/stories/${storyId}/views`, { timeout: 12000 }),
+          api.get(`/api/stories/${storyId}/likes`, { timeout: 12000 })
+        ]);
+
+        const viewsItems = viewsResult.status === "fulfilled" ? toItems(viewsResult.value?.data) : [];
+        const likesItems = likesResult.status === "fulfilled" ? toItems(likesResult.value?.data) : [];
+
+        if (viewsResult.status === "rejected" && likesResult.status === "rejected") {
+          throw viewsResult.reason || likesResult.reason || new Error("Failed to load story engagement");
+        }
+
+        const merged = new Map();
+
+        viewsItems.forEach((entry, idx) => {
+          const key = toUserKey(entry, idx, "view");
+          const viewedAt = entry?.viewedAt || entry?.createdAt || entry?.time || null;
+          merged.set(key, {
+            ...entry,
+            viewedAt,
+            likedAt: null,
+            viewed: true,
+            liked: false,
+            _sortTs: toTs(viewedAt)
+          });
+        });
+
+        likesItems.forEach((entry, idx) => {
+          const key = toUserKey(entry, idx, "like");
+          const likedAt = entry?.likedAt || entry?.createdAt || entry?.time || null;
+          const existing = merged.get(key);
+          if (existing) {
+            merged.set(key, {
+              ...existing,
+              ...entry,
+              viewed: true,
+              liked: true,
+              likedAt: likedAt || existing?.likedAt || null,
+              _sortTs: Math.max(existing?._sortTs || 0, toTs(likedAt))
+            });
+            return;
+          }
+          merged.set(key, {
+            ...entry,
+            viewedAt: entry?.viewedAt || likedAt || null,
+            likedAt,
+            viewed: true,
+            liked: true,
+            _sortTs: toTs(likedAt)
+          });
+        });
+
+        const rows = Array.from(merged.values())
+          .sort((a, b) => (b?._sortTs || 0) - (a?._sortTs || 0))
+          .map((entry) => {
+            const { _sortTs, ...rest } = entry || {};
+            return rest;
+          });
+
+        setStoryInsightsItems(rows);
+      } else {
+        const res = await api.get(`/api/stories/${storyId}/${tab}`, { timeout: 12000 });
+        setStoryInsightsItems(toItems(res?.data));
+      }
+    } catch (err) {
+      const message = err?.response?.data?.message || "Failed to load story insights";
+      setStoryInsightsError(String(message));
+    } finally {
+      setStoryInsightsLoading(false);
+    }
+  }, [pauseStoryPlayback]);
+
+  const shareStoryItem = useCallback(async (candidate) => {
+    const target = candidate || activeStory || storyOptionsItems[0];
+    if (!target) return;
+
+    const label = String(target?.storyText || target?.caption || "Check this story").trim() || "Check this story";
+    const mediaUrl = String(resolveStoryMediaUrl(target?.mediaUrl || target?.url || "")).trim();
+    const fallbackUrl =
+      target?.id && typeof window !== "undefined"
+        ? `${window.location.origin}/api/stories/media/${encodeURIComponent(String(target.id))}`
+        : "";
+    const shareUrl = mediaUrl || fallbackUrl;
+    const shareText = `${label}${shareUrl ? ` ${shareUrl}` : ""}`.trim();
+
+    try {
+      if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
+        await navigator.share({
+          title: label,
+          text: shareText,
+          url: shareUrl || undefined
+        });
+        setShareHint("Story shared.");
+      } else if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(shareText || label);
+        setShareHint("Story link copied.");
+      } else {
+        setShareHint("Share is not supported on this device.");
+      }
+    } catch (err) {
+      if (String(err?.name || "").toLowerCase() !== "aborterror") {
+        setShareHint("Could not share story.");
+      }
+    } finally {
+      setTimeout(() => setShareHint(""), 1800);
+      closeStoryOptions();
+    }
+  }, [activeStory, closeStoryOptions, resolveStoryMediaUrl, setShareHint, storyOptionsItems]);
+
+  useEffect(() => {
+    if (storyViewerIndex != null && activeStory) return;
+    setStoryInsightsOpen(false);
+    setStoryInsightsLoading(false);
+    setStoryInsightsError("");
+    setStoryInsightsItems([]);
+  }, [storyViewerIndex, activeStory]);
   return (
     <div className={`chat-page ${isConversationRoute ? "chat-single-pane" : "chat-list-only"}`}>
       {!isConversationRoute && !isRequestsRoute && (
@@ -1000,7 +1157,7 @@ export default function ChatMessages() {
                     ) : (
                       <span className="chat-story-fallback">{label.slice(0, 1).toUpperCase()}</span>
                     )}
-                    {isVideo && <span className="chat-story-play">▶</span>}
+                    {isVideo && <span className="chat-story-play">Ã¢â€“Â¶</span>}
                   </span>
                   <small>{label.length > 14 ? `${label.slice(0, 12)}...` : label}</small>
                 </button>
@@ -1541,7 +1698,7 @@ export default function ChatMessages() {
                             <span className="chat-utility-item-body">
                               <strong>{trimReplyPreview(entry.label, 90)}</strong>
                               <small>
-                                {entry.type === "document" ? "Document" : "Link"} ·{" "}
+                                {entry.type === "document" ? "Document" : "Link"} Ã‚Â·{" "}
                                 {new Date(entry?.message?.createdAt || Date.now()).toLocaleString([], {
                                   day: "numeric",
                                   month: "short",
@@ -1677,7 +1834,7 @@ export default function ChatMessages() {
                             <div className="chat-reel-video chat-reel-placeholder">REEL</div>
                           )}
                           <div className="chat-reel-overlay">
-                            <span className="chat-reel-play">▶</span>
+                            <span className="chat-reel-play">Ã¢â€“Â¶</span>
                           </div>
                         </button>
                       </div>
@@ -1687,18 +1844,25 @@ export default function ChatMessages() {
                 const renderFeedShareCard = (mediaUrl) => {
                   if (!feedShare) return null;
                   const openSharedPost = () => {
+                    if (feedShare?.href) {
+                      navigate(feedShare.href);
+                      return;
+                    }
                     if (feedShare?.id) {
                       navigate(`/feed?post=${encodeURIComponent(feedShare.id)}`);
                       return;
                     }
-                    if (feedShare?.href) navigate(feedShare.href);
                   };
                   const preview = feedShare?.id ? feedPreviewById[feedShare.id] : null;
                   const previewSrc = mediaUrl || preview?.src || "";
                   const previewPoster = preview?.poster || reelPosterBySrc[previewSrc] || "";
+                  const destinationLabel = feedShare?.kind === "watch" ? "Open in Long Videos" : "Open in Feed";
                   const title =
                     preview?.title ||
-                    trimReplyPreview(shareCaption(item.raw?.text || item.text, feedShare?.match) || "Shared video");
+                    trimReplyPreview(
+                      shareCaption(item.raw?.text || item.text, feedShare?.match) ||
+                        (feedShare?.kind === "watch" ? "Shared long video" : "Shared video")
+                    );
                   return (
                     <div className="chat-feed-share-wrap">
                       <button
@@ -1728,11 +1892,11 @@ export default function ChatMessages() {
                           ) : (
                             <div className="chat-feed-share-video chat-reel-placeholder">VIDEO</div>
                           )}
-                          <span className="chat-feed-share-play">▶</span>
+                          <span className="chat-feed-share-play">Ã¢â€“Â¶</span>
                         </div>
                         <div className="chat-feed-share-meta">
                           <strong>{title || "Shared video"}</strong>
-                          <small>Open in Feed</small>
+                          <small>{destinationLabel}</small>
                         </div>
                       </button>
                     </div>
@@ -2013,7 +2177,7 @@ export default function ChatMessages() {
                   }}
                   aria-label="Close image preview"
                 >
-                  ×
+                  Ã—
                 </button>
                 <img
                   src={imagePreview.src}
@@ -2029,7 +2193,7 @@ export default function ChatMessages() {
       )}
       {storyViewerIndex != null && activeStory && (
         <div className="chat-story-viewer-backdrop" onClick={closeStory}>
-          <div className="chat-story-player" onClick={(e) => e.stopPropagation()}>
+          <div className="chat-story-player" onClick={(event) => event.stopPropagation()}>
             {(() => {
               const mediaUrl = resolvedStoryMediaUrl;
               const isVideo = resolvedStoryIsVideo;
@@ -2051,8 +2215,10 @@ export default function ChatMessages() {
               const storyReaction = storyReactions?.[storyKey] || {};
               const storyLiked = Boolean(storyReaction.liked);
               const storyLikeCount = Number(activeStory?.likeCount || 0);
-              const storyCommentCount = Number(activeStory?.commentCount || 0);
               const storyViewCount = Number(activeStory?.viewCount || 0);
+              const storyPostedTime = formatMessageTime(
+                activeStory?.createdAt || activeStory?.created || activeStory?.timestamp || activeStory?.time
+              );
               const storyOptionsGroup = storyViewerGroupKey
                 ? storyGroupsByKey.get(storyViewerGroupKey)
                 : null;
@@ -2146,6 +2312,7 @@ export default function ChatMessages() {
                       <span>
                         {storyViewerIndex + 1}/{storyViewerItems.length}
                       </span>
+                      {storyPostedTime && <span>Posted {storyPostedTime}</span>}
                     </div>
                     <div className="chat-story-player-actions">
                       {isVideo && mediaUrl && (
@@ -2250,23 +2417,61 @@ export default function ChatMessages() {
                     {storyPlayerPaused && !storyViewerLoadError && (
                       <div className="chat-story-player-paused">Paused</div>
                     )}
+                    {storyViewerItems.length > 1 && (
+                      <div className="chat-story-player-nav">
+                        <button
+                          type="button"
+                          className="prev"
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onPointerUp={(e) => e.stopPropagation()}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            goPrevStory();
+                          }}
+                          disabled={storyViewerIndex <= 0}
+                          aria-label="Previous story"
+                        />
+                        <button
+                          type="button"
+                          className="next"
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onPointerUp={(e) => e.stopPropagation()}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            goNextStory();
+                          }}
+                          disabled={storyViewerIndex >= storyViewerItems.length - 1}
+                          aria-label="Next story"
+                        />
+                      </div>
+                    )}
                   </div>
                   {label && <p className="chat-story-player-caption">{label}</p>}
                   <div className="chat-story-reactions">
                     <span className="chat-story-reaction-user">{storyUserLabel || "Story"}</span>
                     <div className="chat-story-reaction-buttons">
-                      <button
-                        type="button"
-                        className={`chat-story-reaction-btn ${storyLiked ? "is-liked" : ""}`}
-                        onClick={toggleStoryLike}
-                      >
-                        <FiHeart />
-                        {storyLiked ? "Liked" : "Like"}
-                      </button>
+                      {!isMyStoryItem && (
+                        <button
+                          type="button"
+                          className={`chat-story-reaction-btn ${storyLiked ? "is-liked" : ""}`}
+                          onClick={toggleStoryLike}
+                        >
+                          <FiHeart />
+                          {storyLiked ? "Liked" : "Like"}
+                        </button>
+                      )}
                       <button
                         type="button"
                         className="chat-story-reaction-btn"
-                        onClick={() => setStoryCommentOpen((prev) => !prev)}
+                        onClick={() => {
+                          if (storyCommentOpen) {
+                            setStoryCommentOpen(false);
+                            resumeStoryPlayback();
+                            return;
+                          }
+                          setStoryCommentOpen(true);
+                          pauseStoryPlayback();
+                        }}
                       >
                         <FiMessageCircle />
                         Comment
@@ -2275,18 +2480,15 @@ export default function ChatMessages() {
                   </div>
                   {isMyStoryItem && (
                     <div className="chat-story-stats" aria-label="Story stats">
-                      <span className="chat-story-stat">
-                        <FiHeart />
-                        {formatStoryCount(storyLikeCount)}
-                      </span>
-                      <span className="chat-story-stat">
-                        <FiMessageCircle />
-                        {formatStoryCount(storyCommentCount)}
-                      </span>
-                      <span className="chat-story-stat">
+                      <button
+                        type="button"
+                        className="chat-story-stat chat-story-stat-engagement"
+                        aria-label="Show viewed and liked users"
+                        onClick={() => openStoryInsights("engagement", activeStory)}
+                      >
                         <FiEye />
-                        {formatStoryCount(storyViewCount)}
-                      </span>
+                        Viewed {formatStoryCount(storyViewCount)} | Likes {formatStoryCount(storyLikeCount)}
+                      </button>
                     </div>
                   )}
                   {storyCommentOpen && (
@@ -2302,30 +2504,6 @@ export default function ChatMessages() {
                       </button>
                     </div>
                   )}
-                  {storyViewerItems.length > 1 && (
-                    <div className="chat-story-player-nav">
-                      <button
-                        type="button"
-                        className="prev"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          goPrevStory();
-                        }}
-                        disabled={storyViewerIndex <= 0}
-                        aria-label="Previous story"
-                      />
-                      <button
-                        type="button"
-                        className="next"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          goNextStory();
-                        }}
-                        disabled={storyViewerIndex >= storyViewerItems.length - 1}
-                        aria-label="Next story"
-                      />
-                    </div>
-                  )}
                 </>
               );
             })()}
@@ -2336,6 +2514,18 @@ export default function ChatMessages() {
         <div className="chat-story-options-backdrop" onClick={closeStoryOptions}>
           <div className="chat-story-options" onClick={(e) => e.stopPropagation()}>
             <h4>Story options</h4>
+            <button
+              type="button"
+              onClick={() => {
+                const currentStoryId = String(activeStory?.id || "").trim();
+                const currentStory = currentStoryId
+                  ? storyOptionsItems.find((item) => String(item?.id || "").trim() === currentStoryId)
+                  : null;
+                void shareStoryItem(currentStory || storyOptionsItems[0]);
+              }}
+            >
+              {storyOptionsItems.length > 1 ? "Share latest story" : "Share story"}
+            </button>
             <button
               type="button"
               onClick={() => {
@@ -2360,6 +2550,74 @@ export default function ChatMessages() {
             <button type="button" className="ghost" onClick={closeStoryOptions}>
               Cancel
             </button>
+          </div>
+        </div>
+      )}
+      {storyInsightsOpen && (
+        <div className="chat-story-insights-backdrop" onClick={closeStoryInsights}>
+          <div className="chat-story-insights" onClick={(e) => e.stopPropagation()}>
+            <div className="chat-story-insights-header">
+              <strong>
+                {storyInsightsTab === "engagement"
+                  ? `Viewed by ${formatStoryCount(Number(activeStory?.viewCount || storyInsightsItems.length || 0))}`
+                  : storyInsightsTab === "likes"
+                  ? "Liked by"
+                  : storyInsightsTab === "views"
+                    ? "Viewed by"
+                    : "Comments"}
+              </strong>
+              <button type="button" aria-label="Close insights" onClick={closeStoryInsights}>
+                <FiX />
+              </button>
+            </div>
+            {storyInsightsLoading && <p className="chat-story-insights-state">Loading...</p>}
+            {!storyInsightsLoading && storyInsightsError && (
+              <p className="chat-story-insights-state error">{storyInsightsError}</p>
+            )}
+            {!storyInsightsLoading && !storyInsightsError && storyInsightsItems.length === 0 && (
+              <p className="chat-story-insights-state">No data yet.</p>
+            )}
+            {!storyInsightsLoading && !storyInsightsError && storyInsightsItems.length > 0 && (
+              <div className="chat-story-insights-list">
+                {storyInsightsItems.map((entry, idx) => {
+                  const name = String(entry?.name || entry?.username || entry?.email || "Unknown").trim() || "Unknown";
+                  const avatarRaw = String(entry?.profilePic || "").trim();
+                  const avatarUrl = avatarRaw ? toApiUrl(avatarRaw) : "";
+                  const timeValue =
+                    storyInsightsTab === "engagement"
+                      ? (entry?.likedAt || entry?.viewedAt || entry?.createdAt || entry?.time || null)
+                      : (entry?.viewedAt || entry?.commentedAt || null);
+                  const entryKey = `${entry?.userId || "u"}-${entry?.email || "x"}-${idx}`;
+                  return (
+                    <div key={entryKey} className="chat-story-insights-item">
+                      <div className="chat-story-insights-avatar" aria-hidden="true">
+                        {avatarUrl ? (
+                          <img src={avatarUrl} alt={name} />
+                        ) : (
+                          <span>{name.charAt(0).toUpperCase()}</span>
+                        )}
+                      </div>
+                      <div className="chat-story-insights-meta">
+                        <strong>{name}</strong>
+                        {storyInsightsTab === "comments" && entry?.text && <p>{String(entry.text)}</p>}
+                        {storyInsightsTab === "engagement" && (
+                          <p className="chat-story-insights-engagement">
+                            {entry?.liked ? (
+                              <>
+                                <FiHeart aria-hidden="true" /> Liked
+                              </>
+                            ) : (
+                              "Viewed"
+                            )}
+                          </p>
+                        )}
+                        {timeValue && <small>{formatMessageTime(timeValue)}</small>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       )}

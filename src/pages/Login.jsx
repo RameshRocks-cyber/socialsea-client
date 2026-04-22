@@ -8,6 +8,15 @@ import { buildProfilePath, persistProfileIdentity } from "../utils/profileRoute"
 import "./AuthScreen.css";
 
 function parseErrorMessage(err, fallback) {
+  const code = String(err?.code || "").toLowerCase();
+  const rawMessage = String(err?.message || "").trim();
+  if (
+    code === "econnaborted" ||
+    /timeout/i.test(rawMessage) ||
+    /network error/i.test(rawMessage)
+  ) {
+    return "Login server is slow or temporarily unreachable. Please retry in a few seconds.";
+  }
   const data = err?.response?.data;
   if (typeof data === "string" && data.trim()) {
     const text = data.trim();
@@ -209,6 +218,10 @@ export default function Login() {
             {creatingAccount ? "Creating account..." : "Create account & Log in (Local)"}
           </button>
         )}
+
+        <p className="auth-foot">
+          Want to post privately? <Link to="/anonymous/upload">Upload anonymously</Link>
+        </p>
 
         <p className="auth-foot">
           New here? <Link to="/register">Create account</Link>

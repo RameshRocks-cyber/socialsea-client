@@ -197,6 +197,55 @@ export const syncStoryCaches = (incomingStories) => {
   };
 };
 
+export const syncStoryCachesForIdentity = (identity, incomingStories) => {
+  if (!identity) return syncStoryCaches(incomingStories);
+
+  const incoming = mergeStoryLists(incomingStories);
+  const incomingKeySet = new Set();
+  const incomingIdSet = new Set();
+
+  incoming.forEach((story) => {
+    const normalized = normalizeStoryEntry(story);
+    if (!normalized) return;
+    const storageKey = normalized.archiveId || resolveStoryStorageKey(normalized);
+    const storyId = ensureString(normalized?.id || normalized?.storyId);
+    if (storageKey) incomingKeySet.add(storageKey);
+    if (storyId) incomingIdSet.add(storyId);
+  });
+
+  const shouldKeepLocal = (story) => {
+    const normalized = normalizeStoryEntry(story);
+    if (!normalized) return false;
+
+    if (!isStoryOwnedByIdentity(normalized, identity)) return true;
+    if (normalized?.createdLocally === true) return true;
+
+    const sourceType = ensureString(normalized?.sourceType || normalized?.kind || "story").toLowerCase();
+    if (sourceType && sourceType !== "story") return true;
+
+    const storageKey = normalized.archiveId || resolveStoryStorageKey(normalized);
+    if (storageKey && incomingKeySet.has(storageKey)) return true;
+
+    const storyId = ensureString(normalized?.id || normalized?.storyId);
+    if (storyId && incomingIdSet.has(storyId)) return true;
+
+    return false;
+  };
+
+  const prunedArchive = mergeStoryLists(readArchivedStories().filter(shouldKeepLocal), incoming);
+  writeArchivedStories(prunedArchive);
+
+  const prunedActive = mergeStoryLists(readActiveStories().filter(shouldKeepLocal), incoming).filter(
+    (item) => !isStoryExpired(item)
+  );
+  writeActiveStories(prunedActive);
+
+  return {
+    active: prunedActive,
+    archive: prunedArchive
+  };
+};
+
 export const addStoryEntry = (story, options = {}) => {
   const normalized = normalizeStoryEntry(story);
   if (!normalized) return null;

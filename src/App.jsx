@@ -100,6 +100,7 @@ const SWIPE_MAX_DURATION_MS = 700;
 const SWIPE_DOMINANCE_RATIO = 1.2;
 const PRESENCE_HEARTBEAT_MS = 20000;
 const SETTINGS_KEY = "socialsea_settings_v1";
+const SOS_SWIPE_ATTEMPT_EVENT = "ss-sos-activation-gesture";
 
 const readShowSosInNavbar = () => {
   try {
@@ -209,6 +210,55 @@ function AppRoutes() {
     startAt: 0,
     target: null
   });
+
+  useEffect(() => {
+    const node = appMainRef.current;
+    if (!node || typeof window === "undefined") return undefined;
+
+    if (!isChatRoute) {
+      node.style.removeProperty("--ss-chat-route-height");
+      return undefined;
+    }
+
+    let rafId = 0;
+    const viewport = window.visualViewport || null;
+
+    const applyChatRouteHeight = () => {
+      const rawHeight = Number(viewport?.height || window.innerHeight || 0);
+      const nextHeight = Math.round(Math.max(320, rawHeight));
+      if (!Number.isFinite(nextHeight) || nextHeight <= 0) return;
+      node.style.setProperty("--ss-chat-route-height", `${nextHeight}px`);
+    };
+
+    const scheduleApplyHeight = () => {
+      if (typeof window.requestAnimationFrame !== "function") {
+        applyChatRouteHeight();
+        return;
+      }
+      if (rafId) window.cancelAnimationFrame(rafId);
+      rafId = window.requestAnimationFrame(() => {
+        rafId = 0;
+        applyChatRouteHeight();
+      });
+    };
+
+    scheduleApplyHeight();
+    viewport?.addEventListener("resize", scheduleApplyHeight);
+    viewport?.addEventListener("scroll", scheduleApplyHeight);
+    window.addEventListener("resize", scheduleApplyHeight);
+    window.addEventListener("orientationchange", scheduleApplyHeight);
+    window.addEventListener("focus", scheduleApplyHeight);
+
+    return () => {
+      if (rafId) window.cancelAnimationFrame(rafId);
+      viewport?.removeEventListener("resize", scheduleApplyHeight);
+      viewport?.removeEventListener("scroll", scheduleApplyHeight);
+      window.removeEventListener("resize", scheduleApplyHeight);
+      window.removeEventListener("orientationchange", scheduleApplyHeight);
+      window.removeEventListener("focus", scheduleApplyHeight);
+      node.style.removeProperty("--ss-chat-route-height");
+    };
+  }, [isChatRoute]);
 
   useEffect(() => {
     const handleVideoPlay = (event) => {
@@ -575,6 +625,19 @@ function AppRoutes() {
       if (nextIndex < 0 || nextIndex >= activeSwipeTabs.length) return;
       const nextPath = resolveSwipeTabPath(nextIndex, activeSwipeTabs);
       if (!nextPath || nextPath === location.pathname) return;
+      if (nextPath === "/sos") {
+        try {
+          window.dispatchEvent(
+            new CustomEvent(SOS_SWIPE_ATTEMPT_EVENT, {
+              detail: { source: "swipe", direction: direction > 0 ? "left" : "right" }
+            })
+          );
+        } catch {
+          // If event dispatch fails for any reason, keep fallback navigation disabled
+          // to avoid accidental SOS arming from a single swipe.
+        }
+        return;
+      }
       navigate(nextPath);
     };
 
@@ -683,6 +746,7 @@ function AppRoutes() {
               <Route path="/settings/manage/jobs-profile" element={<Navigate to="/settings" replace />} />
               <Route path="/settings/manage/jobs-post" element={<Navigate to="/settings" replace />} />
               <Route path="/settings/manage/jobs-storage" element={<Navigate to="/settings" replace />} />
+              <Route path="/settings/manage/gesture-cursor" element={<Navigate to="/settings" replace />} />
               <Route path="/settings/manage/:optionId" element={<ProtectedRoute><SettingsManage /></ProtectedRoute>} />
               <Route path="/sos" element={<ProtectedRoute><SOSPage /></ProtectedRoute>} />
               <Route path="/sos/live/:alertId" element={<ProtectedRoute><SOSPage /></ProtectedRoute>} />
@@ -694,7 +758,7 @@ function AppRoutes() {
               <Route path="/storage" element={<ProtectedRoute><StorageVault /></ProtectedRoute>} />
               <Route path="/profile-setup" element={<ProtectedRoute><ProfileSetup /></ProtectedRoute>} />
               <Route path="/anonymous-feed" element={<ProtectedRoute><AnonymousFeed /></ProtectedRoute>} />
-              <Route path="/anonymous/upload" element={<ProtectedRoute><AnonymousUpload /></ProtectedRoute>} />
+              <Route path="/anonymous/upload" element={<AnonymousUpload />} />
 
               <Route path="/admin" element={<ProtectedRoute role="ADMIN"><AdminLayout /></ProtectedRoute>}>
                 <Route index element={<Navigate to="dashboard" replace />} />

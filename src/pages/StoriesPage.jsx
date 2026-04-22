@@ -9,6 +9,7 @@ import {
   readStoriesForIdentity,
   readStoryIdentity,
   syncStoryCaches,
+  syncStoryCachesForIdentity,
   toStoryEpochMs
 } from "../services/storyStorage";
 import "./StoriesPage.css";
@@ -44,6 +45,85 @@ const getStoryLabel = (story) => {
   const label = String(story?.storyText || story?.caption || "").trim();
   if (label) return label;
   return story?.sourceType === "reel-share" ? "Shared reel" : "Story";
+};
+
+const toCount = (value) => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? Math.floor(numeric) : 0;
+};
+
+const toItems = (payload) =>
+  Array.isArray(payload) ? payload : Array.isArray(payload?.items) ? payload.items : [];
+
+const toViewedAt = (entry) => entry?.viewedAt || entry?.createdAt || entry?.time || null;
+const toLikedAt = (entry) => entry?.likedAt || entry?.createdAt || entry?.time || null;
+const toUserKey = (entry, idx, prefix) => {
+  const id = String(entry?.userId ?? entry?.id ?? "").trim();
+  if (id) return `id:${id}`;
+  const email = String(entry?.email ?? entry?.userEmail ?? "").trim().toLowerCase();
+  if (email) return `email:${email}`;
+  const username = String(entry?.username ?? entry?.name ?? "").trim().toLowerCase();
+  if (username) return `name:${username}`;
+  return `${prefix}:${idx}`;
+};
+const toTs = (value) => {
+  const n = Number(value);
+  if (Number.isFinite(n)) return n > 1000000000000 ? n : n * 1000;
+  const parsed = new Date(String(value || "")).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const formatEngagement = (story) =>
+  `Likes ${toCount(story?.likeCount)} | Views ${toCount(story?.viewCount)}`;
+
+const storyDisplayDedupeKey = (story) => {
+  const sourceType = String(story?.sourceType || story?.kind || "story").trim().toLowerCase();
+  const ownerKey = String(story?.userId || story?.email || story?.username || "")
+    .trim()
+    .toLowerCase();
+  const mediaKey = resolveMediaUrl(story?.mediaUrl || story?.url || story?.fileUrl || story?.storyUrl || "");
+  const expiresAtMs = toStoryEpochMs(story?.expiresAt || story?.expires || story?.expiry || 0);
+  const labelKey = String(story?.storyText || story?.caption || "").trim().toLowerCase();
+  const createdAtMs = toStoryEpochMs(story?.createdAt || story?.created || story?.timestamp || story?.time || 0);
+  const stableId = String(story?.archiveId || story?.storyId || story?.id || "").trim();
+
+  if (mediaKey) return `sig:${sourceType}|${ownerKey}|${mediaKey}|${expiresAtMs}|${labelKey}`;
+  if (stableId) return `id:${sourceType}|${stableId}`;
+  return `time:${sourceType}|${ownerKey}|${createdAtMs}|${labelKey}`;
+};
+
+const dedupeStoriesForDisplay = (list) => {
+  const map = new Map();
+  const input = Array.isArray(list) ? list : [];
+
+  input.forEach((story) => {
+    if (!story) return;
+    const key = storyDisplayDedupeKey(story);
+    const previous = map.get(key);
+    if (!previous) {
+      map.set(key, story);
+      return;
+    }
+
+    const prevCreatedAtMs = toStoryEpochMs(
+      previous?.createdAt || previous?.created || previous?.timestamp || previous?.time || 0
+    );
+    const nextCreatedAtMs = toStoryEpochMs(
+      story?.createdAt || story?.created || story?.timestamp || story?.time || 0
+    );
+
+    const merged = {
+      ...(prevCreatedAtMs >= nextCreatedAtMs ? previous : story),
+      ...previous,
+      ...story,
+      likeCount: Math.max(toCount(previous?.likeCount), toCount(story?.likeCount)),
+      commentCount: Math.max(toCount(previous?.commentCount), toCount(story?.commentCount)),
+      viewCount: Math.max(toCount(previous?.viewCount), toCount(story?.viewCount))
+    };
+    map.set(key, merged);
+  });
+
+  return Array.from(map.values());
 };
 
 const StorySection = ({ title, emptyText, items, onOpen }) => (
@@ -91,6 +171,7 @@ const StorySection = ({ title, emptyText, items, onOpen }) => (
               <div className="stories-meta">
                 <p>{caption}</p>
                 <small>{formatStatus(story)}</small>
+                <small className="stories-meta-stats">{formatEngagement(story)}</small>
               </div>
             </button>
           );
@@ -107,6 +188,10 @@ export default function StoriesPage() {
   const [loading, setLoading] = useState(() => stories.length === 0);
   const [error, setError] = useState("");
   const [activeStory, setActiveStory] = useState(null);
+  const [viewersOpen, setViewersOpen] = useState(false);
+  const [viewersLoading, setViewersLoading] = useState(false);
+  const [viewersError, setViewersError] = useState("");
+  const [viewersItems, setViewersItems] = useState([]);
 
   useEffect(() => {
     let mounted = true;
@@ -123,7 +208,7 @@ export default function StoriesPage() {
       try {
         const res = await api.get("/api/stories/mine", { timeout: 12000 });
         if (!mounted) return;
-        syncStoryCaches(Array.isArray(res?.data) ? res.data : []);
+        syncStoryCachesForIdentity(identity, Array.isArray(res?.data) ? res.data : []);
         refreshLocal();
       } catch {
         if (!mounted) return;
@@ -154,7 +239,7 @@ export default function StoriesPage() {
   }, [identity]);
 
   const sortedStories = useMemo(() => {
-    const list = Array.isArray(stories) ? stories.slice() : [];
+    const list = dedupeStoriesForDisplay(Array.isArray(stories) ? stories : []);
     return list.sort(
       (a, b) => toStoryEpochMs(b?.createdAt || 0) - toStoryEpochMs(a?.createdAt || 0)
     );
@@ -168,11 +253,6 @@ export default function StoriesPage() {
     [sortedStories]
   );
 
-  const sharedReels = useMemo(
-    () => sortedStories.filter((story) => story?.sourceType === "reel-share"),
-    [sortedStories]
-  );
-
   const pastStories = useMemo(
     () =>
       sortedStories.filter(
@@ -180,6 +260,155 @@ export default function StoriesPage() {
       ),
     [sortedStories]
   );
+
+  useEffect(() => {
+    setViewersOpen(false);
+    setViewersLoading(false);
+    setViewersError("");
+    setViewersItems([]);
+  }, [activeStory?.id, activeStory?.storyId]);
+
+  const closeViewersList = () => {
+    setViewersOpen(false);
+    setViewersLoading(false);
+    setViewersError("");
+    setViewersItems([]);
+  };
+
+  const openEngagementInsights = async (story) => {
+    const storyId = Number(story?.id || story?.storyId || 0);
+    setViewersOpen(true);
+    setViewersLoading(true);
+    setViewersError("");
+    setViewersItems([]);
+
+    if (!Number.isFinite(storyId) || storyId <= 0) {
+      setViewersError("Story insights are available after this story syncs to server.");
+      setViewersLoading(false);
+      return;
+    }
+
+    try {
+      const [viewsResult, likesResult] = await Promise.allSettled([
+        api.get(`/api/stories/${Math.floor(storyId)}/views`, { timeout: 12000 }),
+        api.get(`/api/stories/${Math.floor(storyId)}/likes`, { timeout: 12000 })
+      ]);
+
+      const viewsItems = viewsResult.status === "fulfilled" ? toItems(viewsResult.value?.data) : [];
+      const likesItems = likesResult.status === "fulfilled" ? toItems(likesResult.value?.data) : [];
+
+      if (viewsResult.status === "rejected" && likesResult.status === "rejected") {
+        throw viewsResult.reason || likesResult.reason || new Error("Failed to load story engagement");
+      }
+
+      const merged = new Map();
+
+      viewsItems.forEach((entry, idx) => {
+        const key = toUserKey(entry, idx, "view");
+        const viewedAt = toViewedAt(entry);
+        merged.set(key, {
+          ...entry,
+          viewedAt,
+          likedAt: null,
+          viewed: true,
+          liked: false,
+          _insightAt: viewedAt,
+          _sortTs: toTs(viewedAt),
+          _entryIdx: idx
+        });
+      });
+
+      likesItems.forEach((entry, idx) => {
+        const key = toUserKey(entry, idx, "like");
+        const likedAt = toLikedAt(entry);
+        const existing = merged.get(key);
+
+        if (existing) {
+          merged.set(key, {
+            ...existing,
+            ...entry,
+            viewed: true,
+            liked: true,
+            likedAt: likedAt || existing?.likedAt || null,
+            _insightAt: likedAt || existing?._insightAt || existing?.viewedAt || null,
+            _sortTs: Math.max(existing?._sortTs || 0, toTs(likedAt)),
+            _entryIdx: existing?._entryIdx ?? idx
+          });
+          return;
+        }
+
+        merged.set(key, {
+          ...entry,
+          viewedAt: toViewedAt(entry) || likedAt || null,
+          likedAt,
+          viewed: true,
+          liked: true,
+          _insightAt: likedAt,
+          _sortTs: toTs(likedAt),
+          _entryIdx: idx
+        });
+      });
+
+      const rows = Array.from(merged.values())
+        .sort((a, b) => (b?._sortTs || 0) - (a?._sortTs || 0))
+        .map((entry) => {
+          const { _sortTs, ...rest } = entry || {};
+          return rest;
+        });
+      setViewersItems(rows);
+
+      const nextLikeCount =
+        likesResult.status === "fulfilled"
+          ? Math.max(toCount(likesResult.value?.data?.count), likesItems.length)
+          : toCount(story?.likeCount);
+      const nextViewCount =
+        viewsResult.status === "fulfilled"
+          ? Math.max(toCount(viewsResult.value?.data?.count), viewsItems.length)
+          : toCount(story?.viewCount);
+
+      setActiveStory((prev) => {
+        if (!prev) return prev;
+        const prevId = Number(prev?.id || prev?.storyId || 0);
+        const normalizedStoryId = Math.floor(storyId);
+        if (Number.isFinite(prevId) && prevId > 0 && prevId !== normalizedStoryId) {
+          return prev;
+        }
+        return {
+          ...prev,
+          likeCount: nextLikeCount,
+          viewCount: nextViewCount
+        };
+      });
+
+      setStories((prev) => {
+        if (!Array.isArray(prev) || prev.length === 0) return prev;
+        const normalizedStoryId = Math.floor(storyId);
+        const storyArchiveId = String(story?.archiveId || "").trim();
+        let changed = false;
+        const updated = prev.map((item) => {
+          const itemId = Number(item?.id || item?.storyId || 0);
+          const byId = Number.isFinite(itemId) && itemId > 0 && itemId === normalizedStoryId;
+          const itemArchiveId = String(item?.archiveId || "").trim();
+          const byArchive = Boolean(storyArchiveId) && itemArchiveId === storyArchiveId;
+          if (!byId && !byArchive) return item;
+          changed = true;
+          return {
+            ...item,
+            likeCount: nextLikeCount,
+            viewCount: nextViewCount
+          };
+        });
+        if (!changed) return prev;
+        syncStoryCaches(updated);
+        return updated;
+      });
+    } catch (err) {
+      const message = err?.response?.data?.message || "Failed to load story insights";
+      setViewersError(String(message));
+    } finally {
+      setViewersLoading(false);
+    }
+  };
 
   return (
     <div className="stories-page">
@@ -207,23 +436,12 @@ export default function StoriesPage() {
           <strong>{pastStories.length}</strong>
           <span>Past stories</span>
         </div>
-        <div className="stories-summary-card">
-          <strong>{sharedReels.length}</strong>
-          <span>Shared reels</span>
-        </div>
       </div>
 
       <StorySection
         title="Active Stories"
         emptyText="No active stories yet."
         items={activeStories}
-        onOpen={setActiveStory}
-      />
-
-      <StorySection
-        title="Shared Reels"
-        emptyText="No shared reels yet."
-        items={sharedReels}
         onOpen={setActiveStory}
       />
 
@@ -237,6 +455,15 @@ export default function StoriesPage() {
       {activeStory && (
         <div className="stories-viewer-backdrop" onClick={() => setActiveStory(null)}>
           <div className="stories-viewer" onClick={(event) => event.stopPropagation()}>
+            <div className="stories-viewer-quick-actions">
+              <button
+                type="button"
+                className={`stories-viewer-quick-btn ${viewersOpen ? "is-active" : ""}`.trim()}
+                onClick={() => void openEngagementInsights(activeStory)}
+              >
+                Viewed {toCount(activeStory?.viewCount)} | Likes {toCount(activeStory?.likeCount)}
+              </button>
+            </div>
             <button
               type="button"
               className="stories-viewer-close"
@@ -258,6 +485,7 @@ export default function StoriesPage() {
               <div className="stories-viewer-meta">
                 <strong>{getStoryLabel(activeStory)}</strong>
                 <span>{formatStatus(activeStory)}</span>
+                <span className="stories-viewer-stats">{formatEngagement(activeStory)}</span>
               </div>
               {(activeStory.storyText || activeStory.caption) && (
                 <p className="stories-viewer-caption">
@@ -265,6 +493,62 @@ export default function StoriesPage() {
                 </p>
               )}
             </div>
+            {viewersOpen && (
+              <div className="stories-insights-backdrop" onClick={closeViewersList}>
+                <div className="stories-insights" onClick={(event) => event.stopPropagation()}>
+                  <div className="stories-insights-header">
+                    <strong>
+                      Viewed by {toCount(activeStory?.viewCount || viewersItems.length || 0)}
+                    </strong>
+                    <button type="button" aria-label="Close viewers list" onClick={closeViewersList}>
+                      x
+                    </button>
+                  </div>
+
+                  {viewersLoading && <p className="stories-insights-state">Loading insights...</p>}
+                  {!viewersLoading && viewersError && (
+                    <p className="stories-insights-state error">{viewersError}</p>
+                  )}
+                  {!viewersLoading && !viewersError && viewersItems.length === 0 && (
+                    <p className="stories-insights-state">No data yet.</p>
+                  )}
+                  {!viewersLoading && !viewersError && viewersItems.length > 0 && (
+                    <div className="stories-insights-list">
+                      {viewersItems.map((entry, idx) => {
+                        const name =
+                          String(entry?.name || entry?.username || entry?.email || "Unknown").trim() ||
+                          "Unknown";
+                        const avatarRaw = String(entry?.profilePic || "").trim();
+                        const avatarUrl = avatarRaw ? resolveMediaUrl(avatarRaw) : "";
+                        const insightAt = entry?._insightAt || entry?.likedAt || entry?.viewedAt || null;
+                        const entryKey = `${entry?.userId || "u"}-${entry?.email || "x"}-${
+                          entry?._entryIdx ?? idx
+                        }`;
+
+                        return (
+                          <div key={entryKey} className="stories-insights-item">
+                            <div className="stories-insights-avatar" aria-hidden="true">
+                              {avatarUrl ? (
+                                <img src={avatarUrl} alt={name} />
+                              ) : (
+                                <span>{name.charAt(0).toUpperCase()}</span>
+                              )}
+                            </div>
+                            <div className="stories-insights-meta">
+                              <strong>{name}</strong>
+                              <p className="stories-insights-engagement">
+                                {entry?.liked ? "Liked" : "Viewed"}
+                              </p>
+                              {insightAt && <small>{formatDateTime(insightAt)}</small>}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

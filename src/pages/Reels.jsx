@@ -13,6 +13,17 @@ import api from "../api/axios";
 import { getApiBaseUrl, toApiUrl } from "../api/baseUrl";
 import { recordCommentActivity, recordRepostActivity, recordWatchHistory } from "../services/activityStore";
 import { addStoryEntry, readStoryIdentity } from "../services/storyStorage";
+import { classifyVideoBucket } from "../utils/videoFeedClassifier";
+import {
+  FEED_WATCH_PROGRESS_MILESTONES,
+  FEED_WATCH_TIME_CHUNK_SECONDS,
+  FEED_WATCH_TIME_CHUNK_WEIGHT,
+  FEED_WATCH_TIME_MAX_CHUNKS_PER_POST,
+  FEED_WATCH_TIME_MAX_STEP_SECONDS,
+  readFeedPersonalizationState,
+  resolveFeedUserKey,
+  trackFeedPersonalizationSignal,
+} from "../utils/feedPersonalization";
 import StudyMode from "./StudyMode";
 import "./Reels.css";
 
@@ -32,7 +43,6 @@ const SETTINGS_KEY = "socialsea_settings_v1";
 const REELS_CACHE_KEY = "socialsea_reels_cache_v1";
 const REELS_CACHE_TTL_MS = 3 * 60 * 1000;
 const MAX_REELS_DEFAULT = 40;
-const MAX_DURATION_PROBES = 24;
 const REELS_LIMIT = Number(import.meta.env.VITE_REELS_LIMIT || MAX_REELS_DEFAULT);
 
 const readStudyModeReels = () => {
@@ -137,6 +147,9 @@ export default function Reels() {
   const likedPostIdsRef = useRef({});
   const likeBusyByPostRef = useRef({});
   const likeCountLoadedRef = useRef(new Set());
+  const watchProgressByPostRef = useRef({});
+  const feedUserKeyRef = useRef(resolveFeedUserKey());
+  const feedPersonalizationRef = useRef(readFeedPersonalizationState(feedUserKeyRef.current));
   const location = useLocation();
   const targetPostId = useMemo(() => {
     const params = new URLSearchParams(location.search);
@@ -243,10 +256,7 @@ export default function Reels() {
     const loadShortVideos = async () => {
       try {
         const limitParam = Number.isFinite(REELS_LIMIT) && REELS_LIMIT > 0 ? Math.max(REELS_LIMIT, 30) : 60;
-        const [fromFeed, fromReels] = await Promise.all([
-          fetchAny(["/api/feed", "/feed"], { limit: limitParam }),
-          fetchAny(["/api/reels", "/reels"], { limit: limitParam }),
-        ]);
+        const fromReels = await fetchAny(["/api/reels", "/reels"], { limit: limitParam });
 
         const byKey = new Map();
         const pushItem = (item, source) => {
@@ -257,43 +267,52 @@ export default function Reels() {
           if (!key) return;
           byKey.set(key, { item, source });
         };
-        fromFeed.forEach((item) => pushItem(item, "feed"));
         fromReels.forEach((item) => pushItem(item, "reels"));
         if (targetPostId) {
-          const fallbackMatch =
-            fromFeed.find((item) => String(item?.id || "").trim() === targetPostId) ||
-            fromReels.find((item) => String(item?.id || "").trim() === targetPostId);
+          const fallbackMatch = fromReels.find(
+            (item) => String(item?.id || "").trim() === targetPostId
+          );
           if (fallbackMatch) pushItem(fallbackMatch, "target");
         }
 
         const merged = Array.from(byKey.values());
-        let durationProbeCount = 0;
+        const durationProbeCache = new Map();
+        const readDurationWithCache = async (mediaUrl) => {
+          if (!mediaUrl) return 0;
+          if (!durationProbeCache.has(mediaUrl)) {
+            durationProbeCache.set(
+              mediaUrl,
+              readVideoDuration(mediaUrl).catch(() => 0)
+            );
+          }
+          return durationProbeCache.get(mediaUrl);
+        };
         const filtered = await Promise.all(
           merged.map(async ({ item }) => {
             if (getMediaType(item) !== "VIDEO") return null;
-            const explicitReel = isExplicitReel(item);
-            if (!explicitReel) return null;
-
             const rawUrl = item.contentUrl || item.mediaUrl || "";
             const mediaUrl = resolveUrl(String(rawUrl).trim());
             if (!mediaUrl) return null;
 
-            const knownDuration = durationFromPost(item);
-            if (knownDuration > 0) {
-              return knownDuration <= MAX_REEL_SECONDS ? item : null;
+            let durationHint = durationFromPost(item);
+            let bucket = classifyVideoBucket(item, {
+              durationHint,
+              shortSeconds: MAX_REEL_SECONDS,
+              defaultUnknown: "long"
+            });
+
+            if ((bucket === "reel" || bucket === "short") && durationHint <= 0) {
+              durationHint = Number(await readDurationWithCache(mediaUrl)) || 0;
+              bucket = classifyVideoBucket(item, {
+                durationHint,
+                shortSeconds: MAX_REEL_SECONDS,
+                defaultUnknown: "long"
+              });
             }
 
-            if (durationProbeCount < MAX_DURATION_PROBES) {
-              durationProbeCount += 1;
-              const measuredDuration = await readVideoDuration(mediaUrl);
-              if (measuredDuration > 0) {
-                return measuredDuration <= MAX_REEL_SECONDS ? item : null;
-              }
-            }
-
-            // Keep only explicit reels when metadata is unavailable.
-            return explicitReel ? item : null;
-          }),
+            if (durationHint <= 0 || durationHint > MAX_REEL_SECONDS) return null;
+            return bucket === "reel" || bucket === "short" ? item : null;
+          })
         );
 
         if (!cancelled) {
@@ -423,6 +442,7 @@ export default function Reels() {
         clearTimeout(tapTrackerRef.current.singleTapTimer);
       if (scrollIdleTimerRef.current) clearTimeout(scrollIdleTimerRef.current);
       if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current);
+      watchProgressByPostRef.current = {};
       stopGestureControl();
     };
   }, [targetPostId]);
@@ -439,6 +459,9 @@ export default function Reels() {
     const activeReel = reels[currentIndex];
     if (!activeReel?.id) return;
     recordWatchHistory({ item: activeReel, source: "reels" });
+    trackFeedSignal(activeReel, "watch");
+    const activeNode = videoRefs.current[activeReel.id];
+    if (activeNode) syncWatchProgressCursor(activeReel.id, activeNode.currentTime || 0);
   }, [reels, currentIndex]);
 
   useEffect(() => {
@@ -504,36 +527,48 @@ export default function Reels() {
     return item?.reel ? "VIDEO" : "IMAGE";
   };
 
-  const isExplicitReel = (item) => {
-    if (!item || typeof item !== "object") return false;
-    if (item?.reel === true || item?.reel === "true") return true;
-    if (item?.isReel === true || item?.isReel === "true") return true;
-    if (item?.isShortVideo === true || item?.isShortVideo === "true")
-      return true;
-    if (
-      item?.isShort === true ||
-      item?.short === true ||
-      item?.shortVideo === true
-    )
-      return true;
-    const rawType = String(
-      item?.type || item?.mediaType || item?.contentType || "",
-    )
-      .trim()
-      .toLowerCase();
-    return rawType.includes("reel") || rawType.includes("short");
+  const parseDurationSeconds = (value) => {
+    const rawText = String(value || "").trim();
+    if (!rawText) return 0;
+
+    if (rawText.includes(":")) {
+      const parts = rawText
+        .split(":")
+        .map((part) => part.trim())
+        .filter(Boolean);
+      if (
+        (parts.length === 2 || parts.length === 3) &&
+        parts.every((part) => /^\d+(\.\d+)?$/.test(part))
+      ) {
+        const nums = parts.map((part) => Number(part));
+        if (parts.length === 3) return nums[0] * 3600 + nums[1] * 60 + nums[2];
+        return nums[0] * 60 + nums[1];
+      }
+    }
+
+    const n = Number(rawText);
+    if (!Number.isFinite(n) || n <= 0) return 0;
+    return n > 10000 ? n / 1000 : n;
   };
 
   const durationFromPost = (post) => {
     const candidates = [
       post?.durationSeconds,
+      post?.durationInSeconds,
       post?.videoDurationSeconds,
+      post?.videoDurationInSeconds,
       post?.duration,
       post?.videoDuration,
+      post?.length,
+      post?.videoLength,
+      post?.durationMs,
+      post?.videoDurationMs,
+      post?.durationLabel,
+      post?.videoDurationLabel
     ];
     for (const raw of candidates) {
-      const n = Number(raw);
-      if (Number.isFinite(n) && n > 0) return n;
+      const n = parseDurationSeconds(raw);
+      if (n > 0) return n;
     }
     return 0;
   };
@@ -546,6 +581,84 @@ export default function Reels() {
       video.onloadedmetadata = () => resolve(Number(video.duration) || 0);
       video.onerror = () => resolve(0);
     });
+
+  const trackFeedSignal = (post, signal = "view", customWeight = null) => {
+    if (!post?.id) return;
+    const nextState = trackFeedPersonalizationSignal({
+      state: feedPersonalizationRef.current,
+      userKey: feedUserKeyRef.current,
+      post,
+      signal,
+      customWeight,
+    });
+    feedPersonalizationRef.current = nextState;
+  };
+
+  const ensureWatchProgressEntry = (postId) => {
+    const id = String(postId || "").trim();
+    if (!id) return null;
+    const existing = watchProgressByPostRef.current[id];
+    if (existing) return existing;
+    const next = {
+      lastTime: 0,
+      bufferedSeconds: 0,
+      awardedChunks: 0,
+      progressMilestones: {},
+    };
+    watchProgressByPostRef.current[id] = next;
+    return next;
+  };
+
+  const syncWatchProgressCursor = (postId, currentTime = 0) => {
+    const entry = ensureWatchProgressEntry(postId);
+    if (!entry) return;
+    entry.lastTime = Math.max(0, Number(currentTime) || 0);
+  };
+
+  const applyReelWatchTimeSignals = (reel, event) => {
+    if (!reel?.id) return;
+    const activeReel = reelsRef.current[currentIndexRef.current];
+    if (!activeReel || String(activeReel.id) !== String(reel.id)) return;
+
+    const videoNode = event?.currentTarget;
+    if (!videoNode) return;
+
+    const entry = ensureWatchProgressEntry(reel.id);
+    if (!entry) return;
+
+    const currentTime = Math.max(0, Number(videoNode.currentTime) || 0);
+    const previousTime = Number(entry.lastTime || 0);
+    entry.lastTime = currentTime;
+
+    if (!videoNode.paused && !videoNode.seeking) {
+      const watchedDelta = currentTime - previousTime;
+      if (watchedDelta > 0 && watchedDelta <= FEED_WATCH_TIME_MAX_STEP_SECONDS) {
+        entry.bufferedSeconds += watchedDelta;
+        let safetyCount = 0;
+        while (
+          entry.bufferedSeconds >= FEED_WATCH_TIME_CHUNK_SECONDS &&
+          entry.awardedChunks < FEED_WATCH_TIME_MAX_CHUNKS_PER_POST &&
+          safetyCount < 6
+        ) {
+          entry.bufferedSeconds -= FEED_WATCH_TIME_CHUNK_SECONDS;
+          entry.awardedChunks += 1;
+          trackFeedSignal(reel, "watch", FEED_WATCH_TIME_CHUNK_WEIGHT);
+          safetyCount += 1;
+        }
+      }
+    }
+
+    const durationHint = Math.max(0, Number(videoNode.duration) || 0) || durationFromPost(reel);
+    if (durationHint > 0) {
+      const progress = Math.max(0, Math.min(1, currentTime / durationHint));
+      FEED_WATCH_PROGRESS_MILESTONES.forEach((milestone) => {
+        const key = String(milestone.ratio);
+        if (progress < milestone.ratio || entry.progressMilestones[key]) return;
+        entry.progressMilestones[key] = true;
+        trackFeedSignal(reel, "watch", milestone.weight);
+      });
+    }
+  };
 
   const emailToName = (email) => {
     const raw = (email || "").split("@")[0] || "";
@@ -727,6 +840,7 @@ export default function Reels() {
     };
 
     if (likeBusyByPostRef.current[postId]) return;
+    const targetReel = reelsRef.current.find((item) => String(item?.id) === String(postId));
 
     const wasLiked = !!likedPostIdsRef.current[postId];
     const nextLiked = !wasLiked;
@@ -774,7 +888,10 @@ export default function Reels() {
         [postId]: Math.max(0, (prev[postId] || 0) + (nextLiked ? 1 : -1)),
       }));
 
-      if (nextLiked) triggerLikeBurst();
+      if (nextLiked) {
+        triggerLikeBurst();
+        if (targetReel) trackFeedSignal(targetReel, "like");
+      }
     } catch {
       // keep prior UI state on failure
     } finally {
@@ -815,6 +932,7 @@ export default function Reels() {
       setCommentTextByPost((prev) => ({ ...prev, [postId]: "" }));
       await loadComments(postId);
       recordCommentActivity({ postId, text, item: reel, source: "reels" });
+      if (reel) trackFeedSignal(reel, "comment");
     } catch {
       // noop
     }
@@ -853,6 +971,7 @@ export default function Reels() {
         // ignore storage failures
       }
       navigate(`/chat?share=${encodeURIComponent(shareText)}`);
+      trackFeedSignal(reel, "share");
       setShareMessageByPost((prev) => ({
         ...prev,
         [reel.id]: "Saved to My Stories and sharing to chat...",
@@ -1232,6 +1351,18 @@ export default function Reels() {
                     playsInline
                     controls={false}
                     className="reel-video"
+                    onPlay={(event) => {
+                      syncWatchProgressCursor(reel.id, event.currentTarget.currentTime || 0);
+                    }}
+                    onPause={(event) => {
+                      syncWatchProgressCursor(reel.id, event.currentTarget.currentTime || 0);
+                    }}
+                    onSeeking={(event) => {
+                      syncWatchProgressCursor(reel.id, event.currentTarget.currentTime || 0);
+                    }}
+                    onTimeUpdate={(event) => {
+                      applyReelWatchTimeSignals(reel, event);
+                    }}
                   />
                   <div className="reel-gradient-top" />
                   <div className="reel-gradient-bottom" />

@@ -577,6 +577,140 @@
   color: #d5dff2;
 }
 
+body.ss-theme-white .upload-panel {
+  background:
+    radial-gradient(circle at top left, rgba(89, 141, 204, 0.16), transparent 36%),
+    linear-gradient(180deg, #ffffff 0%, #eef5ff 100%);
+  border-color: rgba(126, 164, 207, 0.52);
+  color: #15385f;
+  box-shadow: 0 20px 42px rgba(25, 68, 117, 0.14);
+}
+
+body.ss-theme-white .upload-panel h2 {
+  color: #12365c;
+}
+
+body.ss-theme-white .upload-subtitle {
+  color: #4f7094;
+}
+
+body.ss-theme-white .upload-file-pick,
+body.ss-theme-white .upload-camera-pick,
+body.ss-theme-white .studio-soft-btn,
+body.ss-theme-white .pill-group button,
+body.ss-theme-white .toggle-btn {
+  border-color: rgba(125, 162, 204, 0.5);
+  background: linear-gradient(145deg, #f8fbff 0%, #e8f2ff 100%);
+  color: #1d4f84;
+}
+
+body.ss-theme-white .upload-file-pick:hover,
+body.ss-theme-white .upload-camera-pick:hover,
+body.ss-theme-white .studio-soft-btn:hover,
+body.ss-theme-white .pill-group button:hover,
+body.ss-theme-white .toggle-btn:hover {
+  border-color: rgba(74, 128, 191, 0.74);
+  background: linear-gradient(145deg, #edf6ff 0%, #dcecff 100%);
+}
+
+body.ss-theme-white .pill-group button.active,
+body.ss-theme-white .toggle-btn.active {
+  background: linear-gradient(135deg, rgba(57, 141, 219, 0.2), rgba(106, 159, 227, 0.22));
+  border-color: rgba(72, 131, 197, 0.74);
+  color: #0f3e6d;
+}
+
+body.ss-theme-white .upload-caption,
+body.ss-theme-white .studio-input-field input,
+body.ss-theme-white .creator-settings-grid select,
+body.ss-theme-white .creator-settings-grid input {
+  border-color: rgba(133, 168, 208, 0.46);
+  background: #f8fbff;
+  color: #14385f;
+}
+
+body.ss-theme-white .upload-caption::placeholder,
+body.ss-theme-white .studio-input-field input::placeholder {
+  color: #6e8eb4;
+}
+
+body.ss-theme-white .upload-preview-frame,
+body.ss-theme-white .upload-preview-video-stage {
+  border-color: rgba(131, 168, 208, 0.48);
+  background: #f6fbff;
+  box-shadow: 0 14px 32px rgba(27, 73, 124, 0.14);
+}
+
+body.ss-theme-white .studio-heading p,
+body.ss-theme-white .video-meta-line,
+body.ss-theme-white .video-note,
+body.ss-theme-white .studio-inline-label,
+body.ss-theme-white .studio-helper,
+body.ss-theme-white .studio-input-field,
+body.ss-theme-white .creator-settings-grid label {
+  color: #55789f;
+}
+
+body.ss-theme-white .studio-inline-value,
+body.ss-theme-white .studio-slider-head strong {
+  color: #15385f;
+}
+
+body.ss-theme-white .studio-slider-head {
+  color: #5a7ea7;
+}
+
+body.ss-theme-white .studio-tool-strip {
+  border-bottom-color: rgba(133, 168, 208, 0.38);
+}
+
+body.ss-theme-white .studio-tool-btn {
+  color: #688ab1;
+}
+
+body.ss-theme-white .studio-tool-btn:hover {
+  color: #2d5f93;
+}
+
+body.ss-theme-white .studio-tool-btn.active {
+  color: #184779;
+}
+
+body.ss-theme-white .studio-tool-btn.active::after {
+  background: linear-gradient(90deg, #2fa0dd, #4e83d9);
+}
+
+body.ss-theme-white .upload-selected-item {
+  border-color: rgba(131, 168, 208, 0.42);
+  background: linear-gradient(145deg, #f8fbff 0%, #edf5ff 100%);
+  color: #184575;
+}
+
+body.ss-theme-white .upload-selected-item:hover {
+  border-color: rgba(78, 133, 196, 0.6);
+}
+
+body.ss-theme-white .upload-selected-item.is-active {
+  border-color: rgba(64, 123, 190, 0.72);
+  background: linear-gradient(145deg, #eef6ff 0%, #e2efff 100%);
+}
+
+body.ss-theme-white .upload-selected-kind {
+  border-color: rgba(126, 164, 206, 0.52);
+  color: #456b96;
+  background: #f3f9ff;
+}
+
+body.ss-theme-white .upload-submit {
+  border-color: rgba(66, 126, 190, 0.64);
+  background: linear-gradient(135deg, #2d8fd5, #4f7fe1);
+  box-shadow: 0 12px 24px rgba(37, 104, 178, 0.22);
+}
+
+body.ss-theme-white .upload-msg {
+  color: #3f6692;
+}
+
 @media (max-width: 760px) {
   .upload-page {
     padding: 12px 10px 84px;

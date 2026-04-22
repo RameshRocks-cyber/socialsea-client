@@ -26,9 +26,19 @@ export default class PageErrorBoundary extends React.Component {
         : this.state.message;
 
       return (
-        <div style={{ padding: 20, color: "#fff" }}>
+        <div
+          style={{
+            margin: "16px auto",
+            maxWidth: 720,
+            padding: 16,
+            borderRadius: 12,
+            border: "1px solid #f3b0b0",
+            background: "#fff5f5",
+            color: "#1f1f1f"
+          }}
+        >
           <h2 style={{ marginBottom: 8 }}>{this.props.title || "Page crashed"}</h2>
-          <p style={{ opacity: 0.9, marginBottom: chunkLoadError ? 12 : 0 }}>{description}</p>
+          <p style={{ opacity: 0.9, marginBottom: chunkLoadError ? 12 : 0, color: "#3a3a3a" }}>{description}</p>
           {chunkLoadError ? (
             <button
               type="button"

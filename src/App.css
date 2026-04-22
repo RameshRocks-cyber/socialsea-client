@@ -8,15 +8,13 @@
 .app-main {
   --shell-max-width: 1720px;
   --shell-gutter: clamp(12px, 2vw, 28px);
-  --user-nav-offset: 72px;
+  --user-nav-offset: 66px;
   min-height: 100vh;
 }
 
 .app-main.chat-main-route {
-  height: 100vh;
-  height: 100dvh;
-  min-height: 100vh;
-  min-height: 100dvh;
+  height: var(--ss-chat-route-height, 100dvh);
+  min-height: var(--ss-chat-route-height, 100dvh);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -74,7 +72,7 @@
 @media (max-width: 1024px) {
   .app-main {
     --shell-gutter: clamp(10px, 2vw, 18px);
-    --user-nav-offset: 68px;
+    --user-nav-offset: 62px;
   }
 
   .app-content {
@@ -89,8 +87,8 @@
   }
 
   .app-main.with-user-nav {
-    padding-top: 6px;
-    padding-bottom: env(safe-area-inset-bottom);
+    padding-top: 0;
+    padding-bottom: 0;
   }
 
   .app-main.chat-main-route.with-user-nav {
@@ -135,8 +133,8 @@
   }
 
   .app-main.with-user-nav {
-    padding-top: 6px;
-    padding-bottom: env(safe-area-inset-bottom);
+    padding-top: 0;
+    padding-bottom: 0;
   }
 
   .app-main.chat-main-route.with-user-nav {

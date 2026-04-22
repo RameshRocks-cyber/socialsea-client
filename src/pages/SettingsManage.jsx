@@ -36,7 +36,7 @@ const BOOL_OPTIONS = [
   {
     id: "gesture-cursor",
     title: "Hand Gesture Cursor",
-    subtitle: "Enable hand gesture cursor controls.",
+    subtitle: "Thumb + middle finger = left click, thumb + ring finger = right click.",
     prefKey: "gestureCursorEnabled",
     label: "Hand gesture cursor"
   },
@@ -655,4 +655,3 @@ export default function SettingsManage() {
     </div>
   );
 }
-

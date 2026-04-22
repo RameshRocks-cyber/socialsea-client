@@ -222,7 +222,7 @@ export default function AnonymousFeed() {
       <nav style={styles.nav}>
         <div style={styles.navStart}>
           <h2 style={styles.logo}>
-            SocialSea <span style={{ fontSize: "14px", color: "#aaa", fontWeight: "normal" }}>Anonymous</span>
+            SocialSea <span style={{ fontSize: "14px", color: "color-mix(in srgb, var(--ss-theme-text) 58%, transparent)", fontWeight: "normal" }}>Anonymous</span>
           </h2>
         </div>
         <div style={styles.navEnd}>
@@ -288,9 +288,10 @@ export default function AnonymousFeed() {
 
 const styles = {
   container: {
-    background: "radial-gradient(80% 55% at 12% -12%, rgba(255,255,255,0.06), transparent 65%), #050505",
+    background:
+      "radial-gradient(80% 55% at 12% -12%, color-mix(in srgb, var(--ss-theme-accent) 16%, transparent), transparent 65%), linear-gradient(180deg, color-mix(in srgb, var(--ss-theme-bg-soft) 78%, var(--ss-theme-bg) 22%), var(--ss-theme-bg))",
     minBlockSize: "100vh",
-    color: "white",
+    color: "var(--ss-theme-text)",
     fontFamily: "Sora, Segoe UI, sans-serif"
   },
   nav: {
@@ -299,25 +300,27 @@ const styles = {
     alignItems: "center",
     padding: "0 14px",
     blockSize: "54px",
-    backgroundColor: "rgba(3, 3, 3, 0.92)",
+    background:
+      "radial-gradient(130% 140% at 5% -20%, color-mix(in srgb, var(--ss-theme-accent) 18%, transparent), transparent 50%), color-mix(in srgb, var(--ss-theme-bg-soft) 88%, transparent)",
     position: "sticky",
     insetBlockStart: 0,
     zIndex: 100,
-    borderBlockEnd: "1px solid rgba(255, 255, 255, 0.12)",
+    borderBlockEnd: "1px solid var(--ss-theme-border)",
     backdropFilter: "blur(10px)"
   },
   navStart: { display: "flex", alignItems: "center" },
-  logo: { color: "white", margin: 0, fontSize: "24px", letterSpacing: "-0.4px", fontWeight: 800 },
+  logo: { color: "var(--ss-theme-text)", margin: 0, fontSize: "24px", letterSpacing: "-0.4px", fontWeight: 800 },
   navEnd: { display: "flex", gap: "14px" },
   navLink: {
-    color: "#f1f1f1",
+    color: "var(--ss-theme-text)",
     textDecoration: "none",
     fontSize: "13px",
     fontWeight: "700",
     padding: "6px 10px",
-    border: "1px solid rgba(255, 255, 255, 0.14)",
+    border: "1px solid var(--ss-theme-border)",
     borderRadius: "999px",
-    background: "rgba(0, 0, 0, 0.58)"
+    background:
+      "linear-gradient(135deg, color-mix(in srgb, var(--ss-theme-bg-soft) 86%, white 14%), color-mix(in srgb, var(--ss-theme-bg) 90%, white 10%))"
   },
   grid: {
     display: "grid",
@@ -327,7 +330,12 @@ const styles = {
     maxInlineSize: "1180px",
     margin: "0 auto"
   },
-  info: { color: "#b8b8b8", gridColumn: "1 / -1", textAlign: "center", margin: 0 },
+  info: {
+    color: "color-mix(in srgb, var(--ss-theme-text) 68%, transparent)",
+    gridColumn: "1 / -1",
+    textAlign: "center",
+    margin: 0
+  },
   errorWrap: {
     gridColumn: "1 / -1",
     display: "flex",
@@ -336,13 +344,15 @@ const styles = {
     gap: "10px",
     padding: "14px",
     borderRadius: "12px",
-    border: "1px solid rgba(255, 255, 255, 0.12)",
-    background: "rgba(0, 0, 0, 0.42)"
+    border: "1px solid var(--ss-theme-border)",
+    background:
+      "linear-gradient(135deg, color-mix(in srgb, var(--ss-theme-bg-soft) 92%, white 8%), color-mix(in srgb, var(--ss-theme-bg) 92%, white 8%))"
   },
   retryBtn: {
-    border: "1px solid rgba(255, 255, 255, 0.2)",
-    color: "#f4f4f4",
-    background: "#111111",
+    border: "1px solid var(--ss-theme-border)",
+    color: "var(--ss-theme-text)",
+    background:
+      "linear-gradient(135deg, color-mix(in srgb, var(--ss-theme-accent) 52%, var(--ss-theme-bg) 48%), color-mix(in srgb, var(--ss-theme-accent-2) 48%, var(--ss-theme-bg) 52%))",
     padding: "6px 12px",
     borderRadius: "10px",
     cursor: "pointer",
@@ -350,13 +360,14 @@ const styles = {
     fontWeight: "700"
   },
   card: {
-    background: "linear-gradient(155deg, rgba(12, 12, 12, 0.95), rgba(3, 3, 3, 0.96))",
-    border: "1px solid rgba(255, 255, 255, 0.13)",
+    background:
+      "linear-gradient(155deg, color-mix(in srgb, var(--ss-theme-bg-soft) 86%, white 14%), color-mix(in srgb, var(--ss-theme-bg) 88%, white 12%))",
+    border: "1px solid var(--ss-theme-border)",
     borderRadius: "14px",
     padding: "10px",
     display: "flex",
     flexDirection: "column",
-    boxShadow: "0 10px 24px rgba(0, 0, 0, 0.48)"
+    boxShadow: "0 10px 24px color-mix(in srgb, var(--ss-theme-accent) 18%, transparent)"
   },
   cardHead: {
     display: "flex",
@@ -364,12 +375,16 @@ const styles = {
     justifyContent: "space-between",
     marginBlockEnd: "8px"
   },
-  author: { color: "#dbdbdb", fontSize: "13px", letterSpacing: "0.2px" },
+  author: {
+    color: "color-mix(in srgb, var(--ss-theme-text) 86%, transparent)",
+    fontSize: "13px",
+    letterSpacing: "0.2px"
+  },
   mediaWrap: {
     position: "relative",
     inlineSize: "100%",
     paddingBlockStart: "56.25%",
-    backgroundColor: "#000",
+    backgroundColor: "color-mix(in srgb, var(--ss-theme-bg) 82%, black 18%)",
     borderRadius: "10px",
     overflow: "hidden"
   },
@@ -397,15 +412,16 @@ const styles = {
     marginBlockEnd: "6px"
   },
   likeBtn: {
-    border: "1px solid rgba(255, 255, 255, 0.18)",
-    color: "#f6f6f6",
-    background: "linear-gradient(135deg, #1b1b1b, #0a0a0a)",
+    border: "1px solid var(--ss-theme-border)",
+    color: "var(--ss-theme-text)",
+    background:
+      "linear-gradient(135deg, color-mix(in srgb, var(--ss-theme-accent) 55%, var(--ss-theme-bg) 45%), color-mix(in srgb, var(--ss-theme-accent-2) 52%, var(--ss-theme-bg) 48%))",
     padding: "5px 9px",
     borderRadius: "9px",
     cursor: "pointer",
     fontSize: "12px",
     fontWeight: "700"
   },
-  desc: { margin: "0 0 7px", color: "#f1f1f1", fontSize: "0.95rem" },
-  meta: { color: "#a4a4a4", fontSize: "0.82rem" }
+  desc: { margin: "0 0 7px", color: "var(--ss-theme-text)", fontSize: "0.95rem" },
+  meta: { color: "color-mix(in srgb, var(--ss-theme-text) 66%, transparent)", fontSize: "0.82rem" }
 };

@@ -2,6 +2,7 @@
   max-width: 1120px;
   margin: 0 auto;
   padding: 10px 8px 24px;
+  color: var(--ss-theme-text);
 }
 
 .live-recordings-head {
@@ -19,13 +20,17 @@
 
 .live-recordings-head p {
   margin: 4px 0 0;
-  color: #a7a7a7;
+  color: color-mix(in srgb, var(--ss-theme-text) 62%, transparent);
 }
 
 .live-recordings-head button {
-  border: 1px solid rgba(122, 122, 122, 0.45);
-  background: rgba(20, 20, 20, 0.92);
-  color: #fff;
+  border: 1px solid var(--ss-theme-border);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--ss-theme-bg-soft) 84%, white 16%),
+    color-mix(in srgb, var(--ss-theme-bg) 90%, white 10%)
+  );
+  color: var(--ss-theme-text);
   border-radius: 10px;
   padding: 8px 14px;
   cursor: pointer;
@@ -33,9 +38,13 @@
 }
 
 .live-recordings-lock-card {
-  border: 1px solid rgba(118, 118, 118, 0.32);
+  border: 1px solid var(--ss-theme-border);
   border-radius: 14px;
-  background: linear-gradient(150deg, rgba(17, 17, 17, 0.94), rgba(7, 7, 7, 0.96));
+  background: linear-gradient(
+    150deg,
+    color-mix(in srgb, var(--ss-theme-bg-soft) 88%, white 12%),
+    color-mix(in srgb, var(--ss-theme-bg) 92%, white 8%)
+  );
   padding: 18px;
   max-width: 460px;
 }
@@ -50,18 +59,26 @@
 }
 
 .live-recordings-lock-form input {
-  border: 1px solid rgba(112, 112, 112, 0.45);
-  background: rgba(16, 16, 16, 0.9);
-  color: #fff;
+  border: 1px solid var(--ss-theme-border);
+  background: color-mix(in srgb, var(--ss-theme-bg) 90%, white 10%);
+  color: var(--ss-theme-text);
   border-radius: 10px;
   padding: 10px 12px;
   font-size: 1rem;
 }
 
+.live-recordings-lock-form input::placeholder {
+  color: color-mix(in srgb, var(--ss-theme-text) 58%, transparent);
+}
+
 .live-recordings-lock-form button {
-  border: 1px solid rgba(112, 112, 112, 0.45);
-  background: rgba(22, 22, 22, 0.95);
-  color: #fff;
+  border: 1px solid var(--ss-theme-border);
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--ss-theme-accent) 58%, var(--ss-theme-bg) 42%),
+    color-mix(in srgb, var(--ss-theme-accent-2) 52%, var(--ss-theme-bg) 48%)
+  );
+  color: var(--ss-theme-text);
   border-radius: 10px;
   padding: 10px 12px;
   cursor: pointer;
@@ -69,9 +86,9 @@
 }
 
 .live-recordings-forgot {
-  border: 1px solid rgba(112, 112, 112, 0.35);
-  background: transparent;
-  color: #bcbcbc;
+  border: 1px solid var(--ss-theme-border);
+  background: color-mix(in srgb, var(--ss-theme-bg-soft) 84%, white 16%);
+  color: color-mix(in srgb, var(--ss-theme-text) 72%, transparent);
   border-radius: 10px;
   padding: 8px 12px;
   cursor: pointer;
@@ -85,16 +102,20 @@
 }
 
 .live-recordings-player-card {
-  border: 1px solid rgba(110, 110, 110, 0.32);
+  border: 1px solid var(--ss-theme-border);
   border-radius: 14px;
   overflow: hidden;
-  background: linear-gradient(150deg, rgba(15, 15, 15, 0.94), rgba(8, 8, 8, 0.96));
+  background: linear-gradient(
+    150deg,
+    color-mix(in srgb, var(--ss-theme-bg-soft) 88%, white 12%),
+    color-mix(in srgb, var(--ss-theme-bg) 92%, white 8%)
+  );
 }
 
 .live-recordings-player {
   width: 100%;
   max-height: 70vh;
-  background: #000;
+  background: color-mix(in srgb, var(--ss-theme-bg) 80%, black 20%);
 }
 
 .live-recordings-player-empty {
@@ -105,13 +126,13 @@
   justify-content: center;
   padding: 24px;
   text-align: center;
-  color: #b9b9b9;
-  background: #090909;
+  color: color-mix(in srgb, var(--ss-theme-text) 66%, transparent);
+  background: color-mix(in srgb, var(--ss-theme-bg-soft) 90%, white 10%);
 }
 
 .live-recordings-meta {
   padding: 10px;
-  color: #e2e2e2;
+  color: var(--ss-theme-text);
 }
 
 .live-recordings-meta p {
@@ -126,9 +147,13 @@
 }
 
 .live-recordings-list {
-  border: 1px solid rgba(110, 110, 110, 0.32);
+  border: 1px solid var(--ss-theme-border);
   border-radius: 14px;
-  background: linear-gradient(150deg, rgba(15, 15, 15, 0.94), rgba(8, 8, 8, 0.96));
+  background: linear-gradient(
+    150deg,
+    color-mix(in srgb, var(--ss-theme-bg-soft) 88%, white 12%),
+    color-mix(in srgb, var(--ss-theme-bg) 92%, white 8%)
+  );
   padding: 10px;
   max-height: 70vh;
   overflow: auto;
@@ -145,10 +170,10 @@
 
 .live-recording-item {
   width: 100%;
-  border: 1px solid rgba(107, 107, 107, 0.35);
+  border: 1px solid var(--ss-theme-border);
   border-radius: 10px;
-  background: rgba(20, 20, 20, 0.82);
-  color: #fff;
+  background: color-mix(in srgb, var(--ss-theme-bg-soft) 86%, white 14%);
+  color: var(--ss-theme-text);
   display: grid;
   grid-template-columns: 120px minmax(0, 1fr);
   gap: 8px;
@@ -158,8 +183,8 @@
 }
 
 .live-recording-item.is-active {
-  border-color: rgba(182, 182, 182, 0.68);
-  box-shadow: 0 0 0 1px rgba(220, 220, 220, 0.14) inset;
+  border-color: color-mix(in srgb, var(--ss-theme-accent) 48%, var(--ss-theme-border) 52%);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ss-theme-accent-2) 24%, transparent) inset;
 }
 
 .live-recording-item video {
@@ -167,15 +192,15 @@
   height: 68px;
   object-fit: cover;
   border-radius: 8px;
-  background: #000;
+  background: color-mix(in srgb, var(--ss-theme-bg) 80%, black 20%);
 }
 
 .live-recording-item-empty {
   width: 100%;
   height: 68px;
   border-radius: 8px;
-  background: #0a0a0a;
-  color: #b6b6b6;
+  background: color-mix(in srgb, var(--ss-theme-bg) 88%, white 12%);
+  color: color-mix(in srgb, var(--ss-theme-text) 66%, transparent);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -191,13 +216,13 @@
 .live-recording-item small {
   display: block;
   margin-top: 4px;
-  color: #b4b4b4;
+  color: color-mix(in srgb, var(--ss-theme-text) 64%, transparent);
 }
 
 .live-recordings-delete {
-  border: 1px solid rgba(255, 131, 156, 0.55);
-  background: rgba(172, 28, 55, 0.35);
-  color: #ffe6ec;
+  border: 1px solid color-mix(in srgb, #df4e70 56%, var(--ss-theme-border) 44%);
+  background: color-mix(in srgb, #df4e70 16%, var(--ss-theme-bg) 84%);
+  color: color-mix(in srgb, #df4e70 72%, var(--ss-theme-text) 28%);
   border-radius: 10px;
   padding: 8px 12px;
   font-weight: 700;
@@ -210,9 +235,9 @@
 }
 
 .live-recordings-share {
-  border: 1px solid rgba(126, 233, 190, 0.55);
-  background: rgba(10, 118, 76, 0.35);
-  color: #dcfff1;
+  border: 1px solid color-mix(in srgb, #2d9f7b 56%, var(--ss-theme-border) 44%);
+  background: color-mix(in srgb, #2d9f7b 18%, var(--ss-theme-bg) 82%);
+  color: color-mix(in srgb, #2d9f7b 72%, var(--ss-theme-text) 28%);
   border-radius: 10px;
   padding: 8px 12px;
   font-weight: 700;
@@ -239,24 +264,27 @@
 
 .live-recordings-empty,
 .live-recordings-error {
-  border: 1px dashed rgba(115, 115, 115, 0.45);
+  border: 1px dashed var(--ss-theme-border);
   border-radius: 14px;
   padding: 18px;
   text-align: center;
   margin-top: 14px;
+  color: color-mix(in srgb, var(--ss-theme-text) 80%, transparent);
+  background: color-mix(in srgb, var(--ss-theme-bg-soft) 90%, white 10%);
 }
 
 .live-recordings-error {
-  color: #ff9cae;
+  color: color-mix(in srgb, #df4e70 76%, var(--ss-theme-text) 24%);
 }
 
 .live-recordings-note {
-  border: 1px dashed rgba(106, 212, 165, 0.45);
+  border: 1px dashed color-mix(in srgb, #2d9f7b 48%, var(--ss-theme-border) 52%);
   border-radius: 14px;
   padding: 18px;
   text-align: center;
   margin-top: 14px;
-  color: #a8f0cf;
+  color: color-mix(in srgb, #2d9f7b 72%, var(--ss-theme-text) 28%);
+  background: color-mix(in srgb, #2d9f7b 10%, var(--ss-theme-bg-soft) 90%);
 }
 
 @media (max-width: 900px) {

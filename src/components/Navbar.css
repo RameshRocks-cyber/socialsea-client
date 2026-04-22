@@ -1124,7 +1124,19 @@ body.ss-theme-white .ss-link-logo {
   .ss-link-logo {
     width: clamp(1.2rem, 6vw, 1.45rem);
     height: clamp(1.2rem, 6vw, 1.45rem);
-    border-radius: 5px;
+    border-radius: 999px;
+    object-fit: cover;
+    transform: none;
+    border: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+
+  .ss-link-icon-wrap.is-logo {
+    width: clamp(1.2rem, 6vw, 1.45rem);
+    height: clamp(1.2rem, 6vw, 1.45rem);
+    border-radius: 999px;
+    overflow: hidden;
   }
 
   .ss-link-avatar {

@@ -68,6 +68,39 @@ const buildOtpBaseCandidates = () => {
   return candidates;
 };
 
+const buildLoginBaseCandidates = () => {
+  const isHttpsPage =
+    typeof window !== "undefined" && window.location.protocol === "https:";
+  const isLocalPage =
+    typeof window !== "undefined" &&
+    (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+  const pageOrigin =
+    typeof window !== "undefined" ? String(window.location.origin || "").trim() : "";
+
+  const storedAuthBaseRaw =
+    sessionStorage.getItem("socialsea_auth_base_url") ||
+    localStorage.getItem("socialsea_auth_base_url") ||
+    "";
+  const storedOtpBaseRaw =
+    sessionStorage.getItem(OTP_BASE_KEY) ||
+    localStorage.getItem(OTP_BASE_KEY) ||
+    "";
+
+  const candidates = [
+    normalizeBaseCandidate(storedAuthBaseRaw),
+    normalizeBaseCandidate(storedOtpBaseRaw),
+    normalizeBaseCandidate(api.defaults.baseURL),
+    normalizeBaseCandidate(import.meta.env.VITE_API_URL),
+    isLocalPage ? "http://localhost:8080" : "",
+    "/api",
+    isLocalPage ? "" : normalizeBaseCandidate(pageOrigin),
+  ]
+    .filter((v, i, arr) => v && arr.indexOf(v) === i)
+    .filter((v) => !(isHttpsPage && /^http:\/\//i.test(v)));
+
+  return candidates.length ? candidates : [undefined];
+};
+
 export const sendOtp = (email) => {
   const value = String(email || "").trim();
   const payloads = [
@@ -194,6 +227,8 @@ export const registerWithPassword = ({ username, email, phoneNumber, password, o
 export const loginWithPassword = ({ identifier, password }) => {
   const value = String(identifier || "").trim();
   const looksLikeEmail = /@/.test(value);
+  const baseCandidates = buildLoginBaseCandidates();
+  const endpoints = ["/api/auth/login", "/auth/login"];
 
   const payloads = looksLikeEmail
     ? [
@@ -209,26 +244,70 @@ export const loginWithPassword = ({ identifier, password }) => {
 
   const run = async () => {
     let lastError = null;
-    for (const body of payloads) {
-      try {
-        return await api.request({
-          method: "POST",
-          url: "/api/auth/login",
-          data: body,
-          skipAuth: true,
-          timeout: 9000,
-        });
-      } catch (err) {
-        lastError = err;
-        const status = err?.response?.status;
-        const text = String(err?.response?.data?.message || err?.response?.data || err?.message || "").toLowerCase();
-        if (text.includes("otp") && text.includes("required")) {
-          throw new Error("Password login endpoint is misconfigured (OTP required). Contact backend admin.");
+    for (const baseURL of baseCandidates) {
+      for (const url of endpoints) {
+        for (const body of payloads) {
+          try {
+            const res = await api.request({
+              method: "POST",
+              url,
+              data: body,
+              baseURL,
+              skipAuth: true,
+              timeout: 18000,
+            });
+            const textData = typeof res?.data === "string" ? res.data.trim() : "";
+            if (looksLikeHtml(textData)) {
+              const htmlErr = new Error("Received HTML instead of API response");
+              htmlErr.response = { status: 404, data: textData };
+              throw htmlErr;
+            }
+            const usedBase = String(res?.config?.baseURL || baseURL || api.defaults.baseURL || "").trim();
+            if (usedBase) {
+              try {
+                sessionStorage.setItem("socialsea_auth_base_url", usedBase);
+                localStorage.setItem("socialsea_auth_base_url", usedBase);
+                sessionStorage.setItem(OTP_BASE_KEY, usedBase);
+                localStorage.setItem(OTP_BASE_KEY, usedBase);
+              } catch {
+                // ignore storage errors
+              }
+            }
+            return res;
+          } catch (err) {
+            lastError = err;
+            const status = err?.response?.status;
+            const text = String(
+              err?.response?.data?.message || err?.response?.data || err?.message || ""
+            ).toLowerCase();
+            if (text.includes("otp") && text.includes("required")) {
+              throw new Error("Password login endpoint is misconfigured (OTP required). Contact backend admin.");
+            }
+            if (
+              !(
+                status === 400 ||
+                status === 401 ||
+                status === 403 ||
+                status === 404 ||
+                status === 405 ||
+                (status >= 500 && status <= 599) ||
+                !status
+              )
+            ) {
+              throw err;
+            }
+          }
         }
-        if (!(status === 400 || status === 401 || status === 403 || status === 404 || status === 405 || (status >= 500 && status <= 599) || !status)) {
-          throw err;
-        }
+      } 
+    }
+    if (lastError?.code === "ECONNABORTED" || !lastError?.response) {
+      const isLocalPage =
+        typeof window !== "undefined" &&
+        (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+      if (isLocalPage) {
+        throw new Error("Local backend is not running on http://localhost:8080. Start backend and retry.");
       }
+      throw new Error("Login server is taking too long to respond. Please retry in a few seconds.");
     }
     throw lastError || new Error("Login failed");
   };

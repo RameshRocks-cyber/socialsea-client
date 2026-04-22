@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import { logout } from "../auth";
 import { DEFAULT_SOUND_PREFS, SETTINGS_KEY, getSoundLabel, readSoundPrefs } from "./soundPrefs";
@@ -16,6 +16,7 @@ import "./Settings.css";
 
 const CLOSE_FRIENDS_KEY = "socialsea_close_friends_v1";
 const BLOCKED_KEY = "socialsea_blocked_users_v1";
+const GESTURE_CURSOR_KEY = "socialsea_gesture_cursor_enabled_v1";
 const NOTIFICATION_CHARACTERS = [
   "Lion",
   "Dog",
@@ -52,6 +53,7 @@ const defaultPrefs = {
   notificationSound: DEFAULT_SOUND_PREFS.notificationSound,
   ringtoneSound: DEFAULT_SOUND_PREFS.ringtoneSound,
   trafficAlerts: false,
+  longVideosEnabled: false,
   ambulanceNavigation: false,
   preferredLanguage: "en",
   contentTypes: DEFAULT_CONTENT_TYPES,
@@ -70,6 +72,7 @@ const SETTING_LABELS = {
   notifications: "Notifications",
   notificationBuddy: "Notification Character",
   trafficAlerts: "Traffic Alerts",
+  longVideosEnabled: "Long videos",
   ambulanceNavigation: "Ambulance Navigation",
   preferredLanguage: "Language",
   showMyStoriesOnProfile: "My Stories on profile"
@@ -161,8 +164,36 @@ const readPrefs = () => {
   }
 };
 
+const persistSettingsSafely = (prefs) => {
+  if (typeof window === "undefined") return;
+
+  const save = (payload) => {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(payload));
+  };
+
+  try {
+    save(prefs);
+    return;
+  } catch {
+    // Fall back to a compact payload when quota is exceeded (for example,
+    // when custom ringtone data URLs are very large).
+  }
+
+  try {
+    const compact = { ...(prefs || {}) };
+    delete compact.customRingtoneDataUrl;
+    if (typeof compact.customRingtoneUrl === "string" && compact.customRingtoneUrl.startsWith("data:")) {
+      delete compact.customRingtoneUrl;
+    }
+    save(compact);
+  } catch {
+    // Ignore storage failures to keep Settings page usable.
+  }
+};
+
 export default function Settings() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [itemsById, setItemsById] = useState({});
   const [loading, setLoading] = useState(true);
   const [savedIds, setSavedIds] = useState(() => {
@@ -178,11 +209,13 @@ export default function Settings() {
   const [privacyBusy, setPrivacyBusy] = useState(false);
   const [ambulanceApproved, setAmbulanceApproved] = useState(false);
   const [trafficAlertsBusy, setTrafficAlertsBusy] = useState(false);
+  const [longVideosBusy, setLongVideosBusy] = useState(false);
 
   const [closeFriends, setCloseFriends] = useState(() => readJsonArray(CLOSE_FRIENDS_KEY));
   const [blockedUsers, setBlockedUsers] = useState(() => readJsonArray(BLOCKED_KEY));
   const [userQuery, setUserQuery] = useState("");
   const [userResults, setUserResults] = useState([]);
+  const [settingsSearch, setSettingsSearch] = useState(() => String(searchParams.get("q") || ""));
   const jobMode =
     prefs.jobMode === "post" ? "post" :
     prefs.jobMode === "storage" ? "storage" :
@@ -208,11 +241,25 @@ export default function Settings() {
   const preferredLanguageLabel = useMemo(() => getLanguageLabel(prefs.preferredLanguage), [prefs.preferredLanguage]);
 
   useEffect(() => {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(prefs));
+    persistSettingsSafely(prefs);
+    try {
+      localStorage.setItem(GESTURE_CURSOR_KEY, prefs.gestureCursorEnabled ? "true" : "false");
+    } catch {
+      // Ignore fallback-key write failures.
+    }
     if (typeof window !== "undefined") {
-      window.dispatchEvent(new Event("ss-settings-update"));
+      window.dispatchEvent(
+        new CustomEvent("ss-settings-update", {
+          detail: { gestureCursorEnabled: Boolean(prefs.gestureCursorEnabled) }
+        })
+      );
     }
   }, [prefs]);
+
+  useEffect(() => {
+    const queryValue = String(searchParams.get("q") || "");
+    setSettingsSearch((prev) => (prev === queryValue ? prev : queryValue));
+  }, [searchParams]);
 
   useEffect(() => {
     let cancelled = false;
@@ -222,6 +269,7 @@ export default function Settings() {
         const data = res?.data?.user || res?.data || {};
         const value = data?.privateAccount ?? data?.accountPrivate;
         const trafficValue = data?.trafficAlertsEnabled ?? data?.trafficAlerts;
+        const longVideosValue = data?.longVideosEnabled ?? data?.longVideoEnabled;
         const ambulanceValue = data?.ambulanceDriverApproved;
         const languageValue = data?.preferredLanguage;
         if (!cancelled && typeof value === "boolean") {
@@ -229,6 +277,9 @@ export default function Settings() {
         }
         if (!cancelled && typeof trafficValue === "boolean") {
           setPrefs((prev) => ({ ...prev, trafficAlerts: trafficValue }));
+        }
+        if (!cancelled && typeof longVideosValue === "boolean") {
+          setPrefs((prev) => ({ ...prev, longVideosEnabled: longVideosValue }));
         }
         if (!cancelled && typeof ambulanceValue === "boolean") {
           setAmbulanceApproved(ambulanceValue);
@@ -385,6 +436,24 @@ export default function Settings() {
     }
   };
 
+  const setLongVideosEnabled = async (next) => {
+    if (longVideosBusy || next === prefs.longVideosEnabled) return;
+    setPrefs((prev) => ({ ...prev, longVideosEnabled: next }));
+    recordAccountHistoryEntry({
+      action: "Long videos",
+      detail: next ? "Turned on" : "Turned off",
+      source: "settings"
+    });
+    setLongVideosBusy(true);
+    try {
+      await api.post("/api/profile/me/long-videos", { enabled: next });
+    } catch {
+      // Keep local selection if the backend is unavailable
+    } finally {
+      setLongVideosBusy(false);
+    }
+  };
+
   const setToggle = (key) => {
     if (key === "accountPrivate") {
       setAccountPrivacy(!prefs.accountPrivate);
@@ -392,6 +461,10 @@ export default function Settings() {
     }
     if (key === "trafficAlerts") {
       setTrafficAlerts(!prefs.trafficAlerts);
+      return;
+    }
+    if (key === "longVideosEnabled") {
+      setLongVideosEnabled(!prefs.longVideosEnabled);
       return;
     }
     const nextValue = !prefs[key];
@@ -490,6 +563,56 @@ export default function Settings() {
     setBlockedUsers((prev) => prev.filter((u) => Number(u.id) !== Number(id)));
   };
 
+  const updateSettingsSearch = (nextValue) => {
+    const text = String(nextValue || "");
+    setSettingsSearch(text);
+    const nextParams = new URLSearchParams(searchParams);
+    if (text.trim()) {
+      nextParams.set("q", text);
+    } else {
+      nextParams.delete("q");
+    }
+    setSearchParams(nextParams, { replace: true });
+  };
+
+  const settingsSearchTokens = settingsSearch
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  const settingsSearchOptions = [
+    { icon: "🎨", title: "Appearance", value: colorThemeLabel, keywords: ["theme", "color"], onClick: () => navigate("/settings/appearance") },
+    { icon: "🧩", title: "Content types", value: contentTypeSummary, keywords: ["content", "type"], onClick: () => navigate("/settings/content-types") },
+    { icon: "🌐", title: "Language", value: preferredLanguageLabel, keywords: ["language", "translate"], onClick: () => navigate("/settings/language") },
+    { icon: "🎓", title: "Study mode (hide Reels)", value: prefs.studyModeReels ? "On" : "Off", keywords: ["study", "reels"], onClick: () => navigate("/settings/manage/study-mode") },
+    { icon: "✋", title: "Hand gesture cursor", value: prefs.gestureCursorEnabled ? "On" : "Off", keywords: ["gesture", "cursor"], onClick: () => setToggle("gestureCursorEnabled") },
+    { icon: "🚨", title: "SOS on Navbar", value: prefs.showSosInNavbar ? "On" : "Off", keywords: ["sos", "navbar"], onClick: () => navigate("/settings/manage/sos-navbar") },
+    { icon: "🔔", title: "Notifications", value: prefs.notifications ? "On" : "Off", keywords: ["notification", "alerts"], onClick: () => navigate("/notifications") },
+    { icon: "🚦", title: "Traffic Alerts", value: prefs.trafficAlerts ? "On" : "Off", keywords: ["traffic", "alerts"], onClick: () => navigate("/settings/manage/traffic-alerts") },
+    { icon: "🎬", title: "Long videos", value: prefs.longVideosEnabled ? "On" : "Off", keywords: ["long", "video", "watch"], onClick: () => setToggle("longVideosEnabled") },
+    { icon: "🔒", title: "Account privacy", value: prefs.accountPrivate ? "Private" : "Public", keywords: ["privacy", "private", "public"], onClick: () => navigate("/settings/privacy") },
+    { icon: "👥", title: "Close Friends", value: String(closeFriends.length), keywords: ["friends", "close"], onClick: () => navigate("/settings/manage/close-friends") },
+    { icon: "⛔", title: "Blocked", value: String(blockedUsers.length), keywords: ["blocked", "block"], onClick: () => navigate("/settings/manage/blocked") },
+    { icon: "📍", title: "My exact location", value: "Open", keywords: ["location", "map"], onClick: () => navigate("/settings/location") },
+    { icon: "💬", title: "Messages and story replies", value: prefs.messageReplies, keywords: ["message", "reply", "story"], onClick: () => navigate("/settings/manage/message-replies") },
+    { icon: "🏷️", title: "Tags and mentions", value: prefs.tagsMentions, keywords: ["tags", "mentions"], onClick: () => navigate("/settings/manage/tags-mentions") },
+    { icon: "🗨️", title: "Comments", value: prefs.comments, keywords: ["comments"], onClick: () => navigate("/settings/manage/comments") },
+    { icon: "🔊", title: "Notification sound", value: getSoundLabel("notification", prefs.notificationSound), keywords: ["sound", "notification"], onClick: () => navigate("/settings/sounds") },
+    { icon: "📳", title: "Ringtone", value: getSoundLabel("ringtone", prefs.ringtoneSound), keywords: ["ringtone", "call"], onClick: () => navigate("/settings/sounds") }
+  ];
+
+  const filteredSettingsOptions = settingsSearchTokens.length === 0
+    ? []
+    : settingsSearchOptions.filter((option) => {
+      const searchable = `${option.title} ${option.value || ""} ${(option.keywords || []).join(" ")}`.toLowerCase();
+      return settingsSearchTokens.every((token) => searchable.includes(token));
+    });
+
+  const handleSettingsSearchOptionClick = (action) => {
+    if (typeof action === "function") action();
+  };
+
   const Row = ({ icon, title, value, onClick }) => (
     <button type="button" className="settings-row" onClick={onClick}>
       <span className="settings-row-icon">{icon}</span>
@@ -509,6 +632,48 @@ export default function Settings() {
             <p className="settings-subtitle">Control privacy, activity, and experience in one place.</p>
           </div>
         </header>
+
+        <div className="settings-option-search-wrap">
+          <span className="settings-option-search-icon">⌕</span>
+          <input
+            type="search"
+            className="settings-option-search-input"
+            placeholder="Search settings options"
+            value={settingsSearch}
+            onChange={(e) => updateSettingsSearch(e.target.value)}
+          />
+          {settingsSearch.trim() && (
+            <button
+              type="button"
+              className="settings-option-search-clear"
+              onClick={() => updateSettingsSearch("")}
+            >
+              Clear
+            </button>
+          )}
+        </div>
+
+        {settingsSearchTokens.length > 0 && (
+          <section className="settings-section">
+            <h2>Search results</h2>
+            {filteredSettingsOptions.length === 0 && (
+              <p className="settings-search-empty">No settings options matched "{settingsSearch.trim()}".</p>
+            )}
+            {filteredSettingsOptions.map((option) => (
+              <button
+                key={`settings-search-${option.title}`}
+                type="button"
+                className="settings-row settings-row-search-result"
+                onClick={() => handleSettingsSearchOptionClick(option.onClick)}
+              >
+                <span className="settings-row-icon">{option.icon}</span>
+                <span className="settings-row-title">{option.title}</span>
+                <span className="settings-row-value">{option.value || ""}</span>
+                <span className="settings-row-arrow">{">"}</span>
+              </button>
+            ))}
+          </section>
+        )}
 
         <section className="settings-section">
           <h2>Jobs</h2>
@@ -553,7 +718,7 @@ export default function Settings() {
             icon={"✋"}
             title="Hand gesture cursor"
             value={prefs.gestureCursorEnabled ? "On" : "Off"}
-            onClick={() => navigate("/settings/manage/gesture-cursor")}
+            onClick={() => setToggle("gestureCursorEnabled")}
           />
           <Row icon={"🔖"} title="Saved" value={savedIds.length} onClick={() => navigate("/saved")} />
           <Row icon={"🗃️"} title="Archive" value={archiveIds.length} onClick={() => navigate("/settings/manage/archive")} />
@@ -582,6 +747,12 @@ export default function Settings() {
             title="Traffic Alerts"
             value={prefs.trafficAlerts ? "On" : "Off"}
             onClick={() => navigate("/settings/manage/traffic-alerts")}
+          />
+          <Row
+            icon={"🎬"}
+            title="Long videos"
+            value={prefs.longVideosEnabled ? "On" : "Off"}
+            onClick={() => setToggle("longVideosEnabled")}
           />
           <Row
             icon={"🚑"}

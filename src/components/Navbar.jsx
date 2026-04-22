@@ -48,6 +48,7 @@ const SOS_SUPPRESSED_ALERTS_KEY = "socialsea_sos_suppressed_alerts_v1";
 const SOS_SUPPRESSED_ALERTS_AT_KEY = "socialsea_sos_suppressed_alerts_at_v1";
 const SOS_SEEN_ALERTS_KEY = "socialsea_sos_seen_alerts_v1";
 const SOS_POPUP_POS_KEY = "socialsea_sos_popup_pos_v1";
+const SOS_SWIPE_ATTEMPT_EVENT = "ss-sos-activation-gesture";
 const SOS_ALERT_SUPPRESS_TTL_MS = 5 * 60 * 1000;
 const SOS_SIGNAL_STALE_MS = 2 * 60 * 1000;
 const SOS_ALERT_STALE_MINUTES = Number(import.meta.env.VITE_EMERGENCY_ALERT_STALE_MINUTES || 180);
@@ -742,6 +743,7 @@ export default function Navbar() {
   const sosUserLocationRef = useRef(null);
   const sosLocationWatchRef = useRef(null);
   const sosLocationPromptRef = useRef(false);
+  const onSosTapRef = useRef(null);
   const lastHandledSignalIdRef = useRef(readSessionValue(SOS_LAST_SIGNAL_ID_KEY));
   const lastHandledSessionSigRef = useRef(readSessionValue(SOS_LAST_SESSION_SIG_KEY));
   const lastEmergencyNotificationIdRef = useRef(readSessionValue(SOS_LAST_NOTIFICATION_ID_KEY));
@@ -1100,7 +1102,7 @@ export default function Navbar() {
 
     const pollCalls = async () => {
       try {
-        const res = await api.get("/api/calls/inbox");
+        const res = await api.get("/api/calls/inbox", { params: { includeTyping: false } });
         if (disposed) return;
         const list = Array.isArray(res.data) ? res.data : [];
 
@@ -1317,7 +1319,9 @@ export default function Navbar() {
     return Number.isFinite(lat) && Number.isFinite(lon);
   };
 
-  const onSosTap = async (event) => {
+  const onSosTap = async (event, source = "tap") => {
+    const actionWord = source === "swipe" ? "Swipe" : "Tap";
+    const actionNoun = source === "swipe" ? "swipe" : "tap";
     if (event) {
       event.preventDefault();
       event.stopPropagation();
@@ -1331,7 +1335,7 @@ export default function Navbar() {
         sosUserLocationRef.current = point;
         setSosUserLocation(point);
         sosTapRef.current = { count: 0, lastAt: 0 };
-        showSosPopup("Location captured. Tap SOS again to start emergency flow.");
+        showSosPopup(`Location captured. ${actionWord} SOS again to start emergency flow.`);
       } catch {
         showSosPopup("Location is required for SOS. Please allow location permission.");
       } finally {
@@ -1345,18 +1349,30 @@ export default function Navbar() {
     sosTapRef.current = { count, lastAt: now };
 
     if (count === 1) {
-      showSosPopup("SOS ready. Tap 2 more times to send emergency alert.");
+      showSosPopup(`SOS ready. ${actionWord} 2 more times to send emergency alert.`);
       return;
     }
     if (count === 2) {
-      showSosPopup("One more tap. SOS will be sent now.");
+      showSosPopup(`One more ${actionNoun}. SOS will be sent now.`);
       return;
     }
 
     sosTapRef.current = { count: 0, lastAt: 0 };
-    showSosPopup("ok bee Brave Help is on the way");
+    showSosPopup("ok bee brave help is on the way");
     navigate("/sos?arm=1");
   };
+  onSosTapRef.current = onSosTap;
+
+  useEffect(() => {
+    const handleSosSwipeAttempt = () => {
+      const handler = onSosTapRef.current;
+      if (typeof handler === "function") {
+        void handler(null, "swipe");
+      }
+    };
+    window.addEventListener(SOS_SWIPE_ATTEMPT_EVENT, handleSosSwipeAttempt);
+    return () => window.removeEventListener(SOS_SWIPE_ATTEMPT_EVENT, handleSosSwipeAttempt);
+  }, []);
 
   useEffect(() => {
     if (!sosPopup) return undefined;
@@ -3161,9 +3177,9 @@ export default function Navbar() {
                 title={showChatUnread ? `${item.label} (${chatUnreadCount > 99 ? "99+" : chatUnreadCount} unread)` : item.label}
                 aria-current={active ? "page" : undefined}
               >
-                <span className="ss-link-icon-wrap">
+                <span className={`ss-link-icon-wrap ${isFeedItem ? "is-logo" : ""}`.trim()}>
                   {isFeedItem ? (
-                    <img src="/logo-light.png?v=1" alt="" className="ss-link-logo" aria-hidden="true" />
+                    <img src="/logo-clean-round.png?v=1" alt="" className="ss-link-logo" aria-hidden="true" />
                   ) : isProfileItem && profileNavPic ? (
                     <img
                       src={profileNavPic}

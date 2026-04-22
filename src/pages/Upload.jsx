@@ -231,6 +231,8 @@ export default function Upload() {
     return String(params.get("type") || "").toLowerCase();
   }, [location.search]);
   const isReelUpload = uploadType === "reel";
+  const isLongVideoUpload = uploadType === "long-video" || uploadType === "long" || uploadType === "watch";
+  const isPhotoPostUpload = !isReelUpload && !isLongVideoUpload;
 
   useEffect(() => {
     if (!file) {
@@ -534,13 +536,21 @@ export default function Upload() {
       setMsg("File required");
       return;
     }
-    if (isReelUpload) {
+    if (isReelUpload || isLongVideoUpload) {
       if (filesToUpload.length !== 1) {
-        setMsg("Please choose a single video for a reel.");
+        setMsg(isReelUpload ? "Please choose a single video for a reel." : "Please choose a single video for a long video post.");
         return;
       }
       if (!filesToUpload[0]?.type?.startsWith("video/")) {
-        setMsg("Reels must be a video file.");
+        setMsg(isReelUpload ? "Reels must be a video file." : "Long video uploads must be a video file.");
+        return;
+      }
+    }
+
+    if (isPhotoPostUpload) {
+      const hasVideo = filesToUpload.some((entry) => String(entry?.type || "").startsWith("video/"));
+      if (hasVideo) {
+        setMsg("Post uploads are photo-only now. Use Long Video to share videos.");
         return;
       }
     }
@@ -570,6 +580,10 @@ export default function Upload() {
           form.append("reel", "true");
           form.append("isShortVideo", "true");
           form.append("type", "reel");
+        } else if (isLongVideoUpload) {
+          form.append("isLongVideo", "true");
+          form.append("isShortVideo", "false");
+          form.append("type", "long_video");
         }
         if (currentIsVideo) {
           const safeCreatorSettings = sanitizeCreatorSettings(creatorSettings);
@@ -592,7 +606,7 @@ export default function Upload() {
             const status = Number(firstErr?.response?.status || 0);
             // Some backend variants fail on extra multipart fields; retry with strict file-only payload.
             if (status >= 500) {
-              if (isReelUpload) throw firstErr;
+              if (isReelUpload || isLongVideoUpload) throw firstErr;
               const fallbackForm = new FormData();
               fallbackForm.append("file", uploadFile);
               res = await api.post("/api/posts/upload", fallbackForm, {
@@ -645,21 +659,29 @@ export default function Upload() {
     }
   };
 
+  const uploadHeading = isReelUpload ? "Create Reel" : isLongVideoUpload ? "Create Long Video" : "Create Post";
+  const uploadSubtitle = isReelUpload
+    ? "Upload a short video for reels."
+    : isLongVideoUpload
+      ? "Upload a long video for the long videos feed."
+      : "Create your photo post.";
+  const filePickerLabel = isReelUpload || isLongVideoUpload ? "Choose video" : "Choose photo";
+  const fileAccept = isReelUpload || isLongVideoUpload ? "video/*" : "image/*";
+  const allowMultipleFiles = isPhotoPostUpload;
+
   return (
     <div className="upload-page">
       <section className="upload-panel">
-        <h2>{isReelUpload ? "Create Reel" : "Create Post"}</h2>
-        <p className="upload-subtitle">
-          {isReelUpload ? "Upload a short video for reels." : "Create your post."}
-        </p>
+        <h2>{uploadHeading}</h2>
+        <p className="upload-subtitle">{uploadSubtitle}</p>
 
         <div className="upload-pick-row">
           <label className="upload-file-pick">
-            {isReelUpload ? "Choose video" : "Choose photo/video"}
+            {filePickerLabel}
             <input
               type="file"
-              accept={isReelUpload ? "video/*" : "image/*,video/*"}
-              multiple={!isReelUpload}
+              accept={fileAccept}
+              multiple={allowMultipleFiles}
               onChange={(e) => {
                 applyPickedFiles(e.target.files);
                 e.target.value = "";

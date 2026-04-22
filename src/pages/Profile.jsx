@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { FiBookOpen, FiImage, FiRadio, FiStar, FiVideo } from "react-icons/fi";
+import { FiBookOpen, FiFilm, FiImage, FiRadio, FiStar, FiVideo } from "react-icons/fi";
 import api from "../api/axios";
 import { getApiBaseUrl, toApiUrl } from "../api/baseUrl";
 import { clearAuthStorage } from "../auth";
 import { SETTINGS_KEY } from "./soundPrefs";
 import { getJobsByOwner, removeCompanyJob } from "../data/jobStore";
 import { recordRecentlyDeleted } from "../services/activityStore";
-import { readActiveStories, syncStoryCaches } from "../services/storyStorage";
+import { readActiveStories, readStoryIdentity, syncStoryCachesForIdentity } from "../services/storyStorage";
 import { getVaultCount } from "../services/vaultStorage";
 import { buildProfilePath, getProfileIdentifier, persistProfileIdentity } from "../utils/profileRoute";
 import "./Profile.css";
@@ -47,6 +47,22 @@ const readShowMyStoriesOnProfile = () => {
     return true;
   } catch {
     return true;
+  }
+};
+
+const readLongVideosEnabled = () => {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    if (typeof parsed?.longVideosEnabled === "boolean") {
+      return parsed.longVideosEnabled;
+    }
+    if (typeof parsed?.longVideoEnabled === "boolean") {
+      return parsed.longVideoEnabled;
+    }
+    return false;
+  } catch {
+    return false;
   }
 };
 
@@ -385,6 +401,7 @@ export default function Profile() {
   const [vaultCount, setVaultCount] = useState(0);
   const [jobMode, setJobMode] = useState(() => readJobMode());
   const [showMyStoriesOnProfile, setShowMyStoriesOnProfile] = useState(() => readShowMyStoriesOnProfile());
+  const [longVideosEnabled, setLongVideosEnabled] = useState(() => readLongVideosEnabled());
   const [createSheetOpen, setCreateSheetOpen] = useState(false);
   const [highlights, setHighlights] = useState(() => readHighlights());
   const [activeHighlight, setActiveHighlight] = useState(null);
@@ -400,14 +417,22 @@ export default function Profile() {
     String(profile?.id || "").trim().toLowerCase() === normalizedMyUserId;
 
   useEffect(() => {
+    const refreshFromSettings = () => {
+      setJobMode(readJobMode());
+      setShowMyStoriesOnProfile(readShowMyStoriesOnProfile());
+      setLongVideosEnabled(readLongVideosEnabled());
+    };
     const handleStorage = (event) => {
       if (event?.key === SETTINGS_KEY) {
-        setJobMode(readJobMode());
-        setShowMyStoriesOnProfile(readShowMyStoriesOnProfile());
+        refreshFromSettings();
       }
     };
+    window.addEventListener("ss-settings-update", refreshFromSettings);
     window.addEventListener("storage", handleStorage);
-    return () => window.removeEventListener("storage", handleStorage);
+    return () => {
+      window.removeEventListener("ss-settings-update", refreshFromSettings);
+      window.removeEventListener("storage", handleStorage);
+    };
   }, []);
 
   useEffect(() => {
@@ -531,7 +556,7 @@ export default function Profile() {
           );
           const set = buildStoryMediaSet(res?.data);
           if (Array.isArray(res?.data)) {
-            syncStoryCaches(res.data.slice(0, 120));
+            syncStoryCachesForIdentity(readStoryIdentity(), res.data.slice(0, 120));
           }
           if (set.size) return set;
         } catch {
@@ -1058,10 +1083,21 @@ export default function Profile() {
     navigate("/login");
   };
 
-  const reels = posts.filter((post) => post?.isShortVideo);
-  const normalPosts = posts.filter((post) => !post?.isShortVideo);
-  const visiblePosts = profileTab === "reels" ? reels : normalPosts;
-  const loadedPostsCount = (normalPosts?.length || 0) + (reels?.length || 0);
+  const reels = posts.filter((post) => post?.isVideo && post?.isShortVideo);
+  const longVideos = posts.filter((post) => post?.isVideo && !post?.isShortVideo);
+  const imagePosts = posts.filter((post) => !post?.isVideo);
+  const showLongVideosOnProfile = !isOwnProfile || longVideosEnabled;
+  const activeProfileTab =
+    !showLongVideosOnProfile && profileTab === "long-videos"
+      ? "posts"
+      : profileTab;
+  const visiblePosts =
+    activeProfileTab === "reels" ? reels : activeProfileTab === "long-videos" ? longVideos : imagePosts;
+  const loadedPostsCount = (imagePosts?.length || 0) + (reels?.length || 0) + (longVideos?.length || 0);
+  const profileContentTitle =
+    activeProfileTab === "reels" ? "Reels" : activeProfileTab === "long-videos" ? "Long Videos" : "Posts";
+  const emptyTabMessage =
+    activeProfileTab === "reels" ? "No reels yet" : activeProfileTab === "long-videos" ? "No long videos yet" : "No posts yet";
   const postsCount = postsLoaded
     ? loadedPostsCount
     : Number.isFinite(Number(profile?.postsCount)) && Number(profile?.postsCount) >= 0
@@ -1091,6 +1127,12 @@ export default function Profile() {
       ? `${coverResolved}${coverResolved.includes("?") ? "&" : "?"}v=${encodeURIComponent(coverBust)}`
       : coverResolved;
   useEffect(() => {
+    if (!showLongVideosOnProfile && profileTab === "long-videos") {
+      setProfileTab("posts");
+    }
+  }, [profileTab, showLongVideosOnProfile]);
+
+  useEffect(() => {
     setCoverImageBroken(false);
   }, [coverUrl]);
 
@@ -1105,11 +1147,16 @@ export default function Profile() {
   const handleCreateAction = (kind) => {
     closeCreateSheet();
     if (kind === "post") {
-      navigate("/upload");
+      navigate("/upload?type=post");
       return;
     }
     if (kind === "reel") {
       navigate("/upload?type=reel");
+      return;
+    }
+    if (kind === "long-video") {
+      if (!longVideosEnabled) return;
+      navigate("/upload?type=long-video");
       return;
     }
     if (kind === "live") {
@@ -1421,8 +1468,12 @@ export default function Profile() {
   <hr className="profile-divider" />
 
             <div className="profile-posts-head">
-              <h3 className="profile-posts-title">Posts</h3>
-              <div className="profile-post-tabs" role="tablist" aria-label="Profile post filters">
+              <h3 className="profile-posts-title">{profileContentTitle}</h3>
+              <div
+                className={`profile-post-tabs ${showLongVideosOnProfile ? "" : "is-two-tabs"}`.trim()}
+                role="tablist"
+                aria-label="Profile post filters"
+              >
                 <button
                   type="button"
                   className={`profile-post-tab ${profileTab === "posts" ? "is-active" : ""}`}
@@ -1430,7 +1481,7 @@ export default function Profile() {
                   role="tab"
                   aria-selected={profileTab === "posts"}
                 >
-                  Posts ({normalPosts.length})
+                  Posts ({imagePosts.length})
                 </button>
                 <button
                   type="button"
@@ -1441,15 +1492,30 @@ export default function Profile() {
                 >
                   Reels ({reels.length})
                 </button>
+                {showLongVideosOnProfile && (
+                  <button
+                    type="button"
+                    className={`profile-post-tab ${profileTab === "long-videos" ? "is-active" : ""}`}
+                    onClick={() => setProfileTab("long-videos")}
+                    role="tab"
+                    aria-selected={profileTab === "long-videos"}
+                  >
+                    Long Videos ({longVideos.length})
+                  </button>
+                )}
               </div>
             </div>
             {postActionError && <p className="profile-posts-error">{postActionError}</p>}
             {isPrivateLocked && (
-              <div className="profile-private-note">This account is private. Follow to see posts and reels.</div>
+              <div className="profile-private-note">
+                {showLongVideosOnProfile
+                  ? "This account is private. Follow to see posts, reels, and long videos."
+                  : "This account is private. Follow to see posts and reels."}
+              </div>
             )}
             <div className="profile-posts-grid">
               {visiblePosts.length === 0 && (
-                <p>{profileTab === "reels" ? "No reels yet" : "No posts yet"}</p>
+                <p>{emptyTabMessage}</p>
               )}
               {visiblePosts.map((post, index) => (
                 <div
@@ -1566,7 +1632,6 @@ export default function Profile() {
             <div className="profile-create-handle" aria-hidden="true" />
             <div className="profile-create-head">
               <h3 className="profile-create-title">Create</h3>
-              <p className="profile-create-subtitle">Choose how you want to share today.</p>
             </div>
             <div className="profile-create-grid">
               <button type="button" className="profile-create-card accent-reel" onClick={() => handleCreateAction("reel")}>
@@ -1575,7 +1640,6 @@ export default function Profile() {
                 </span>
                 <div>
                   <span className="profile-create-label">Reel</span>
-                  <small>Short video with music</small>
                 </div>
               </button>
               <button type="button" className="profile-create-card accent-post" onClick={() => handleCreateAction("post")}>
@@ -1584,16 +1648,24 @@ export default function Profile() {
                 </span>
                 <div>
                   <span className="profile-create-label">Post</span>
-                  <small>Photo or long video</small>
                 </div>
               </button>
+              {longVideosEnabled && (
+                <button type="button" className="profile-create-card accent-long-video" onClick={() => handleCreateAction("long-video")}>
+                  <span className='profile-create-symbol' aria-hidden='true'>
+                    <FiFilm />
+                  </span>
+                  <div>
+                    <span className="profile-create-label">Long Video</span>
+                  </div>
+                </button>
+              )}
               <button type="button" className="profile-create-card accent-story" onClick={() => handleCreateAction("story")}>
                 <span className='profile-create-symbol' aria-hidden='true'>
                   <FiBookOpen />
                 </span>
                 <div>
                   <span className="profile-create-label">Story</span>
-                  <small>24 hour updates</small>
                 </div>
               </button>
               <button type="button" className="profile-create-card accent-highlights" onClick={() => handleCreateAction("highlights")}>
@@ -1602,7 +1674,6 @@ export default function Profile() {
                 </span>
                 <div>
                   <span className="profile-create-label">Highlights</span>
-                  <small>Pin your best moments</small>
                 </div>
               </button>
               <button type="button" className="profile-create-card accent-live" onClick={() => handleCreateAction("live")}>
@@ -1611,7 +1682,6 @@ export default function Profile() {
                 </span>
                 <div>
                   <span className="profile-create-label">Live</span>
-                  <small>Go live with your audience</small>
                 </div>
               </button>
             </div>

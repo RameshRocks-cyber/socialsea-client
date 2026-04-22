@@ -44,7 +44,7 @@ const CHAT_TYPING_IDLE_MS = 7000;
 const CHAT_TYPING_VISIBLE_MS = 9000;
 const CHAT_REMOTE_DISABLE_MS = 5 * 60 * 1000;
 const STORY_FEED_DISABLE_MS = 5 * 60 * 1000;
-const STORY_IMAGE_DURATION_MS = 6500;
+const STORY_IMAGE_DURATION_MS = 8000;
 const STORY_MEDIA_LOAD_TIMEOUT_MS = 2500;
 export const formatStoryCount = (value) => {
   const num = Number(value || 0);
@@ -605,7 +605,7 @@ export const extractFeedShare = (value) => {
   if (typeof window === "undefined") return null;
   const text = String(value || "");
   if (!text) return null;
-  const match = text.match(/(https?:\/\/[^\s]+\/feed[^\s]*|\/feed\?[^\s]+)/i);
+  const match = text.match(/(https?:\/\/[^\s]+\/(?:feed|watch)[^\s]*|\/(?:feed|watch)(?:\/[^\s?#]+)?(?:\?[^\s]*)?)/i);
   if (!match) return null;
   const rawLink = match[1].replace(/[)\],.!?]+$/, "");
   let url = null;
@@ -614,17 +614,39 @@ export const extractFeedShare = (value) => {
   } catch {
     return null;
   }
-  if (!String(url.pathname || "").toLowerCase().includes("/feed")) return null;
-  const id =
+  const pathname = String(url.pathname || "");
+  const pathLower = pathname.toLowerCase();
+  const isFeedPath = pathLower.includes("/feed");
+  const isWatchPath = pathLower.includes("/watch");
+  if (!isFeedPath && !isWatchPath) return null;
+
+  let id =
     url.searchParams.get("post") ||
     url.searchParams.get("postId") ||
     url.searchParams.get("id") ||
     "";
-  if (!String(id).trim()) return null;
-  const href = `/feed?post=${encodeURIComponent(String(id).trim())}`;
+  if (!String(id).trim() && isWatchPath) {
+    const pathParts = pathname.split("/").filter(Boolean);
+    const watchIndex = pathParts.findIndex((part) => String(part || "").toLowerCase() === "watch");
+    if (watchIndex >= 0 && pathParts.length > watchIndex + 1) {
+      try {
+        id = decodeURIComponent(String(pathParts[watchIndex + 1] || ""));
+      } catch {
+        id = String(pathParts[watchIndex + 1] || "");
+      }
+    }
+  }
+  const normalizedId = String(id || "").trim();
+  if (!normalizedId) return null;
+  const kind = isWatchPath ? "watch" : "feed";
+  const href =
+    kind === "watch"
+      ? `/watch/${encodeURIComponent(normalizedId)}`
+      : `/feed?post=${encodeURIComponent(normalizedId)}`;
   return {
     href,
-    id: String(id).trim(),
+    id: normalizedId,
+    kind,
     match: rawLink,
     raw: text
   };
@@ -4114,14 +4136,15 @@ function useChatController() {
           toUserId: String(targetUserId),
           signal: signalPacket
         });
-      }
-      try {
-        localStorage.setItem(CALL_SIGNAL_LOCAL_KEY, JSON.stringify({
-          fromTab: tabIdRef.current,
-          signal: signalPacket
-        }));
-      } catch {
-        // ignore storage fallback failure
+      } else {
+        try {
+          localStorage.setItem(CALL_SIGNAL_LOCAL_KEY, JSON.stringify({
+            fromTab: tabIdRef.current,
+            signal: signalPacket
+          }));
+        } catch {
+          // ignore storage fallback failure
+        }
       }
     } catch {
       // ignore broadcast fallback issues
@@ -4181,7 +4204,7 @@ function useChatController() {
     const key = String(contactId || "").trim();
     if (!key || key === String(myUserId || "")) return;
     const wsConnected = Boolean(stompRef.current?.connected);
-    if (!wsConnected && !Boolean(isTyping)) {
+    if (!wsConnected && !isTyping) {
       // With REST inbox polling, `typing=true` and `typing=false` can be drained together
       // and cancel each other before UI paints. Let timeout-based hiding handle "stop typing".
       typingSentStateByContactRef.current[key] = false;
@@ -5449,7 +5472,8 @@ function useChatController() {
       ? (parsedTs > 1000000000000 ? parsedTs : parsedTs * 1000)
       : new Date(String(rawTs || "")).getTime();
     const signalTime = Number.isFinite(signalMs) && signalMs > 0 ? signalMs : 0;
-    const signature = `${type}|${fromId}|${signal?.timestamp || ""}|${signal?.sdp || ""}|${signal?.candidate || ""}|${signal?.readUptoMs || ""}|${signal?.receiptId || ""}`;
+    const typingState = type === "typing" ? (signal?.typing !== false ? "1" : "0") : "";
+    const signature = `${type}|${fromId}|${signalTime || 0}|${typingState}|${signal?.sdp || ""}|${signal?.candidate || ""}|${signal?.readUptoMs || ""}|${signal?.receiptId || ""}`;
     if (seenSignalsRef.current.has(signature)) return;
     seenSignalsRef.current.add(signature);
     if (seenSignalsRef.current.size > 1000) {
@@ -7520,6 +7544,7 @@ function useChatController() {
   }, [myUserId, myEmail]);
 
   useEffect(() => {
+    if (typeof BroadcastChannel !== "undefined") return undefined;
     const onStorage = (event) => {
       if (event.key !== CALL_SIGNAL_LOCAL_KEY || !event.newValue) return;
       try {
@@ -8074,16 +8099,6 @@ function useChatController() {
               // ignore malformed payload
             }
           });
-          if (myEmail) {
-            client.subscribe(`/topic/calls/email/${encodeURIComponent(myEmail)}`, (frame) => {
-              try {
-                const payload = JSON.parse(frame.body || "{}");
-                onSignal(payload);
-              } catch {
-                // ignore malformed payload
-              }
-            });
-          }
         };
         client.onStompError = () => {
         };
@@ -9299,6 +9314,11 @@ function useChatController() {
       }
 
       // Prefer direct playback (enables range/streaming). Blob fallback happens later if needed.
+      // For images, do not block auto-advance waiting for load events that may be skipped for cached assets.
+      const looksLikeVideo = inferredKind === "video" || isStoryVideo(candidate);
+      if (!looksLikeVideo) {
+        setStoryViewerLoading(false);
+      }
       setStoryViewerSrc(candidate);
       return true;
     }
@@ -9623,7 +9643,7 @@ function useChatController() {
     }
     openStoryGroup(group, 0);
   };
-  const goNextStory = () => {
+  const goNextStory = useCallback(() => {
     setStoryViewerMuted(true);
     if (storyPlayerPausedRef.current) {
       storyPlayerPausedRef.current = false;
@@ -9635,8 +9655,8 @@ function useChatController() {
       const next = prev + 1;
       return next < storyViewerItems.length ? next : null;
     });
-  };
-  const goPrevStory = () => {
+  }, [storyViewerItems.length]);
+  const goPrevStory = useCallback(() => {
     setStoryViewerMuted(true);
     if (storyPlayerPausedRef.current) {
       storyPlayerPausedRef.current = false;
@@ -9648,7 +9668,7 @@ function useChatController() {
       const next = prev - 1;
       return next >= 0 ? next : prev;
     });
-  };
+  }, []);
 
   const resolvedStoryMediaUrl =
     storyViewerIndex != null && activeStory
@@ -9894,7 +9914,44 @@ function useChatController() {
       if (isSpeechTyping) stopSpeechTyping();
       setInputText("");
       setShowEmojiTray(false);
-      setTimeout(() => composerInputRef.current?.focus(), 0);
+      const shouldBlurComposerForMobile =
+        isConversationRouteRef.current &&
+        typeof window !== "undefined" &&
+        typeof window.matchMedia === "function" &&
+        window.matchMedia("(max-width: 900px)").matches;
+
+      if (shouldBlurComposerForMobile) {
+        const blurComposer = () => {
+          try {
+            composerInputRef.current?.blur?.();
+          } catch {
+            // ignore blur failures
+          }
+          if (typeof document !== "undefined") {
+            try {
+              const activeEl = document.activeElement;
+              if (activeEl && typeof activeEl.blur === "function") activeEl.blur();
+            } catch {
+              // ignore active element blur failures
+            }
+          }
+          if (typeof window !== "undefined") {
+            try {
+              window.scrollTo(0, 0);
+            } catch {
+              // ignore scroll reset failures
+            }
+          }
+        };
+
+        if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
+          window.requestAnimationFrame(blurComposer);
+        } else {
+          blurComposer();
+        }
+      } else {
+        setTimeout(() => composerInputRef.current?.focus(), 0);
+      }
     }
 
     try {
@@ -12569,11 +12626,46 @@ function useChatController() {
     });
   };
 
+  const resolveBubbleMenuPosition = (clientX, clientY, item) => {
+    const fallbackX = Number.isFinite(Number(clientX)) ? Number(clientX) : 120;
+    const fallbackY = Number.isFinite(Number(clientY)) ? Number(clientY) : 120;
+    if (typeof window === "undefined") {
+      return { x: fallbackX, y: fallbackY };
+    }
+
+    const margin = 10;
+    const viewportWidth = Number(window.innerWidth || 0);
+    const viewportHeight = Number(window.innerHeight || 0);
+    const estimatedWidth = 220;
+    const hasDownloadAction = item?.raw?.mediaUrl || item?.raw?.audioUrl;
+    const hasDeleteEveryoneAction = item?.kind === "message" && item?.mine;
+    const actionCount = 3 + (hasDownloadAction ? 1 : 0) + (hasDeleteEveryoneAction ? 1 : 0);
+    const estimatedHeight = 10 + actionCount * 42;
+
+    const maxX = Math.max(margin, viewportWidth - estimatedWidth - margin);
+    const maxY = Math.max(margin, viewportHeight - estimatedHeight - margin);
+
+    const preferX =
+      fallbackX + estimatedWidth > viewportWidth - margin
+        ? fallbackX - estimatedWidth
+        : fallbackX;
+    const preferY =
+      fallbackY + estimatedHeight > viewportHeight - margin
+        ? fallbackY - estimatedHeight
+        : fallbackY;
+
+    return {
+      x: Math.min(maxX, Math.max(margin, preferX)),
+      y: Math.min(maxY, Math.max(margin, preferY))
+    };
+  };
+
   const openBubbleMenu = (event, item) => {
     event.preventDefault();
+    const pos = resolveBubbleMenuPosition(event?.clientX, event?.clientY, item);
     setBubbleMenu({
-      x: event.clientX || 120,
-      y: event.clientY || 120,
+      x: pos.x,
+      y: pos.y,
       item
     });
   };
@@ -12584,9 +12676,10 @@ function useChatController() {
     if (typeof event?.button === "number" && event.button !== 0) return;
     const target = event?.target;
     if (target?.closest?.("a, button, input, textarea, select, audio, video, img")) return;
+    const pos = resolveBubbleMenuPosition(event?.clientX, event?.clientY, item);
     setBubbleMenu({
-      x: event.clientX || 120,
-      y: event.clientY || 120,
+      x: pos.x,
+      y: pos.y,
       item
     });
   };
@@ -12597,7 +12690,8 @@ function useChatController() {
     touchStartPointRef.current = { x: t.clientX, y: t.clientY };
     touchSwipeReplyRef.current = { triggered: false };
     longPressTimerRef.current = setTimeout(() => {
-      setBubbleMenu({ x: t.clientX, y: t.clientY, item });
+      const pos = resolveBubbleMenuPosition(t.clientX, t.clientY, item);
+      setBubbleMenu({ x: pos.x, y: pos.y, item });
     }, 600);
   };
 

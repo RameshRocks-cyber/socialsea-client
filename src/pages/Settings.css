@@ -33,6 +33,25 @@ body.ss-theme-white .settings-top {
     0 1px 0 rgba(255, 255, 255, 0.7) inset;
 }
 
+body.ss-theme-white .settings-option-search-wrap {
+  background: #ffffff;
+  border-color: rgba(60, 80, 110, 0.18);
+}
+
+body.ss-theme-white .settings-option-search-icon {
+  color: #5f6f86;
+}
+
+body.ss-theme-white .settings-option-search-input::placeholder {
+  color: #8a98aa;
+}
+
+body.ss-theme-white .settings-option-search-clear {
+  background: #f1f5fb;
+  color: #1c2a3d;
+  border-color: rgba(96, 118, 148, 0.3);
+}
+
 body.ss-theme-white .settings-section,
 body.ss-theme-white .settings-panel {
   background: #ffffff !important;
@@ -114,6 +133,64 @@ body.ss-theme-white .settings-page .settings-theme-mode button.active:focus-visi
   margin: 0 auto;
   display: grid;
   gap: 8px;
+}
+
+.settings-option-search-wrap {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--ss-card-border);
+  border-radius: 999px;
+  padding: 6px 8px 6px 12px;
+  background: linear-gradient(145deg, rgba(14, 14, 14, 0.94), rgba(7, 7, 7, 0.94));
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.24);
+}
+
+.settings-option-search-icon {
+  color: #b7b7b7;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.settings-option-search-input {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--ss-text);
+  font-size: 0.9rem;
+  outline: none;
+}
+
+.settings-option-search-input::placeholder {
+  color: #8f8f8f;
+}
+
+.settings-option-search-clear {
+  border: 1px solid var(--ss-card-border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--ss-text);
+  font-size: 0.76rem;
+  font-weight: 700;
+  padding: 5px 10px;
+  cursor: pointer;
+  transition: filter 0.18s ease;
+}
+
+.settings-option-search-clear:hover {
+  filter: brightness(1.08);
+}
+
+.settings-search-empty {
+  margin: 0;
+  color: var(--ss-muted);
+  font-size: 0.82rem;
+  padding: 8px 12px;
+}
+
+.settings-row-search-result:hover {
+  transform: none;
 }
 
 .settings-top {

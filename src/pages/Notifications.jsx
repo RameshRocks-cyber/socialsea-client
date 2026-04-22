@@ -12,6 +12,8 @@ const READ_NOTIFICATIONS_KEY = "socialsea_read_notifications_v1";
 const NOTIFICATIONS_CACHE_KEY = "socialsea_notifications_cache_v1";
 const NOTIFICATIONS_CACHE_TTL_MS = 2 * 60 * 1000;
 const isServerNotificationId = (value) => /^\d+$/.test(String(value || "").trim());
+const POST_ID_MARKER_REGEX = /\[postid\s*:\s*(\d+)\]/i;
+const POST_ID_MARKER_CLEAN_REGEX = /\s*\[postid\s*:\s*\d+\]\s*/gi;
 
 const readFollowingCache = () => {
   try {
@@ -147,6 +149,143 @@ const normalizeLiveUrl = (rawUrl, fallbackAlertId = "") => {
 
 const normalizeKey = (value) => String(value || "").trim().toLowerCase();
 
+const stripPostMarker = (message) =>
+  String(message || "")
+    .replace(POST_ID_MARKER_CLEAN_REGEX, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+const isLikelyPostRoute = (pathname, search = "") => {
+  const path = String(pathname || "").toLowerCase();
+  if (!path) return false;
+  if (path.startsWith("/feed")) return true;
+  if (path.startsWith("/reels")) return true;
+  if (path.startsWith("/watch/")) return true;
+  if (/\/(?:post|posts)\/\d+(?:\/|$)/i.test(path)) return true;
+  const params = new URLSearchParams(String(search || ""));
+  const queryPostId = String(params.get("post") || params.get("postId") || "").trim();
+  return /^\d+$/.test(queryPostId);
+};
+
+const extractPostRoutePath = (value) => {
+  if (value == null) return "";
+  const raw = String(value).trim();
+  if (!raw) return "";
+
+  const base = typeof window !== "undefined" ? window.location.origin : "http://localhost";
+  const toPath = (parsed) => {
+    const pathname = String(parsed?.pathname || "").trim();
+    const search = String(parsed?.search || "");
+    const hash = String(parsed?.hash || "");
+    if (!isLikelyPostRoute(pathname, search)) return "";
+    if (!pathname) return "";
+    const normalizedPath = pathname.startsWith("/") ? pathname : `/${pathname.replace(/^\/+/, "")}`;
+    return `${normalizedPath}${search}${hash}`;
+  };
+
+  try {
+    const parsed = new URL(raw, base);
+    const path = toPath(parsed);
+    if (path) return path;
+  } catch {
+    // keep fallback handling below
+  }
+
+  if (/^(feed|reels)\?/i.test(raw)) {
+    try {
+      const parsed = new URL(`/${raw.replace(/^\/+/, "")}`, base);
+      return toPath(parsed);
+    } catch {
+      // ignore malformed relative values
+    }
+  }
+
+  return "";
+};
+
+const extractPostIdFromValue = (value) => {
+  if (value == null) return "";
+  const text = String(value).trim();
+  if (!text) return "";
+  if (/^\d+$/.test(text)) return text;
+
+  const markerMatch = text.match(POST_ID_MARKER_REGEX);
+  if (markerMatch?.[1]) return markerMatch[1];
+
+  try {
+    const base = typeof window !== "undefined" ? window.location.origin : "http://localhost";
+    const parsed = new URL(text, base);
+    const postParam = String(parsed.searchParams.get("post") || "").trim();
+    if (/^\d+$/.test(postParam)) return postParam;
+    const pathMatch = parsed.pathname.match(/\/(?:feed|post|posts)\/(\d+)(?:\/|$)/i);
+    if (pathMatch?.[1]) return pathMatch[1];
+  } catch {
+    // keep fallback regex handling below
+  }
+
+  const fallbackMatch = text.match(/(?:\?|&|\/)post(?:id)?(?:=|\/)(\d+)/i);
+  if (fallbackMatch?.[1]) return fallbackMatch[1];
+
+  return "";
+};
+
+const resolveNotificationPostId = (item, message) => {
+  const directCandidates = [
+    item?.postId,
+    item?.postID,
+    item?.post_id,
+    item?.targetPostId,
+    item?.target?.postId,
+    item?.payload?.postId,
+    item?.post?.id
+  ];
+
+  for (const candidate of directCandidates) {
+    const id = extractPostIdFromValue(candidate);
+    if (id) return id;
+  }
+
+  const urlCandidates = [item?.postUrl, item?.url, item?.targetUrl, item?.link];
+  for (const candidate of urlCandidates) {
+    const id = extractPostIdFromValue(candidate);
+    if (id) return id;
+  }
+
+  return extractPostIdFromValue(message);
+};
+
+const resolveNotificationTargetPath = (item, message) => {
+  const routeCandidates = [
+    item?.postUrl,
+    item?.postURL,
+    item?.postLink,
+    item?.target?.postUrl,
+    item?.target?.url,
+    item?.payload?.postUrl,
+    item?.payload?.url,
+    item?.url,
+    item?.targetUrl,
+    item?.link
+  ];
+
+  for (const candidate of routeCandidates) {
+    const route = extractPostRoutePath(candidate);
+    if (route) return route;
+  }
+
+  const postId = resolveNotificationPostId(item, message);
+  if (postId) return `/feed?post=${encodeURIComponent(postId)}`;
+
+  const messageText = String(message || "");
+  const inlineCandidates = messageText.match(/(?:https?:\/\/\S+|\/(?:feed|reels|watch|posts?)\/\S+|(?:feed|reels)\?[^\s]+)/gi) || [];
+  for (const candidate of inlineCandidates) {
+    const route = extractPostRoutePath(candidate.replace(/[),.;]+$/g, ""));
+    if (route) return route;
+  }
+
+  return "";
+};
+
 const mapFollowRequestToNotification = (request) => {
   const sender = request?.sender || {};
   const senderName = sender?.name || sender?.email || "User";
@@ -216,7 +355,8 @@ export default function Notifications() {
 
   const normalizeMessage = (message) => {
     if (!message) return "";
-    return String(message).replace(EMAIL_REGEX, (email) => emailToName(email));
+    const cleaned = stripPostMarker(message);
+    return cleaned.replace(EMAIL_REGEX, (email) => emailToName(email));
   };
 
   const deriveActor = (message) => {
@@ -577,17 +717,41 @@ export default function Notifications() {
           const canRespondToRequest = Boolean(followRequestId) && (!followRequestStatus || followRequestStatus === "PENDING");
           const requestBusy = followRequestId ? !!requestBusyById[String(followRequestId)] : false;
           const typeLabel = isFollowRequest ? "Request" : label;
+          const postTargetPath = !isFollowRequest ? resolveNotificationTargetPath(n, n?.message) : "";
+          const canOpenPostFromNotification = Boolean(postTargetPath);
+
+          const handleCardClick = () => {
+            if (!canOpenPostFromNotification) return;
+            if (idText) {
+              markReadLocal(idText);
+              void markReadOnServer(idText);
+            }
+            navigate(postTargetPath);
+          };
 
           return (
             <article
               key={n.id}
-              className={`notify-card ${isRead ? "is-read" : "is-unread"}`}
+              className={`notify-card ${isRead ? "is-read" : "is-unread"} ${canOpenPostFromNotification ? "is-clickable" : ""}`}
               onMouseEnter={() => markReadLocal(n?.id)}
+              onClick={handleCardClick}
+              role={canOpenPostFromNotification ? "button" : undefined}
+              tabIndex={canOpenPostFromNotification ? 0 : undefined}
+              onKeyDown={(event) => {
+                if (!canOpenPostFromNotification) return;
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  handleCardClick();
+                }
+              }}
             >
               <button
                 type="button"
                 className={`notify-avatar ${tone} notify-avatar-btn`}
-                onClick={() => openActorProfile(actorIdentifier)}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  openActorProfile(actorIdentifier);
+                }}
                 aria-label={`Open ${actor} profile`}
               >
                 {actorAvatar ? (
@@ -598,14 +762,24 @@ export default function Notifications() {
               </button>
               <div className="notify-main">
                 <div className="notify-row">
-                  <button type="button" className="notify-actor-btn" onClick={() => openActorProfile(actorIdentifier)}>
+                  <button
+                    type="button"
+                    className="notify-actor-btn"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      openActorProfile(actorIdentifier);
+                    }}
+                  >
                     <strong className="notify-actor">{actor}</strong>
                   </button>
                   {canFollow ? (
                     <button
                       type="button"
                       className={`notify-type ${tone} notify-follow-btn ${following ? "is-following" : ""}`}
-                      onClick={() => handleFollow(n)}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        handleFollow(n);
+                      }}
                       disabled={followBusy || following}
                     >
                       <Icon />
@@ -626,7 +800,10 @@ export default function Notifications() {
                         <button
                           type="button"
                           className="notify-request-btn accept"
-                          onClick={() => acceptFollowRequest(followRequestId)}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            acceptFollowRequest(followRequestId);
+                          }}
                           disabled={requestBusy}
                         >
                           <FiCheck /> {requestBusy ? "..." : "Accept"}
@@ -634,7 +811,10 @@ export default function Notifications() {
                         <button
                           type="button"
                           className="notify-request-btn reject"
-                          onClick={() => rejectFollowRequest(followRequestId)}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            rejectFollowRequest(followRequestId);
+                          }}
                           disabled={requestBusy}
                         >
                           <FiX /> {requestBusy ? "..." : "Reject"}
@@ -644,7 +824,10 @@ export default function Notifications() {
                       <button
                         type="button"
                         className="notify-request-btn review"
-                        onClick={() => navigate("/follow-requests")}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          navigate("/follow-requests");
+                        }}
                       >
                         <FiUserPlus /> Review Requests
                       </button>
@@ -654,12 +837,22 @@ export default function Notifications() {
                 {kind === "emergency" && (
                   <div className="notify-emergency-actions">
                     {emergency.liveUrl && (
-                      <a className="notify-emergency-btn live" href={emergency.liveUrl}>
+                      <a
+                        className="notify-emergency-btn live"
+                        href={emergency.liveUrl}
+                        onClick={(event) => event.stopPropagation()}
+                      >
                         <FiVideo /> Open Live
                       </a>
                     )}
                     {emergencyNav && (
-                      <a className="notify-emergency-btn navigate" href={emergencyNav} target="_blank" rel="noreferrer">
+                      <a
+                        className="notify-emergency-btn navigate"
+                        href={emergencyNav}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={(event) => event.stopPropagation()}
+                      >
                         <FiMapPin /> Navigate
                       </a>
                     )}
@@ -668,12 +861,24 @@ export default function Notifications() {
                 {kind === "traffic" && (trafficRoute || trafficSpot) && (
                   <div className="notify-emergency-actions">
                     {trafficRoute && (
-                      <a className="notify-emergency-btn navigate" href={trafficRoute} target="_blank" rel="noreferrer">
+                      <a
+                        className="notify-emergency-btn navigate"
+                        href={trafficRoute}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={(event) => event.stopPropagation()}
+                      >
                         <FiMapPin /> Route
                       </a>
                     )}
                     {trafficSpot && trafficSpot !== trafficRoute && (
-                      <a className="notify-emergency-btn live" href={trafficSpot} target="_blank" rel="noreferrer">
+                      <a
+                        className="notify-emergency-btn live"
+                        href={trafficSpot}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={(event) => event.stopPropagation()}
+                      >
                         <FiMapPin /> Spot
                       </a>
                     )}

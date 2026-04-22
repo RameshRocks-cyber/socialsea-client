@@ -6,16 +6,216 @@ import api from "../api/axios";
 import { getApiBaseUrl, toApiUrl } from "../api/baseUrl";
 import { recordCommentActivity, recordRepostActivity, recordSearchActivity } from "../services/activityStore";
 import { readLiveBroadcast, subscribeLiveBroadcast } from "../utils/liveBroadcast";
+import { buildProfilePath } from "../utils/profileRoute";
+import { classifyVideoBucket, mediaTypeForPost, SHORT_VIDEO_SECONDS } from "../utils/videoFeedClassifier";
 import { CONTENT_TYPE_OPTIONS } from "../pages/contentPrefs";
 import "./Feed.css";
 
-const LONG_VIDEO_SECONDS = 90;
 const CHAT_SHARE_DRAFT_KEY = "socialsea_chat_share_draft_v1";
 const POST_GENRE_MAP_KEY = "socialsea_post_genre_map_v1";
 const FEED_CACHE_KEY = "socialsea_feed_cache_v1";
 const LIVE_PREVIEW_FRAME_KEY = "socialsea_live_preview_frame_v1";
 const FEED_YT_RAIL_ITEMS = ["Home", "Trending", "Subscriptions", "History", "Playlists", "Watch Later"];
-const FEED_CONTENT_TYPES = [{ value: "all", label: "All" }, ...CONTENT_TYPE_OPTIONS];
+const FEED_FILTER_PRIORITY_ORDER = [
+  "general",
+  "study",
+  "movies",
+  "gaming",
+  "trending",
+  "entertainment",
+  "social",
+  "news"
+];
+const FEED_FILTER_LABEL_OVERRIDES = {
+  gaming: "Games"
+};
+const FEED_CONTENT_TYPES = (() => {
+  const byValue = new Map(
+    CONTENT_TYPE_OPTIONS.map((option) => {
+      const value = String(option?.value || "").trim().toLowerCase();
+      const label = FEED_FILTER_LABEL_OVERRIDES[value] || option?.label || value;
+      return [value, { value, label }];
+    })
+  );
+
+  // Ensure these choices are always available and visible near the top.
+  if (!byValue.has("movies")) byValue.set("movies", { value: "movies", label: "Movies" });
+  if (!byValue.has("gaming")) byValue.set("gaming", { value: "gaming", label: "Games" });
+  if (!byValue.has("trending")) byValue.set("trending", { value: "trending", label: "Trending" });
+
+  const ordered = [];
+  FEED_FILTER_PRIORITY_ORDER.forEach((value) => {
+    const option = byValue.get(value);
+    if (!option) return;
+    ordered.push(option);
+    byValue.delete(value);
+  });
+
+  ordered.push(...Array.from(byValue.values()));
+  return [{ value: "all", label: "All" }, ...ordered];
+})();
+const CONTENT_SUB_FILTERS = {
+  study: {
+    ariaLabel: "Study subjects",
+    options: [
+      { value: "all", label: "All" },
+      { value: "biology", label: "Biology" },
+      { value: "zoology", label: "Zoology" },
+      { value: "botany", label: "Botany" },
+      { value: "physics", label: "Physics" },
+      { value: "chemistry", label: "Chemistry" },
+      { value: "mathematics", label: "Mathematics" },
+      { value: "computer science", label: "Computer Science" },
+      { value: "history", label: "History" },
+      { value: "geography", label: "Geography" },
+      { value: "economics", label: "Economics" }
+    ],
+    keywords: {
+      biology: ["biology", "biological", "cell", "genetics", "anatomy", "physiology"],
+      zoology: ["zoology", "zology", "zoological", "animal", "wildlife", "fauna", "vertebrate", "invertebrate"],
+      botany: ["botany", "botanical", "plant", "flora", "photosynthesis", "plant cell"],
+      physics: ["physics", "mechanics", "thermodynamics", "optics", "electromagnetism", "quantum"],
+      chemistry: ["chemistry", "chemical", "organic chemistry", "inorganic chemistry", "reaction", "molecule"],
+      mathematics: ["mathematics", "math", "algebra", "geometry", "calculus", "trigonometry", "statistics"],
+      "computer science": ["computer science", "computer", "programming", "coding", "algorithm", "data structures", "software"],
+      history: ["history", "historical", "ancient", "medieval", "civilization", "war history"],
+      geography: ["geography", "geographical", "maps", "climate", "earth science", "landforms"],
+      economics: ["economics", "economy", "microeconomics", "macroeconomics", "finance", "market"]
+    }
+  },
+  movies: {
+    ariaLabel: "Movie topics",
+    options: [
+      { value: "all", label: "All" },
+      { value: "hollywood", label: "Hollywood" },
+      { value: "bollywood", label: "Bollywood" },
+      { value: "tollywood", label: "Tollywood" },
+      { value: "kollywood", label: "Kollywood" },
+      { value: "mollywood", label: "Mollywood" },
+      { value: "sandalwood", label: "Sandalwood" },
+      { value: "marathi cinema", label: "Marathi Cinema" },
+      { value: "bengali cinema", label: "Bengali Cinema" },
+      { value: "bhojpuri cinema", label: "Bhojpuri Cinema" },
+      { value: "korean cinema", label: "Korean Cinema" },
+      { value: "japanese cinema", label: "Japanese Cinema" },
+      { value: "chinese cinema", label: "Chinese Cinema" },
+      { value: "anime movies", label: "Anime Movies" },
+      { value: "action", label: "Action" },
+      { value: "comedy", label: "Comedy" },
+      { value: "thriller", label: "Thriller" },
+      { value: "horror", label: "Horror" },
+      { value: "sci fi", label: "Sci-Fi" },
+      { value: "fantasy", label: "Fantasy" },
+      { value: "romance", label: "Romance" },
+      { value: "drama", label: "Drama" },
+      { value: "documentary", label: "Documentary" },
+      { value: "animation", label: "Animation" },
+      { value: "biopic", label: "Biopic" },
+      { value: "superhero", label: "Superhero" },
+      { value: "marvel", label: "Marvel" },
+      { value: "dc", label: "DC" },
+      { value: "hbo", label: "HBO" },
+      { value: "max", label: "MAX" },
+      { value: "fox", label: "Fox" },
+      { value: "netflix", label: "Netflix" },
+      { value: "hotstar", label: "Hotstar" },
+      { value: "disney", label: "Disney+" },
+      { value: "prime video", label: "Prime Video" },
+      { value: "apple tv plus", label: "Apple TV+" },
+      { value: "hulu", label: "Hulu" },
+      { value: "zee5", label: "ZEE5" },
+      { value: "sonyliv", label: "SonyLIV" },
+      { value: "warner bros", label: "Warner Bros" },
+      { value: "universal", label: "Universal" },
+      { value: "paramount", label: "Paramount" },
+      { value: "sony pictures", label: "Sony Pictures" },
+      { value: "a24", label: "A24" }
+    ],
+    keywords: {
+      hollywood: ["hollywood", "american cinema", "warner bros", "universal pictures", "paramount", "sony pictures"],
+      bollywood: ["bollywood", "hindi cinema", "hindi movie"],
+      tollywood: ["tollywood", "telugu cinema", "telugu movie"],
+      kollywood: ["kollywood", "tamil cinema", "tamil movie"],
+      mollywood: ["mollywood", "malayalam cinema", "malayalam movie"],
+      sandalwood: ["sandalwood", "kannada cinema", "kannada movie"],
+      "marathi cinema": ["marathi cinema", "marathi movie"],
+      "bengali cinema": ["bengali cinema", "bengali movie", "tollygunge"],
+      "bhojpuri cinema": ["bhojpuri cinema", "bhojpuri movie"],
+      "korean cinema": ["korean cinema", "k-movie", "korean movie"],
+      "japanese cinema": ["japanese cinema", "japanese movie", "j cinema"],
+      "chinese cinema": ["chinese cinema", "chinese movie", "mandarin movie"],
+      "anime movies": ["anime movie", "anime film", "studio ghibli", "anime cinema"],
+      action: ["action", "fight scene", "stunt", "action thriller"],
+      comedy: ["comedy", "funny", "humor", "comic"],
+      thriller: ["thriller", "suspense", "mystery thriller", "crime thriller"],
+      horror: ["horror", "scary", "haunted", "supernatural horror"],
+      "sci fi": ["sci-fi", "science fiction", "future tech", "space movie"],
+      fantasy: ["fantasy", "magic", "mythical", "epic fantasy"],
+      romance: ["romance", "romantic", "love story", "rom-com"],
+      drama: ["drama", "emotional", "family drama", "period drama"],
+      documentary: ["documentary", "docu", "true story", "docuseries"],
+      animation: ["animation", "animated", "cartoon movie", "cg movie"],
+      biopic: ["biopic", "biography", "based on true life"],
+      superhero: ["superhero", "super hero", "comic book movie"],
+      marvel: ["marvel", "mcu", "avengers", "marvel studios"],
+      dc: ["dc", "dc comics", "dceu", "justice league", "batman", "superman"],
+      hbo: ["hbo", "hbo original", "hbo series"],
+      max: ["hbo max", "max original", "max series", "warner bros discovery"],
+      fox: ["fox", "20th century fox", "fox studios", "fx"],
+      netflix: ["netflix", "netflix original", "netflix series"],
+      hotstar: ["hotstar", "jiohotstar", "disney hotstar", "star network"],
+      disney: ["disney+", "disney plus", "disney", "pixar", "marvel studios"],
+      "prime video": ["prime video", "amazon prime", "amazon prime video", "prime original"],
+      "apple tv plus": ["apple tv+", "apple tv plus", "apple original", "apple studios"],
+      hulu: ["hulu", "hulu original"],
+      zee5: ["zee5", "zee 5", "zee original"],
+      sonyliv: ["sonyliv", "sony liv", "sony original"],
+      "warner bros": ["warner bros", "warner brothers", "wb pictures"],
+      universal: ["universal", "universal pictures", "illumination"],
+      paramount: ["paramount", "paramount pictures", "paramount+"],
+      "sony pictures": ["sony pictures", "columbia pictures", "screen gems"],
+      a24: ["a24", "a24 films", "a24 studio"]
+    }
+  },
+  gaming: {
+    ariaLabel: "Physical game topics",
+    options: [
+      { value: "all", label: "All" },
+      { value: "cricket", label: "Cricket" },
+      { value: "football", label: "Football" },
+      { value: "badminton", label: "Badminton" },
+      { value: "volleyball", label: "Volleyball" },
+      { value: "basketball", label: "Basketball" },
+      { value: "kabaddi", label: "Kabaddi" },
+      { value: "tennis", label: "Tennis" },
+      { value: "hockey", label: "Hockey" },
+      { value: "athletics", label: "Athletics" },
+      { value: "wrestling", label: "Wrestling" },
+      { value: "boxing", label: "Boxing" },
+      { value: "table tennis", label: "Table Tennis" }
+    ],
+    keywords: {
+      cricket: ["cricket", "ipl", "test match", "odi", "t20", "batsman", "bowler"],
+      football: ["football", "soccer", "premier league", "fifa", "uefa", "goal", "striker"],
+      badminton: ["badminton", "shuttle", "shuttlecock", "smash", "bwf"],
+      volleyball: ["volleyball", "spike", "block", "fivb"],
+      basketball: ["basketball", "nba", "dunk", "hoops", "three pointer"],
+      kabaddi: ["kabaddi", "pro kabaddi", "raid", "defender"],
+      tennis: ["tennis", "atp", "wta", "grand slam", "serve", "rally"],
+      hockey: ["hockey", "field hockey", "hockey india", "stick", "goalkeeper"],
+      athletics: ["athletics", "track and field", "sprint", "marathon", "relay", "javelin"],
+      wrestling: ["wrestling", "freestyle wrestling", "greco", "mat wrestling"],
+      boxing: ["boxing", "boxer", "ring", "knockout", "heavyweight"],
+      "table tennis": ["table tennis", "ping pong", "tt", "paddle"]
+    }
+  }
+};
+const createDefaultLongMenuPlacement = () => ({
+  postId: null,
+  vertical: "down",
+  horizontal: "right",
+  maxHeight: 320,
+});
 const FEED_CATEGORY_KEYWORDS = {
   music: ["music", "song", "audio", "album", "lyrics", "singer", "melody"],
   mixes: ["mix", "mixes", "remix", "mashup", "medley", "dj"],
@@ -23,7 +223,7 @@ const FEED_CATEGORY_KEYWORDS = {
   live: ["live", "livestream", "live stream", "streaming", "stream"],
   comedy: ["comedy", "funny", "joke", "memes", "laugh", "standup"],
   movies: ["movie", "movies", "cinema", "film", "trailer", "scene"],
-  gaming: ["gaming", "game", "gameplay", "esports", "pubg", "freefire", "bgmi", "minecraft", "valorant"],
+  gaming: ["games", "physical game", "outdoor game", "sport", "sports", "cricket", "football", "badminton", "volleyball", "basketball", "kabaddi", "tennis", "hockey", "athletics", "wrestling", "boxing"],
   trending: ["trending", "viral", "popular", "hot", "trend"]
 };
 
@@ -97,6 +297,20 @@ const categoryMatchesPost = (post, selectedCategory, localGenreMap) => {
   return keywords.some((word) => searchable.includes(word));
 };
 
+const contentSubFilterMatchesPost = (post, selectedCategory, selectedSubFilter, localGenreMap) => {
+  const category = normalizeGenre(selectedCategory);
+  const config = CONTENT_SUB_FILTERS[category];
+  if (!config) return true;
+  const subFilter = normalizeGenre(selectedSubFilter);
+  if (!subFilter || subFilter === "all") return true;
+  const tokens = collectGenreTokens(post, localGenreMap);
+  if (tokens.has(subFilter)) return true;
+  const keywords = config.keywords?.[subFilter] || [];
+  if (!keywords.length) return false;
+  const searchable = `${post?.description || ""} ${post?.content || ""} ${post?.title || ""}`.toLowerCase();
+  return keywords.some((word) => searchable.includes(word));
+};
+
 const readCachedFeedPosts = () => {
   try {
     const raw = localStorage.getItem(FEED_CACHE_KEY);
@@ -108,13 +322,128 @@ const readCachedFeedPosts = () => {
   }
 };
 
+const FEED_PERSONALIZATION_VERSION = 1;
+const FEED_PERSONALIZATION_KEY_PREFIX = "socialsea_feed_personalization_v1";
+const FEED_SIGNAL_WEIGHTS = {
+  view: 1.0,
+  watch: 1.4,
+  like: 3.5,
+  share: 1.6,
+  comment: 2.2,
+};
+const FEED_WATCH_TIME_CHUNK_SECONDS = 12;
+const FEED_WATCH_TIME_CHUNK_WEIGHT = 0.32;
+const FEED_WATCH_TIME_MAX_CHUNKS_PER_POST = 30;
+const FEED_WATCH_TIME_MAX_STEP_SECONDS = 3;
+const FEED_WATCH_PROGRESS_MILESTONES = [
+  { ratio: 0.35, weight: 0.7 },
+  { ratio: 0.6, weight: 1.05 },
+  { ratio: 0.85, weight: 1.45 },
+  { ratio: 0.98, weight: 2.1 },
+];
+const PERSONALIZATION_MAX_TOKENS = 260;
+const PERSONALIZATION_MAX_POSTS = 320;
+
+const createDefaultPersonalizationState = (userKey = "guest") => ({
+  version: FEED_PERSONALIZATION_VERSION,
+  userKey,
+  updatedAt: 0,
+  tokenWeights: {},
+  postWeights: {},
+});
+
+const resolveFeedUserKey = () => {
+  try {
+    const userId =
+      localStorage.getItem("userId") ||
+      sessionStorage.getItem("userId") ||
+      localStorage.getItem("username") ||
+      sessionStorage.getItem("username");
+    const normalized = String(userId || "").trim();
+    return normalized || "guest";
+  } catch {
+    return "guest";
+  }
+};
+
+const personalizationStorageKeyForUser = (userKey) =>
+  `${FEED_PERSONALIZATION_KEY_PREFIX}:${String(userKey || "guest").trim() || "guest"}`;
+
+const trimWeightMap = (input, limit) => {
+  const entries = Object.entries(input || {})
+    .map(([key, value]) => [String(key || "").trim(), Number(value)])
+    .filter(([key, value]) => key && Number.isFinite(value) && Math.abs(value) > 0.0001);
+  if (entries.length <= limit) {
+    return Object.fromEntries(entries);
+  }
+  entries.sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
+  return Object.fromEntries(entries.slice(0, limit));
+};
+
+const readFeedPersonalizationState = (userKey) => {
+  const fallback = createDefaultPersonalizationState(userKey);
+  try {
+    const raw = localStorage.getItem(personalizationStorageKeyForUser(userKey));
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (!parsed || typeof parsed !== "object") return fallback;
+    return {
+      version: FEED_PERSONALIZATION_VERSION,
+      userKey,
+      updatedAt: Number(parsed.updatedAt) || 0,
+      tokenWeights: trimWeightMap(parsed.tokenWeights || {}, PERSONALIZATION_MAX_TOKENS),
+      postWeights: trimWeightMap(parsed.postWeights || {}, PERSONALIZATION_MAX_POSTS),
+    };
+  } catch {
+    return fallback;
+  }
+};
+
+const persistFeedPersonalizationState = (userKey, state) => {
+  try {
+    const payload = {
+      version: FEED_PERSONALIZATION_VERSION,
+      userKey: String(userKey || "guest"),
+      updatedAt: Number(state?.updatedAt) || Date.now(),
+      tokenWeights: trimWeightMap(state?.tokenWeights || {}, PERSONALIZATION_MAX_TOKENS),
+      postWeights: trimWeightMap(state?.postWeights || {}, PERSONALIZATION_MAX_POSTS),
+    };
+    localStorage.setItem(personalizationStorageKeyForUser(userKey), JSON.stringify(payload));
+  } catch {
+    // ignore storage errors
+  }
+};
+
+const collectPersonalizationTokens = (post, localGenreMap) => {
+  const tokens = collectGenreTokens(post, localGenreMap);
+  const mediaType = String(mediaTypeForPost(post) || "").trim().toLowerCase();
+  if (mediaType) tokens.add(mediaType);
+
+  const searchable = `${post?.description || ""} ${post?.content || ""} ${post?.title || ""}`.toLowerCase();
+  Object.entries(CONTENT_SUB_FILTERS).forEach(([category, config]) => {
+    const categoryToken = normalizeGenre(category);
+    if (categoryToken) tokens.add(categoryToken);
+    Object.entries(config?.keywords || {}).forEach(([subFilter, keywords]) => {
+      if (!Array.isArray(keywords) || !keywords.length) return;
+      if (keywords.some((word) => searchable.includes(String(word || "").toLowerCase()))) {
+        const subToken = normalizeGenre(subFilter);
+        if (subToken) tokens.add(subToken);
+      }
+    });
+  });
+
+  return Array.from(tokens).filter(Boolean);
+};
+
 export default function Feed() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const feedUserKey = useMemo(() => resolveFeedUserKey(), []);
   const [feedMode, setFeedMode] = useState("long");
   const [feedMenuOpen, setFeedMenuOpen] = useState(false);
   const [contentTypeFilter, setContentTypeFilter] = useState("all");
+  const [contentSubFilter, setContentSubFilter] = useState("all");
   const [posts, setPosts] = useState(() => readCachedFeedPosts());
+  const [personalizationState, setPersonalizationState] = useState(() => readFeedPersonalizationState(feedUserKey));
   const [liveBroadcast, setLiveBroadcast] = useState(() => readLiveBroadcast());
   const [livePreviewFrame, setLivePreviewFrame] = useState("");
   const [likeCounts, setLikeCounts] = useState({});
@@ -132,11 +461,15 @@ export default function Feed() {
   const [videoDurationByPost, setVideoDurationByPost] = useState({});
   const [profilePicByOwner, setProfilePicByOwner] = useState({});
   const [mutedByPost, setMutedByPost] = useState({});
+  const [followStateByOwner, setFollowStateByOwner] = useState({});
+  const [followBusyByOwner, setFollowBusyByOwner] = useState({});
   const [menuOpenPostId, setMenuOpenPostId] = useState(null);
+  const [menuPlacement, setMenuPlacement] = useState(() => createDefaultLongMenuPlacement());
   const [hiddenPostIds, setHiddenPostIds] = useState({});
   const [blockedOwnerKeys, setBlockedOwnerKeys] = useState({});
   const mediaClickTimerByPostRef = useRef({});
   const viewerVideoRefs = useRef({});
+  const watchProgressByPostRef = useRef({});
   const retryTimerRef = useRef(0);
   const retryCountRef = useRef(0);
   const inFlightLoadRef = useRef(false);
@@ -151,6 +484,10 @@ export default function Feed() {
   const PLAYLIST_KEY = "playlistPostIds";
   const QUEUE_KEY = "postQueueIds";
   const PLAY_NEXT_KEY = "playNextPostId";
+
+  useEffect(() => {
+    persistFeedPersonalizationState(feedUserKey, personalizationState);
+  }, [feedUserKey, personalizationState]);
 
   useEffect(() => {
     postsCountRef.current = Array.isArray(posts) ? posts.length : 0;
@@ -222,6 +559,18 @@ export default function Feed() {
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, [feedMenuOpen]);
+
+  useEffect(() => {
+    const category = normalizeGenre(contentTypeFilter);
+    const config = CONTENT_SUB_FILTERS[category];
+    if (!config) {
+      if (contentSubFilter !== "all") setContentSubFilter("all");
+      return;
+    }
+    const selected = normalizeGenre(contentSubFilter);
+    const isValid = config.options.some((option) => normalizeGenre(option.value) === selected);
+    if (!isValid) setContentSubFilter("all");
+  }, [contentTypeFilter, contentSubFilter]);
 
   useEffect(() => {
     let mounted = true;
@@ -495,6 +844,7 @@ export default function Feed() {
     const onDocClick = (e) => {
       if (menuRef.current && !menuRef.current.contains(e.target)) {
         setMenuOpenPostId(null);
+        setMenuPlacement(createDefaultLongMenuPlacement());
       }
     };
     document.addEventListener("mousedown", onDocClick);
@@ -504,6 +854,45 @@ export default function Feed() {
       document.removeEventListener("touchstart", onDocClick);
     };
   }, [menuOpenPostId]);
+
+  const measureLongMenuPlacement = (triggerEl) => {
+    const fallback = { vertical: "down", horizontal: "right", maxHeight: 320 };
+    if (!triggerEl || typeof window === "undefined") return fallback;
+
+    const rect = triggerEl.getBoundingClientRect();
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 800;
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 1200;
+    const estimatedMenuWidth = 236;
+    const estimatedMenuHeight = 340;
+    const viewportPadding = 12;
+
+    const spaceBelow = viewportHeight - rect.bottom - viewportPadding;
+    const spaceAbove = rect.top - viewportPadding;
+    const vertical = spaceBelow >= estimatedMenuHeight || spaceBelow >= spaceAbove ? "down" : "up";
+    const verticalRoom = vertical === "down" ? spaceBelow : spaceAbove;
+    const maxHeight = Math.max(180, Math.min(420, Math.floor(verticalRoom)));
+
+    const overflowLeftIfRightAligned = rect.right - estimatedMenuWidth < viewportPadding;
+    const overflowRightIfLeftAligned = rect.left + estimatedMenuWidth > viewportWidth - viewportPadding;
+    const horizontal =
+      overflowLeftIfRightAligned && !overflowRightIfLeftAligned
+        ? "left"
+        : "right";
+
+    return { vertical, horizontal, maxHeight };
+  };
+
+  const togglePostMenu = (event, postId) => {
+    if (event?.stopPropagation) event.stopPropagation();
+    if (menuOpenPostId === postId) {
+      setMenuOpenPostId(null);
+      setMenuPlacement(createDefaultLongMenuPlacement());
+      return;
+    }
+    const placement = measureLongMenuPlacement(event?.currentTarget);
+    setMenuPlacement({ postId, ...placement });
+    setMenuOpenPostId(postId);
+  };
 
   const selectContentType = (value) => {
     setContentTypeFilter(value);
@@ -552,6 +941,115 @@ export default function Feed() {
   };
 
   const ownerKeyFor = (post) => ownerCandidatesFor(post)[0] || "";
+
+  const normalizeIdentityKey = (value) => String(value || "").trim().toLowerCase();
+
+  const viewerIdentityKeys = useMemo(() => {
+    const keys = [];
+    try {
+      const rawValues = [
+        localStorage.getItem("userId"),
+        sessionStorage.getItem("userId"),
+        localStorage.getItem("username"),
+        sessionStorage.getItem("username"),
+        localStorage.getItem("email"),
+        sessionStorage.getItem("email"),
+        localStorage.getItem("name"),
+        sessionStorage.getItem("name"),
+        feedUserKey,
+      ];
+      rawValues.forEach((value) => {
+        const normalized = normalizeIdentityKey(value);
+        if (!normalized || normalized === "guest") return;
+        keys.push(normalized);
+      });
+    } catch {
+      const fallback = normalizeIdentityKey(feedUserKey);
+      if (fallback && fallback !== "guest") keys.push(fallback);
+    }
+    return new Set(keys);
+  }, [feedUserKey]);
+
+  const followTargetFor = (post) => {
+    const candidates = [
+      post?.user?.email,
+      post?.email,
+      post?.user?.username,
+      post?.username,
+      post?.user?.id,
+      post?.userId,
+    ]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean);
+    return candidates[0] || "";
+  };
+
+  const isOwnPost = (post) => {
+    if (!viewerIdentityKeys.size) return false;
+    const candidates = [...ownerCandidatesFor(post), followTargetFor(post)]
+      .map(normalizeIdentityKey)
+      .filter(Boolean);
+    return candidates.some((candidate) => viewerIdentityKeys.has(candidate));
+  };
+
+  const followStateHintFor = (post) => {
+    const boolCandidates = [
+      post?.isFollowing,
+      post?.followState?.isFollowing,
+      post?.followInfo?.isFollowing,
+      post?.user?.isFollowing,
+      post?.user?.followState?.isFollowing,
+      post?.user?.followInfo?.isFollowing,
+    ];
+    if (boolCandidates.some((value) => value === true)) return "following";
+
+    const statusCandidates = [
+      post?.followStatus,
+      post?.relationship,
+      post?.followState?.status,
+      post?.followInfo?.status,
+      post?.user?.followStatus,
+      post?.user?.relationship,
+      post?.user?.followState?.status,
+      post?.user?.followInfo?.status,
+    ]
+      .map((value) => String(value || "").trim().toLowerCase())
+      .filter(Boolean);
+    if (statusCandidates.some((value) => value.includes("request"))) return "requested";
+    if (statusCandidates.some((value) => value.includes("following") || value.includes("followed"))) return "following";
+
+    if (boolCandidates.some((value) => value === false)) return "not_following";
+    return "not_following";
+  };
+
+  const resolveFollowStateFromResponse = (response) => {
+    const text = String(
+      response?.data?.status ||
+      response?.data?.followStatus ||
+      response?.data?.relationship ||
+      response?.data ||
+      ""
+    ).trim().toLowerCase();
+    if (text.includes("request")) return "requested";
+    if (text.includes("following") || text.includes("followed")) return "following";
+    return "following";
+  };
+
+  const followPostOwner = async (post) => {
+    const followTarget = followTargetFor(post);
+    const ownerKey = ownerKeyFor(post) || followTarget;
+    if (!followTarget || !ownerKey || isOwnPost(post) || followBusyByOwner[ownerKey]) return;
+    setFollowBusyByOwner((prev) => ({ ...prev, [ownerKey]: true }));
+    try {
+      const res = await api.post(`/api/follow/${encodeURIComponent(followTarget)}`);
+      const nextState = resolveFollowStateFromResponse(res);
+      setFollowStateByOwner((prev) => ({ ...prev, [ownerKey]: nextState }));
+    } catch {
+      // noop
+    } finally {
+      setFollowBusyByOwner((prev) => ({ ...prev, [ownerKey]: false }));
+    }
+  };
 
   const profilePicFor = (post) => {
     const ownerKey = ownerKeyFor(post);
@@ -624,20 +1122,180 @@ export default function Feed() {
     };
   }, [posts]);
 
+  const postById = useMemo(() => {
+    const map = {};
+    posts.forEach((post) => {
+      const id = String(post?.id || "").trim();
+      if (!id) return;
+      map[id] = post;
+    });
+    return map;
+  }, [posts]);
+
+  const personalizationTokensByPost = useMemo(() => {
+    const map = {};
+    posts.forEach((post) => {
+      const id = String(post?.id || "").trim();
+      if (!id) return;
+      map[id] = collectPersonalizationTokens(post, localGenreMap);
+    });
+    return map;
+  }, [posts, localGenreMap]);
+
+  const trackFeedInteraction = (post, signal = "view", customWeight = null) => {
+    if (!post?.id) return;
+    const postId = String(post.id);
+    const baseWeight = Number(FEED_SIGNAL_WEIGHTS[signal] || FEED_SIGNAL_WEIGHTS.view || 1);
+    const overrideWeight = Number(customWeight);
+    const weight = Number.isFinite(overrideWeight) ? overrideWeight : baseWeight;
+    if (!Number.isFinite(weight) || weight === 0) return;
+    const postTokens = personalizationTokensByPost[postId] || collectPersonalizationTokens(post, localGenreMap);
+
+    setPersonalizationState((prevState) => {
+      const prev = prevState && typeof prevState === "object" ? prevState : createDefaultPersonalizationState(feedUserKey);
+      const nextTokenWeights = { ...(prev.tokenWeights || {}) };
+      const nextPostWeights = { ...(prev.postWeights || {}) };
+
+      postTokens.forEach((token) => {
+        const key = normalizeGenre(token);
+        if (!key) return;
+        const previous = Number(nextTokenWeights[key] || 0);
+        nextTokenWeights[key] = Math.max(-500, Math.min(500, previous + weight));
+      });
+
+      const prevPostWeight = Number(nextPostWeights[postId] || 0);
+      nextPostWeights[postId] = Math.max(-500, Math.min(500, prevPostWeight + weight * 1.25));
+
+      return {
+        version: FEED_PERSONALIZATION_VERSION,
+        userKey: feedUserKey,
+        updatedAt: Date.now(),
+        tokenWeights: trimWeightMap(nextTokenWeights, PERSONALIZATION_MAX_TOKENS),
+        postWeights: trimWeightMap(nextPostWeights, PERSONALIZATION_MAX_POSTS),
+      };
+    });
+  };
+
+  const ensureWatchProgressEntry = (postId) => {
+    const id = String(postId || "").trim();
+    if (!id) return null;
+    const existing = watchProgressByPostRef.current[id];
+    if (existing) return existing;
+    const next = {
+      lastTime: 0,
+      bufferedSeconds: 0,
+      awardedChunks: 0,
+      progressMilestones: {},
+    };
+    watchProgressByPostRef.current[id] = next;
+    return next;
+  };
+
+  const syncWatchProgressCursor = (postId, currentTime = 0) => {
+    const entry = ensureWatchProgressEntry(postId);
+    if (!entry) return;
+    entry.lastTime = Math.max(0, Number(currentTime) || 0);
+  };
+
+  const applyWatchTimeSignals = (post, event) => {
+    if (!post?.id) return;
+    const videoNode = event?.currentTarget;
+    if (!videoNode) return;
+    const postId = String(post.id);
+    const currentTime = Math.max(0, Number(videoNode.currentTime) || 0);
+    const duration = Math.max(0, Number(videoNode.duration) || 0);
+    const entry = ensureWatchProgressEntry(postId);
+    if (!entry) return;
+
+    if (duration > 0) {
+      setVideoDurationByPost((prev) => (prev[post.id] === duration ? prev : { ...prev, [post.id]: duration }));
+    }
+
+    const previousTime = Number(entry.lastTime || 0);
+    entry.lastTime = currentTime;
+
+    if (!videoNode.paused && !videoNode.seeking) {
+      const watchedDelta = currentTime - previousTime;
+      if (watchedDelta > 0 && watchedDelta <= FEED_WATCH_TIME_MAX_STEP_SECONDS) {
+        entry.bufferedSeconds += watchedDelta;
+        let safetyCount = 0;
+        while (
+          entry.bufferedSeconds >= FEED_WATCH_TIME_CHUNK_SECONDS &&
+          entry.awardedChunks < FEED_WATCH_TIME_MAX_CHUNKS_PER_POST &&
+          safetyCount < 6
+        ) {
+          entry.bufferedSeconds -= FEED_WATCH_TIME_CHUNK_SECONDS;
+          entry.awardedChunks += 1;
+          trackFeedInteraction(post, "watch", FEED_WATCH_TIME_CHUNK_WEIGHT);
+          safetyCount += 1;
+        }
+      }
+    }
+
+    const durationHint = duration || Number(videoDurationByPost[post.id] || 0);
+    if (durationHint > 0) {
+      const progress = Math.max(0, Math.min(1, currentTime / durationHint));
+      FEED_WATCH_PROGRESS_MILESTONES.forEach((milestone) => {
+        const key = String(milestone.ratio);
+        if (progress < milestone.ratio || entry.progressMilestones[key]) return;
+        entry.progressMilestones[key] = true;
+        trackFeedInteraction(post, "watch", milestone.weight);
+      });
+    }
+  };
+
+  const handleViewerVideoPlay = (post, event) => {
+    if (!post?.id) return;
+    syncWatchProgressCursor(post.id, event?.currentTarget?.currentTime || 0);
+  };
+
+  const handleViewerVideoPause = (post, event) => {
+    if (!post?.id) return;
+    syncWatchProgressCursor(post.id, event?.currentTarget?.currentTime || 0);
+  };
+
+  const handleViewerVideoSeeking = (post, event) => {
+    if (!post?.id) return;
+    syncWatchProgressCursor(post.id, event?.currentTarget?.currentTime || 0);
+  };
+
+  const personalizedPosts = useMemo(() => {
+    if (!Array.isArray(posts) || posts.length < 2) return posts;
+    const tokenWeights = personalizationState?.tokenWeights || {};
+    const postWeights = personalizationState?.postWeights || {};
+    if (!Object.keys(tokenWeights).length && !Object.keys(postWeights).length) return posts;
+
+    const now = Date.now();
+    const scored = posts.map((post, idx) => {
+      const id = String(post?.id || "");
+      const tokens = personalizationTokensByPost[id] || [];
+      let score = 0;
+
+      tokens.forEach((token) => {
+        const key = normalizeGenre(token);
+        if (!key) return;
+        score += Number(tokenWeights[key] || 0);
+      });
+
+      if (id) score += Number(postWeights[id] || 0) * 1.8;
+
+      const createdAtRaw = post?.createdAt || post?.createdDate || post?.createdOn || "";
+      const createdAt = Date.parse(String(createdAtRaw || ""));
+      if (Number.isFinite(createdAt)) {
+        const ageHours = Math.max(0, (now - createdAt) / (1000 * 60 * 60));
+        // Keep some freshness so newer posts can still surface.
+        score += Math.max(0, 6 - ageHours * 0.08);
+      }
+
+      return { post, idx, score };
+    });
+
+    scored.sort((a, b) => (b.score - a.score) || (a.idx - b.idx));
+    return scored.map((entry) => entry.post);
+  }, [posts, personalizationState, personalizationTokensByPost]);
+
   const mediaTypeFor = (post) => {
-    const rawType = String(post?.type || post?.mediaType || post?.contentType || "")
-      .trim()
-      .toLowerCase();
-    if (rawType.includes("video")) return "VIDEO";
-    if (rawType.includes("image")) return "IMAGE";
-
-    const url = String(post?.contentUrl || post?.mediaUrl || "")
-      .trim()
-      .toLowerCase();
-    if (/\.(mp4|mov|webm|mkv|m4v|avi|mpg|mpeg|3gp|ogv)(\?|#|$)/.test(url)) return "VIDEO";
-    if (/\.(png|jpe?g|gif|webp|bmp|avif|svg)(\?|#|$)/.test(url)) return "IMAGE";
-
-    return post?.reel ? "VIDEO" : "IMAGE";
+    return mediaTypeForPost(post);
   };
 
   const captionFor = (post) => post?.description || post?.content || "Untitled video";
@@ -709,6 +1367,8 @@ export default function Feed() {
           persistLikedMap(next);
           return next;
         });
+        const targetPost = postById[String(postId)];
+        if (targetPost) trackFeedInteraction(targetPost, "like");
         return;
       }
       setLikeCounts((prev) => ({ ...prev, [postId]: (prev[postId] || 0) + 1 }));
@@ -717,6 +1377,8 @@ export default function Feed() {
         persistLikedMap(next);
         return next;
       });
+      const targetPost = postById[String(postId)];
+      if (targetPost) trackFeedInteraction(targetPost, "like");
     } catch {
       // noop
     }
@@ -811,6 +1473,7 @@ export default function Feed() {
       return;
     }
     viewerVideoRefs.current[id] = node;
+    syncWatchProgressCursor(id, node.currentTime || 0);
   };
 
   const submitComment = async (postId) => {
@@ -823,14 +1486,101 @@ export default function Feed() {
       });
       setCommentTextByPost((prev) => ({ ...prev, [postId]: "" }));
       await loadComments(postId);
+      if (targetPost) trackFeedInteraction(targetPost, "comment");
       recordCommentActivity({ postId, text, item: targetPost, source: "feed" });
     } catch {
       // noop
     }
   };
 
+  const parseDurationSeconds = (value) => {
+    const raw = Number(value);
+    if (!Number.isFinite(raw) || raw <= 0) return 0;
+    return raw > 10000 ? raw / 1000 : raw;
+  };
+
+  const inferIsShortVideo = (candidate) => {
+    if (!candidate || mediaTypeFor(candidate) !== "VIDEO") return false;
+    const durationHint =
+      parseDurationSeconds(videoDurationByPost[candidate.id] || 0) ||
+      parseDurationSeconds(candidate?.durationSeconds) ||
+      parseDurationSeconds(candidate?.videoDurationSeconds) ||
+      parseDurationSeconds(candidate?.duration) ||
+      parseDurationSeconds(candidate?.videoDuration) ||
+      parseDurationSeconds(candidate?.length) ||
+      parseDurationSeconds(candidate?.videoLength) ||
+      parseDurationSeconds(candidate?.durationMs) ||
+      parseDurationSeconds(candidate?.videoDurationMs);
+    const bucket = classifyVideoBucket(candidate, {
+      durationHint,
+      shortSeconds: SHORT_VIDEO_SECONDS,
+      defaultUnknown: "long"
+    });
+    return bucket === "short" || bucket === "reel";
+  };
+
+  const buildPostShareUrl = (candidate) => {
+    const postId = String(candidate?.id || "").trim();
+    if (!postId) return `${window.location.origin}/feed`;
+    const mediaType = mediaTypeFor(candidate);
+    if (mediaType === "VIDEO") {
+      if (inferIsShortVideo(candidate)) {
+        return `${window.location.origin}/reels?post=${encodeURIComponent(postId)}`;
+      }
+      return `${window.location.origin}/watch/${encodeURIComponent(postId)}`;
+    }
+    return `${window.location.origin}/feed?post=${encodeURIComponent(postId)}`;
+  };
+
+  const flashShareStatus = (postId, text, durationMs = 1200) => {
+    if (!postId) return;
+    setShareMessageByPost((prev) => ({ ...prev, [postId]: text }));
+    setTimeout(() => {
+      setShareMessageByPost((prev) => ({ ...prev, [postId]: "" }));
+    }, durationMs);
+  };
+
+  const sharePostOutside = async (post) => {
+    if (!post?.id) return;
+    const shareUrl = buildPostShareUrl(post);
+    const shareTitle = captionFor(post);
+    const shareText = `${shareTitle} ${shareUrl}`.trim();
+
+    try {
+      if (navigator?.share) {
+        await navigator.share({
+          title: shareTitle,
+          text: shareTitle,
+          url: shareUrl
+        });
+        recordRepostActivity({ item: post, source: "feed", via: "outside" });
+        trackFeedInteraction(post, "share");
+        flashShareStatus(post.id, "Shared");
+        return;
+      }
+    } catch (err) {
+      if (err?.name === "AbortError") return;
+    }
+
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(shareText);
+        recordRepostActivity({ item: post, source: "feed", via: "outside_copy" });
+        trackFeedInteraction(post, "share");
+        flashShareStatus(post.id, "Link copied");
+        return;
+      }
+    } catch {
+      // ignore clipboard failures and continue fallback
+    }
+
+    window.prompt("Copy and share this link", shareUrl);
+    trackFeedInteraction(post, "share");
+    flashShareStatus(post.id, "Share link ready");
+  };
+
   const sharePost = async (post) => {
-    const shareUrl = `${window.location.origin}${window.location.pathname}?post=${post.id}`;
+    const shareUrl = buildPostShareUrl(post);
     const shareText = `${post.description || post.content || "Check this post"} ${shareUrl}`;
     try {
       recordRepostActivity({ item: post, source: "feed", via: "chat" });
@@ -840,13 +1590,11 @@ export default function Feed() {
         // ignore storage failures
       }
       navigate(`/chat?share=${encodeURIComponent(shareText)}`);
-      setShareMessageByPost((prev) => ({ ...prev, [post.id]: "Sharing to chat..." }));
+      trackFeedInteraction(post, "share");
+      flashShareStatus(post.id, "Sharing to chat...");
     } catch {
-      setShareMessageByPost((prev) => ({ ...prev, [post.id]: "Share failed" }));
+      flashShareStatus(post.id, "Share failed");
     }
-    setTimeout(() => {
-      setShareMessageByPost((prev) => ({ ...prev, [post.id]: "" }));
-    }, 1200);
   };
 
   const toggleSave = (postId) => {
@@ -868,14 +1616,14 @@ export default function Feed() {
   };
 
   const filteredPosts = useMemo(() => {
-    if (!query.trim()) return posts;
+    if (!query.trim()) return personalizedPosts;
     const q = query.toLowerCase();
-    return posts.filter((post) => {
+    return personalizedPosts.filter((post) => {
       const user = usernameFor(post).toLowerCase();
       const text = `${post.description || ""} ${post.content || ""}`.toLowerCase();
       return user.includes(q) || text.includes(q);
     });
-  }, [posts, query]);
+  }, [personalizedPosts, query]);
 
   const visiblePosts = useMemo(() => {
     return filteredPosts.filter((post) => {
@@ -891,33 +1639,49 @@ export default function Feed() {
     return visiblePosts.filter((post) => categoryMatchesPost(post, contentTypeFilter, localGenreMap));
   }, [visiblePosts, contentTypeFilter, localGenreMap]);
 
+  const subFilteredPosts = useMemo(() => {
+    const category = normalizeGenre(contentTypeFilter);
+    if (!CONTENT_SUB_FILTERS[category] || !contentSubFilter || contentSubFilter === "all") return typeFilteredPosts;
+    return typeFilteredPosts.filter((post) => contentSubFilterMatchesPost(post, category, contentSubFilter, localGenreMap));
+  }, [typeFilteredPosts, contentTypeFilter, contentSubFilter, localGenreMap]);
+
   const longVideoPosts = useMemo(() => {
-    return typeFilteredPosts.filter((post) => {
+    return subFilteredPosts.filter((post) => {
       const isVideo = mediaTypeFor(post) === "VIDEO";
-      const duration = Number(videoDurationByPost[post.id] || 0);
-      // Keep videos visible until metadata is known, then keep only true long videos.
-      return isVideo && (duration <= 0 || duration > LONG_VIDEO_SECONDS);
+      if (!isVideo) return false;
+      const bucket = classifyVideoBucket(post, {
+        durationHint: Number(videoDurationByPost[post.id] || 0),
+        shortSeconds: SHORT_VIDEO_SECONDS,
+        defaultUnknown: "long"
+      });
+      return bucket === "long";
     });
-  }, [typeFilteredPosts, videoDurationByPost]);
+  }, [subFilteredPosts, videoDurationByPost]);
 
   const longVideoFeedPosts = useMemo(() => longVideoPosts, [longVideoPosts]);
 
-  const shortVideoPosts = useMemo(() => {
-    return typeFilteredPosts.filter((post) => {
-      if (mediaTypeFor(post) !== "VIDEO") return false;
-      const duration = Number(videoDurationByPost[post.id] || 0);
-      return duration <= 0 || duration <= LONG_VIDEO_SECONDS;
+  const feedPosts = useMemo(() => {
+    return subFilteredPosts.filter((post) => {
+      if (mediaTypeFor(post) !== "VIDEO") return true;
+      const bucket = classifyVideoBucket(post, {
+        durationHint: Number(videoDurationByPost[post.id] || 0),
+        shortSeconds: SHORT_VIDEO_SECONDS,
+        defaultUnknown: "long"
+      });
+      return bucket === "short";
     });
-  }, [typeFilteredPosts, videoDurationByPost]);
+  }, [subFilteredPosts, videoDurationByPost]);
 
-  const activeShortVideoIndex = useMemo(
-    () => shortVideoPosts.findIndex((p) => p.id === activePostId),
-    [shortVideoPosts, activePostId]
+  const activeFeedIndex = useMemo(
+    () => feedPosts.findIndex((p) => p.id === activePostId),
+    [feedPosts, activePostId]
   );
-  const isShortViewerOpen = feedMode === "all" && activeShortVideoIndex >= 0;
+  const isFeedViewerOpen = feedMode === "all" && activeFeedIndex >= 0;
 
-  const openPost = async (postId, syncUrl = false, replace = false) => {
+  const openPost = async (postId, syncUrl = false, replace = false, signal = "view") => {
     setActivePostId(postId);
+    const post = postById[String(postId)];
+    if (post) trackFeedInteraction(post, signal);
     await loadComments(postId);
     if (syncUrl) {
       navigate(`/feed?post=${postId}`, { replace });
@@ -936,40 +1700,46 @@ export default function Feed() {
   const openPostFromGrid = async (post) => {
     const type = mediaTypeFor(post);
     if (feedMode === "all" && type === "VIDEO") {
+      trackFeedInteraction(post, "watch");
       navigate(`/reels?post=${post.id}`);
       return;
     }
-    const duration = videoDurationByPost[post.id] || 0;
-    const isShortVideo = type === "VIDEO" && duration > 0 && duration <= LONG_VIDEO_SECONDS;
+    const bucket = classifyVideoBucket(post, {
+      durationHint: Number(videoDurationByPost[post.id] || 0),
+      shortSeconds: SHORT_VIDEO_SECONDS,
+      defaultUnknown: "long"
+    });
+    const isShortVideo = type === "VIDEO" && bucket === "short";
     if (isShortVideo) {
+      trackFeedInteraction(post, "watch");
       navigate(`/reels?post=${post.id}`);
       return;
     }
-    await openPost(post.id, false);
+    await openPost(post.id, false, false, "watch");
   };
 
-  const moveShortVideo = async (direction) => {
-    if (activeShortVideoIndex < 0 || !shortVideoPosts.length) return;
-    const nextIndex = (activeShortVideoIndex + direction + shortVideoPosts.length) % shortVideoPosts.length;
-    const nextPost = shortVideoPosts[nextIndex];
+  const moveFeedItem = async (direction) => {
+    if (activeFeedIndex < 0 || !feedPosts.length) return;
+    const nextIndex = (activeFeedIndex + direction + feedPosts.length) % feedPosts.length;
+    const nextPost = feedPosts[nextIndex];
     if (!nextPost) return;
-    await openPost(nextPost.id, true, true);
+    await openPost(nextPost.id, true, true, "feed");
   };
 
   useEffect(() => {
-    if (!isShortViewerOpen) return;
+    if (!isFeedViewerOpen) return;
     const onKeyDown = (e) => {
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        void moveShortVideo(1);
+        void moveFeedItem(1);
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
-        void moveShortVideo(-1);
+        void moveFeedItem(-1);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [isShortViewerOpen, shortVideoPosts, activeShortVideoIndex]);
+  }, [isFeedViewerOpen, feedPosts, activeFeedIndex]);
 
   const closePostView = () => {
     setActivePostId(null);
@@ -977,16 +1747,17 @@ export default function Feed() {
   };
 
   const activePost = posts.find((p) => p.id === activePostId) || null;
+  const isVideoViewer = activePost ? mediaTypeFor(activePost) === "VIDEO" : false;
   const viewerPosts = useMemo(() => {
     if (!activePost) return [];
     const activeType = mediaTypeFor(activePost);
-    const videoPool = typeFilteredPosts.filter((p) => mediaTypeFor(p) === "VIDEO");
+    const videoPool = subFilteredPosts.filter((p) => mediaTypeFor(p) === "VIDEO");
     const pool = activeType === "VIDEO" ? videoPool : [activePost];
     const idx = pool.findIndex((p) => Number(p?.id) === Number(activePost.id));
     if (idx < 0) return [activePost];
     const ordered = [...pool.slice(idx), ...pool.slice(0, idx)];
     return ordered.length ? ordered : [activePost];
-  }, [activePost, typeFilteredPosts]);
+  }, [activePost, subFilteredPosts]);
 
   useEffect(() => {
     if (!activePostId) return undefined;
@@ -1078,6 +1849,7 @@ export default function Feed() {
         if (timer) clearTimeout(timer);
       });
       mediaClickTimerByPostRef.current = {};
+      watchProgressByPostRef.current = {};
     };
   }, []);
 
@@ -1101,10 +1873,7 @@ export default function Feed() {
   };
 
   const showMenuStatus = (postId, text) => {
-    setShareMessageByPost((prev) => ({ ...prev, [postId]: text }));
-    setTimeout(() => {
-      setShareMessageByPost((prev) => ({ ...prev, [postId]: "" }));
-    }, 1200);
+    flashShareStatus(postId, text, 1200);
   };
 
   const onMenuAction = async (action, post) => {
@@ -1112,7 +1881,7 @@ export default function Feed() {
     const ownerKey = ownerKeyFor(post);
 
     if (action === "share") {
-      await sharePost(post);
+      await sharePostOutside(post);
     } else if (action === "playlist") {
       appendToIdList(PLAYLIST_KEY, post.id);
       showMenuStatus(post.id, "Saved to playlist");
@@ -1156,6 +1925,7 @@ export default function Feed() {
     }
 
     setMenuOpenPostId(null);
+    setMenuPlacement(createDefaultLongMenuPlacement());
   };
 
   const handleMenuItemClick = async (event, action, post) => {
@@ -1168,7 +1938,7 @@ export default function Feed() {
   const liveTitle = liveBroadcast?.title || `${liveHostName} is live`;
   const liveSubtitle = liveBroadcast?.startedAt ? formatLiveElapsed(liveBroadcast.startedAt) : "Live now";
   const hasLongContent = Boolean(liveBroadcast) || longVideoFeedPosts.length > 0;
-  const hasShortContent = Boolean(liveBroadcast) || shortVideoPosts.length > 0;
+  const hasFeedContent = Boolean(liveBroadcast) || feedPosts.length > 0;
 
   const renderLivePreview = (className) => {
     if (livePreviewFrame) {
@@ -1231,7 +2001,7 @@ export default function Feed() {
             className={`feed-mode-btn ${feedMode === "long" ? "is-active" : ""}`}
             onClick={() => setFeedMode("long")}
           >
-            Long Videos
+            Video
           </button>
           <button
             type="button"
@@ -1240,10 +2010,31 @@ export default function Feed() {
             className={`feed-mode-btn ${feedMode === "all" ? "is-active" : ""}`}
             onClick={() => setFeedMode("all")}
           >
-            Short Videos
+            Feed
           </button>
         </div>
       </div>
+
+      {CONTENT_SUB_FILTERS[normalizeGenre(contentTypeFilter)] && (
+        <div
+          className="feed-study-subject-row"
+          role="tablist"
+          aria-label={CONTENT_SUB_FILTERS[normalizeGenre(contentTypeFilter)].ariaLabel}
+        >
+          {CONTENT_SUB_FILTERS[normalizeGenre(contentTypeFilter)].options.map((subject) => (
+            <button
+              key={`study-${subject.value}`}
+              type="button"
+              role="tab"
+              aria-selected={contentSubFilter === subject.value}
+              className={`feed-study-subject-chip ${contentSubFilter === subject.value ? "is-active" : ""}`}
+              onClick={() => setContentSubFilter(subject.value)}
+            >
+              {subject.label}
+            </button>
+          ))}
+        </div>
+      )}
 
 
       {error && <p>{error}</p>}
@@ -1252,12 +2043,12 @@ export default function Feed() {
           <span className="feed-loading-spinner" />
         </div>
       )}
-      {!error && !isLoading && typeFilteredPosts.length === 0 && <p className="feed-empty">No posts found</p>}
+      {!error && !isLoading && subFilteredPosts.length === 0 && <p className="feed-empty">No posts found</p>}
       {!error && !isLoading && feedMode === "long" && !longVideoFeedPosts.length && !liveBroadcast && (
-        <p className="feed-empty">No long videos found</p>
+        <p className="feed-empty">No videos found</p>
       )}
-      {!error && !isLoading && feedMode === "all" && !shortVideoPosts.length && !liveBroadcast && (
-        <p className="feed-empty">No short videos found</p>
+      {!error && !isLoading && feedMode === "all" && !feedPosts.length && !liveBroadcast && (
+        <p className="feed-empty">No feed found</p>
       )}
 
       {hasLongContent && feedMode === "long" && (
@@ -1311,14 +2102,30 @@ export default function Feed() {
             const user = usernameFor(post);
             const profilePic = profilePicFor(post);
             const duration = videoDurationByPost[post.id] || 0;
+            const isMenuOpen = menuOpenPostId === post.id;
+            const menuClassName = [
+              "long-feed-menu",
+              isMenuOpen && menuPlacement.postId === post.id && menuPlacement.vertical === "up" ? "is-open-up" : "",
+              isMenuOpen && menuPlacement.postId === post.id && menuPlacement.horizontal === "left" ? "is-open-left" : "",
+            ]
+              .filter(Boolean)
+              .join(" ");
+            const menuStyle =
+              isMenuOpen && menuPlacement.postId === post.id
+                ? { "--long-feed-menu-max-height": `${menuPlacement.maxHeight}px` }
+                : undefined;
             return (
               <article
                 key={`long-${post.id}`}
                 className="long-feed-card"
-                onClick={() => navigate(`/watch/${post.id}`)}
+                onClick={() => {
+                  trackFeedInteraction(post, "watch");
+                  navigate(`/watch/${post.id}`);
+                }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
+                    trackFeedInteraction(post, "watch");
                     navigate(`/watch/${post.id}`);
                   }
                 }}
@@ -1351,44 +2158,58 @@ export default function Feed() {
                     <p className="long-feed-sub">{user} | {(likeCounts[post.id] || 0).toLocaleString()} likes</p>
                     {shareMessageByPost[post.id] && <p className="long-feed-status">{shareMessageByPost[post.id]}</p>}
                   </div>
-                  <div className="long-feed-menu-wrap" ref={menuOpenPostId === post.id ? menuRef : null}>
+                  <div className="long-feed-actions-wrap">
                     <button
                       type="button"
-                      className="long-feed-menu-btn"
-                      aria-label="More options"
-                      aria-expanded={menuOpenPostId === post.id}
-                      onPointerDown={(e) => {
-                        e.stopPropagation();
-                      }}
-                      onTouchStart={(e) => {
-                        e.stopPropagation();
-                      }}
+                      className="long-feed-share-btn"
+                      title="Share outside SocialSea"
                       onClick={(e) => {
                         e.stopPropagation();
-                        setMenuOpenPostId((prev) => (prev === post.id ? null : post.id));
+                        void sharePostOutside(post);
                       }}
                     >
-                      {"\u22EE"}
+                      Share
                     </button>
-                    {menuOpenPostId === post.id && (
-                      <div
-                        className="long-feed-menu"
-                        onPointerDown={(e) => e.stopPropagation()}
-                        onTouchStart={(e) => e.stopPropagation()}
-                        onTouchMove={(e) => e.stopPropagation()}
-                        onWheel={(e) => e.stopPropagation()}
-                        onClick={(e) => e.stopPropagation()}
+                    <div className="long-feed-menu-wrap" ref={isMenuOpen ? menuRef : null}>
+                      <button
+                        type="button"
+                        className="long-feed-menu-btn"
+                        aria-label="More options"
+                        aria-haspopup="menu"
+                        aria-expanded={isMenuOpen}
+                        onPointerDown={(e) => {
+                          e.stopPropagation();
+                        }}
+                        onTouchStart={(e) => {
+                          e.stopPropagation();
+                        }}
+                        onClick={(e) => {
+                          togglePostMenu(e, post.id);
+                        }}
                       >
-                        <button type="button" onClick={(e) => void handleMenuItemClick(e, "share", post)}>Share video</button>
-                        <button type="button" onClick={(e) => void handleMenuItemClick(e, "playlist", post)}>Save to playlist</button>
-                        <button type="button" onClick={(e) => void handleMenuItemClick(e, "not_interested", post)}>Not interested</button>
-                        <button type="button" onClick={(e) => void handleMenuItemClick(e, "dont_recommend", post)}>Don't recommend this video</button>
-                        <button type="button" onClick={(e) => void handleMenuItemClick(e, "report", post)}>Report</button>
-                        <button type="button" onClick={(e) => void handleMenuItemClick(e, "watch_later", post)}>Save to Watch Later</button>
-                        <button type="button" onClick={(e) => void handleMenuItemClick(e, "play_next", post)}>Play next</button>
-                        <button type="button" onClick={(e) => void handleMenuItemClick(e, "queue", post)}>In queue</button>
-                      </div>
-                    )}
+                        {"\u22EE"}
+                      </button>
+                      {isMenuOpen && (
+                        <div
+                          className={menuClassName}
+                          style={menuStyle}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onTouchStart={(e) => e.stopPropagation()}
+                          onTouchMove={(e) => e.stopPropagation()}
+                          onWheel={(e) => e.stopPropagation()}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <button type="button" onClick={(e) => void handleMenuItemClick(e, "share", post)}>Share outside SocialSea</button>
+                          <button type="button" onClick={(e) => void handleMenuItemClick(e, "playlist", post)}>Save to playlist</button>
+                          <button type="button" onClick={(e) => void handleMenuItemClick(e, "not_interested", post)}>Not interested</button>
+                          <button type="button" onClick={(e) => void handleMenuItemClick(e, "dont_recommend", post)}>Don't recommend this video</button>
+                          <button type="button" onClick={(e) => void handleMenuItemClick(e, "report", post)}>Report</button>
+                          <button type="button" onClick={(e) => void handleMenuItemClick(e, "watch_later", post)}>Save to Watch Later</button>
+                          <button type="button" onClick={(e) => void handleMenuItemClick(e, "play_next", post)}>Play next</button>
+                          <button type="button" onClick={(e) => void handleMenuItemClick(e, "queue", post)}>In queue</button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               </article>
@@ -1399,7 +2220,7 @@ export default function Feed() {
         </section>
       )}
 
-      {feedMode === "all" && hasShortContent && (
+      {feedMode === "all" && hasFeedContent && (
         <section className="explore-grid instagram-grid">
         {liveBroadcast && (
           <button
@@ -1419,7 +2240,7 @@ export default function Feed() {
             </div>
           </button>
         )}
-        {shortVideoPosts.map((post) => {
+        {feedPosts.map((post) => {
           const rawUrl = post.contentUrl || post.mediaUrl || "";
           const mediaUrl = rawUrl.trim() ? resolveUrl(rawUrl.trim()) : "";
           const type = mediaTypeFor(post);
@@ -1430,7 +2251,7 @@ export default function Feed() {
               key={post.id}
               type="button"
               className="explore-tile instagram-tile"
-              onClick={() => openPost(post.id, true)}
+              onClick={() => openPost(post.id, true, false, "feed")}
               title={usernameFor(post)}
             >
               {type === "VIDEO" ? (
@@ -1463,7 +2284,11 @@ export default function Feed() {
       )}
 
       {activePost && (
-        <div className="post-view-backdrop" ref={postViewBackdropRef} onClick={closePostView}>
+        <div
+          className={`post-view-backdrop ${isVideoViewer ? "is-video-viewer" : ""}`.trim()}
+          ref={postViewBackdropRef}
+          onClick={closePostView}
+        >
           <div className="post-view-stack" onClick={(e) => e.stopPropagation()}>
             <button type="button" className="post-view-exit-btn" onClick={closePostView} aria-label="Close viewer">
               {"<"}
@@ -1473,8 +2298,17 @@ export default function Feed() {
               const raw = post.contentUrl || post.mediaUrl || "";
               const mediaUrl = raw.trim() ? resolveUrl(raw.trim()) : "";
               const type = mediaTypeFor(post);
+              const ownerKey = ownerKeyFor(post) || String(post?.id || "");
+              const followState = followStateByOwner[ownerKey] || followStateHintFor(post);
+              const isFollowing = followState === "following";
+              const isRequested = followState === "requested";
+              const isFollowBusy = !!followBusyByOwner[ownerKey];
+              const showFollow = !isOwnPost(post);
               return (
-                <article className="post-view-card instagram-post-card" key={`viewer-${post.id}-${idx}`}>
+                <article
+                  className={`post-view-card instagram-post-card ${type === "VIDEO" ? "is-video-post" : ""}`.trim()}
+                  key={`viewer-${post.id}-${idx}`}
+                >
                   <div className="ig-post-context">
                     <p className="ig-post-tags">{post.description || post.content || "Post"}</p>
                     <p className="ig-post-time">{relativePostTime(post.createdAt || post.createdDate)}</p>
@@ -1491,12 +2325,28 @@ export default function Feed() {
                       <div className="feed-avatar">{usernameFor(post).charAt(0).toUpperCase()}</div>
                     )}
                     <div className="ig-user-meta">
-                      <p className="feed-username">{usernameFor(post)}</p>
+                      <button
+                        type="button"
+                        className="feed-username-link"
+                        onClick={() => navigate(buildProfilePath(post))}
+                        title={`Open ${usernameFor(post)} profile`}
+                      >
+                        {usernameFor(post)}
+                      </button>
                       <small>{usernameFor(post)} | Original audio</small>
                     </div>
-                    <div className="ig-user-actions">
-                      <button type="button" className="ig-follow-btn">Follow</button>
-                    </div>
+                    {showFollow && (
+                      <div className="ig-user-actions">
+                        <button
+                          type="button"
+                          className={`ig-follow-btn ${isFollowing || isRequested ? "is-following" : ""}`.trim()}
+                          onClick={() => followPostOwner(post)}
+                          disabled={isFollowBusy || isFollowing || isRequested}
+                        >
+                          {isFollowBusy ? "..." : isFollowing ? "Following" : isRequested ? "Requested" : "Follow"}
+                        </button>
+                      </div>
+                    )}
                   </header>
 
                   {mediaUrl && (
@@ -1509,8 +2359,12 @@ export default function Feed() {
                         playsInline
                         preload="metadata"
                         muted={mutedByPost[post.id] ?? true}
-                        className="feed-media-view"
+                        className="feed-media-view is-video-media"
                         onClick={() => handleViewerMediaClick(post)}
+                        onPlay={(event) => handleViewerVideoPlay(post, event)}
+                        onPause={(event) => handleViewerVideoPause(post, event)}
+                        onSeeking={(event) => handleViewerVideoSeeking(post, event)}
+                        onTimeUpdate={(event) => applyWatchTimeSignals(post, event)}
                         onDoubleClick={(event) => {
                           void handleViewerMediaDoubleClick(post, event);
                         }}

@@ -693,3 +693,173 @@ body.ss-theme-white .job-page-contact-item {
 body.ss-theme-white .job-page-contact-label {
   color: #8d6a4a;
 }
+
+body.ss-theme-white .job-page-title {
+  color: #15385f;
+}
+
+body.ss-theme-white .job-page-edit:hover,
+body.ss-theme-white .job-page-download:hover,
+body.ss-theme-white .job-page-exit:hover {
+  border-color: rgba(96, 142, 191, 0.56);
+  background: #f4f8ff;
+}
+
+body.ss-theme-white .job-search-input,
+body.ss-theme-white .job-list-search input {
+  background: #ffffff;
+  color: #17395f;
+  border-color: rgba(96, 142, 191, 0.34);
+}
+
+body.ss-theme-white .job-search-input::placeholder,
+body.ss-theme-white .job-list-search input::placeholder {
+  color: #6f8fb2;
+}
+
+body.ss-theme-white .job-search-button,
+body.ss-theme-white .job-search-clear,
+body.ss-theme-white .job-list-search button {
+  background: #ffffff;
+  color: #17395f;
+  border-color: rgba(96, 142, 191, 0.34);
+}
+
+body.ss-theme-white .job-list-search button:hover,
+body.ss-theme-white .job-search-button:hover,
+body.ss-theme-white .job-search-clear:hover {
+  background: #f4f8ff;
+  border-color: rgba(96, 142, 191, 0.56);
+}
+
+body.ss-theme-white .job-section {
+  background: #ffffff;
+  border-color: rgba(96, 142, 191, 0.24);
+  box-shadow: 0 14px 30px rgba(24, 70, 120, 0.08);
+}
+
+body.ss-theme-white .job-section-title {
+  color: #3b638f;
+}
+
+body.ss-theme-white .job-card,
+body.ss-theme-white .resume-card,
+body.ss-theme-white .applicant-card {
+  background: #f8fbff;
+  border-color: rgba(96, 142, 191, 0.24);
+}
+
+body.ss-theme-white .job-card h4,
+body.ss-theme-white .resume-card h4,
+body.ss-theme-white .applicant-card strong,
+body.ss-theme-white .job-list-role {
+  color: #163a61;
+}
+
+body.ss-theme-white .job-card p,
+body.ss-theme-white .resume-item p,
+body.ss-theme-white .job-list-skills,
+body.ss-theme-white .applicant-note {
+  color: #46698f;
+}
+
+body.ss-theme-white .job-empty,
+body.ss-theme-white .applicant-meta,
+body.ss-theme-white .resume-item span,
+body.ss-theme-white .job-list-meta,
+body.ss-theme-white .job-list-company-label,
+body.ss-theme-white .job-match-footer {
+  color: #6987a7;
+}
+
+body.ss-theme-white .job-pill {
+  background: #eef4ff;
+  border-color: rgba(96, 142, 191, 0.28);
+  color: #1f446d;
+}
+
+body.ss-theme-white .job-pill-accent {
+  background: rgba(45, 123, 255, 0.14);
+  border-color: rgba(45, 123, 255, 0.38);
+  color: #1d4b84;
+}
+
+body.ss-theme-white .job-pill-success {
+  background: rgba(42, 179, 155, 0.14);
+  border-color: rgba(42, 179, 155, 0.34);
+  color: #0f5d52;
+}
+
+body.ss-theme-white .job-pill-muted {
+  background: rgba(255, 193, 94, 0.16);
+  border-color: rgba(240, 169, 51, 0.34);
+  color: #785322;
+}
+
+body.ss-theme-white .job-match-meter {
+  background: #eaf1fb;
+  border-color: rgba(96, 142, 191, 0.24);
+}
+
+body.ss-theme-white .job-list-row {
+  background: #ffffff;
+  border-color: rgba(96, 142, 191, 0.24);
+  box-shadow: 0 14px 30px rgba(24, 70, 120, 0.08);
+}
+
+body.ss-theme-white .job-list-row:hover,
+body.ss-theme-white .job-list-row:focus {
+  border-color: rgba(45, 123, 255, 0.62);
+}
+
+body.ss-theme-white .job-list-company {
+  border-left-color: rgba(96, 142, 191, 0.26);
+}
+
+body.ss-theme-white .job-list-company-name {
+  color: #1f5ea0;
+}
+
+body.ss-theme-white .applicant-link {
+  color: #1d63a8;
+}
+
+body.ss-theme-white .applicant-action {
+  background: #ffffff;
+  color: #1d446f;
+  border-color: rgba(96, 142, 191, 0.32);
+}
+
+body.ss-theme-white .applicant-action:hover {
+  background: #f4f8ff;
+  border-color: rgba(96, 142, 191, 0.54);
+}
+
+body.ss-theme-white .applicant-profile-note {
+  border-top-color: rgba(96, 142, 191, 0.22);
+}
+
+body.ss-theme-white .job-timeline-item {
+  border-left-color: rgba(96, 142, 191, 0.34);
+}
+
+body.ss-theme-white .job-timeline-item span {
+  color: #6d8eaf;
+}
+
+body.ss-theme-white .job-project-media img,
+body.ss-theme-white .job-project-media video {
+  border-color: rgba(96, 142, 191, 0.28);
+  background: #ffffff;
+}
+
+body.ss-theme-white .job-page-contact-item:hover {
+  border-color: rgba(96, 142, 191, 0.52);
+  background: #f4f8ff;
+}
+
+@media (max-width: 720px) {
+  body.ss-theme-white .job-list-company {
+    border-top-color: rgba(96, 142, 191, 0.26);
+  }
+}
