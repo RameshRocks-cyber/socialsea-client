@@ -108,9 +108,9 @@ export default function SOSNavigate() {
     const load = async () => {
       setLoading(true);
       setError("");
-      const isNumericAlertId = /^\d+$/.test(String(alertId || "").trim());
+      const normalizedAlertId = String(alertId || "").trim();
       try {
-        if (!isNumericAlertId) {
+        if (!normalizedAlertId) {
           const fallback = fallbackFromSearchAndCache();
           if (!active) return;
           if (fallback) {
@@ -121,7 +121,7 @@ export default function SOSNavigate() {
           return;
         }
 
-        const res = await api.get(`/api/emergency/${alertId}/assist`);
+        const res = await api.get(`/api/emergency/${encodeURIComponent(normalizedAlertId)}/assist`);
         if (!active) return;
         const data = res?.data || null;
         if (!data) {
