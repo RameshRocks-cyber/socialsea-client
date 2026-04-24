@@ -3,7 +3,9 @@ import { useNavigate, useParams } from "react-router-dom";
 import api from "../api/axios";
 import { getApiBaseUrl } from "../api/baseUrl";
 import { recordCommentActivity, recordSearchActivity, recordWatchHistory } from "../services/activityStore";
+import { readIdMapFromStorage, writeIdMapToStorage } from "../utils/idStorage";
 import { readLiveBroadcast, subscribeLiveBroadcast } from "../utils/liveBroadcast";
+import { isYouTubeMedia } from "../utils/youtubeMedia";
 import {
   FEED_WATCH_PROGRESS_MILESTONES,
   FEED_WATCH_TIME_CHUNK_SECONDS,
@@ -100,6 +102,7 @@ export default function LongVideos() {
   const [searchText, setSearchText] = useState("");
   const [activeCategory, setActiveCategory] = useState("All");
   const [playerBrightness, setPlayerBrightness] = useState(1);
+  const [playerVolume, setPlayerVolume] = useState(1);
   const [gestureHud, setGestureHud] = useState({ text: "", position: "bottom" });
   const [isPlayerPaused, setIsPlayerPaused] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(false);
@@ -301,13 +304,7 @@ export default function LongVideos() {
     return `${base}${url}`;
   };
   const readIdMap = (key) => {
-    try {
-      const raw = localStorage.getItem(key);    if (!raw) return {};
-      const ids = JSON.parse(raw);    if (!Array.isArray(ids)) return {};
-      return ids.reduce((acc, id) => ({ ...acc, [Number(id)]: true }), {});
-    } catch {
-      return {};
-    }
+    return readIdMapFromStorage(key);
   };
 
   const readNumberMap = (key) => {
@@ -325,10 +322,7 @@ export default function LongVideos() {
   };
 
   const persistIdMap = (key, map) => {
-    const ids = Object.keys(map)
-      .filter((id) => map[id])
-      .map((id) => Number(id));
-    localStorage.setItem(key, JSON.stringify(ids));
+    writeIdMapToStorage(key, map);
   };
 
   const mediaUrlFor = (post) =>
@@ -351,6 +345,18 @@ export default function LongVideos() {
     if (post?.isShort === true || post?.isShortVideo === true || post?.shortVideo === true) return true;
     const url = mediaUrlFor(post).toLowerCase();
     return /\.(mp4|mov|webm|mkv|m4v|avi|mpg|mpeg|3gp|ogv)(\?|#|$)/.test(url);
+  };
+
+  const isReelPost = (post) => {
+    if (!post) return false;
+    if (post?.originalReel === true || post?.originalReel === "true") return true;
+    if (post?.reel === true || post?.reel === "true") return true;
+    if (post?.isReel === true || post?.isReel === "true") return true;
+
+    const rawType = String(post?.type || post?.mediaType || post?.contentType || post?.mimeType || "")
+      .trim()
+      .toLowerCase();
+    return rawType.includes("reel");
   };
 
   const parseDurationLikeValue = (raw) => {    if (raw == null) return 0;    if (typeof raw === "number") {    if (!Number.isFinite(raw) || raw <= 0) return 0;
@@ -521,13 +527,13 @@ export default function LongVideos() {
       if (hasCached) setAllPosts(cached);
       setIsLoading(!hasCached);
       try {
-        const [fromFeed, fromReels, fromMe, fromProfile] = await Promise.all([
+        const [fromVideos, fromFeed, fromMe, fromProfile] = await Promise.all([
+          fetchAny(["/api/feed/videos"]),
           fetchAny(["/api/feed"]),
-          fetchAny(["/api/reels"]),
           fetchAny(["/api/profile/me/posts"]),
           fetchAny(["/api/profile/posts"])
         ]);
-        let posts = [...fromFeed, ...fromReels, ...fromMe, ...fromProfile].filter(Boolean);
+        let posts = [...fromVideos, ...fromFeed, ...fromMe, ...fromProfile].filter(Boolean);
 
         if (postId) {
           const direct = await fetchOne([
@@ -606,7 +612,8 @@ export default function LongVideos() {
     const liked = readIdMap("likedPostIds");
     const disliked = readIdMap("dislikedPostIds");
     const normalizedLiked = { ...liked };
-    Object.keys(disliked).forEach((id) => {    if (disliked[id]) normalizedLiked[id] = false;
+    Object.keys(disliked).forEach((id) => {
+      if (disliked[id]) delete normalizedLiked[id];
     });
     setLikedPostIds(normalizedLiked);
     setDislikedPostIds(disliked);
@@ -642,7 +649,9 @@ export default function LongVideos() {
   };
 
   const videoPosts = useMemo(() => {
-    return uniqueByPostKey(allPosts.filter((post) => !!mediaUrlFor(post) && isVideoPost(post)));
+    return uniqueByPostKey(
+      allPosts.filter((post) => !!mediaUrlFor(post) && isVideoPost(post) && !isReelPost(post) && !isYouTubeMedia(post))
+    );
   }, [allPosts]);
 
   const longVideos = useMemo(() => {
@@ -661,6 +670,7 @@ export default function LongVideos() {
       allPosts.filter((post) => {
         const mediaUrl = mediaUrlFor(post).toLowerCase();
         if (!mediaUrl) return false;
+        if (isYouTubeMedia(post)) return false;
         const rawType = String(post?.type || post?.mediaType || post?.contentType || post?.mimeType || "")
           .trim()
           .toLowerCase();
@@ -671,7 +681,7 @@ export default function LongVideos() {
     );
     const baseList = longVideos.length ? longVideos : videoPosts.length ? videoPosts : fallbackNonImage;
     const routePostCandidate = allPosts.find(
-      (post) => String(post?.id ?? "") === String(postId ?? "") && !!mediaUrlFor(post)
+      (post) => String(post?.id ?? "") === String(postId ?? "") && !!mediaUrlFor(post) && !isYouTubeMedia(post)
     );
     if (routePostCandidate) return uniqueByPostKey([routePostCandidate, ...baseList]);
     return baseList;
@@ -707,8 +717,14 @@ export default function LongVideos() {
     });
   }, [watchableVideos, searchText, activeCategory]);
 
-  const activeVideo =
-    watchableVideos.find((p) => String(p.id) === String(postId)) || filteredLongVideos[0] || watchableVideos[0] || null;
+  const requestedPost = useMemo(() => {
+    if (!postId) return null;
+    return allPosts.find((post) => String(post?.id ?? "") === String(postId ?? "")) || null;
+  }, [allPosts, postId]);
+  const isBlockedYouTubeRoute = Boolean(postId) && isYouTubeMedia(requestedPost);
+  const activeVideo = isBlockedYouTubeRoute
+    ? null
+    : watchableVideos.find((p) => String(p.id) === String(postId)) || filteredLongVideos[0] || watchableVideos[0] || null;
   const watchSequence = filteredLongVideos.length ? filteredLongVideos : watchableVideos;
   const activeVideoIndex = watchSequence.findIndex((p) => String(p.id) === String(activeVideo?.id));
 
@@ -845,18 +861,25 @@ export default function LongVideos() {
     const wasDisliked = Boolean(dislikedPostIds[postId]);
 
     setDislikedPostIds((prev) => {    if (!prev[postId]) return prev;
-      const next = { ...prev, [postId]: false };
+      const next = { ...prev };
+      delete next[postId];
       persistIdMap("dislikedPostIds", next);
       return next;
     });    if (wasDisliked) {
       setDislikeCounts((prev) => {
         const next = { ...prev, [postId]: Math.max(0, (Number(prev[postId]) || 0) - 1) };
-        localStorage.setItem("dislikeCountsByPost", JSON.stringify(next));
+        try {
+          localStorage.setItem("dislikeCountsByPost", JSON.stringify(next));
+        } catch {
+          // ignore storage issues
+        }
         return next;
       });
     }    if (wasLiked) {
       setLikedPostIds((prev) => {
-        const next = { ...prev, [postId]: false };
+        if (!prev[postId]) return prev;
+        const next = { ...prev };
+        delete next[postId];
         persistIdMap("likedPostIds", next);
         return next;
       });
@@ -888,7 +911,8 @@ export default function LongVideos() {
     const wasDisliked = Boolean(dislikedPostIds[postId]);
 
     setLikedPostIds((prev) => {    if (!prev[postId]) return prev;
-      const next = { ...prev, [postId]: false };
+      const next = { ...prev };
+      delete next[postId];
       persistIdMap("likedPostIds", next);
       return next;
     });    if (wasLiked) {
@@ -902,14 +926,20 @@ export default function LongVideos() {
 
     setDislikedPostIds((prev) => {
       const nextValue = !wasDisliked;
-      const next = { ...prev, [postId]: nextValue };
+      const next = { ...prev };
+      if (nextValue) next[postId] = true;
+      else delete next[postId];
       persistIdMap("dislikedPostIds", next);
       return next;
     });
     setDislikeCounts((prev) => {
       const delta = wasDisliked ? -1 : 1;
       const next = { ...prev, [postId]: Math.max(0, (Number(prev[postId]) || 0) + delta) };
-      localStorage.setItem("dislikeCountsByPost", JSON.stringify(next));
+      try {
+        localStorage.setItem("dislikeCountsByPost", JSON.stringify(next));
+      } catch {
+        // ignore storage issues
+      }
       return next;
     });
   };
@@ -936,7 +966,9 @@ export default function LongVideos() {
 
   const toggleSave = (postId) => {
     setSavedPostIds((prev) => {
-      const next = { ...prev, [postId]: !prev[postId] };
+      const next = { ...prev };
+      if (next[postId]) delete next[postId];
+      else next[postId] = true;
       persistIdMap("savedPostIds", next);
       return next;
     });
@@ -944,7 +976,9 @@ export default function LongVideos() {
 
   const toggleWatchLater = (postId) => {
     setWatchLaterPostIds((prev) => {
-      const next = { ...prev, [postId]: !prev[postId] };
+      const next = { ...prev };
+      if (next[postId]) delete next[postId];
+      else next[postId] = true;
       persistIdMap("watchLaterPostIds", next);
       return next;
     });
@@ -1018,9 +1052,24 @@ export default function LongVideos() {
 
   const ensurePlayerAudio = (video = playerRef.current) => {
     if (!video) return;
-    const currentVolume = clamp(Number(video.volume ?? 1), 0, 1);
-    video.volume = currentVolume > 0 ? currentVolume : 1;
-    if (video.muted) video.muted = false;
+    const raw = Number(playerVolume);
+    const desiredVolume = Number.isFinite(raw) ? clamp(raw, 0, 1) : 1;
+    video.volume = desiredVolume;
+    if (desiredVolume > 0 && video.muted) video.muted = false;
+    if (desiredVolume === 0 && !video.muted) video.muted = true;
+  };
+
+  const applyPlayerVolume = (nextValue, { showHud = false } = {}) => {
+    const raw = Number(nextValue);
+    const normalized = Number.isFinite(raw) ? clamp(raw, 0, 1) : 1;
+    setPlayerVolume(normalized);
+    const video = playerRef.current;
+    if (video) {
+      video.volume = normalized;
+      if (normalized > 0 && video.muted) video.muted = false;
+      if (normalized === 0 && !video.muted) video.muted = true;
+    }
+    if (showHud) showGestureHud(`Volume ${Math.round(normalized * 100)}%`);
   };
 
   const togglePlayPause = () => {
@@ -1770,6 +1819,7 @@ export default function LongVideos() {
   const selectedSpeedLabel = `${playerPlaybackSpeed}x`;
   const selectedLoopLabel = isLoopVideo ? "On" : "Off";
   const selectedLockLabel = isScreenLocked ? "On" : "Off";
+  const selectedVolumeLabel = playerVolume <= 0 ? "Muted" : `${Math.round(playerVolume * 100)}%`;
   const selectedBrightnessLabel = `${Math.round(playerBrightness * 100)}%`;
   const settingsRows = [
     { key: "quality", label: "Quality", value: selectedQualityLabel },
@@ -1777,6 +1827,7 @@ export default function LongVideos() {
     { key: "lock", label: "Lock Screen", value: selectedLockLabel },
     { key: "speed", label: "Playback speed", value: selectedSpeedLabel },
     { key: "loop", label: "Loop video", value: selectedLoopLabel },
+    { key: "volume", label: "Volume", value: selectedVolumeLabel },
     { key: "brightness", label: "Brightness", value: selectedBrightnessLabel }
   ];
   const openSettingsPanel = (key) => {
@@ -1923,7 +1974,13 @@ export default function LongVideos() {
         <div className="watch-page">
           <section className="watch-main">
             {isLoading && <p className="watch-empty">Loading long videos...</p>}
-            {!isLoading && !activeVideo && <p className="watch-empty">No long videos found.</p>}
+            {!isLoading && !activeVideo && (
+              <p className="watch-empty">
+                {isBlockedYouTubeRoute
+                  ? "This video can't be played here. Upload an MP4 to watch in-app."
+                  : "No long videos found."}
+              </p>
+            )}
 
             {activeVideo && (
               <>
@@ -2071,6 +2128,38 @@ export default function LongVideos() {
                     </button>
                     <button
                       type="button"
+                      className={`watch-quick-btn ${quickAdjustMode === "volume" ? "is-active" : ""}`}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={() => toggleQuickAdjustMode("volume")}
+                      title="Volume"
+                      aria-label="Volume"
+                    >
+                      <svg className="watch-quick-icon" viewBox="0 0 24 24" aria-hidden="true">
+                        <path
+                          d="M4 10v4h3.4l4.6 3.3V6.7L7.4 10H4z"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinejoin="round"
+                        />
+                        <path
+                          d="M14.6 9.2a3.6 3.6 0 010 5.6"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                        />
+                        <path
+                          d="M16.9 6.7a7 7 0 010 10.6"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    </button>
+                    <button
+                      type="button"
                       className={`watch-quick-btn ${showQualityMenu ? "is-active" : ""}`}
                       onPointerDown={(e) => e.stopPropagation()}
                       onClick={toggleSettingsMenu}
@@ -2091,7 +2180,13 @@ export default function LongVideos() {
                   </div>
                   {quickAdjustMode && overlayVisible && (
                     <div
-                      className={`watch-quick-adjust${quickAdjustMode === "brightness" ? " is-brightness" : ""}`}
+                      className={`watch-quick-adjust${
+                        quickAdjustMode === "brightness"
+                          ? " is-brightness"
+                          : quickAdjustMode === "volume"
+                            ? " is-volume"
+                            : ""
+                      }`}
                       onPointerDown={(e) => e.stopPropagation()}
                       onClick={(e) => e.stopPropagation()}
                       onWheel={(e) => e.stopPropagation()}
@@ -2132,6 +2227,44 @@ export default function LongVideos() {
                               }}
                               onChange={(e) => {
                                 setPlayerBrightness(clamp((Number(e.target.value) || 100) / 100, 0.5, 1.7));
+                                scheduleQuickAdjustAutoHide();
+                              }}
+                            />
+                          </div>
+                        </div>
+                      ) : quickAdjustMode === "volume" ? (
+                        <div className="watch-quick-adjust-content watch-quick-adjust-content--volume">
+                          <p className="watch-quick-adjust-label">{selectedVolumeLabel}</p>
+                          <div className="watch-quick-vertical-wrap">
+                            <input
+                              type="range"
+                              min="0"
+                              max="100"
+                              step="1"
+                              value={Math.round(playerVolume * 100)}
+                              className="watch-settings-range watch-quick-range is-vertical"
+                              onPointerDown={(e) => {
+                                startSettingsAdjust(e);
+                                clearQuickAdjustHideTimer();
+                              }}
+                              onPointerUp={() => {
+                                stopSettingsAdjust();
+                                scheduleQuickAdjustAutoHide();
+                              }}
+                              onPointerCancel={() => {
+                                stopSettingsAdjust();
+                                scheduleQuickAdjustAutoHide();
+                              }}
+                              onBlur={() => {
+                                stopSettingsAdjust();
+                                scheduleQuickAdjustAutoHide();
+                              }}
+                              onFocus={(e) => {
+                                startSettingsAdjust(e);
+                                clearQuickAdjustHideTimer();
+                              }}
+                              onChange={(e) => {
+                                applyPlayerVolume((Number(e.target.value) || 0) / 100);
                                 scheduleQuickAdjustAutoHide();
                               }}
                             />
@@ -2237,6 +2370,25 @@ export default function LongVideos() {
                               >
                                 On
                               </button>
+                            </div>
+                          )}
+
+                          {activeSettingsPanel === "volume" && (
+                            <div className="watch-settings-subcontent">
+                              <input
+                                type="range"
+                                min="0"
+                                max="100"
+                                step="1"
+                                value={Math.round(playerVolume * 100)}
+                                className="watch-settings-range"
+                                onPointerDown={startSettingsAdjust}
+                                onPointerUp={stopSettingsAdjust}
+                                onPointerCancel={stopSettingsAdjust}
+                                onBlur={stopSettingsAdjust}
+                                onFocus={startSettingsAdjust}
+                                onChange={(e) => applyPlayerVolume((Number(e.target.value) || 0) / 100)}
+                              />
                             </div>
                           )}
 

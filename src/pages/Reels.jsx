@@ -3,17 +3,19 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   FiBookmark,
   FiMessageCircle,
-  FiSend,
   FiVolume2,
   FiVolumeX,
 } from "react-icons/fi";
 import { BsBookmarkFill } from "react-icons/bs";
 import { HiHandThumbUp, HiOutlineHandThumbUp } from "react-icons/hi2";
+import { IoArrowRedoOutline } from "react-icons/io5";
 import api from "../api/axios";
 import { getApiBaseUrl, toApiUrl } from "../api/baseUrl";
 import { recordCommentActivity, recordRepostActivity, recordWatchHistory } from "../services/activityStore";
 import { addStoryEntry, readStoryIdentity } from "../services/storyStorage";
+import { readIdMapFromStorage, writeIdMapToStorage } from "../utils/idStorage";
 import { classifyVideoBucket } from "../utils/videoFeedClassifier";
+import { isYouTubeMedia } from "../utils/youtubeMedia";
 import {
   FEED_WATCH_PROGRESS_MILESTONES,
   FEED_WATCH_TIME_CHUNK_SECONDS,
@@ -64,7 +66,7 @@ const readReelsCache = () => {
     const at = Number(parsed?.at || 0);
     const items = Array.isArray(parsed?.items) ? parsed.items : [];
     if (!Number.isFinite(at) || Date.now() - at > REELS_CACHE_TTL_MS) return [];
-    return items;
+    return items.filter((item) => item && !isYouTubeMedia(item));
   } catch {
     return [];
   }
@@ -117,9 +119,11 @@ export default function Reels() {
   const [profilePicByOwner, setProfilePicByOwner] = useState({});
   const [allMuted, setAllMuted] = useState(() => {
     try {
-      return localStorage.getItem("reelsMutedAll") === "1";
+      const stored = localStorage.getItem("reelsMutedAll");
+      if (stored == null) return true;
+      return stored === "1";
     } catch {
-      return false;
+      return true;
     }
   });
 
@@ -260,6 +264,7 @@ export default function Reels() {
 
         const byKey = new Map();
         const pushItem = (item, source) => {
+          if (isYouTubeMedia(item)) return;
           const rawUrl = String(
             item?.contentUrl || item?.mediaUrl || "",
           ).trim();
@@ -370,29 +375,13 @@ export default function Reels() {
   }, [reels, currentIndex]);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem("likedPostIds");
-      if (!raw) return;
-      const ids = JSON.parse(raw);
-      if (!Array.isArray(ids)) return;
-      const map = ids.reduce((acc, id) => ({ ...acc, [id]: true }), {});
-      setLikedPostIds(map);
-    } catch {
-      // ignore invalid localStorage payload
-    }
+    const map = readIdMapFromStorage("likedPostIds");
+    if (Object.keys(map).length) setLikedPostIds(map);
   }, []);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem("savedReelIds");
-      if (!raw) return;
-      const ids = JSON.parse(raw);
-      if (!Array.isArray(ids)) return;
-      const map = ids.reduce((acc, id) => ({ ...acc, [id]: true }), {});
-      setSavedPostIds(map);
-    } catch {
-      // ignore invalid localStorage payload
-    }
+    const map = readIdMapFromStorage("savedReelIds");
+    if (Object.keys(map).length) setSavedPostIds(map);
   }, []);
 
   useEffect(() => {
@@ -825,10 +814,7 @@ export default function Reels() {
 
   const likeReel = async (postId) => {
     const persistLikedMap = (next) => {
-      const ids = Object.keys(next)
-        .filter((id) => next[id])
-        .map((id) => Number(id));
-      localStorage.setItem("likedPostIds", JSON.stringify(ids));
+      writeIdMapToStorage("likedPostIds", next);
     };
 
     const triggerLikeBurst = () => {
@@ -877,7 +863,9 @@ export default function Reels() {
         });
       } else {
         setLikedPostIds((prev) => {
-          const next = { ...prev, [postId]: nextLiked };
+          const next = { ...prev };
+          if (nextLiked) next[postId] = true;
+          else delete next[postId];
           likedPostIdsRef.current = next;
           persistLikedMap(next);
           return next;
@@ -987,11 +975,10 @@ export default function Reels() {
 
   const toggleSave = (postId) => {
     setSavedPostIds((prev) => {
-      const next = { ...prev, [postId]: !prev[postId] };
-      const savedIds = Object.keys(next)
-        .filter((id) => next[id])
-        .map((id) => Number(id));
-      localStorage.setItem("savedReelIds", JSON.stringify(savedIds));
+      const next = { ...prev };
+      if (next[postId]) delete next[postId];
+      else next[postId] = true;
+      writeIdMapToStorage("savedReelIds", next);
       return next;
     });
   };
@@ -1319,7 +1306,7 @@ export default function Reels() {
         {reels.map((reel, idx) => {
           const rawUrl = reel.contentUrl || reel.mediaUrl || "";
           const videoUrl = resolveUrl(rawUrl.trim());
-          if (!videoUrl) return null;
+          if (!videoUrl || isYouTubeMedia(reel)) return null;
 
           const comments = commentsByPost[reel.id] || [];
           const ownerNameRaw =
@@ -1418,7 +1405,7 @@ export default function Reels() {
                     title="Share"
                   >
                     <span>
-                      <FiSend />
+                      <IoArrowRedoOutline aria-hidden="true" />
                     </span>
                   </button>
                   <button

@@ -7,6 +7,7 @@ import { buildProfilePath } from "../../utils/profileRoute";
 import { getApiBaseUrl, toApiUrl } from "../../api/baseUrl";
 import { clearAuthStorage } from "../../auth";
 import { readActiveStories, syncStoryCaches } from "../../services/storyStorage";
+import { addVaultFiles } from "../../services/vaultStorage";
 import { SETTINGS_KEY, readSoundPrefs, NOTIFICATION_SOUND_URLS, RINGTONE_SOUND_URLS } from "../soundPrefs";
 
 const POLL_MS = 4000;
@@ -24,6 +25,7 @@ const HIDDEN_CHAT_MSG_IDS_KEY = "socialsea_hidden_msg_ids_v1";
   const CALL_VIDEO_QUALITY_KEY = "socialsea_call_video_quality_v1";
   const CALL_RING_MS = 30000;
   const CALL_MEDIA_CONNECT_MS = 25000;
+  const CALL_RECORDING_SLICE_MS = 250;
   const STORY_STORAGE_KEY = "socialsea_stories_v1";
   const CALL_POLL_MS = 3000;
   const CALL_SIGNAL_MAX_AGE_MS = 45000;
@@ -1203,6 +1205,8 @@ function useChatController() {
   const [isSpeakerOn, setIsSpeakerOn] = useState(true);
   const [ringtoneMuted, setRingtoneMuted] = useState(false);
   const [callDurationSec, setCallDurationSec] = useState(0);
+  const [isCallRecording, setIsCallRecording] = useState(false);
+  const [callRecordingError, setCallRecordingError] = useState("");
   const [callHistoryByContact, setCallHistoryByContact] = useState({});
   const [videoFilterId, setVideoFilterId] = useState("beauty_soft");
   const [showVideoFilters, setShowVideoFilters] = useState(false);
@@ -1737,6 +1741,11 @@ function useChatController() {
   const activeCallPopupPosRef = useRef(activeCallPopupPos);
   const callStartedAtRef = useRef(null);
   const callConnectedLoggedRef = useRef(false);
+  const callRecorderRef = useRef(null);
+  const callRecordingStreamRef = useRef(null);
+  const callRecordingChunksRef = useRef([]);
+  const callRecordingBindingsRef = useRef([]);
+  const callRecordingStartedAtRef = useRef(0);
   const rejoinRetryTimerRef = useRef(null);
   const rejoinRetryCountRef = useRef(0);
   const rejoinPayloadRef = useRef(null);
@@ -4355,6 +4364,348 @@ function useChatController() {
     setRemoteIsScreenShare(remoteScreenShareSignalRef.current || detectedScreenShare);
   }, [isScreenShareStream]);
 
+  const callRecordingSupported =
+    typeof window !== "undefined" && typeof window.MediaRecorder !== "undefined";
+
+  const detachCallRecordingBindings = useCallback(() => {
+    const bindings = Array.isArray(callRecordingBindingsRef.current) ? callRecordingBindingsRef.current : [];
+    bindings.forEach((binding) => {
+      const stream = binding?.stream;
+      const handler = binding?.handler;
+      if (!stream || typeof stream.removeEventListener !== "function" || !handler) return;
+      try {
+        stream.removeEventListener("addtrack", handler);
+        stream.removeEventListener("removetrack", handler);
+      } catch {
+        // ignore listener cleanup failures
+      }
+    });
+    callRecordingBindingsRef.current = [];
+  }, []);
+
+  const clearCallRecordingStream = useCallback(() => {
+    detachCallRecordingBindings();
+    const stream = callRecordingStreamRef.current;
+    if (stream?.getTracks) {
+      stream.getTracks().forEach((track) => {
+        try {
+          stream.removeTrack(track);
+        } catch {
+          // ignore remove track failures
+        }
+      });
+    }
+    callRecordingStreamRef.current = null;
+  }, [detachCallRecordingBindings]);
+
+  const syncCallRecordingTracks = useCallback(() => {
+    const recordingStream = callRecordingStreamRef.current;
+    if (!recordingStream) return 0;
+
+    const desiredTracks = [];
+    const addTracksFrom = (sourceStream) => {
+      if (!sourceStream?.getAudioTracks) return;
+      sourceStream.getAudioTracks().forEach((track) => {
+        if (!track || track.readyState === "ended") return;
+        desiredTracks.push(track);
+      });
+    };
+
+    addTracksFrom(localStreamRef.current);
+    addTracksFrom(remoteStreamRef.current);
+
+    const desiredById = new Map(desiredTracks.map((track) => [track.id, track]));
+    recordingStream.getAudioTracks().forEach((track) => {
+      if (!desiredById.has(track.id) || track.readyState === "ended") {
+        try {
+          recordingStream.removeTrack(track);
+        } catch {
+          // ignore remove track failures
+        }
+      }
+    });
+
+    const existingIds = new Set(recordingStream.getAudioTracks().map((track) => track.id));
+    desiredTracks.forEach((track) => {
+      if (existingIds.has(track.id)) return;
+      try {
+        recordingStream.addTrack(track);
+      } catch {
+        // ignore duplicate add failures
+      }
+    });
+
+    return recordingStream.getAudioTracks().length;
+  }, []);
+
+  const bindCallRecordingStreams = useCallback(() => {
+    detachCallRecordingBindings();
+    const onTrackChanged = (event) => {
+      const track = event?.track;
+      if (track && track.kind !== "audio") return;
+      syncCallRecordingTracks();
+    };
+    const streams = [localStreamRef.current, remoteStreamRef.current];
+    const bindings = [];
+    streams.forEach((stream) => {
+      if (!stream || typeof stream.addEventListener !== "function") return;
+      try {
+        stream.addEventListener("addtrack", onTrackChanged);
+        stream.addEventListener("removetrack", onTrackChanged);
+        bindings.push({ stream, handler: onTrackChanged });
+      } catch {
+        // ignore stream listener failures
+      }
+    });
+    callRecordingBindingsRef.current = bindings;
+  }, [detachCallRecordingBindings, syncCallRecordingTracks]);
+
+  const resolveCallRecordingMimeType = () => {
+    const candidates = [
+      "audio/webm;codecs=opus",
+      "audio/webm",
+      "audio/mp4",
+      "audio/ogg;codecs=opus"
+    ];
+    for (const candidate of candidates) {
+      try {
+        if (typeof MediaRecorder.isTypeSupported === "function" && MediaRecorder.isTypeSupported(candidate)) {
+          return candidate;
+        }
+      } catch {
+        // try next candidate
+      }
+    }
+    return "";
+  };
+
+  const buildCallRecordingFileName = useCallback((mimeType = "audio/webm") => {
+    const mime = String(mimeType || "audio/webm").toLowerCase();
+    const safePeer = String(callStateRef.current?.peerName || "user")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "user";
+    const mode = callStateRef.current?.mode === "video" ? "video" : "audio";
+    const ext = mime.includes("mp4") ? "m4a" : mime.includes("ogg") ? "ogg" : "webm";
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    return `call-${mode}-audio-${safePeer}-${stamp}.${ext}`;
+  }, []);
+
+  const downloadCallRecordingFallback = useCallback((blob, fileName) => {
+    if (!blob?.size) return;
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileName || "call-audio-recording.webm";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => {
+      URL.revokeObjectURL(url);
+    }, 1500);
+  }, []);
+
+  const saveCallRecordingToVault = useCallback(
+    async (blob, mimeType, recordingMeta = {}) => {
+      if (!blob?.size) return "";
+      const endedAt = Number(recordingMeta.endedAt || Date.now());
+      const startedAt = Number(recordingMeta.startedAt || endedAt);
+      const durationSec = Math.max(0, Number(recordingMeta.durationSec || 0));
+      const fileName = buildCallRecordingFileName(mimeType);
+      const normalizedMimeType = String(mimeType || blob.type || "audio/webm");
+      const file = new File([blob], fileName, {
+        type: normalizedMimeType,
+        lastModified: endedAt
+      });
+      await addVaultFiles([file], {
+        source: "call-recording",
+        meta: {
+          source: "call-recording",
+          callMode: recordingMeta.callMode || (callStateRef.current?.mode === "video" ? "video" : "audio"),
+          peerId: String(recordingMeta.peerId || callStateRef.current?.peerId || "").trim(),
+          peerName: String(recordingMeta.peerName || callStateRef.current?.peerName || "").trim(),
+          startedAt,
+          endedAt,
+          durationSec
+        }
+      });
+      return fileName;
+    },
+    [buildCallRecordingFileName]
+  );
+
+  const startCallRecording = useCallback(
+    async ({ silent = false } = {}) => {
+      if (isCallRecording || callRecorderRef.current?.state === "recording") return true;
+      if (!callRecordingSupported) {
+        if (!silent) setCallRecordingError("Call recording is not supported in this browser.");
+        return false;
+      }
+      if (callStateRef.current.phase === "idle") {
+        if (!silent) setCallRecordingError("Start a call first to record audio.");
+        return false;
+      }
+
+      const recordingStream = new MediaStream();
+      callRecordingStreamRef.current = recordingStream;
+      bindCallRecordingStreams();
+      const audioTrackCount = syncCallRecordingTracks();
+      if (!audioTrackCount) {
+        clearCallRecordingStream();
+        if (!silent) setCallRecordingError("Audio is not ready yet. Wait for the call to connect.");
+        return false;
+      }
+
+      const preferredMime = resolveCallRecordingMimeType();
+      let recorder;
+      try {
+        recorder = preferredMime
+          ? new MediaRecorder(recordingStream, { mimeType: preferredMime })
+          : new MediaRecorder(recordingStream);
+      } catch {
+        clearCallRecordingStream();
+        if (!silent) setCallRecordingError("Could not start call recording.");
+        return false;
+      }
+
+      callRecorderRef.current = recorder;
+      callRecordingChunksRef.current = [];
+
+      recorder.ondataavailable = (event) => {
+        if (event?.data?.size) callRecordingChunksRef.current.push(event.data);
+      };
+
+      recorder.onerror = () => {
+        callRecorderRef.current = null;
+        callRecordingChunksRef.current = [];
+        callRecordingStartedAtRef.current = 0;
+        clearCallRecordingStream();
+        setIsCallRecording(false);
+        setCallRecordingError("Call recording failed. Try again.");
+      };
+
+      recorder.onstop = () => {
+        const chunks = [...callRecordingChunksRef.current];
+        const mimeType = recorder.mimeType || preferredMime || "audio/webm";
+        const endedAt = Date.now();
+        const startedAt = Number(callRecordingStartedAtRef.current || endedAt);
+        const durationSec = Math.max(1, Math.round((endedAt - startedAt) / 1000));
+        const mode = callStateRef.current?.mode === "video" ? "video" : "audio";
+        const peerId = String(callStateRef.current?.peerId || "").trim();
+        const peerName = String(callStateRef.current?.peerName || "").trim();
+        callRecorderRef.current = null;
+        callRecordingChunksRef.current = [];
+        callRecordingStartedAtRef.current = 0;
+        clearCallRecordingStream();
+        setIsCallRecording(false);
+        if (!chunks.length) return;
+        const blob = new Blob(chunks, { type: mimeType });
+        if (!blob.size) return;
+        void (async () => {
+          const fileName = buildCallRecordingFileName(mimeType);
+          try {
+            await saveCallRecordingToVault(blob, mimeType, {
+              callMode: mode,
+              peerId,
+              peerName,
+              startedAt,
+              endedAt,
+              durationSec
+            });
+            setCallRecordingError("");
+          } catch {
+            downloadCallRecordingFallback(blob, fileName);
+            setCallRecordingError("Saved as a download. Add it to Storage Vault manually.");
+          }
+        })();
+      };
+
+      try {
+        recorder.start(CALL_RECORDING_SLICE_MS);
+        callRecordingStartedAtRef.current = Date.now();
+        setCallRecordingError("");
+        setIsCallRecording(true);
+        return true;
+      } catch {
+        callRecorderRef.current = null;
+        callRecordingChunksRef.current = [];
+        callRecordingStartedAtRef.current = 0;
+        clearCallRecordingStream();
+        setIsCallRecording(false);
+        if (!silent) setCallRecordingError("Unable to start call recording.");
+        return false;
+      }
+    },
+    [
+      isCallRecording,
+      callRecordingSupported,
+      bindCallRecordingStreams,
+      syncCallRecordingTracks,
+      clearCallRecordingStream,
+      buildCallRecordingFileName,
+      saveCallRecordingToVault,
+      downloadCallRecordingFallback
+    ]
+  );
+
+  const stopCallRecording = useCallback(() => {
+    const recorder = callRecorderRef.current;
+    if (recorder && recorder.state !== "inactive") {
+      try {
+        recorder.stop();
+      } catch {
+        // ignore recorder stop failures
+      }
+      return;
+    }
+    callRecorderRef.current = null;
+    callRecordingChunksRef.current = [];
+    callRecordingStartedAtRef.current = 0;
+    clearCallRecordingStream();
+    setIsCallRecording(false);
+  }, [clearCallRecordingStream]);
+
+  const toggleCallRecording = useCallback(() => {
+    if (isCallRecording || callRecorderRef.current?.state === "recording") {
+      stopCallRecording();
+      return;
+    }
+    void startCallRecording();
+  }, [isCallRecording, startCallRecording, stopCallRecording]);
+
+  useEffect(() => {
+    if (!(isCallRecording || callRecorderRef.current?.state === "recording")) return;
+    bindCallRecordingStreams();
+    syncCallRecordingTracks();
+  }, [isCallRecording, callState.mode, bindCallRecordingStreams, syncCallRecordingTracks]);
+
+  useEffect(() => {
+    if (callState.phase !== "idle") return;
+    if (callRecorderRef.current?.state === "recording" || isCallRecording) {
+      stopCallRecording();
+      return;
+    }
+    setCallRecordingError("");
+  }, [callState.phase, isCallRecording, stopCallRecording]);
+
+  useEffect(() => () => {
+    try {
+      const recorder = callRecorderRef.current;
+      if (recorder) {
+        recorder.ondataavailable = null;
+        recorder.onerror = null;
+        recorder.onstop = null;
+        if (recorder.state !== "inactive") recorder.stop();
+      }
+    } catch {
+      // ignore recorder cleanup failures
+    }
+    callRecorderRef.current = null;
+    callRecordingChunksRef.current = [];
+    callRecordingStartedAtRef.current = 0;
+    clearCallRecordingStream();
+  }, [clearCallRecordingStream]);
+
   useEffect(() => {
     if (callState.phase === "idle" || callState.mode !== "video") {
       remoteScreenShareSignalRef.current = false;
@@ -4757,6 +5108,9 @@ function useChatController() {
 
   const finishCall = (notifyPeer = false, reason = "") => {
     const current = callStateRef.current;
+    if (callRecorderRef.current?.state === "recording" || isCallRecording) {
+      stopCallRecording();
+    }
     clearRejoinRetryTimer();
     clearMediaConnectTimer();
     rejoinRetryCountRef.current = 0;
@@ -4788,6 +5142,7 @@ function useChatController() {
       resetMedia();
       resetGroupCall();
       callConnectedLoggedRef.current = false;
+      setCallRecordingError("");
       setIncomingCall(null);
       setCallState({ phase: "idle", mode: "audio", peerId: "", peerName: "", initiatedByMe: false, provider: "webrtc" });
       clearCallRejoin();
@@ -4824,6 +5179,7 @@ function useChatController() {
     closePeer();
     resetMedia();
     callConnectedLoggedRef.current = false;
+    setCallRecordingError("");
         setIncomingCall(null);
     setCallState({ phase: "idle", mode: "audio", peerId: "", peerName: "", initiatedByMe: false, provider: "webrtc" });
     clearCallRejoin();
@@ -13018,6 +13374,11 @@ function useChatController() {
     setRingtoneMuted,
     callDurationSec,
     setCallDurationSec,
+    isCallRecording,
+    setIsCallRecording,
+    callRecordingError,
+    setCallRecordingError,
+    callRecordingSupported,
     callHistoryByContact,
     setCallHistoryByContact,
     videoFilterId,
@@ -13603,6 +13964,9 @@ function useChatController() {
     releaseRecordingStream,
     stopAudioRecording,
     toggleAudioRecording,
+    startCallRecording,
+    stopCallRecording,
+    toggleCallRecording,
     callActive,
     openImagePreview,
     closeImagePreview,

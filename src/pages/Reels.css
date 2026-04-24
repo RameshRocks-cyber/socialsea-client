@@ -215,7 +215,7 @@
   width: min(100%, 430px);
   height: 100%;
   aspect-ratio: 9 / 16;
-  max-height: calc(100dvh - 24px);
+  max-height: 100%;
   margin: 0 auto;
   border-radius: 22px;
   overflow: hidden;
@@ -582,25 +582,19 @@ body.ss-theme-white .reel-frame {
 }
 
 body.ss-theme-white .reel-gradient-top {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.8), rgba(255, 255, 255, 0.3) 58%, transparent);
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.72), rgba(0, 0, 0, 0.22) 58%, transparent);
 }
 
 body.ss-theme-white .reel-gradient-bottom {
-  background: linear-gradient(
-    0deg,
-    rgba(255, 255, 255, 0.9),
-    rgba(255, 255, 255, 0.58) 34%,
-    rgba(255, 255, 255, 0.2) 62%,
-    transparent
-  );
+  background: linear-gradient(0deg, rgba(0, 0, 0, 0.94), rgba(0, 0, 0, 0.56) 34%, rgba(0, 0, 0, 0.18) 62%, transparent);
 }
 
 body.ss-theme-white .reel-top-title,
 body.ss-theme-white .reel-owner,
 body.ss-theme-white .reel-caption,
 body.ss-theme-white .reel-share-status {
-  color: #163c65;
-  text-shadow: 0 2px 10px rgba(255, 255, 255, 0.78);
+  color: #f7fbff;
+  text-shadow: 0 3px 14px rgba(0, 0, 0, 0.55);
 }
 
 body.ss-theme-white .reel-action-btn,
@@ -743,6 +737,15 @@ body.ss-theme-white .reel-state.is-error {
 
   body.ss-theme-white .reels-container {
     background: linear-gradient(180deg, #f8fcff 0%, #edf5ff 100%);
+  }
+
+  /* On mobile the action buttons sit on top of the reel, so force high contrast. */
+  body.ss-theme-white .reel-action-btn,
+  body.ss-theme-white .reel-action-btn span,
+  body.ss-theme-white .reel-action-btn small,
+  body.ss-theme-white .reels-gesture-btn {
+    color: #f2f7ff !important;
+    text-shadow: 0 3px 14px rgba(0, 0, 0, 0.55);
   }
 }
 

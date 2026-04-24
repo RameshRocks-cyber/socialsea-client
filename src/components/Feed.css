@@ -224,23 +224,28 @@ body.feed-no-swipe-back {
 .feed-filter-btn {
   width: 42px;
   height: 42px;
-  border-radius: 999px;
-  border: 1px solid rgba(108, 130, 166, 0.48);
-  background: linear-gradient(180deg, #18202c, #0d121a);
+  border-radius: 8px;
+  border: none;
+  background: transparent;
   color: #d9e8ff;
   font-size: 20px;
   letter-spacing: 2px;
   line-height: 1;
   cursor: pointer;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, color 0.2s ease;
+  transition: color 0.2s ease, transform 0.2s ease, opacity 0.2s ease;
 }
 
-.feed-filter-btn:hover,
-.feed-filter-btn:focus-visible {
+.feed-filter-btn:hover {
   outline: none;
-  border-color: rgba(142, 174, 224, 0.72);
   color: #f4f8ff;
-  box-shadow: 0 0 0 3px rgba(82, 128, 196, 0.26);
+  transform: translateY(-1px);
+  opacity: 0.95;
+}
+
+.feed-filter-btn:focus-visible {
+  outline: 2px solid rgba(82, 128, 196, 0.6);
+  outline-offset: 2px;
+  color: #f4f8ff;
 }
 
 .feed-filter-panel {
@@ -559,7 +564,7 @@ body.ss-theme-white .feed-study-subject-chip.is-active {
   max-width: 100%;
   border: none;
   background: transparent;
-  border-radius: 0;
+  border-radius: 12px;
   padding: 0;
   color: inherit;
   text-align: left;
@@ -588,6 +593,7 @@ body.ss-theme-white .feed-study-subject-chip.is-active {
   height: 100%;
   object-fit: cover;
   display: block;
+  border-radius: inherit;
 }
 
 .long-feed-duration {
@@ -679,25 +685,37 @@ body.ss-theme-white .feed-study-subject-chip.is-active {
 }
 
 .long-feed-share-btn {
-  border: 1px solid rgba(106, 128, 164, 0.56);
-  border-radius: 999px;
-  background: linear-gradient(180deg, #1a222f, #0d121a);
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
   color: #d8e7ff;
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1;
-  padding: 7px 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
   cursor: pointer;
-  white-space: nowrap;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, color 0.2s ease;
+  transition: color 0.2s ease, transform 0.2s ease, opacity 0.2s ease;
 }
 
-.long-feed-share-btn:hover,
-.long-feed-share-btn:focus-visible {
+.long-feed-share-icon {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+.long-feed-share-btn:hover {
   outline: none;
-  border-color: rgba(142, 174, 224, 0.72);
   color: #f4f8ff;
-  box-shadow: 0 0 0 3px rgba(82, 128, 196, 0.26);
+  transform: translateY(-1px);
+  opacity: 0.95;
+}
+
+.long-feed-share-btn:focus-visible {
+  outline: 2px solid rgba(82, 128, 196, 0.6);
+  outline-offset: 2px;
+  color: #f4f8ff;
 }
 
 .long-feed-menu-wrap {
@@ -708,13 +726,26 @@ body.ss-theme-white .feed-study-subject-chip.is-active {
 .long-feed-menu-btn {
   width: 30px;
   height: 30px;
-  border: 1px solid rgba(106, 128, 164, 0.54);
-  border-radius: 999px;
-  background: linear-gradient(180deg, #1a222f, #0d121a);
+  border: none;
+  border-radius: 8px;
+  background: transparent;
   color: #d8e7ff;
   font-size: 18px;
   line-height: 1;
   cursor: pointer;
+  transition: color 0.2s ease, transform 0.2s ease, opacity 0.2s ease;
+}
+
+.long-feed-menu-btn:hover {
+  color: #f4f8ff;
+  transform: translateY(-1px);
+  opacity: 0.95;
+}
+
+.long-feed-menu-btn:focus-visible {
+  outline: 2px solid rgba(82, 128, 196, 0.6);
+  outline-offset: 2px;
+  color: #f4f8ff;
 }
 
 .long-feed-menu {
@@ -783,16 +814,20 @@ body.ss-theme-white .feed-study-subject-chip.is-active {
 }
 
 body.ss-theme-white .feed-filter-btn {
-  border: 1px solid #d4d8e0;
-  background: linear-gradient(180deg, #ffffff, #f3f5f8);
+  border: none;
+  background: transparent;
   color: #2b3342;
 }
 
-body.ss-theme-white .feed-filter-btn:hover,
-body.ss-theme-white .feed-filter-btn:focus-visible {
-  border-color: #b9c3d4;
+body.ss-theme-white .feed-filter-btn:hover {
+  outline: none;
   color: #111827;
-  box-shadow: 0 0 0 3px rgba(17, 24, 39, 0.14);
+}
+
+body.ss-theme-white .feed-filter-btn:focus-visible {
+  outline: 2px solid rgba(17, 24, 39, 0.35);
+  outline-offset: 2px;
+  color: #111827;
 }
 
 body.ss-theme-white .feed-filter-panel {
@@ -828,22 +863,36 @@ body.ss-theme-white .long-feed-status {
 }
 
 body.ss-theme-white .long-feed-menu-btn {
-  border: 1px solid #d4d8e0;
-  background: linear-gradient(180deg, #ffffff, #f3f5f8);
+  border: none;
+  background: transparent;
   color: #2b3342;
+}
+
+body.ss-theme-white .long-feed-menu-btn:hover {
+  color: #111827;
+}
+
+body.ss-theme-white .long-feed-menu-btn:focus-visible {
+  outline: 2px solid rgba(17, 24, 39, 0.35);
+  outline-offset: 2px;
+  color: #111827;
 }
 
 body.ss-theme-white .long-feed-share-btn {
-  border: 1px solid #d4d8e0;
-  background: linear-gradient(180deg, #ffffff, #f3f5f8);
+  border: none;
+  background: transparent;
   color: #2b3342;
 }
 
-body.ss-theme-white .long-feed-share-btn:hover,
-body.ss-theme-white .long-feed-share-btn:focus-visible {
-  border-color: #b9c3d4;
+body.ss-theme-white .long-feed-share-btn:hover {
+  outline: none;
   color: #111827;
-  box-shadow: 0 0 0 3px rgba(17, 24, 39, 0.14);
+}
+
+body.ss-theme-white .long-feed-share-btn:focus-visible {
+  outline: 2px solid rgba(17, 24, 39, 0.35);
+  outline-offset: 2px;
+  color: #111827;
 }
 
 body.ss-theme-white .long-feed-menu {

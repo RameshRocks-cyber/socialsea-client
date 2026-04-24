@@ -22,7 +22,8 @@ const DEFAULT_PREFS = {
   trafficAlerts: false,
   ambulanceNavigation: false,
   jobMode: "profile",
-  showMyStoriesOnProfile: true
+  showMyStoriesOnProfile: true,
+  showAnonymousShortcutsOnProfile: true
 };
 
 const BOOL_OPTIONS = [
@@ -53,6 +54,13 @@ const BOOL_OPTIONS = [
     subtitle: "Show your story ring on your profile.",
     prefKey: "showMyStoriesOnProfile",
     label: "My Stories on profile"
+  },
+  {
+    id: "anonymous-profile",
+    title: "Anonymous Shortcuts on Profile",
+    subtitle: "Show or hide Anonymous Upload and Anonymous Feed shortcuts on profile.",
+    prefKey: "showAnonymousShortcutsOnProfile",
+    label: "Anonymous shortcuts on profile"
   },
   {
     id: "crossposting",

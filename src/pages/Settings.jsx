@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import { logout } from "../auth";
@@ -58,7 +58,8 @@ const defaultPrefs = {
   preferredLanguage: "en",
   contentTypes: DEFAULT_CONTENT_TYPES,
   jobMode: "profile",
-  showMyStoriesOnProfile: true
+  showMyStoriesOnProfile: true,
+  showAnonymousShortcutsOnProfile: true
 };
 
 const SETTING_LABELS = {
@@ -75,7 +76,8 @@ const SETTING_LABELS = {
   longVideosEnabled: "Long videos",
   ambulanceNavigation: "Ambulance Navigation",
   preferredLanguage: "Language",
-  showMyStoriesOnProfile: "My Stories on profile"
+  showMyStoriesOnProfile: "My Stories on profile",
+  showAnonymousShortcutsOnProfile: "Anonymous shortcuts on profile"
 };
 
 const readIds = (key) => {
@@ -585,13 +587,20 @@ export default function Settings() {
     { icon: "🎨", title: "Appearance", value: colorThemeLabel, keywords: ["theme", "color"], onClick: () => navigate("/settings/appearance") },
     { icon: "🧩", title: "Content types", value: contentTypeSummary, keywords: ["content", "type"], onClick: () => navigate("/settings/content-types") },
     { icon: "🌐", title: "Language", value: preferredLanguageLabel, keywords: ["language", "translate"], onClick: () => navigate("/settings/language") },
-    { icon: "🎓", title: "Study mode (hide Reels)", value: prefs.studyModeReels ? "On" : "Off", keywords: ["study", "reels"], onClick: () => navigate("/settings/manage/study-mode") },
+    { icon: "🎓", title: "Study mode (hide Reels)", value: prefs.studyModeReels ? "On" : "Off", keywords: ["study", "reels"], onClick: () => setToggle("studyModeReels") },
     { icon: "✋", title: "Hand gesture cursor", value: prefs.gestureCursorEnabled ? "On" : "Off", keywords: ["gesture", "cursor"], onClick: () => setToggle("gestureCursorEnabled") },
-    { icon: "🚨", title: "SOS on Navbar", value: prefs.showSosInNavbar ? "On" : "Off", keywords: ["sos", "navbar"], onClick: () => navigate("/settings/manage/sos-navbar") },
+    { icon: "🚨", title: "SOS on Navbar", value: prefs.showSosInNavbar ? "On" : "Off", keywords: ["sos", "navbar"], onClick: () => setToggle("showSosInNavbar") },
     { icon: "🔔", title: "Notifications", value: prefs.notifications ? "On" : "Off", keywords: ["notification", "alerts"], onClick: () => navigate("/notifications") },
-    { icon: "🚦", title: "Traffic Alerts", value: prefs.trafficAlerts ? "On" : "Off", keywords: ["traffic", "alerts"], onClick: () => navigate("/settings/manage/traffic-alerts") },
+    { icon: "🚦", title: "Traffic Alerts", value: prefs.trafficAlerts ? "On" : "Off", keywords: ["traffic", "alerts"], onClick: () => setToggle("trafficAlerts") },
     { icon: "🎬", title: "Long videos", value: prefs.longVideosEnabled ? "On" : "Off", keywords: ["long", "video", "watch"], onClick: () => setToggle("longVideosEnabled") },
-    { icon: "🔒", title: "Account privacy", value: prefs.accountPrivate ? "Private" : "Public", keywords: ["privacy", "private", "public"], onClick: () => navigate("/settings/privacy") },
+    {
+      icon: "🕶️",
+      title: "Anonymous shortcuts on profile",
+      value: prefs.showAnonymousShortcutsOnProfile ? "On" : "Off",
+      keywords: ["anonymous", "profile", "upload", "feed", "shortcut"],
+      onClick: () => setToggle("showAnonymousShortcutsOnProfile")
+    },
+    { icon: "🔒", title: "Account privacy", value: prefs.accountPrivate ? "Private" : "Public", keywords: ["privacy", "private", "public"], onClick: () => setToggle("accountPrivate") },
     { icon: "👥", title: "Close Friends", value: String(closeFriends.length), keywords: ["friends", "close"], onClick: () => navigate("/settings/manage/close-friends") },
     { icon: "⛔", title: "Blocked", value: String(blockedUsers.length), keywords: ["blocked", "block"], onClick: () => navigate("/settings/manage/blocked") },
     { icon: "📍", title: "My exact location", value: "Open", keywords: ["location", "map"], onClick: () => navigate("/settings/location") },
@@ -712,7 +721,7 @@ export default function Settings() {
             icon={"🎓"}
             title="Study mode (hide Reels)"
             value={prefs.studyModeReels ? "On" : "Off"}
-            onClick={() => navigate("/settings/manage/study-mode")}
+            onClick={() => setToggle("studyModeReels")}
           />
           <Row
             icon={"✋"}
@@ -728,7 +737,7 @@ export default function Settings() {
             icon={"🆘"}
             title="SOS on Navbar"
             value={prefs.showSosInNavbar ? "On" : "Off"}
-            onClick={() => navigate("/settings/manage/sos-navbar")}
+            onClick={() => setToggle("showSosInNavbar")}
           />
           <Row
             icon={"🚨"}
@@ -746,7 +755,7 @@ export default function Settings() {
             icon={"🚦"}
             title="Traffic Alerts"
             value={prefs.trafficAlerts ? "On" : "Off"}
-            onClick={() => navigate("/settings/manage/traffic-alerts")}
+            onClick={() => setToggle("trafficAlerts")}
           />
           <Row
             icon={"🎬"}
@@ -764,7 +773,13 @@ export default function Settings() {
             icon={"📸"}
             title="My Stories on profile"
             value={prefs.showMyStoriesOnProfile ? "On" : "Off"}
-            onClick={() => navigate("/settings/manage/stories-profile")}
+            onClick={() => setToggle("showMyStoriesOnProfile")}
+          />
+          <Row
+            icon={"🕶️"}
+            title="Anonymous shortcuts on profile"
+            value={prefs.showAnonymousShortcutsOnProfile ? "On" : "Off"}
+            onClick={() => setToggle("showAnonymousShortcutsOnProfile")}
           />
           <Row
             icon={"🐾"}
@@ -793,21 +808,21 @@ export default function Settings() {
             icon={"🔒"}
             title="Account privacy"
             value={prefs.accountPrivate ? "Private" : "Public"}
-            onClick={() => navigate("/settings/privacy")}
+            onClick={() => setToggle("accountPrivate")}
           />
           <Row icon={"👥"} title="Close Friends" value={String(closeFriends.length)} onClick={() => navigate("/settings/manage/close-friends")} />
           <Row
             icon={"🔁"}
             title="Crossposting"
             value={prefs.crossposting ? "On" : "Off"}
-            onClick={() => navigate("/settings/manage/crossposting")}
+            onClick={() => setToggle("crossposting")}
           />
           <Row icon={"⛔"} title="Blocked" value={String(blockedUsers.length)} onClick={() => navigate("/settings/manage/blocked")} />
           <Row
             icon={"📍"}
             title="Story, live and location"
             value={prefs.storyLocationEnabled ? "On" : "Off"}
-            onClick={() => navigate("/settings/manage/story-live-location")}
+            onClick={() => setToggle("storyLocationEnabled")}
           />
           <Row
             icon={"🧭"}
@@ -819,7 +834,7 @@ export default function Settings() {
             icon={"🤝"}
             title="Activity in Friends tab"
             value={prefs.activityInFriendsTab ? "On" : "Off"}
-            onClick={() => navigate("/settings/manage/activity-friends")}
+            onClick={() => setToggle("activityInFriendsTab")}
           />
         </section>
 
@@ -1076,6 +1091,8 @@ export default function Settings() {
     </div>
   );
 }
+
+
 
 
 

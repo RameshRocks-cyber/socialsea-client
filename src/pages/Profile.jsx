@@ -50,6 +50,19 @@ const readShowMyStoriesOnProfile = () => {
   }
 };
 
+const readShowAnonymousShortcutsOnProfile = () => {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    if (typeof parsed?.showAnonymousShortcutsOnProfile === "boolean") {
+      return parsed.showAnonymousShortcutsOnProfile;
+    }
+    return true;
+  } catch {
+    return true;
+  }
+};
+
 const readLongVideosEnabled = () => {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
@@ -401,6 +414,9 @@ export default function Profile() {
   const [vaultCount, setVaultCount] = useState(0);
   const [jobMode, setJobMode] = useState(() => readJobMode());
   const [showMyStoriesOnProfile, setShowMyStoriesOnProfile] = useState(() => readShowMyStoriesOnProfile());
+  const [showAnonymousShortcutsOnProfile, setShowAnonymousShortcutsOnProfile] = useState(() =>
+    readShowAnonymousShortcutsOnProfile()
+  );
   const [longVideosEnabled, setLongVideosEnabled] = useState(() => readLongVideosEnabled());
   const [createSheetOpen, setCreateSheetOpen] = useState(false);
   const [highlights, setHighlights] = useState(() => readHighlights());
@@ -420,6 +436,7 @@ export default function Profile() {
     const refreshFromSettings = () => {
       setJobMode(readJobMode());
       setShowMyStoriesOnProfile(readShowMyStoriesOnProfile());
+      setShowAnonymousShortcutsOnProfile(readShowAnonymousShortcutsOnProfile());
       setLongVideosEnabled(readLongVideosEnabled());
     };
     const handleStorage = (event) => {
@@ -1384,20 +1401,24 @@ export default function Profile() {
             )}
             {isOwnProfile && (
               <section className="profile-shortcuts">
-                <button type="button" className="profile-shortcut-card" onClick={() => navigate("/anonymous/upload")}>
-                  <div>
-                    <h4>Anonymous Upload</h4>
-                    <p>Share safely without exposing your profile identity.</p>
-                  </div>
-                  <span className="profile-shortcut-arrow">{">"}</span>
-                </button>
-                <button type="button" className="profile-shortcut-card" onClick={() => navigate("/anonymous-feed")}>
-                  <div>
-                    <h4>Anonymous Feed</h4>
-                    <p>See all approved anonymous posts and interactions.</p>
-                  </div>
-                  <span className="profile-shortcut-arrow">{">"}</span>
-                </button>
+                {showAnonymousShortcutsOnProfile && (
+                  <button type="button" className="profile-shortcut-card" onClick={() => navigate("/anonymous/upload")}>
+                    <div>
+                      <h4>Anonymous Upload</h4>
+                      <p>Share safely without exposing your profile identity.</p>
+                    </div>
+                    <span className="profile-shortcut-arrow">{">"}</span>
+                  </button>
+                )}
+                {showAnonymousShortcutsOnProfile && (
+                  <button type="button" className="profile-shortcut-card" onClick={() => navigate("/anonymous-feed")}>
+                    <div>
+                      <h4>Anonymous Feed</h4>
+                      <p>See all approved anonymous posts and interactions.</p>
+                    </div>
+                    <span className="profile-shortcut-arrow">{">"}</span>
+                  </button>
+                )}
                 <button type="button" className="profile-shortcut-card" onClick={() => navigate("/live-recordings")}>
                   <div>
                     <h4>Private Live</h4>

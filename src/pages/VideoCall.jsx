@@ -108,6 +108,10 @@ export default function VideoCall({ placement = "page" }) {
     formatCallDuration,
     toggleMute,
     isMuted,
+    isCallRecording,
+    callRecordingError,
+    callRecordingSupported,
+    toggleCallRecording,
     upgradeCallToVideo,
     finishCall,
     showVideoCallScreen,
@@ -326,9 +330,19 @@ export default function VideoCall({ placement = "page" }) {
           <p className="active-call-popup-subtitle">
             {callStatusText} - Total {formatCallDuration(callDurationSec)}
           </p>
+          {isCallRecording && <p className="active-call-popup-subtitle">Recording audio...</p>}
+          {callRecordingError && <p className="call-error">{callRecordingError}</p>}
           <div className="active-call-popup-actions">
             <button type="button" className="call-ring-toggle" onClick={toggleMute}>
               {isMuted ? "Unmute mic" : "Mute mic"}
+            </button>
+            <button
+              type="button"
+              className="call-ring-toggle"
+              onClick={toggleCallRecording}
+              disabled={!callRecordingSupported}
+            >
+              {isCallRecording ? "Stop recording" : "Record call"}
             </button>
             <button type="button" className="call-ring-toggle" onClick={upgradeCallToVideo}>
               Switch to video

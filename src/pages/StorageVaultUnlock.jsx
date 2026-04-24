@@ -218,9 +218,9 @@ export default function StorageVaultUnlock() {
   const selectionCount = `${selectedImageIds.length}/${LOCK_PICK_COUNT}`;
   const selectionHint = isSetupMode
     ? (isConfirmStage
-      ? `Confirm the same ${LOCK_PICK_COUNT} pictures in the same order (${selectionCount}). Tap a slot to remove.`
-      : `Pick ${LOCK_PICK_COUNT} pictures in order (${selectionCount}). You can repeat a picture. Tap a slot to remove.`)
-    : `Select your ${LOCK_PICK_COUNT} pictures in the same order (${selectionCount}). Tap a slot to remove.`;
+      ? `Confirm the same ${LOCK_PICK_COUNT} pictures in the same order (${selectionCount}). Tap X on a slot to remove.`
+      : `Pick ${LOCK_PICK_COUNT} pictures in order (${selectionCount}). You can repeat a picture. Tap X on a slot to remove.`)
+    : `Select your ${LOCK_PICK_COUNT} pictures in the same order (${selectionCount}). Tap X on a slot to remove.`;
 
   const selectedCounts = selectedImageIds.reduce((acc, id) => {
     acc[id] = (acc[id] || 0) + 1;
@@ -282,6 +282,7 @@ export default function StorageVaultUnlock() {
                     <>
                       <img src={item.src} alt={item.label} loading="lazy" />
                       <span className="vault-selected-index">{index + 1}</span>
+                      <span className="vault-selected-remove" aria-hidden="true">X</span>
                     </>
                   ) : (
                     <span className="vault-selected-placeholder">{index + 1}</span>

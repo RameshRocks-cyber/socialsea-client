@@ -621,6 +621,11 @@ export default function StorageVault() {
     setMenuOpen(false);
   };
 
+  const openCallRecordings = () => {
+    setMenuOpen(false);
+    navigate("/storage/call-recordings");
+  };
+
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (!menuRef.current) return;
@@ -693,6 +698,9 @@ export default function StorageVault() {
             <h1>Storage Vault</h1>
           </div>
           <div className="storage-top-actions">
+            <button type="button" className="storage-top-btn" onClick={openCallRecordings}>
+              Call Recordings
+            </button>
             {isVaultOpen && (
               <button type="button" className="storage-top-btn" onClick={handleLockNow}>
                 Lock
@@ -718,6 +726,9 @@ export default function StorageVault() {
                 <div className="storage-menu-pop" style={menuStyle}>
                   <button type="button" className="storage-menu-item" onClick={openStorageOptionsFromMenu}>
                     Storage Options
+                  </button>
+                  <button type="button" className="storage-menu-item" onClick={openCallRecordings}>
+                    Open Call Recordings
                   </button>
                   <button type="button" className="storage-menu-item" onClick={() => setStoragePlan("local")}>
                     Use Local Device {storagePlan === "local" ? "(Selected)" : ""}

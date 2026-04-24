@@ -184,8 +184,54 @@ const openDb = () =>
     request.onerror = () => reject(request.error || new Error("Failed to open storage"));
   });
 
-export const addVaultFiles = async (files) => {
-  const list = Array.from(files || []).filter(Boolean);
+const normalizeVaultMeta = (value) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const next = {};
+  Object.entries(value).forEach(([key, raw]) => {
+    const safeKey = String(key || "").trim();
+    if (!safeKey || raw == null) return;
+    if (typeof raw === "string") {
+      const text = raw.trim();
+      if (!text) return;
+      next[safeKey] = text;
+      return;
+    }
+    if (typeof raw === "number" || typeof raw === "boolean") {
+      next[safeKey] = raw;
+    }
+  });
+  return next;
+};
+
+const normalizeVaultFileInput = (value) => {
+  if (!value) return null;
+  if (value instanceof Blob) {
+    return {
+      blob: value,
+      name: value.name,
+      type: value.type,
+      source: "",
+      meta: {}
+    };
+  }
+  if (typeof value !== "object") return null;
+  const blob = value.file instanceof Blob ? value.file : value.blob instanceof Blob ? value.blob : null;
+  if (!blob) return null;
+  return {
+    blob,
+    name: value.name,
+    type: value.type,
+    source: String(value.source || "").trim(),
+    meta: normalizeVaultMeta(value.meta)
+  };
+};
+
+export const addVaultFiles = async (files, options = {}) => {
+  const sourceFromOptions = String(options?.source || "").trim();
+  const sharedMeta = normalizeVaultMeta(options?.meta);
+  const list = Array.from(files || [])
+    .map(normalizeVaultFileInput)
+    .filter(Boolean);
   if (!list.length) return [];
 
   const db = await openDb();
@@ -194,14 +240,23 @@ export const addVaultFiles = async (files) => {
     const store = tx.objectStore(STORE_NAME);
     const added = [];
 
-    list.forEach((file) => {
+    list.forEach((item) => {
+      const file = item.blob;
+      const entryMeta = {
+        ...sharedMeta,
+        ...item.meta
+      };
+      const source = String(item.source || sourceFromOptions || entryMeta.source || "").trim();
+      if (source) entryMeta.source = source;
       const entry = {
-        name: file.name || "Untitled",
-        type: file.type || "",
+        name: item.name || file.name || "Untitled",
+        type: item.type || file.type || "",
         size: Number(file.size || 0),
         addedAt: Date.now(),
         blob: file
       };
+      if (source) entry.source = source;
+      if (Object.keys(entryMeta).length) entry.meta = entryMeta;
       const req = store.add(entry);
       req.onsuccess = () => {
         added.push({ ...entry, id: req.result });

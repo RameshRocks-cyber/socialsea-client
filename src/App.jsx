@@ -33,7 +33,6 @@ import YourActivity from "./pages/YourActivity";
 import SettingsContentTypes from "./pages/SettingsContentTypes";
 import SettingsSounds from "./pages/SettingsSounds";
 import SettingsLocation from "./pages/SettingsLocation";
-import SettingsPrivacy from "./pages/SettingsPrivacy";
 import SettingsLanguage from "./pages/SettingsLanguage";
 import SettingsLoginActivity from "./pages/SettingsLoginActivity";
 import NotificationBuddySettings from "./pages/NotificationBuddySettings";
@@ -50,6 +49,7 @@ import FollowConnections from "./pages/FollowConnections";
 import LiveRecordings from "./pages/LiveRecordings";
 import StorageVault from "./pages/StorageVault";
 import StorageVaultUnlock from "./pages/StorageVaultUnlock";
+import CallRecordings from "./pages/CallRecordings";
 import LiveStart from "./pages/LiveStart";
 import VideoCall from "./pages/VideoCall";
 import { ChatProvider } from "./pages/hooks/useChat";
@@ -601,8 +601,8 @@ function AppRoutes() {
 
     const onTouchEnd = (event) => {
       const state = swipeStateRef.current;
-      swipeStateRef.current.active = false;
       if (!state.active) return;
+      swipeStateRef.current.active = false;
       const touch = event.changedTouches?.[0];
       if (!touch) return;
 
@@ -740,13 +740,21 @@ function AppRoutes() {
               <Route path="/settings/sounds" element={<ProtectedRoute><SettingsSounds /></ProtectedRoute>} />
               <Route path="/settings/language" element={<ProtectedRoute><SettingsLanguage /></ProtectedRoute>} />
               <Route path="/settings/location" element={<ProtectedRoute><SettingsLocation /></ProtectedRoute>} />
-              <Route path="/settings/privacy" element={<ProtectedRoute><SettingsPrivacy /></ProtectedRoute>} />
+              <Route path="/settings/privacy" element={<Navigate to="/settings" replace />} />
               <Route path="/settings/login-activity" element={<ProtectedRoute><SettingsLoginActivity /></ProtectedRoute>} />
               <Route path="/settings/notification-buddy" element={<ProtectedRoute><NotificationBuddySettings /></ProtectedRoute>} />
               <Route path="/settings/manage/jobs-profile" element={<Navigate to="/settings" replace />} />
               <Route path="/settings/manage/jobs-post" element={<Navigate to="/settings" replace />} />
               <Route path="/settings/manage/jobs-storage" element={<Navigate to="/settings" replace />} />
               <Route path="/settings/manage/gesture-cursor" element={<Navigate to="/settings" replace />} />
+              <Route path="/settings/manage/study-mode" element={<Navigate to="/settings" replace />} />
+              <Route path="/settings/manage/sos-navbar" element={<Navigate to="/settings" replace />} />
+              <Route path="/settings/manage/traffic-alerts" element={<Navigate to="/settings" replace />} />
+              <Route path="/settings/manage/stories-profile" element={<Navigate to="/settings" replace />} />
+              <Route path="/settings/manage/anonymous-profile" element={<Navigate to="/settings" replace />} />
+              <Route path="/settings/manage/crossposting" element={<Navigate to="/settings" replace />} />
+              <Route path="/settings/manage/story-live-location" element={<Navigate to="/settings" replace />} />
+              <Route path="/settings/manage/activity-friends" element={<Navigate to="/settings" replace />} />
               <Route path="/settings/manage/:optionId" element={<ProtectedRoute><SettingsManage /></ProtectedRoute>} />
               <Route path="/sos" element={<ProtectedRoute><SOSPage /></ProtectedRoute>} />
               <Route path="/sos/live/:alertId" element={<ProtectedRoute><SOSPage /></ProtectedRoute>} />
@@ -756,6 +764,7 @@ function AppRoutes() {
               <Route path="/follow-requests" element={<ProtectedRoute><FollowRequests /></ProtectedRoute>} />
               <Route path="/storage/unlock" element={<ProtectedRoute><StorageVaultUnlock /></ProtectedRoute>} />
               <Route path="/storage" element={<ProtectedRoute><StorageVault /></ProtectedRoute>} />
+              <Route path="/storage/call-recordings" element={<ProtectedRoute><CallRecordings /></ProtectedRoute>} />
               <Route path="/profile-setup" element={<ProtectedRoute><ProfileSetup /></ProtectedRoute>} />
               <Route path="/anonymous-feed" element={<ProtectedRoute><AnonymousFeed /></ProtectedRoute>} />
               <Route path="/anonymous/upload" element={<AnonymousUpload />} />

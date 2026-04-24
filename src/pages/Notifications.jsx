@@ -255,6 +255,31 @@ const resolveNotificationPostId = (item, message) => {
 };
 
 const resolveNotificationTargetPath = (item, message) => {
+  const messageText = String(message || "").toLowerCase();
+  const prefersReels =
+    item?.isReel === true ||
+    item?.reel === true ||
+    item?.post?.reel === true ||
+    item?.target?.isReel === true ||
+    messageText.includes(" your reel");
+
+  const rewriteToReels = (route) => {
+    if (!prefersReels) return route;
+    const value = String(route || "").trim();
+    if (!value) return value;
+    if (value.startsWith("/reels")) return value;
+    if (!value.startsWith("/feed")) return value;
+    try {
+      const base = typeof window !== "undefined" ? window.location.origin : "http://localhost";
+      const parsed = new URL(value, base);
+      const postId = String(parsed.searchParams.get("post") || "").trim();
+      if (!postId) return value;
+      return `/reels?post=${encodeURIComponent(postId)}`;
+    } catch {
+      return value;
+    }
+  };
+
   const routeCandidates = [
     item?.postUrl,
     item?.postURL,
@@ -270,17 +295,19 @@ const resolveNotificationTargetPath = (item, message) => {
 
   for (const candidate of routeCandidates) {
     const route = extractPostRoutePath(candidate);
-    if (route) return route;
+    if (route) return rewriteToReels(route);
   }
 
   const postId = resolveNotificationPostId(item, message);
-  if (postId) return `/feed?post=${encodeURIComponent(postId)}`;
+  if (postId) {
+    const base = prefersReels ? "/reels" : "/feed";
+    return `${base}?post=${encodeURIComponent(postId)}`;
+  }
 
-  const messageText = String(message || "");
-  const inlineCandidates = messageText.match(/(?:https?:\/\/\S+|\/(?:feed|reels|watch|posts?)\/\S+|(?:feed|reels)\?[^\s]+)/gi) || [];
+  const inlineCandidates = String(message || "").match(/(?:https?:\/\/\S+|\/(?:feed|reels|watch|posts?)\/\S+|(?:feed|reels)\?[^\s]+)/gi) || [];
   for (const candidate of inlineCandidates) {
     const route = extractPostRoutePath(candidate.replace(/[),.;]+$/g, ""));
-    if (route) return route;
+    if (route) return rewriteToReels(route);
   }
 
   return "";

@@ -2,12 +2,15 @@
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { FiBookmark } from "react-icons/fi";
 import { BsBookmarkFill } from "react-icons/bs";
+import { IoArrowRedoOutline } from "react-icons/io5";
 import api from "../api/axios";
 import { getApiBaseUrl, toApiUrl } from "../api/baseUrl";
 import { recordCommentActivity, recordRepostActivity, recordSearchActivity } from "../services/activityStore";
+import { readIdListFromStorage, readIdMapFromStorage, writeIdListToStorage, writeIdMapToStorage } from "../utils/idStorage";
 import { readLiveBroadcast, subscribeLiveBroadcast } from "../utils/liveBroadcast";
 import { buildProfilePath } from "../utils/profileRoute";
-import { classifyVideoBucket, mediaTypeForPost, SHORT_VIDEO_SECONDS } from "../utils/videoFeedClassifier";
+import { classifyVideoBucket, isExplicitReelPost, mediaTypeForPost, SHORT_VIDEO_SECONDS } from "../utils/videoFeedClassifier";
+import { isYouTubeMedia } from "../utils/youtubeMedia";
 import { CONTENT_TYPE_OPTIONS } from "../pages/contentPrefs";
 import "./Feed.css";
 
@@ -316,7 +319,7 @@ const readCachedFeedPosts = () => {
     const raw = localStorage.getItem(FEED_CACHE_KEY);
     const parsed = raw ? JSON.parse(raw) : null;
     const list = Array.isArray(parsed?.posts) ? parsed.posts : Array.isArray(parsed) ? parsed : [];
-    return list.filter(Boolean);
+    return list.filter((post) => post && !isYouTubeMedia(post));
   } catch {
     return [];
   }
@@ -438,7 +441,7 @@ export default function Feed() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const feedUserKey = useMemo(() => resolveFeedUserKey(), []);
-  const [feedMode, setFeedMode] = useState("long");
+  const [feedMode, setFeedMode] = useState("all");
   const [feedMenuOpen, setFeedMenuOpen] = useState(false);
   const [contentTypeFilter, setContentTypeFilter] = useState("all");
   const [contentSubFilter, setContentSubFilter] = useState("all");
@@ -666,7 +669,8 @@ export default function Feed() {
         }
         if (!res && fallbackRes) res = fallbackRes;
         if (!res) throw lastErr || new Error("Failed to load feed");
-        const list = Array.isArray(res.data) ? res.data : [];
+        const listRaw = Array.isArray(res.data) ? res.data : [];
+        const list = listRaw.filter((post) => post && !isYouTubeMedia(post));
         if (!mounted) return;
         setPosts(list);
         try {
@@ -752,42 +756,18 @@ export default function Feed() {
   }, [posts]);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem("likedPostIds");
-      if (!raw) return;
-      const ids = JSON.parse(raw);
-      if (!Array.isArray(ids)) return;
-      const map = ids.reduce((acc, id) => ({ ...acc, [id]: true }), {});
-      setLikedPostIds(map);
-    } catch {
-      // ignore invalid localStorage payload
-    }
+    const map = readIdMapFromStorage("likedPostIds");
+    if (Object.keys(map).length) setLikedPostIds(map);
   }, []);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem("savedPostIds");
-      if (!raw) return;
-      const ids = JSON.parse(raw);
-      if (!Array.isArray(ids)) return;
-      const map = ids.reduce((acc, id) => ({ ...acc, [id]: true }), {});
-      setSavedPostIds(map);
-    } catch {
-      // ignore invalid localStorage payload
-    }
+    const map = readIdMapFromStorage("savedPostIds");
+    if (Object.keys(map).length) setSavedPostIds(map);
   }, []);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem("watchLaterPostIds");
-      if (!raw) return;
-      const ids = JSON.parse(raw);
-      if (!Array.isArray(ids)) return;
-      const map = ids.reduce((acc, id) => ({ ...acc, [id]: true }), {});
-      setWatchLaterPostIds(map);
-    } catch {
-      // ignore invalid localStorage payload
-    }
+    const map = readIdMapFromStorage("watchLaterPostIds");
+    if (Object.keys(map).length) setWatchLaterPostIds(map);
   }, []);
 
   useEffect(() => {
@@ -1341,17 +1321,16 @@ export default function Feed() {
 
   const likePost = async (postId) => {
     const persistLikedMap = (next) => {
-      const ids = Object.keys(next)
-        .filter((id) => next[id])
-        .map((id) => Number(id));
-      localStorage.setItem("likedPostIds", JSON.stringify(ids));
+      writeIdMapToStorage("likedPostIds", next);
     };
 
     try {
       if (likedPostIds[postId]) {
         await api.delete(`/api/likes/${postId}`);
         setLikedPostIds((prev) => {
-          const next = { ...prev, [postId]: false };
+          if (!prev[postId]) return prev;
+          const next = { ...prev };
+          delete next[postId];
           persistLikedMap(next);
           return next;
         });
@@ -1599,18 +1578,20 @@ export default function Feed() {
 
   const toggleSave = (postId) => {
     setSavedPostIds((prev) => {
-      const next = { ...prev, [postId]: !prev[postId] };
-      const savedIds = Object.keys(next).filter((id) => next[id]).map((id) => Number(id));
-      localStorage.setItem("savedPostIds", JSON.stringify(savedIds));
+      const next = { ...prev };
+      if (next[postId]) delete next[postId];
+      else next[postId] = true;
+      writeIdMapToStorage("savedPostIds", next);
       return next;
     });
   };
 
   const toggleWatchLater = (postId) => {
     setWatchLaterPostIds((prev) => {
-      const next = { ...prev, [postId]: !prev[postId] };
-      const ids = Object.keys(next).filter((id) => next[id]).map((id) => Number(id));
-      localStorage.setItem("watchLaterPostIds", JSON.stringify(ids));
+      const next = { ...prev };
+      if (next[postId]) delete next[postId];
+      else next[postId] = true;
+      writeIdMapToStorage("watchLaterPostIds", next);
       return next;
     });
   };
@@ -1646,31 +1627,19 @@ export default function Feed() {
   }, [typeFilteredPosts, contentTypeFilter, contentSubFilter, localGenreMap]);
 
   const longVideoPosts = useMemo(() => {
-    return subFilteredPosts.filter((post) => {
-      const isVideo = mediaTypeFor(post) === "VIDEO";
-      if (!isVideo) return false;
-      const bucket = classifyVideoBucket(post, {
-        durationHint: Number(videoDurationByPost[post.id] || 0),
-        shortSeconds: SHORT_VIDEO_SECONDS,
-        defaultUnknown: "long"
-      });
-      return bucket === "long";
-    });
-  }, [subFilteredPosts, videoDurationByPost]);
+    // "Video" tab should show all in-app playable videos (direct mp4/webm/etc),
+    // not just >90s content.
+    return subFilteredPosts.filter(
+      (post) => mediaTypeFor(post) === "VIDEO" && !isYouTubeMedia(post) && !isExplicitReelPost(post)
+    );
+  }, [subFilteredPosts]);
 
   const longVideoFeedPosts = useMemo(() => longVideoPosts, [longVideoPosts]);
 
   const feedPosts = useMemo(() => {
-    return subFilteredPosts.filter((post) => {
-      if (mediaTypeFor(post) !== "VIDEO") return true;
-      const bucket = classifyVideoBucket(post, {
-        durationHint: Number(videoDurationByPost[post.id] || 0),
-        shortSeconds: SHORT_VIDEO_SECONDS,
-        defaultUnknown: "long"
-      });
-      return bucket === "short";
-    });
-  }, [subFilteredPosts, videoDurationByPost]);
+    // Feed tab should show only photo posts (not reels / not long videos).
+    return subFilteredPosts.filter((post) => mediaTypeFor(post) !== "VIDEO");
+  }, [subFilteredPosts]);
 
   const activeFeedIndex = useMemo(
     () => feedPosts.findIndex((p) => p.id === activePostId),
@@ -1854,22 +1823,17 @@ export default function Feed() {
   }, []);
 
   const persistIdCollection = (key, map) => {
-    const ids = Object.keys(map)
-      .filter((id) => map[id])
-      .map((id) => Number(id));
-    localStorage.setItem(key, JSON.stringify(ids));
+    writeIdMapToStorage(key, map);
   };
 
   const appendToIdList = (key, postId) => {
-    try {
-      const raw = localStorage.getItem(key);
-      const parsed = raw ? JSON.parse(raw) : [];
-      const list = Array.isArray(parsed) ? parsed.map((x) => Number(x)).filter((n) => Number.isFinite(n)) : [];
-      if (!list.includes(Number(postId))) list.push(Number(postId));
-      localStorage.setItem(key, JSON.stringify(list));
-    } catch {
-      localStorage.setItem(key, JSON.stringify([Number(postId)]));
-    }
+    const numericId = Number(postId);
+    if (!Number.isFinite(numericId) || numericId <= 0) return;
+
+    const current = readIdListFromStorage(key);
+    const next = current.filter((id) => Number(id) !== numericId);
+    next.push(numericId);
+    writeIdListToStorage(key, next);
   };
 
   const showMenuStatus = (postId, text) => {
@@ -1893,15 +1857,19 @@ export default function Feed() {
       });
       showMenuStatus(post.id, "Hidden");
     } else if (action === "dont_recommend") {
-      if (ownerKey) {
-        setBlockedOwnerKeys((prev) => {
-          const next = { ...prev, [ownerKey]: true };
-          const keys = Object.keys(next).filter((k) => next[k]);
-          localStorage.setItem(BLOCKED_OWNERS_KEY, JSON.stringify(keys));
-          return next;
-        });
-        showMenuStatus(post.id, "Won't recommend this video");
-      }
+        if (ownerKey) {
+          setBlockedOwnerKeys((prev) => {
+            const next = { ...prev, [ownerKey]: true };
+            const keys = Object.keys(next).filter((k) => next[k]);
+            try {
+              localStorage.setItem(BLOCKED_OWNERS_KEY, JSON.stringify(keys));
+            } catch {
+              // ignore storage issues
+            }
+            return next;
+          });
+          showMenuStatus(post.id, "Won't recommend this video");
+        }
     } else if (action === "report") {
       try {
         await api.post("/api/report", {
@@ -1917,7 +1885,11 @@ export default function Feed() {
       toggleWatchLater(post.id);
       showMenuStatus(post.id, wasSaved ? "Removed from Watch Later" : "Saved to Watch Later");
     } else if (action === "play_next") {
-      localStorage.setItem(PLAY_NEXT_KEY, String(post.id));
+      try {
+        localStorage.setItem(PLAY_NEXT_KEY, String(post.id));
+      } catch {
+        // ignore storage issues
+      }
       showMenuStatus(post.id, "Set to play next");
     } else if (action === "queue") {
       appendToIdList(QUEUE_KEY, post.id);
@@ -2045,7 +2017,7 @@ export default function Feed() {
       )}
       {!error && !isLoading && subFilteredPosts.length === 0 && <p className="feed-empty">No posts found</p>}
       {!error && !isLoading && feedMode === "long" && !longVideoFeedPosts.length && !liveBroadcast && (
-        <p className="feed-empty">No videos found</p>
+        <p className="feed-empty">No videos found. Upload an MP4 to watch in-app.</p>
       )}
       {!error && !isLoading && feedMode === "all" && !feedPosts.length && !liveBroadcast && (
         <p className="feed-empty">No feed found</p>
@@ -2163,12 +2135,13 @@ export default function Feed() {
                       type="button"
                       className="long-feed-share-btn"
                       title="Share outside SocialSea"
+                      aria-label="Share outside SocialSea"
                       onClick={(e) => {
                         e.stopPropagation();
                         void sharePostOutside(post);
                       }}
                     >
-                      Share
+                      <IoArrowRedoOutline className="long-feed-share-icon" aria-hidden="true" />
                     </button>
                     <div className="long-feed-menu-wrap" ref={isMenuOpen ? menuRef : null}>
                       <button
