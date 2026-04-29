@@ -58,8 +58,12 @@ export const persistProfileIdentity = (profile) => {
   pairs.forEach(([key, value]) => {
     const safe = String(value || "").trim();
     if (!safe) return;
-    sessionStorage.setItem(key, safe);
-    localStorage.setItem(key, safe);
+    try {
+      sessionStorage.setItem(key, safe);
+      localStorage.setItem(key, safe);
+    } catch {
+      // ignore storage errors (quota / disabled storage)
+    }
   });
 };
 

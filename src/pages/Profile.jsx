@@ -90,7 +90,11 @@ const readFollowingCache = () => {
 };
 
 const writeFollowingCache = (value) => {
-  localStorage.setItem(FOLLOWING_CACHE_KEY, JSON.stringify(value || {}));
+  try {
+    localStorage.setItem(FOLLOWING_CACHE_KEY, JSON.stringify(value || {}));
+  } catch {
+    // ignore storage errors (quota / disabled storage)
+  }
 };
 
 const updateFollowCache = (identifiers, following) => {
@@ -407,7 +411,7 @@ export default function Profile() {
   const [postActionError, setPostActionError] = useState("");
   const [coverImageBroken, setCoverImageBroken] = useState(false);
   const [deletingPostIds, setDeletingPostIds] = useState({});
-  const [deleteRevealPostId, setDeleteRevealPostId] = useState(null);
+  const [postOptionsPost, setPostOptionsPost] = useState(null);
   const [videoMetaByPost, setVideoMetaByPost] = useState({});
   const [profileTab, setProfileTab] = useState("posts");
   const [companyJobs, setCompanyJobs] = useState([]);
@@ -423,7 +427,8 @@ export default function Profile() {
   const [activeHighlight, setActiveHighlight] = useState(null);
   const [activeHighlightIndex, setActiveHighlightIndex] = useState(0);
   const holdTimerRef = useRef(null);
-  const deleteRevealHideTimerRef = useRef(null);
+  const suppressClickPostIdRef = useRef(null);
+  const suppressClickTimerRef = useRef(null);
   const storyMediaSetRef = useRef(new Set());
   const cleanupStoryPostsRef = useRef(false);
   const profileRouteKey = getProfileIdentifier(profile, username) || String(username || "me");
@@ -721,6 +726,7 @@ export default function Profile() {
       }
 
       if (isAuthRequestError(lastError)) {
+        clearAuthStorage();
         navigate("/login");
         return null;
       }
@@ -885,9 +891,32 @@ export default function Profile() {
           });
         }
       } catch (err) {
+        console.error("Profile load failed", err);
         if (!cancelled) {
           const text = String(err?.message || "").toLowerCase();
-          setError(text.includes("timeout") ? "Profile load timeout. Check backend connection." : "Failed to load profile");
+          const baseMessage = text.includes("timeout")
+            ? "Profile load timeout. Check backend connection."
+            : "Failed to load profile";
+          const status = Number(err?.response?.status || 0);
+          if (status === 401 || status === 403) {
+            clearAuthStorage();
+            navigate("/login");
+            return;
+          }
+          const rawMessage = String(err?.message || "").trim();
+          const responseMessage =
+            typeof err?.response?.data === "string"
+              ? err.response.data.trim()
+              : String(err?.response?.data?.message || "").trim();
+          const debugParts = [];
+          if (status) debugParts.push(`HTTP ${status}`);
+          if (responseMessage) debugParts.push(responseMessage);
+          if (rawMessage && rawMessage.toLowerCase() !== "timeout") {
+            debugParts.push(rawMessage.length > 140 ? `${rawMessage.slice(0, 140)}...` : rawMessage);
+          }
+          const debugTail =
+            import.meta?.env?.DEV && debugParts.length ? ` (${debugParts.join(" - ")})` : "";
+          setError(`${baseMessage}${debugTail}`);
         }
       }
     };
@@ -974,7 +1003,7 @@ export default function Profile() {
             suppressAuthRedirect: true
           });
           setPosts((prev) => prev.filter((p) => String(p?.id) !== String(postId)));
-          setDeleteRevealPostId((prev) => (String(prev || "") === String(postId) ? null : prev));
+          setPostOptionsPost((current) => (String(current?.id || "") === String(postId) ? null : current));
           setDeletingPostIds((prev) => ({ ...prev, [postId]: false }));
           recordRecentlyDeleted({ item: deletedPost, source: "profile" });
           return;
@@ -988,7 +1017,7 @@ export default function Profile() {
     const msg = lastError?.response?.data?.message || lastError?.message || "Unable to delete post";
     persistHiddenProfilePostId(postId);
     setPosts((prev) => prev.filter((p) => String(p?.id) !== String(postId)));
-    setDeleteRevealPostId((prev) => (String(prev || "") === String(postId) ? null : prev));
+    setPostOptionsPost((current) => (String(current?.id || "") === String(postId) ? null : current));
     recordRecentlyDeleted({ item: deletedPost, source: "profile" });
     setPostActionError(
       status === 404
@@ -1065,24 +1094,35 @@ export default function Profile() {
     }
   };
 
-  const clearDeleteRevealHideTimer = () => {
-    if (deleteRevealHideTimerRef.current) {
-      clearTimeout(deleteRevealHideTimerRef.current);
-      deleteRevealHideTimerRef.current = null;
+  const clearSuppressClickTimer = () => {
+    if (suppressClickTimerRef.current) {
+      clearTimeout(suppressClickTimerRef.current);
+      suppressClickTimerRef.current = null;
     }
   };
 
-  const handleCardPointerDown = (event, postId) => {
-    if (!isOwnProfile || postId == null) return;
-    const pointerType = String(event?.pointerType || event?.nativeEvent?.pointerType || "").toLowerCase();
-    if (pointerType === "mouse") return;
+  const openPostOptions = (post) => {
+    if (!isOwnProfile || !post) return;
+    setPostOptionsPost(post);
+  };
+
+  const closePostOptions = () => {
+    setPostOptionsPost(null);
+  };
+
+  const handleCardPointerDown = (event, post) => {
+    if (!isOwnProfile || !post) return;
+    const postId = String(post?.id ?? "").trim();
+    if (!postId) return;
+    if (typeof event?.button === "number" && event.button !== 0) return;
     clearHoldTimer();
     holdTimerRef.current = setTimeout(() => {
-      setDeleteRevealPostId(String(postId));
-      clearDeleteRevealHideTimer();
-      deleteRevealHideTimerRef.current = setTimeout(() => {
-        setDeleteRevealPostId((current) => (String(current || "") === String(postId) ? null : current));
-      }, 3500);
+      suppressClickPostIdRef.current = postId;
+      clearSuppressClickTimer();
+      suppressClickTimerRef.current = setTimeout(() => {
+        suppressClickPostIdRef.current = null;
+      }, 1200);
+      openPostOptions(post);
     }, 450);
   };
 
@@ -1090,9 +1130,34 @@ export default function Profile() {
     clearHoldTimer();
   };
 
+  const handleCardClick = (event, post) => {
+    const postId = String(post?.id ?? "").trim();
+    if (postId && String(suppressClickPostIdRef.current || "") === postId) {
+      event.preventDefault();
+      event.stopPropagation();
+      suppressClickPostIdRef.current = null;
+      clearSuppressClickTimer();
+      return;
+    }
+    if (isOwnProfile) {
+      event.preventDefault();
+      event.stopPropagation();
+      openPostOptions(post);
+      return;
+    }
+    openPostInPlayer(post);
+  };
+
+  const handleCardContextMenu = (event, post) => {
+    if (!isOwnProfile || !post) return;
+    event.preventDefault();
+    event.stopPropagation();
+    openPostOptions(post);
+  };
+
   useEffect(() => () => {
     clearHoldTimer();
-    clearDeleteRevealHideTimer();
+    clearSuppressClickTimer();
   }, []);
 
   const logout = () => {
@@ -1541,9 +1606,10 @@ export default function Profile() {
               {visiblePosts.map((post, index) => (
                 <div
                   key={`${String(post?.id ?? "post")}-${index}`}
-                  className={`profile-post-card ${post?.isVideo ? "is-playable" : ""} ${String(deleteRevealPostId || "") === String(post?.id || "") ? "is-delete-visible" : ""}`}
-                  onClick={() => openPostInPlayer(post)}
-                  onPointerDown={(event) => handleCardPointerDown(event, post?.id)}
+                  className={`profile-post-card ${post?.isVideo ? "is-playable" : ""} ${isOwnProfile ? "is-actionable" : ""}`.trim()}
+                  onClick={(event) => handleCardClick(event, post)}
+                  onContextMenu={(event) => handleCardContextMenu(event, post)}
+                  onPointerDown={(event) => handleCardPointerDown(event, post)}
                   onPointerUp={handleCardPointerEnd}
                   onPointerCancel={handleCardPointerEnd}
                   onPointerLeave={handleCardPointerEnd}
@@ -1562,22 +1628,6 @@ export default function Profile() {
                       onLoadedMetadata={(event) => handleProfileVideoMeta(post?.id, event)}
                       onContextMenu={(e) => e.preventDefault()}
                     />
-                  )}
-                  {isOwnProfile && (
-                    <div className="profile-post-actions">
-                      <button
-                        type="button"
-                        className="profile-post-delete-inline"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          deletePost(post?.id);
-                        }}
-                        disabled={Boolean(deletingPostIds[post?.id])}
-                        title="Delete post"
-                      >
-                        {deletingPostIds[post?.id] ? "Deleting..." : "Delete"}
-                      </button>
-                    </div>
                   )}
                 </div>
               ))}
@@ -1704,6 +1754,45 @@ export default function Profile() {
                 <div>
                   <span className="profile-create-label">Live</span>
                 </div>
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {isOwnProfile && postOptionsPost && (
+        <div className="profile-post-options-backdrop" onClick={closePostOptions}>
+          <section className="profile-post-options-sheet" onClick={(event) => event.stopPropagation()}>
+            <div className="profile-create-handle" aria-hidden="true" />
+            <div className="profile-post-options-head">
+              <h3 className="profile-post-options-title">Options</h3>
+            </div>
+            <div className="profile-post-options-actions">
+              <button
+                type="button"
+                className="profile-post-options-btn"
+                onClick={() => {
+                  const selected = postOptionsPost;
+                  closePostOptions();
+                  openPostInPlayer(selected);
+                }}
+              >
+                View
+              </button>
+              <button
+                type="button"
+                className="profile-post-options-btn danger"
+                onClick={() => {
+                  const selectedId = postOptionsPost?.id;
+                  closePostOptions();
+                  deletePost(selectedId);
+                }}
+                disabled={Boolean(deletingPostIds[postOptionsPost?.id])}
+              >
+                {deletingPostIds[postOptionsPost?.id] ? "Deleting..." : "Delete"}
+              </button>
+              <button type="button" className="profile-post-options-btn ghost" onClick={closePostOptions}>
+                Cancel
               </button>
             </div>
           </section>

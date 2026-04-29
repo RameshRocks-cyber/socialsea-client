@@ -167,6 +167,11 @@ api.interceptors.response.use(
     const status = error?.response?.status;
     const guardKey = getEndpointGuardKey(originalRequest);
     const bypassEndpointGuard = originalRequest?.bypassEndpointGuard === true;
+    const requestOrigin = resolveRequestOrigin(originalRequest);
+    const isTrustedOrigin =
+      !!requestOrigin &&
+      !!TRUSTED_API_ORIGIN &&
+      requestOrigin === TRUSTED_API_ORIGIN;
 
     if (guardKey && !bypassEndpointGuard) {
       if (status === 404) {
@@ -196,6 +201,12 @@ api.interceptors.response.use(
       sessionStorage.getItem("refreshToken") ||
       localStorage.getItem("refreshToken");
     if (!refreshToken) {
+      if (isTrustedOrigin) {
+        clearAuthStorage();
+        if (!originalRequest?.suppressAuthRedirect) {
+          window.location.href = "/login";
+        }
+      }
       return Promise.reject(error);
     }
 
@@ -222,6 +233,10 @@ api.interceptors.response.use(
       return api(originalRequest);
     } catch (refreshError) {
       if (originalRequest?.suppressAuthRedirect) {
+        const refreshStatus = refreshError?.response?.status;
+        if (isTrustedOrigin && (refreshStatus === 401 || refreshStatus === 403)) {
+          clearAuthStorage();
+        }
         return Promise.reject(refreshError);
       }
       clearAuthStorage();

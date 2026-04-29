@@ -497,6 +497,9 @@ export default function Settings() {
       source: "settings"
     });
   };
+  const toggleJobMode = (mode) => {
+    setJobMode(jobMode === mode ? "off" : mode);
+  };
 
   const removeFromPanel = (id) => {
     if (activePanel === "saved") {
@@ -690,19 +693,19 @@ export default function Settings() {
             icon={"💼"}
             title="Jobs on profile"
             value={jobMode === "profile" ? "On" : "Off"}
-            onClick={() => setJobMode("profile")}
+            onClick={() => toggleJobMode("profile")}
           />
           <Row
             icon={"📝"}
             title="Post a Job"
             value={jobMode === "post" ? "On" : "Off"}
-            onClick={() => setJobMode("post")}
+            onClick={() => toggleJobMode("post")}
           />
           <Row
             icon={"🔐"}
             title="Storage Vault"
             value={jobMode === "storage" ? "On" : "Off"}
-            onClick={() => setJobMode("storage")}
+            onClick={() => toggleJobMode("storage")}
           />
           <p className="settings-note">Turn one on, or keep all off to hide.</p>
         </section>

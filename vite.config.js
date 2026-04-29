@@ -16,6 +16,9 @@ export default defineConfig(({ mode }) => {
     const candidates = [
       path.resolve(rootDir, '..', 'SocialSea-main', 'src', 'main', 'resources', 'application.properties'),
       path.resolve(rootDir, '..', 'SocialSea-main', 'SocialSea-main', 'src', 'main', 'resources', 'application.properties'),
+      // Common local setup: backend repo is a sibling of the outer workspace folder.
+      path.resolve(rootDir, '..', '..', 'SocialSea-main', 'src', 'main', 'resources', 'application.properties'),
+      path.resolve(rootDir, '..', '..', 'SocialSea-main', 'SocialSea-main', 'src', 'main', 'resources', 'application.properties'),
     ]
     for (const file of candidates) {
       try {

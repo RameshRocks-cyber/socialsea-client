@@ -100,6 +100,7 @@ export default function Reels() {
   const navigate = useNavigate();
   const viewerIdentity = useMemo(() => readStoryIdentity(), []);
   const [reels, setReels] = useState([]);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [studyModeReels, setStudyModeReels] = useState(readStudyModeReels);
   const [gestureEnabled, setGestureEnabled] = useState(false);
@@ -176,6 +177,7 @@ export default function Reels() {
   useEffect(() => {
     if (studyModeReels) {
       setGestureEnabled(false);
+      setLoading(false);
       setError("");
       setReels([]);
     }
@@ -189,6 +191,7 @@ export default function Reels() {
       setReels(cached);
       setError("");
     }
+    setLoading(cached.length === 0);
     const buildBaseCandidates = () => {
       const storedBase =
         typeof window !== "undefined"
@@ -283,46 +286,24 @@ export default function Reels() {
         const merged = Array.from(byKey.values());
         const durationProbeCache = new Map();
         const readDurationWithCache = async (mediaUrl) => {
-          if (!mediaUrl) return 0;
-          if (!durationProbeCache.has(mediaUrl)) {
-            durationProbeCache.set(
-              mediaUrl,
-              readVideoDuration(mediaUrl).catch(() => 0)
-            );
+          const url = String(mediaUrl || "").trim();
+          if (!url) return 0;
+          if (!durationProbeCache.has(url)) {
+            durationProbeCache.set(url, readVideoDuration(url));
           }
-          return durationProbeCache.get(mediaUrl);
+          try {
+            return Number(await durationProbeCache.get(url)) || 0;
+          } catch {
+            return 0;
+          }
         };
-        const filtered = await Promise.all(
-          merged.map(async ({ item }) => {
-            if (getMediaType(item) !== "VIDEO") return null;
-            const rawUrl = item.contentUrl || item.mediaUrl || "";
-            const mediaUrl = resolveUrl(String(rawUrl).trim());
-            if (!mediaUrl) return null;
 
-            let durationHint = durationFromPost(item);
-            let bucket = classifyVideoBucket(item, {
-              durationHint,
-              shortSeconds: MAX_REEL_SECONDS,
-              defaultUnknown: "long"
-            });
+        const isReelBucket = (bucket) => bucket === "reel" || bucket === "short";
+        const desiredCount =
+          Number.isFinite(REELS_LIMIT) && REELS_LIMIT > 0 ? REELS_LIMIT : MAX_REELS_DEFAULT;
 
-            if ((bucket === "reel" || bucket === "short") && durationHint <= 0) {
-              durationHint = Number(await readDurationWithCache(mediaUrl)) || 0;
-              bucket = classifyVideoBucket(item, {
-                durationHint,
-                shortSeconds: MAX_REEL_SECONDS,
-                defaultUnknown: "long"
-              });
-            }
-
-            if (durationHint <= 0 || durationHint > MAX_REEL_SECONDS) return null;
-            return bucket === "reel" || bucket === "short" ? item : null;
-          })
-        );
-
-        if (!cancelled) {
-          setError("");
-          let nextReels = filtered.filter(Boolean);
+        const normalizeList = (items) => {
+          let nextReels = Array.isArray(items) ? items.filter(Boolean) : [];
           if (Number.isFinite(REELS_LIMIT) && REELS_LIMIT > 0) {
             if (targetPostId) {
               const targetIndex = nextReels.findIndex(
@@ -330,7 +311,12 @@ export default function Reels() {
               );
               if (targetIndex > -1 && targetIndex >= REELS_LIMIT) {
                 const picked = nextReels[targetIndex];
-                nextReels = [picked, ...nextReels.filter((_, idx) => idx !== targetIndex).slice(0, REELS_LIMIT - 1)];
+                nextReels = [
+                  picked,
+                  ...nextReels
+                    .filter((_, idx) => idx !== targetIndex)
+                    .slice(0, REELS_LIMIT - 1),
+                ];
               } else {
                 nextReels = nextReels.slice(0, REELS_LIMIT);
               }
@@ -340,7 +326,7 @@ export default function Reels() {
           }
           if (targetPostId) {
             const pickedIndex = nextReels.findIndex(
-              (item) => String(item?.id || "").trim() === targetPostId,
+              (item) => String(item?.id || "").trim() === targetPostId
             );
             if (pickedIndex > 0) {
               const picked = nextReels[pickedIndex];
@@ -348,12 +334,110 @@ export default function Reels() {
               nextReels.unshift(picked);
             }
           }
+          return nextReels;
+        };
+
+        const confirmed = [];
+        const needsProbe = [];
+
+        merged.forEach(({ item }) => {
+          if (!item) return;
+          if (getMediaType(item) !== "VIDEO") return;
+          const rawUrl = item.contentUrl || item.mediaUrl || "";
+          const mediaUrl = resolveUrl(String(rawUrl).trim());
+          if (!mediaUrl) return;
+
+          const durationHint = durationFromPost(item);
+          const bucket = classifyVideoBucket(item, {
+            durationHint,
+            shortSeconds: MAX_REEL_SECONDS,
+            defaultUnknown: "long",
+          });
+
+          if (!isReelBucket(bucket)) return;
+
+          if (durationHint > 0) {
+            if (durationHint <= MAX_REEL_SECONDS) confirmed.push(item);
+            return;
+          }
+
+          needsProbe.push({ item, mediaUrl });
+        });
+
+        let nextReels = normalizeList(confirmed);
+        const shouldPublishInitial = nextReels.length > 0 || cached.length === 0;
+        if (!cancelled && shouldPublishInitial) {
+          setError("");
           setReels(nextReels);
           writeReelsCache(nextReels);
+          setLoading(nextReels.length === 0 && needsProbe.length > 0);
+        } else if (!cancelled) {
+          setError("");
+          setLoading(false);
+        }
+
+        const shouldStop = () =>
+          cancelled ||
+          (Number.isFinite(REELS_LIMIT) && REELS_LIMIT > 0
+            ? nextReels.length >= REELS_LIMIT
+            : nextReels.length >= desiredCount);
+
+        const pushIfValid = (item) => {
+          if (!item?.id) return false;
+          if (nextReels.some((r) => String(r?.id) === String(item.id)))
+            return false;
+          nextReels = normalizeList([...nextReels, item]);
+          return true;
+        };
+
+        const probeQueue = needsProbe.slice(0, Math.max(desiredCount * 3, 30));
+        const PROBE_CONCURRENCY = 4;
+
+        const worker = async () => {
+          while (!shouldStop() && probeQueue.length) {
+            const entry = probeQueue.shift();
+            if (!entry?.item || !entry.mediaUrl) continue;
+
+            const durationHint =
+              Number(await readDurationWithCache(entry.mediaUrl)) || 0;
+            if (durationHint <= 0 || durationHint > MAX_REEL_SECONDS) continue;
+
+            const bucket = classifyVideoBucket(entry.item, {
+              durationHint,
+              shortSeconds: MAX_REEL_SECONDS,
+              defaultUnknown: "long",
+            });
+            if (!isReelBucket(bucket)) continue;
+
+            const didAdd = pushIfValid(entry.item);
+            if (didAdd && !cancelled) {
+              setReels(nextReels);
+              writeReelsCache(nextReels);
+              setLoading(false);
+            }
+          }
+        };
+
+        if (probeQueue.length) {
+          await Promise.all(
+            Array.from({ length: PROBE_CONCURRENCY }, () => worker())
+          );
+        }
+
+        if (!cancelled) {
+          const shouldPublishFinal = nextReels.length > 0 || cached.length === 0;
+          if (shouldPublishFinal) {
+            setReels(nextReels);
+            writeReelsCache(nextReels);
+          }
+          setLoading(false);
         }
       } catch (err) {
         console.error(err);
-        if (!cancelled) setError("Failed to load reels");
+        if (!cancelled) {
+          setError("Failed to load reels");
+          setLoading(false);
+        }
       }
     };
 
@@ -361,7 +445,7 @@ export default function Reels() {
     return () => {
       cancelled = true;
     };
-  }, [studyModeReels]);
+  }, [studyModeReels, targetPostId]);
 
   useEffect(() => {
     if (!reels.length) return;
@@ -562,13 +646,39 @@ export default function Reels() {
     return 0;
   };
 
-  const readVideoDuration = (videoUrl) =>
+  const readVideoDuration = (videoUrl, timeoutMs = 6000) =>
     new Promise((resolve) => {
+      const url = String(videoUrl || "").trim();
+      if (!url) {
+        resolve(0);
+        return;
+      }
+
       const video = document.createElement("video");
+      let done = false;
+      let timerId = 0;
+
+      const finish = (value) => {
+        if (done) return;
+        done = true;
+        if (timerId) window.clearTimeout(timerId);
+        video.onloadedmetadata = null;
+        video.onerror = null;
+        try {
+          video.removeAttribute("src");
+          video.load();
+        } catch {
+          // ignore cleanup errors
+        }
+        resolve(value);
+      };
+
       video.preload = "metadata";
-      video.src = videoUrl;
-      video.onloadedmetadata = () => resolve(Number(video.duration) || 0);
-      video.onerror = () => resolve(0);
+      video.onloadedmetadata = () => finish(Number(video.duration) || 0);
+      video.onerror = () => finish(0);
+      video.src = url;
+
+      timerId = window.setTimeout(() => finish(0), Math.max(500, timeoutMs));
     });
 
   const trackFeedSignal = (post, signal = "view", customWeight = null) => {
@@ -1297,7 +1407,10 @@ export default function Reels() {
         onScroll={onScroll}
       >
         {error && <p className="reel-state is-error">{error}</p>}
-        {!error && reels.length === 0 && (
+        {!error && loading && reels.length === 0 && (
+          <p className="reel-state">Loading reels...</p>
+        )}
+        {!error && !loading && reels.length === 0 && (
           <p className="reel-state">
             No reels yet (only videos up to 60 seconds are shown).
           </p>

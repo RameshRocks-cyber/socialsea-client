@@ -437,7 +437,8 @@ body.ss-theme-white .profile-post-tab.is-active {
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
 }
 
-.profile-post-card.is-playable {
+.profile-post-card.is-playable,
+.profile-post-card.is-actionable {
   cursor: pointer;
 }
 
@@ -1106,72 +1107,119 @@ body.ss-theme-white .profile-create-notice {
   position: relative;
 }
 
-
-
-
-.profile-post-actions {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  z-index: 3;
-  opacity: 0;
-  transform: translateY(-4px);
-  transition: opacity 0.18s ease, transform 0.18s ease;
+.profile-post-options-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 25000;
+  background: rgba(6, 8, 12, 0.64);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 14px 10px;
 }
 
-.profile-post-card:hover .profile-post-actions,
-.profile-post-card:focus-within .profile-post-actions {
-  opacity: 1;
-  transform: translateY(0);
+.profile-post-options-sheet {
+  width: min(560px, 100%);
+  background: linear-gradient(180deg, #14171c, #0b0d12);
+  border: 1px solid rgba(94, 104, 120, 0.34);
+  border-radius: 18px 18px 10px 10px;
+  box-shadow: 0 24px 40px rgba(0, 0, 0, 0.5);
+  padding: 10px 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  animation: profileSheetUp 160ms ease-out;
 }
 
-.profile-post-delete-inline {
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  border-radius: 999px;
-  padding: 7px 12px;
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.25px;
-  text-transform: uppercase;
-  background: linear-gradient(135deg, #1c1c1c, #0b0b0b);
-  backdrop-filter: blur(5px);
+.profile-post-options-head {
+  text-align: center;
+}
+
+.profile-post-options-title {
+  margin: 0;
   color: #f5f5f5;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.profile-post-options-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.profile-post-options-btn {
+  width: 100%;
+  border: 1px solid rgba(82, 92, 108, 0.35);
+  background: linear-gradient(140deg, rgba(16, 16, 16, 0.96), rgba(8, 8, 8, 0.98));
+  color: #f5f5f5;
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 0.95rem;
+  font-weight: 650;
   cursor: pointer;
-  box-shadow:
-    0 10px 20px rgba(0, 0, 0, 0.4),
-    0 0 0 1px rgba(255, 255, 255, 0.14) inset;
-  transition: transform 0.15s ease, filter 0.15s ease, box-shadow 0.15s ease;
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
 }
 
-.profile-post-delete-inline:hover {
+.profile-post-options-btn:hover {
   transform: translateY(-1px);
-  filter: brightness(1.08);
-  box-shadow:
-    0 12px 24px rgba(0, 0, 0, 0.46),
-    0 0 0 1px rgba(255, 255, 255, 0.2) inset;
+  border-color: rgba(140, 160, 190, 0.45);
+  box-shadow: 0 12px 20px rgba(0, 0, 0, 0.28);
+  filter: brightness(1.05);
 }
 
-.profile-post-delete-inline:focus-visible {
-  outline: 2px solid rgba(255, 225, 225, 0.92);
+.profile-post-options-btn:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.72);
   outline-offset: 2px;
 }
 
-.profile-post-delete-inline:disabled {
-  opacity: 0.7;
+.profile-post-options-btn:disabled {
+  opacity: 0.68;
   cursor: wait;
   transform: none;
+  filter: none;
 }
 
-@media (hover: none) {
-  .profile-post-card .profile-post-actions {
-    opacity: 0;
-    transform: translateY(-4px);
-  }
+.profile-post-options-btn.danger {
+  border-color: rgba(243, 88, 88, 0.42);
+  color: #ffbdbd;
+}
 
-  .profile-post-card.is-delete-visible .profile-post-actions {
-    opacity: 1;
-    transform: translateY(0);
-  }
+.profile-post-options-btn.danger:hover {
+  border-color: rgba(255, 120, 120, 0.65);
+}
+
+.profile-post-options-btn.ghost {
+  background: transparent;
+  border-color: rgba(160, 180, 206, 0.35);
+  color: rgba(245, 245, 245, 0.86);
+}
+
+body.ss-theme-white .profile-post-options-sheet {
+  background: linear-gradient(180deg, #ffffff, #f2f7ff);
+  border-color: rgba(143, 174, 210, 0.52);
+  box-shadow: 0 24px 42px rgba(23, 64, 112, 0.18);
+}
+
+body.ss-theme-white .profile-post-options-title {
+  color: #12375d;
+}
+
+body.ss-theme-white .profile-post-options-btn {
+  background: linear-gradient(145deg, #ffffff 0%, #eef5ff 100%);
+  border-color: rgba(131, 168, 209, 0.62);
+  color: #173c65;
+  box-shadow: 0 8px 18px rgba(28, 72, 124, 0.12);
+}
+
+body.ss-theme-white .profile-post-options-btn.danger {
+  border-color: rgba(205, 55, 55, 0.4);
+  color: #aa1f1f;
+}
+
+body.ss-theme-white .profile-post-options-btn.ghost {
+  background: transparent;
+  box-shadow: none;
 }
 .profile-hero {
   max-width: 520px;
