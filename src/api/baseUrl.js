@@ -148,6 +148,9 @@ export function getApiBaseUrl() {
 export function toApiUrl(path = "") {
   const base = getApiBaseUrl();
   if (!path) return base;
+  if (/^\/\//.test(path)) {
+    return `https:${path}`;
+  }
   if (/^https?:\/\//i.test(path)) {
     try {
       const url = new URL(path);

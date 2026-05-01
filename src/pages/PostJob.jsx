@@ -290,17 +290,37 @@ export default function PostJob() {
       updatedAt: Date.now()
     };
 
-    if (jobEditId) {
-      await updateCompanyJob(jobEditId, payload);
-      setJobNotice("Job updated.");
-    } else {
-      await addCompanyJob({ ...payload, createdAt: Date.now() });
-      setJobNotice("Job posted successfully.");
-    }
+    try {
+      if (jobEditId) {
+        await updateCompanyJob(jobEditId, payload, {
+          optimisticLocal: false,
+          throwOnError: true
+        });
+        setJobNotice("Job updated.");
+      } else {
+        await addCompanyJob(
+          { ...payload, createdAt: Date.now() },
+          {
+            optimisticLocal: false,
+            throwOnError: true
+          }
+        );
+        setJobNotice("Job posted successfully.");
+      }
 
-    await syncJobsFromServer({ mine: true, includeClosed: true, includeExpired: true });
-    setJobs(getStoredJobs());
-    resetJobDraft();
+      await syncJobsFromServer({
+        mine: true,
+        includeClosed: true,
+        includeExpired: true,
+        throwOnError: true
+      });
+      setJobs(getStoredJobs());
+      resetJobDraft();
+    } catch (error) {
+      setJobNotice(String(error?.message || "Could not save job to server."));
+      await syncJobsFromServer({ mine: true, includeClosed: true, includeExpired: true });
+      setJobs(getStoredJobs());
+    }
   };
 
   const updateJobStatus = async (jobId, status) => {
@@ -312,8 +332,21 @@ export default function PostJob() {
       const durationDays = toDurationDays(currentJob.durationDays) || DEFAULT_JOB_DURATION_DAYS;
       nextPayload.expiresAt = Date.now() + durationDays * DAY_MS;
     }
-    await updateCompanyJob(jobId, nextPayload);
-    await syncJobsFromServer({ mine: true, includeClosed: true, includeExpired: true });
+    try {
+      await updateCompanyJob(jobId, nextPayload, {
+        optimisticLocal: false,
+        throwOnError: true
+      });
+      await syncJobsFromServer({
+        mine: true,
+        includeClosed: true,
+        includeExpired: true,
+        throwOnError: true
+      });
+      setJobNotice("");
+    } catch (error) {
+      setJobNotice(String(error?.message || "Could not update job status."));
+    }
     setJobs(getStoredJobs());
   };
 
@@ -321,8 +354,21 @@ export default function PostJob() {
     if (!jobId) return;
     const ok = window.confirm("Delete this job?");
     if (!ok) return;
-    await removeCompanyJob(jobId);
-    await syncJobsFromServer({ mine: true, includeClosed: true, includeExpired: true });
+    try {
+      await removeCompanyJob(jobId, {
+        optimisticLocal: false,
+        throwOnError: true
+      });
+      await syncJobsFromServer({
+        mine: true,
+        includeClosed: true,
+        includeExpired: true,
+        throwOnError: true
+      });
+      setJobNotice("");
+    } catch (error) {
+      setJobNotice(String(error?.message || "Could not delete job."));
+    }
     setJobs(getStoredJobs());
     if (String(jobEditId) === String(jobId)) {
       resetJobDraft();
@@ -338,7 +384,16 @@ export default function PostJob() {
 
   useEffect(() => {
     const refresh = async () => {
-      await syncJobsFromServer({ mine: true, includeClosed: true, includeExpired: true });
+      try {
+        await syncJobsFromServer({
+          mine: true,
+          includeClosed: true,
+          includeExpired: true,
+          throwOnError: true
+        });
+      } catch (error) {
+        setJobNotice(String(error?.message || "Could not sync jobs from server."));
+      }
       setJobs(getStoredJobs());
     };
     const onStorage = (event) => {

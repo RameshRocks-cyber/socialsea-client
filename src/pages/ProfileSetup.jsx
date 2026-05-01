@@ -1,16 +1,160 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import { buildProfilePath, persistProfileIdentity } from "../utils/profileRoute";
 import "./ProfileSetup.css";
 
 const NAME_HINT = "3-20 chars: lowercase letters, numbers, dot, underscore";
+const AVATAR_OUTPUT_PX = 512;
+const COVER_OUTPUT_MAX_WIDTH_PX = 1280;
+const COVER_ASPECT_RATIO = 52 / 21; // matches Profile cover frame (520px wide, 210px tall)
 
 const normalizeUsernameInput = (value) =>
   String(value || "")
     .toLowerCase()
     .replace(/[^a-z0-9._]/g, "")
     .slice(0, 20);
+
+function guessOutputExtension(mimeType) {
+  const t = String(mimeType || "").toLowerCase();
+  if (t.includes("png")) return "png";
+  if (t.includes("webp")) return "webp";
+  if (t.includes("gif")) return "gif";
+  if (t.includes("bmp")) return "bmp";
+  return "jpg";
+}
+
+function isHeicLikeFile(file) {
+  if (!file) return false;
+  const type = String(file?.type || "").trim().toLowerCase();
+  if (type.includes("heic") || type.includes("heif")) return true;
+  const name = String(file?.name || "").trim().toLowerCase();
+  return /\.(heic|heif)$/i.test(name);
+}
+
+async function convertHeicToJpegFile(file) {
+  const mod = await import("heic2any");
+  const heic2any = mod?.default || mod;
+  if (typeof heic2any !== "function") throw new Error("HEIC converter not available");
+
+  const converted = await heic2any({
+    blob: file,
+    toType: "image/jpeg",
+    quality: 0.92,
+  });
+  const blob = Array.isArray(converted) ? converted[0] : converted;
+  if (!(blob instanceof Blob) || blob.size <= 0) throw new Error("HEIC conversion failed");
+
+  const originalName = String(file?.name || "image").replace(/\.[a-z0-9]+$/i, "");
+  return new File([blob], `${originalName}.jpg`, {
+    type: blob.type || "image/jpeg",
+    lastModified: Date.now(),
+  });
+}
+
+async function decodeImageSource(file) {
+  if (!file) throw new Error("Missing file");
+
+  if (typeof createImageBitmap === "function") {
+    try {
+      const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+      return { source: bitmap, width: bitmap.width, height: bitmap.height, revoke: () => bitmap.close?.() };
+    } catch {
+      try {
+        const bitmap = await createImageBitmap(file);
+        return { source: bitmap, width: bitmap.width, height: bitmap.height, revoke: () => bitmap.close?.() };
+      } catch {
+        // fall back to <img>
+      }
+    }
+  }
+
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error("Failed to decode image"));
+      el.src = url;
+    });
+    return { source: img, width: img.naturalWidth || img.width, height: img.naturalHeight || img.height, revoke: () => {} };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function computeCenteredCropRect(srcW, srcH, targetAspect) {
+  const w = Number(srcW || 0);
+  const h = Number(srcH || 0);
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) {
+    return { sx: 0, sy: 0, sw: 0, sh: 0 };
+  }
+  const srcAspect = w / h;
+  if (srcAspect > targetAspect) {
+    const sw = h * targetAspect;
+    return { sx: (w - sw) / 2, sy: 0, sw, sh: h };
+  }
+  const sh = w / targetAspect;
+  return { sx: 0, sy: (h - sh) / 2, sw: w, sh };
+}
+
+function canvasToBlob(canvas, mimeType, quality) {
+  return new Promise((resolve) => {
+    if (!canvas) return resolve(null);
+    if (typeof canvas.toBlob === "function") {
+      canvas.toBlob((blob) => resolve(blob), mimeType, quality);
+      return;
+    }
+    try {
+      const dataUrl = canvas.toDataURL(mimeType, quality);
+      const [header, base64] = String(dataUrl || "").split(",");
+      const match = /data:([^;]+);base64/i.exec(header || "");
+      const type = match?.[1] || "image/png";
+      const bin = atob(base64 || "");
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+      resolve(new Blob([bytes], { type }));
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+async function cropImageFileToAspect(file, aspectRatio, outputWidthPx, outputMime = "image/jpeg") {
+  const inputFile = isHeicLikeFile(file) ? await convertHeicToJpegFile(file) : file;
+  const decoded = await decodeImageSource(inputFile);
+  try {
+    const rect = computeCenteredCropRect(decoded.width, decoded.height, aspectRatio);
+    if (!rect.sw || !rect.sh) throw new Error("Invalid crop rect");
+
+    const outW = Math.max(1, Math.round(Number(outputWidthPx) || rect.sw));
+    const outH = Math.max(1, Math.round(outW / aspectRatio));
+
+    const canvas = document.createElement("canvas");
+    canvas.width = outW;
+    canvas.height = outH;
+    const ctx = canvas.getContext("2d", { alpha: true });
+    if (!ctx) throw new Error("Canvas not supported");
+
+    // Avoid black background when encoding to JPEG.
+    if (outputMime === "image/jpeg") {
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, outW, outH);
+    }
+
+    ctx.drawImage(decoded.source, rect.sx, rect.sy, rect.sw, rect.sh, 0, 0, outW, outH);
+
+    const blob = await canvasToBlob(canvas, outputMime, 0.92);
+    if (!blob) throw new Error("Failed to encode image");
+
+    const originalName = String(file?.name || "image").replace(/\.[a-z0-9]+$/i, "");
+    const ext = guessOutputExtension(blob.type || outputMime);
+    const outName = `${originalName}.cropped.${ext}`;
+    return new File([blob], outName, { type: blob.type || outputMime, lastModified: Date.now() });
+  } finally {
+    decoded.revoke?.();
+  }
+}
 
 export default function ProfileSetup() {
   const navigate = useNavigate();
@@ -30,8 +174,33 @@ export default function ProfileSetup() {
   const [nameAvailable, setNameAvailable] = useState(null);
   const [checkingName, setCheckingName] = useState(false);
   const [suggestions, setSuggestions] = useState([]);
+  const [photoProcessing, setPhotoProcessing] = useState(false);
+  const [coverProcessing, setCoverProcessing] = useState(false);
+  const processingTokenRef = useRef({ photo: 0, cover: 0 });
 
   const nameValid = useMemo(() => /^[a-z0-9._]{3,20}$/.test(name), [name]);
+
+  useEffect(() => {
+    if (!preview || typeof preview !== "string" || !preview.startsWith("blob:")) return undefined;
+    return () => {
+      try {
+        URL.revokeObjectURL(preview);
+      } catch {
+        // ignore revoke failures
+      }
+    };
+  }, [preview]);
+
+  useEffect(() => {
+    if (!coverPreview || typeof coverPreview !== "string" || !coverPreview.startsWith("blob:")) return undefined;
+    return () => {
+      try {
+        URL.revokeObjectURL(coverPreview);
+      } catch {
+        // ignore revoke failures
+      }
+    };
+  }, [coverPreview]);
 
   useEffect(() => {
     let active = true;
@@ -182,14 +351,32 @@ export default function ProfileSetup() {
           <div>
             <label className="field-label">Profile photo</label>
             <label className="file-btn">
-              Choose file
+              {photoProcessing ? "Processing..." : "Choose file"}
               <input
                 type="file"
                 accept="image/*"
-                onChange={(e) => {
+                onChange={async (e) => {
                   const file = e.target.files?.[0] || null;
+                  if (!file) {
+                    setPhoto(null);
+                    return;
+                  }
+
                   setPhoto(file);
-                  if (file) setPreview(URL.createObjectURL(file));
+                  setPreview(URL.createObjectURL(file));
+
+                  const token = (processingTokenRef.current.photo += 1);
+                  setPhotoProcessing(true);
+                  try {
+                    const processed = await cropImageFileToAspect(file, 1, AVATAR_OUTPUT_PX, "image/jpeg");
+                    if (processingTokenRef.current.photo !== token) return;
+                    setPhoto(processed);
+                    setPreview(URL.createObjectURL(processed));
+                  } catch {
+                    // keep original file/preview
+                  } finally {
+                    if (processingTokenRef.current.photo === token) setPhotoProcessing(false);
+                  }
                 }}
               />
             </label>
@@ -206,14 +393,37 @@ export default function ProfileSetup() {
             />
           ) : null}
           <label className="file-btn">
-            Choose cover
+            {coverProcessing ? "Processing..." : "Choose cover"}
             <input
               type="file"
               accept="image/*"
-              onChange={(e) => {
+              onChange={async (e) => {
                 const file = e.target.files?.[0] || null;
+                if (!file) {
+                  setCoverPhoto(null);
+                  return;
+                }
+
                 setCoverPhoto(file);
-                if (file) setCoverPreview(URL.createObjectURL(file));
+                setCoverPreview(URL.createObjectURL(file));
+
+                const token = (processingTokenRef.current.cover += 1);
+                setCoverProcessing(true);
+                try {
+                  const processed = await cropImageFileToAspect(
+                    file,
+                    COVER_ASPECT_RATIO,
+                    COVER_OUTPUT_MAX_WIDTH_PX,
+                    "image/jpeg"
+                  );
+                  if (processingTokenRef.current.cover !== token) return;
+                  setCoverPhoto(processed);
+                  setCoverPreview(URL.createObjectURL(processed));
+                } catch {
+                  // keep original file/preview
+                } finally {
+                  if (processingTokenRef.current.cover === token) setCoverProcessing(false);
+                }
               }}
             />
           </label>

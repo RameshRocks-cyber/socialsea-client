@@ -439,9 +439,12 @@ const collectPersonalizationTokens = (post, localGenreMap) => {
 
 export default function Feed() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const feedUserKey = useMemo(() => resolveFeedUserKey(), []);
-  const [feedMode, setFeedMode] = useState("all");
+  const [feedMode, setFeedMode] = useState(() => {
+    const mode = String(searchParams.get("mode") || "").trim().toLowerCase();
+    return mode === "long" ? "long" : "all";
+  });
   const [feedMenuOpen, setFeedMenuOpen] = useState(false);
   const [contentTypeFilter, setContentTypeFilter] = useState("all");
   const [contentSubFilter, setContentSubFilter] = useState("all");
@@ -478,6 +481,7 @@ export default function Feed() {
   const inFlightLoadRef = useRef(false);
   const lastLoadAtRef = useRef(0);
   const postsCountRef = useRef(Array.isArray(posts) ? posts.length : 0);
+  const closingPostViewRef = useRef(false);
   const menuRef = useRef(null);
   const feedMenuRef = useRef(null);
   const postViewBackdropRef = useRef(null);
@@ -562,6 +566,22 @@ export default function Feed() {
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, [feedMenuOpen]);
+
+  useEffect(() => {
+    const mode = String(searchParams.get("mode") || "").trim().toLowerCase();
+    const nextMode = mode === "long" ? "long" : "all";
+    setFeedMode((prev) => (prev === nextMode ? prev : nextMode));
+  }, [searchParams]);
+
+  useEffect(() => {
+    const mode = String(searchParams.get("mode") || "").trim().toLowerCase();
+    const nextMode = feedMode === "long" ? "long" : "all";
+    if (mode === nextMode || (!mode && nextMode === "all")) return;
+    const nextParams = new URLSearchParams(searchParams);
+    if (nextMode === "long") nextParams.set("mode", "long");
+    else nextParams.delete("mode");
+    setSearchParams(nextParams, { replace: true });
+  }, [feedMode, searchParams, setSearchParams]);
 
   useEffect(() => {
     const category = normalizeGenre(contentTypeFilter);
@@ -1502,11 +1522,37 @@ export default function Feed() {
     const postId = String(candidate?.id || "").trim();
     if (!postId) return `${window.location.origin}/feed`;
     const mediaType = mediaTypeFor(candidate);
+    const previewMedia = String(
+      candidate?.contentUrl ||
+      candidate?.mediaUrl ||
+      candidate?.videoUrl ||
+      candidate?.video?.url ||
+      ""
+    ).trim();
+    const previewPoster = String(
+      candidate?.thumbnailUrl ||
+      candidate?.thumbUrl ||
+      candidate?.previewUrl ||
+      candidate?.coverUrl ||
+      candidate?.coverImageUrl ||
+      candidate?.coverImage ||
+      candidate?.posterUrl ||
+      candidate?.poster ||
+      candidate?.imageUrl ||
+      ""
+    ).trim();
     if (mediaType === "VIDEO") {
       if (inferIsShortVideo(candidate)) {
-        return `${window.location.origin}/reels?post=${encodeURIComponent(postId)}`;
+        const reelUrl = new URL("/reels", window.location.origin);
+        reelUrl.searchParams.set("post", postId);
+        if (previewMedia) reelUrl.searchParams.set("media", previewMedia);
+        if (previewPoster) reelUrl.searchParams.set("poster", previewPoster);
+        return reelUrl.toString();
       }
-      return `${window.location.origin}/watch/${encodeURIComponent(postId)}`;
+      const watchUrl = new URL(`/watch/${encodeURIComponent(postId)}`, window.location.origin);
+      if (previewMedia) watchUrl.searchParams.set("media", previewMedia);
+      if (previewPoster) watchUrl.searchParams.set("poster", previewPoster);
+      return watchUrl.toString();
     }
     return `${window.location.origin}/feed?post=${encodeURIComponent(postId)}`;
   };
@@ -1648,18 +1694,28 @@ export default function Feed() {
   const isFeedViewerOpen = feedMode === "all" && activeFeedIndex >= 0;
 
   const openPost = async (postId, syncUrl = false, replace = false, signal = "view") => {
+    closingPostViewRef.current = false;
     setActivePostId(postId);
     const post = postById[String(postId)];
     if (post) trackFeedInteraction(post, signal);
     await loadComments(postId);
     if (syncUrl) {
-      navigate(`/feed?post=${postId}`, { replace });
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.set("post", postId);
+      if (feedMode === "long") nextParams.set("mode", "long");
+      else nextParams.delete("mode");
+      const query = nextParams.toString();
+      navigate(query ? `/feed?${query}` : "/feed", { replace });
     }
   };
 
   useEffect(() => {
     const postParam = String(searchParams.get("post") || "").trim();
-    if (!postParam) return;
+    if (!postParam) {
+      closingPostViewRef.current = false;
+      return;
+    }
+    if (closingPostViewRef.current) return;
     const target = posts.find((p) => String(p?.id) === postParam);
     if (!target) return;
     if (String(activePostId || "") === postParam) return;
@@ -1711,8 +1767,16 @@ export default function Feed() {
   }, [isFeedViewerOpen, feedPosts, activeFeedIndex]);
 
   const closePostView = () => {
+    closingPostViewRef.current = true;
     setActivePostId(null);
-    if (searchParams.get("post")) navigate("/feed", { replace: true });
+    if (searchParams.get("post")) {
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.delete("post");
+      if (feedMode === "long") nextParams.set("mode", "long");
+      else nextParams.delete("mode");
+      const query = nextParams.toString();
+      navigate(query ? `/feed?${query}` : "/feed", { replace: true });
+    }
   };
 
   const activePost = posts.find((p) => p.id === activePostId) || null;

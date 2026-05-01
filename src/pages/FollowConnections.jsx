@@ -111,10 +111,8 @@ function getPathCandidates(identifier, kind) {
         : [kind];
 
   return [
-    ...kindAliases.map((alias) => `/api/follow/${safeId}/${alias}/users`),
     ...kindAliases.map((alias) => `/api/profile/${safeId}/${alias}`),
-    ...kindAliases.map((alias) => `/api/follow/${safeId}/${alias}`),
-    ...kindAliases.map((alias) => `/api/follow/${alias}/${safeId}`)
+    ...kindAliases.map((alias) => `/api/follow/${safeId}/${alias}/users`)
   ].filter((path, index, arr) => arr.indexOf(path) === index);
 }
 
@@ -342,12 +340,10 @@ async function loadUsersFromFollowCache() {
         continue;
       }
     } catch {
-      // Fall back to the cached identifier when profile lookup fails.
+      // Ignore stale cache keys that no longer resolve to a real profile.
     }
-    const fallbackUser = makeFallbackUserFromKey(key);
-    if (fallbackUser?.id) users.push(fallbackUser);
   }
-  return users;
+  return dedupeUsers(users);
 }
 
 async function loadFollowersFromNotifications() {
@@ -439,15 +435,9 @@ export default function FollowConnections() {
         (username || "").toLowerCase() === "me" ||
         (!!storedUserId && String(username || "").trim() === storedUserId) ||
         (!!storedEmail && String(username || "").trim().toLowerCase() === storedEmail.toLowerCase());
+      let cachedFollowingUsers = [];
       if (kind === "following" && isOwnConnections) {
-        const cachedUsers = await loadUsersFromFollowCache();
-        if (!cancelled && cachedUsers.length) {
-          setTitleName((prev) => prev || username || "You");
-          setUsers(cachedUsers);
-          setError("");
-          setLoading(false);
-          return;
-        }
+        cachedFollowingUsers = await loadUsersFromFollowCache();
       }
       const inlineListCandidates = [];
       if ((username || "").toLowerCase() === "me") {
@@ -469,8 +459,7 @@ export default function FollowConnections() {
           const profileId = String(profile?.id ?? "").trim();
           const profileEmail = String(profile?.email ?? "").trim();
           const profileUsername = String(profile?.username ?? "").trim();
-          const profileName = String(profile?.name ?? "").trim();
-          [profileId, profileEmail, profileUsername, profileName].forEach((v) => {
+          [profileId, profileEmail, profileUsername].forEach((v) => {
             if (v && !idCandidates.includes(v)) idCandidates.push(v);
           });
 
@@ -491,8 +480,7 @@ export default function FollowConnections() {
               const profileId = String(profile?.id ?? "").trim();
               const profileEmail = String(profile?.email ?? "").trim();
               const profileUsername = String(profile?.username ?? "").trim();
-              const profileName = String(profile?.name ?? "").trim();
-              [profileId, profileEmail, profileUsername, profileName].forEach((v) => {
+              [profileId, profileEmail, profileUsername].forEach((v) => {
                 if (v && !idCandidates.includes(v)) idCandidates.push(v);
               });
 
@@ -547,9 +535,8 @@ export default function FollowConnections() {
           setUsers(merged);
           setError("");
         } else if (kind === "following" && isOwnConnections) {
-          const cachedUsers = await loadUsersFromFollowCache();
-          setUsers(dedupeUsers(cachedUsers));
-          setError(cachedUsers.length ? "" : `Could not load ${kind}. Please check backend ${kind} endpoint.`);
+          setUsers(dedupeUsers(cachedFollowingUsers));
+          setError(cachedFollowingUsers.length ? "" : `Could not load ${kind}. Please check backend ${kind} endpoint.`);
         } else if (kind === "followers" && isOwnConnections) {
           const fallbackUsers = await loadFollowersFromNotifications();
           setUsers(dedupeUsers(fallbackUsers));

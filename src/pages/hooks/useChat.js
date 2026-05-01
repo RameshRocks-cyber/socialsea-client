@@ -6,9 +6,12 @@ import { pingChatPresence } from "../../api/chatPresence";
 import { buildProfilePath } from "../../utils/profileRoute";
 import { getApiBaseUrl, toApiUrl } from "../../api/baseUrl";
 import { clearAuthStorage } from "../../auth";
-import { readActiveStories, syncStoryCaches } from "../../services/storyStorage";
+import { readActiveStories, removeStoryEntries, syncStoryCaches } from "../../services/storyStorage";
 import { addVaultFiles } from "../../services/vaultStorage";
 import { SETTINGS_KEY, readSoundPrefs, NOTIFICATION_SOUND_URLS, RINGTONE_SOUND_URLS } from "../soundPrefs";
+import { SIGN_VOICE_GENDERS, decodeSignAssistText, useSignAssist } from "./useSignAssist";
+
+export { decodeSignAssistText };
 
 const POLL_MS = 4000;
 const LOCAL_CHAT_KEY = "socialsea_chat_fallback_v1";
@@ -184,15 +187,6 @@ const CHAT_REQUESTS_KEY = "socialsea_chat_requests_v1";
 const DELETE_FOR_EVERYONE_TOKEN = "__SS_DELETE_EVERYONE__:";
 const MESSAGE_REPLY_TOKEN = "__SS_REPLY__:";
 const READ_RECEIPT_TOKEN = "__SS_READ_RECEIPT__:";
-const SIGN_ASSIST_TOKEN = "__SS_SIGN_ASSIST__:";
-const SIGN_VOICE_GENDERS = ["female", "male"];
-const SIGN_LOCAL_TF_SCRIPT = "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js";
-const SIGN_LOCAL_HANDPOSE_SCRIPT =
-  "https://cdn.jsdelivr.net/npm/@tensorflow-models/handpose@0.0.7/dist/handpose.min.js";
-const SIGN_LIVE_DEBOUNCE_MS = 2200;
-const SIGN_LIVE_MAX_BUFFER_CHARS = 320;
-const SIGN_LIVE_CONTINUOUS_COOLDOWN_MS = 1400;
-const SIGN_SEQUENCE_FRAME_WINDOW = 18;
 export const DISAPPEARING_MESSAGE_OPTIONS = [
   { value: "0", label: "Off", ms: 0 },
   { value: "86400000", label: "24 hours", ms: 24 * 60 * 60 * 1000 },
@@ -275,122 +269,6 @@ const DEFAULT_WALLPAPER_OPTIONS = {
   y: 50
 };
 
-const encodeSignAssistText = (text, voiceGender = "female", source = "manual") => {
-  const cleanText = String(text || "").trim();
-  if (!cleanText) return "";
-  const gender = SIGN_VOICE_GENDERS.includes(String(voiceGender || "").toLowerCase())
-    ? String(voiceGender || "").toLowerCase()
-    : "female";
-  const payload = {
-    text: cleanText,
-    voiceGender: gender,
-    source: String(source || "manual").trim().toLowerCase(),
-    ts: new Date().toISOString()
-  };
-  return `${SIGN_ASSIST_TOKEN}${JSON.stringify(payload)}`;
-};
-
-export const decodeSignAssistText = (rawText) => {
-  const raw = String(rawText || "");
-  if (!raw.startsWith(SIGN_ASSIST_TOKEN)) return null;
-  try {
-    const parsed = JSON.parse(raw.slice(SIGN_ASSIST_TOKEN.length));
-    const text = String(parsed?.text || "").trim();
-    if (!text) return null;
-    const gender = SIGN_VOICE_GENDERS.includes(String(parsed?.voiceGender || "").toLowerCase())
-      ? String(parsed.voiceGender).toLowerCase()
-      : "female";
-    return {
-      text,
-      voiceGender: gender,
-      source: String(parsed?.source || "manual"),
-      ts: parsed?.ts || ""
-    };
-  } catch {
-    return null;
-  }
-};
-
-const loadExternalScript = (src, id) => {
-  if (typeof document === "undefined") return Promise.reject(new Error("No document"));
-  if (document.getElementById(id)) return Promise.resolve();
-  return new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = src;
-    script.id = id;
-    script.async = true;
-    script.crossOrigin = "anonymous";
-    script.referrerPolicy = "no-referrer";
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error(`Failed to load ${src}`));
-    document.head.appendChild(script);
-  });
-};
-
-const inferLocalSignText = (landmarks) => {
-  if (!Array.isArray(landmarks) || landmarks.length < 21) return "";
-  const wrist = landmarks[0];
-  const indexTip = landmarks[8];
-  const indexPip = landmarks[6];
-  const indexMcp = landmarks[5];
-  const middleTip = landmarks[12];
-  const middlePip = landmarks[10];
-  const middleMcp = landmarks[9];
-  const ringTip = landmarks[16];
-  const ringPip = landmarks[14];
-  const ringMcp = landmarks[13];
-  const pinkyTip = landmarks[20];
-  const pinkyPip = landmarks[18];
-  const pinkyMcp = landmarks[17];
-  const thumbTip = landmarks[4];
-  const thumbIp = landmarks[3];
-
-  const handSize = Math.hypot(middleMcp[0] - wrist[0], middleMcp[1] - wrist[1]) || 1;
-  const extMargin = handSize * 0.1;
-  const foldMargin = handSize * 0.03;
-  const distance = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
-  const isUp = (tip, pip) => tip[1] < pip[1] - extMargin;
-  const isFolded = (tip, pip, mcp) => tip[1] >= pip[1] - foldMargin || tip[1] > mcp[1] + foldMargin;
-
-  const indexUp = isUp(indexTip, indexPip);
-  const middleUp = isUp(middleTip, middlePip);
-  const ringUp = isUp(ringTip, ringPip);
-  const pinkyUp = isUp(pinkyTip, pinkyPip);
-  const indexDown = indexTip[1] > indexPip[1] + extMargin && indexPip[1] > indexMcp[1] + handSize * 0.02;
-
-  const middleFolded = isFolded(middleTip, middlePip, middleMcp);
-  const ringFolded = isFolded(ringTip, ringPip, ringMcp);
-  const pinkyFolded = isFolded(pinkyTip, pinkyPip, pinkyMcp);
-
-  const thumbRaised = thumbTip[1] < thumbIp[1] && thumbTip[1] < wrist[1] - handSize * 0.1;
-  const thumbDown = thumbTip[1] > thumbIp[1] + handSize * 0.05 && thumbTip[1] > wrist[1] + handSize * 0.1;
-  const thumbIndexPinch = distance(thumbTip, indexTip) < handSize * 0.25;
-
-  const isolatedIndexUp = indexUp && middleFolded && ringFolded && pinkyFolded;
-  const isolatedIndexDown = indexDown && middleFolded && ringFolded && pinkyFolded;
-  const victory = indexUp && middleUp && !ringUp && !pinkyUp;
-  const openPalm = indexUp && middleUp && ringUp && pinkyUp;
-  const fist = !indexUp && middleFolded && ringFolded && pinkyFolded;
-  const thumbsUp = thumbRaised && !indexUp && middleFolded && ringFolded && pinkyFolded;
-  const thumbsDown = thumbDown && !indexUp && middleFolded && ringFolded && pinkyFolded;
-  const callMe = thumbRaised && pinkyUp && middleFolded && ringFolded && !indexUp;
-  const iLoveYou = thumbRaised && indexUp && pinkyUp && middleFolded && ringFolded;
-  const okSign = thumbIndexPinch && middleUp && ringUp && pinkyUp;
-  const threeUp = indexUp && middleUp && ringUp && !pinkyUp;
-
-  if (isolatedIndexUp) return "I need help.";
-  if (isolatedIndexDown) return "I am okay.";
-  if (callMe) return "Call me.";
-  if (iLoveYou) return "I love you.";
-  if (okSign) return "Okay.";
-  if (thumbsUp) return "Okay, understood.";
-  if (thumbsDown) return "Not okay.";
-  if (victory) return "Yes.";
-  if (threeUp) return "I am coming.";
-  if (fist) return "No.";
-  if (openPalm) return "Please wait.";
-  return "";
-};
 const EMOJI_GROUPS = [
   { name: "Smileys", items: ["??", "??", "??", "??", "??", "??", "??", "??", "??", "??", "??", "??"] },
   { name: "Gestures", items: ["??", "??", "??", "??", "??", "??", "??", "??", "??", "??", "??", "??"] },
@@ -581,7 +459,7 @@ export const extractReelShare = (value) => {
   if (typeof window === "undefined") return null;
   const text = String(value || "");
   if (!text) return null;
-  const match = text.match(/(https?:\/\/[^\s]+\/reels[^\s]*|\/reels\?[^\s]+)/i);
+  const match = text.match(/(https?:\/\/[^\s]+\/reels?[^\s]*|\/reels?(?:\/[^\s?#]+)?(?:\?[^\s]*)?)/i);
   if (!match) return null;
   const rawLink = match[1].replace(/[)\],.!?]+$/, "");
   let url = null;
@@ -593,11 +471,45 @@ export const extractReelShare = (value) => {
   const id =
     url.searchParams.get("post") ||
     url.searchParams.get("postId") ||
-    url.searchParams.get("id") ||
-    "";
+    url.searchParams.get("id");
+  let resolvedId = String(id || "").trim();
+  if (!resolvedId) {
+    const pathParts = String(url.pathname || "").split("/").filter(Boolean);
+    const reelIndex = pathParts.findIndex((part) => {
+      const value = String(part || "").toLowerCase();
+      return value === "reels" || value === "reel";
+    });
+    if (reelIndex >= 0 && pathParts.length > reelIndex + 1) {
+      try {
+        resolvedId = decodeURIComponent(String(pathParts[reelIndex + 1] || "")).trim();
+      } catch {
+        resolvedId = String(pathParts[reelIndex + 1] || "").trim();
+      }
+    }
+  }
+  const href = resolvedId
+    ? `/reels?post=${encodeURIComponent(resolvedId)}`
+    : `${url.pathname}${url.search}`;
+  const src =
+    String(
+      url.searchParams.get("media") ||
+      url.searchParams.get("src") ||
+      url.searchParams.get("video") ||
+      ""
+    ).trim();
+  const poster =
+    String(
+      url.searchParams.get("poster") ||
+      url.searchParams.get("thumb") ||
+      url.searchParams.get("thumbnail") ||
+      url.searchParams.get("cover") ||
+      ""
+    ).trim();
   return {
-    href: `${url.pathname}${url.search}`,
-    id,
+    href,
+    id: resolvedId,
+    src,
+    poster,
     match: rawLink,
     raw: text
   };
@@ -638,6 +550,17 @@ export const extractFeedShare = (value) => {
       }
     }
   }
+  if (!String(id).trim() && isFeedPath) {
+    const pathParts = pathname.split("/").filter(Boolean);
+    const feedIndex = pathParts.findIndex((part) => String(part || "").toLowerCase() === "feed");
+    if (feedIndex >= 0 && pathParts.length > feedIndex + 1) {
+      try {
+        id = decodeURIComponent(String(pathParts[feedIndex + 1] || ""));
+      } catch {
+        id = String(pathParts[feedIndex + 1] || "");
+      }
+    }
+  }
   const normalizedId = String(id || "").trim();
   if (!normalizedId) return null;
   const kind = isWatchPath ? "watch" : "feed";
@@ -645,10 +568,27 @@ export const extractFeedShare = (value) => {
     kind === "watch"
       ? `/watch/${encodeURIComponent(normalizedId)}`
       : `/feed?post=${encodeURIComponent(normalizedId)}`;
+  const src =
+    String(
+      url.searchParams.get("media") ||
+      url.searchParams.get("src") ||
+      url.searchParams.get("video") ||
+      ""
+    ).trim();
+  const poster =
+    String(
+      url.searchParams.get("poster") ||
+      url.searchParams.get("thumb") ||
+      url.searchParams.get("thumbnail") ||
+      url.searchParams.get("cover") ||
+      ""
+    ).trim();
   return {
     href,
     id: normalizedId,
     kind,
+    src,
+    poster,
     match: rawLink,
     raw: text
   };
@@ -1045,7 +985,10 @@ function useChatController() {
           if (!Number.isFinite(ms) || ms <= 0) return count;
           return ms > lastReadAtMs ? count + 1 : count;
         }, 0);
-        if (!computedUnread) return prev;
+        if (!computedUnread) {
+          if (!allowDrop || prevUnread <= 0) return prev;
+          return { ...state, [key]: { unread: 0, lastReadAtMs } };
+        }
         const nextUnread = Math.min(999, allowDrop ? computedUnread : Math.max(prevUnread, computedUnread));
         if (nextUnread === prevUnread) return prev;
         return { ...state, [key]: { unread: nextUnread, lastReadAtMs } };
@@ -1594,68 +1537,6 @@ function useChatController() {
     if (showVideoFilters) setShowVideoFilters(false);
   }, [videoFilterId, showVideoFilters]);
   const [callPhaseNote, setCallPhaseNote] = useState("");
-  const [signAssistEnabled, setSignAssistEnabled] = useState(false);
-  const [signAssistText, setSignAssistText] = useState("");
-  const [signAssistVoiceGender, setSignAssistVoiceGender] = useState("female");
-  const readAutoSpeakPrefs = () => {
-    try {
-      const raw = localStorage.getItem(CHAT_AUTOSPEAK_KEY);
-      const parsed = raw ? JSON.parse(raw) : {};
-      return {
-        enabled: Boolean(parsed?.enabled),
-        enabledAt: Number(parsed?.enabledAt || 0)
-      };
-    } catch {
-      return { enabled: false, enabledAt: 0 };
-    }
-  };
-  const autoSpeakPrefsRef = useRef(readAutoSpeakPrefs());
-  const autoSpeakEnabledAtRef = useRef(autoSpeakPrefsRef.current.enabledAt || 0);
-  const [signAssistAutoSpeak, setSignAssistAutoSpeak] = useState(() => autoSpeakPrefsRef.current.enabled);
-  const [signAssistContinuousMode, setSignAssistContinuousMode] = useState(false);
-  const [signAssistBusy, setSignAssistBusy] = useState(false);
-  const [signAssistStatus, setSignAssistStatus] = useState("");
-  const [signAssistDebugOpen, setSignAssistDebugOpen] = useState(false);
-  const [signAssistDebug, setSignAssistDebug] = useState({
-    localModelStatus: "idle",
-    sequenceModelStatus: "idle",
-    apiStatus: "idle",
-    lastDetection: "",
-    lastDetectionSource: "",
-    lastDetectionAt: 0,
-    lastError: "",
-    lastUpdateAt: 0
-  });
-  const updateSignAssistDebug = useCallback((patch = {}) => {
-    setSignAssistDebug((prev) => ({
-      ...prev,
-      ...patch,
-      lastUpdateAt: Date.now()
-    }));
-  }, []);
-  useEffect(() => {
-    if (!signAssistEnabled) return;
-    if (callState.mode !== "video" || callState.phase === "idle") return;
-    const videoTrack = localStreamRef.current?.getVideoTracks?.()[0];
-    if (videoTrack && !videoTrack.enabled) {
-      videoTrack.enabled = true;
-      setIsCameraOff(false);
-    }
-  }, [signAssistEnabled, callState.mode, callState.phase]);
-  useEffect(() => {
-    if (!signAssistAutoSpeak) return;
-    if (!autoSpeakEnabledAtRef.current) {
-      autoSpeakEnabledAtRef.current = Date.now();
-      try {
-        localStorage.setItem(CHAT_AUTOSPEAK_KEY, JSON.stringify({
-          enabled: true,
-          enabledAt: autoSpeakEnabledAtRef.current
-        }));
-      } catch {
-        // ignore storage failures
-      }
-    }
-  }, [signAssistAutoSpeak]);
   const [blockedUsers, setBlockedUsers] = useState(() => {
     try {
       const raw = localStorage.getItem(BLOCKED_USERS_KEY);
@@ -1825,27 +1706,6 @@ function useChatController() {
   const openScrollPlanRef = useRef({ contactId: "", untilMs: 0, timers: [] });
   const showScrollDownRef = useRef(false);
   const highlightTimerRef = useRef(null);
-  const spokenSignMessageIdsRef = useRef(new Set());
-  const autoSpeakBootstrappedByContactRef = useRef({});
-  const signApiUnavailableRef = useRef(false);
-  const signLocalModelRef = useRef(null);
-  const signLocalModelLoadingRef = useRef(null);
-  const signLivePollTimerRef = useRef(null);
-  const signLastDetectedTextRef = useRef("");
-  const signLastDetectedAtRef = useRef(0);
-  const signLiveBufferRef = useRef({
-    parts: [],
-    lastDetected: "",
-    lastAt: 0,
-    flushTimer: null,
-    lastSent: "",
-    lastContinuousText: "",
-    lastContinuousAt: 0
-  });
-  const signAssistSendingRef = useRef(false);
-  const signSequenceFramesRef = useRef([]);
-  const signSequenceModelRef = useRef(null);
-  const signSequenceModelLoadingRef = useRef(null);
   const typingHideTimerByContactRef = useRef({});
   const typingIdleTimerByContactRef = useRef({});
   const typingLastSentAtByContactRef = useRef({});
@@ -3796,12 +3656,14 @@ function useChatController() {
       userLike?.latestMessageAt ||
       userLike?.latestMessageTime ||
       userLike?.latestMessageTimestamp ||
+      userLike?.lastAt ||
       u?.lastMessageAt ||
       u?.lastMessageTime ||
       u?.lastMessageTimestamp ||
       u?.latestMessageAt ||
       u?.latestMessageTime ||
       u?.latestMessageTimestamp ||
+      u?.lastAt ||
       "";
     const lastMessageSenderId = String(
       lastMessageMeta.senderId ||
@@ -3881,6 +3743,7 @@ function useChatController() {
     });
     const online = hasPresenceSignal ? presenceValues.some((value) => toBool(value)) : undefined;
     const normalizedLastActiveAt = String(resolvedLastActiveAt || "").trim();
+    const normalizedLastMessageAt = String(lastMessageAt || "").trim();
     const contact = {
       id,
       name,
@@ -3889,6 +3752,7 @@ function useChatController() {
       avatar: (name[0] || "U").toUpperCase(),
       profilePic: profilePicRaw ? toApiUrl(profilePicRaw) : "",
       lastMessage: lastMessageText,
+      ...(normalizedLastMessageAt ? { lastMessageAt: normalizedLastMessageAt } : {}),
       ...(normalizedLastActiveAt ? { lastActiveAt: normalizedLastActiveAt } : {}),
       ...(hasPresenceSignal ? { online: Boolean(online) } : {}),
       ...(String(presenceUpdatedAt || "").trim() ? { presenceUpdatedAt: String(presenceUpdatedAt).trim() } : {})
@@ -3910,9 +3774,27 @@ function useChatController() {
       const nextName = getContactDisplayName(c);
       const prevTs = toEpochMs(prev?.lastActiveAt);
       const nextTs = toEpochMs(c?.lastActiveAt);
+      const prevMsgTs = toEpochMs(prev?.lastMessageAt);
+      const nextMsgTs = toEpochMs(c?.lastMessageAt);
       const prevPresenceTs = toEpochMs(prev?.presenceUpdatedAt);
       const nextPresenceTs = toEpochMs(c?.presenceUpdatedAt);
       const mergedName = !isGenericUserLabel(nextName, id) ? nextName : prevName;
+      const prevMessageText = String(prev?.lastMessage || "").trim();
+      const nextMessageText = String(c?.lastMessage || "").trim();
+      let mergedLastMessage = prevMessageText || nextMessageText;
+      let mergedLastMessageAt = String(prev?.lastMessageAt || "").trim() || String(c?.lastMessageAt || "").trim();
+      if (nextMsgTs || prevMsgTs) {
+        const useNextMessage = nextMsgTs >= prevMsgTs;
+        if (useNextMessage) {
+          mergedLastMessage = nextMessageText || prevMessageText;
+          mergedLastMessageAt = String(c?.lastMessageAt || "").trim() || String(prev?.lastMessageAt || "").trim();
+        } else {
+          mergedLastMessage = prevMessageText || nextMessageText;
+          mergedLastMessageAt = String(prev?.lastMessageAt || "").trim() || String(c?.lastMessageAt || "").trim();
+        }
+      } else if (!mergedLastMessage && (nextMessageText || prevMessageText)) {
+        mergedLastMessage = nextMessageText || prevMessageText;
+      }
       const merged = {
         ...prev,
         ...c,
@@ -3922,8 +3804,13 @@ function useChatController() {
         username: String(c?.username || "").trim() || String(prev?.username || "").trim(),
         email: String(c?.email || "").trim() || String(prev?.email || "").trim(),
         profilePic: String(c?.profilePic || "").trim() || String(prev?.profilePic || "").trim(),
-        lastMessage: String(c?.lastMessage || "").trim() || String(prev?.lastMessage || "").trim(),
+        lastMessage: mergedLastMessage,
       };
+      if (mergedLastMessageAt) {
+        merged.lastMessageAt = mergedLastMessageAt;
+      } else {
+        delete merged.lastMessageAt;
+      }
       if (prevTs || nextTs) {
         merged.lastActiveAt = nextTs >= prevTs ? (c?.lastActiveAt || prev?.lastActiveAt || "") : (prev?.lastActiveAt || c?.lastActiveAt || "");
       } else {
@@ -4048,6 +3935,7 @@ function useChatController() {
         avatar: (name[0] || "U").toUpperCase(),
         profilePic: "",
         lastMessage: String(last?.text || last?.message || ""),
+        lastMessageAt: String(last?.createdAt || ""),
         lastActiveAt: String(last?.createdAt || "")
       });
     });
@@ -5998,8 +5886,6 @@ function useChatController() {
         at: signalTime || Date.now()
       });
       setRingtoneMuted(false);
-      setActiveContactId(fromId);
-      navigate(`/chat/${fromId}`);
       startRingtone(true);
       armIncomingCallTimeout();
       playNotificationBeep();
@@ -6096,8 +5982,6 @@ function useChatController() {
         at: signalTime || Date.now()
       });
       setRingtoneMuted(false);
-      setActiveContactId(fromId);
-      navigate(`/chat/${fromId}`);
       startRingtone(true);
       armIncomingCallTimeout();
       playNotificationBeep();
@@ -6328,7 +6212,8 @@ function useChatController() {
               payload?.from_email ||
               "",
             avatar: (name[0] || "U").toUpperCase(),
-            lastMessage: preview || nextMessage.text
+            lastMessage: preview || nextMessage.text,
+            lastMessageAt: nextMessage?.createdAt || new Date().toISOString()
           }
         ]);
       }
@@ -6336,7 +6221,8 @@ function useChatController() {
         c.id === contactIdForThread
           ? {
               ...c,
-              lastMessage: preview || c.lastMessage
+              lastMessage: preview || c.lastMessage,
+              lastMessageAt: nextMessage?.createdAt || c?.lastMessageAt || new Date().toISOString()
             }
           : c
       );
@@ -7782,7 +7668,7 @@ function useChatController() {
             .filter((m) => !hiddenIds.has(String(m?.id || "")))
             .map((m) => toEpochMs(m?.createdAt || 0))
             .filter((ms) => Number.isFinite(ms) && ms > 0);
-          syncThreadUnreadFromIncomingTimes(otherId, incomingTimesMs);
+          syncThreadUnreadFromIncomingTimes(otherId, incomingTimesMs, { allowDecrease: true });
         }
         if (areMessageListsEquivalent(oldList, merged)) {
           return prev;
@@ -8289,7 +8175,7 @@ function useChatController() {
             .filter((m) => !hiddenIds.has(String(m?.id || "")))
             .map((m) => toEpochMs(m?.createdAt || 0))
             .filter((ms) => Number.isFinite(ms) && ms > 0);
-          syncThreadUnreadFromIncomingTimes(id, incomingTimesMs);
+          syncThreadUnreadFromIncomingTimes(id, incomingTimesMs, { allowDecrease: true });
           await new Promise((resolve) => setTimeout(resolve, 120));
         }
       } finally {
@@ -8402,16 +8288,6 @@ function useChatController() {
               // ignore malformed payload
             }
           });
-          if (myEmail) {
-            client.subscribe(`/topic/chat/email/${encodeURIComponent(myEmail)}`, (frame) => {
-              try {
-                const payload = JSON.parse(frame.body || "{}");
-                onIncomingChatMessage(payload);
-              } catch {
-                // ignore malformed payload
-              }
-            });
-          }
           client.subscribe("/user/queue/chat/read", (frame) => {
             try {
               const payload = JSON.parse(frame.body || "{}");
@@ -8428,16 +8304,6 @@ function useChatController() {
               // ignore malformed payload
             }
           });
-          if (myEmail) {
-            client.subscribe(`/topic/chat/read/email/${encodeURIComponent(myEmail)}`, (frame) => {
-              try {
-                const payload = JSON.parse(frame.body || "{}");
-                applyReadReceiptPacket(payload);
-              } catch {
-                // ignore malformed payload
-              }
-            });
-          }
 
           client.subscribe("/user/queue/calls", (frame) => {
             try {
@@ -8483,7 +8349,7 @@ function useChatController() {
       stompRef.current = null;
       finishCall(false);
     };
-  }, [myUserId, myEmail, applyReadReceiptPacket]);
+  }, [myUserId, applyReadReceiptPacket]);
 
   useEffect(() => {
     if (!myUserId) return undefined;
@@ -9339,7 +9205,12 @@ function useChatController() {
     const profileTs = clampFutureTimestamp(toEpochMs(contact?.lastActiveAt || 0));
     const contactId = String(contact?.id || "").trim();
     const peerMsgTs = getPeerMessageActivityTs(contactId);
-    const latest = Math.max(Number.isFinite(profileTs) ? profileTs : 0, Number.isFinite(peerMsgTs) ? peerMsgTs : 0);
+    const peerCallTs = getPeerCallActivityTs(contactId);
+    const latest = Math.max(
+      Number.isFinite(profileTs) ? profileTs : 0,
+      Number.isFinite(peerMsgTs) ? peerMsgTs : 0,
+      Number.isFinite(peerCallTs) ? peerCallTs : 0
+    );
     return Number.isFinite(latest) ? latest : 0;
   };
 
@@ -9380,6 +9251,7 @@ function useChatController() {
     if (!raw) return "";
     const normalized = String(raw);
     if (/^(blob:|data:|https?:\/\/)/i.test(normalized)) return normalized;
+    if (normalized.startsWith("//")) return `https:${normalized}`;
     return toApiUrl(normalized);
   };
 
@@ -9865,8 +9737,10 @@ function useChatController() {
       if (candidates.includes(value)) return;
       candidates.unshift(value);
     };
-    if (activeStory?.id) {
-      const proxyPath = `/api/stories/media/${activeStory.id}`;
+    const activeStoryId = getStoryIdValue(activeStory);
+    if (activeStoryId) {
+      const encodedStoryId = encodeURIComponent(String(activeStoryId));
+      const proxyPath = `/api/stories/media/${encodedStoryId}`;
       const proxyCandidates = buildStoryMediaCandidates(proxyPath);
       const preferProxy = !/^https?:\/\//i.test(rawUrl) && !rawUrl.startsWith("//");
       const addProxy = (value) => {
@@ -9955,6 +9829,7 @@ function useChatController() {
   ]);
   const deleteStoryItems = (targets) => {
     if (!Array.isArray(targets) || targets.length === 0) return;
+    const pruned = removeStoryEntries(targets);
     const idSet = new Set(
       targets
         .map((item) => getStoryIdValue(item))
@@ -9963,16 +9838,46 @@ function useChatController() {
     );
     const refSet = new Set(targets);
     setStoryItems((prev) => {
-      if (!Array.isArray(prev) || prev.length === 0) return prev;
+      if (!Array.isArray(prev) || prev.length === 0) {
+        return normalizeStoryList(pruned?.active || []);
+      }
       const next = prev.filter((item) => {
         const id = getStoryIdValue(item);
         if (id && idSet.has(String(id))) return false;
         if (refSet.has(item)) return false;
         return true;
       });
-      writeStoryCache(next);
       return normalizeStoryList(next);
     });
+
+    const numericIds = Array.from(idSet)
+      .map((value) => String(value || "").trim())
+      .filter((value) => /^\d+$/.test(value));
+    if (!numericIds.length) return;
+
+    void (async () => {
+      let failed = false;
+      for (const idText of numericIds) {
+        try {
+          await requestChatMutation({
+            method: "DELETE",
+            endpoints: [`/api/stories/${encodeURIComponent(idText)}`]
+          });
+        } catch {
+          try {
+            await requestChatMutation({
+              method: "POST",
+              endpoints: [`/api/stories/${encodeURIComponent(idText)}/delete`]
+            });
+          } catch {
+            failed = true;
+          }
+        }
+      }
+      if (failed) {
+        fetchStoryFeed().catch(() => {});
+      }
+    })();
   };
   const startStoryLongPress = (group) => () => {
     if (storyLongPressTimeoutRef.current) {
@@ -10151,7 +10056,7 @@ function useChatController() {
 
   useEffect(() => {
     if (storyViewerIndex == null || !activeStory) return;
-    const storyId = activeStory?.id;
+    const storyId = getStoryIdValue(activeStory);
     const storyKey = storyKeyFor(activeStory, storyViewerIndex);
     const likedFromServer = Boolean(activeStory?.likedByMe);
     setStoryReactions((prev) => {
@@ -10164,7 +10069,7 @@ function useChatController() {
     if (viewedStoryIdsRef.current.has(idText)) return;
     viewedStoryIdsRef.current.add(idText);
     api
-      .post(`/api/stories/${storyId}/view`)
+      .post(`/api/stories/${encodeURIComponent(idText)}/view`)
       .then((res) => {
         if (res?.data && typeof res.data === "object") {
           applyStoryStats(storyId, {
@@ -10231,23 +10136,26 @@ function useChatController() {
 
   const sendTextPayload = async (text, options = {}) => {
     const cleanText = String(text || "").trim();
-    if (!cleanText || !activeContactId) return false;
-    if (activeContactId === myUserId) {
+    const {
+      clearComposer = false,
+      previewText = cleanText,
+      onSent = null,
+      targetContactId: targetContactIdOption = ""
+    } = options;
+    const targetContactId = String(targetContactIdOption || activeContactId || "").trim();
+    if (!cleanText || !targetContactId) return false;
+    if (targetContactId === myUserId) {
       setError("Cannot send message to your own account.");
       return false;
     }
 
-    const {
-      clearComposer = false,
-      previewText = cleanText,
-      onSent = null
-    } = options;
-    const expiresAtMs = buildActiveDisappearingExpiryMs();
+    const isActiveTarget = String(activeContactId || "") === targetContactId;
+    const expiresAtMs = isActiveTarget ? buildActiveDisappearingExpiryMs() : 0;
     const expiresAtIso = expiresAtMs ? new Date(expiresAtMs).toISOString() : "";
     const useFallback = chatFallbackMode || isChatApiDisabled();
 
     const emitLocalPacket = (payload) => {
-      if (!payload || !myUserId || !activeContactId) return;
+      if (!payload || !myUserId || !targetContactId) return;
       const packet = {
         kind: "chat-message",
         fromTab: tabIdRef.current,
@@ -10266,7 +10174,7 @@ function useChatController() {
       }
     };
 
-    if (clearComposer) {
+    if (clearComposer && isActiveTarget) {
       if (isSpeechTyping) stopSpeechTyping();
       setInputText("");
       setShowEmojiTray(false);
@@ -10315,33 +10223,41 @@ function useChatController() {
         const mine = normalizeMessage({
           id: Date.now(),
           senderId: Number(myUserId) || null,
-          receiverId: Number(activeContactId) || null,
+          receiverId: Number(targetContactId) || null,
           text: cleanText,
           speechTyped: false,
           expiresAt: expiresAtIso || undefined,
           createdAt: new Date().toISOString(),
           mine: true
-        }, activeContactId);
+        }, targetContactId);
         const all = readLocalChat();
-        const key = localThreadKey(myUserId, activeContactId);
+        const key = localThreadKey(myUserId, targetContactId);
         const nextList = [...(Array.isArray(all[key]) ? all[key] : []), mine];
         all[key] = nextList;
         writeLocalChat(all);
-        setMessagesByContact((prev) => ({ ...prev, [activeContactId]: nextList }));
-        setContacts((prev) => prev.map((c) => (c.id === activeContactId ? { ...c, lastMessage: previewText } : c)));
+        setMessagesByContact((prev) => ({ ...prev, [targetContactId]: nextList }));
+        setContacts((prev) =>
+          prev.map((c) =>
+            String(c?.id || "") === targetContactId
+              ? { ...c, lastMessage: previewText, lastMessageAt: mine?.createdAt || new Date().toISOString() }
+              : c
+          )
+        );
         setError("Server chat unavailable on this backend. Using local chat mode.");
         emitLocalPacket({
           id: mine.id,
           senderId: mine.senderId || Number(myUserId) || myUserId,
-          receiverId: mine.receiverId || Number(activeContactId) || activeContactId,
+          receiverId: mine.receiverId || Number(targetContactId) || targetContactId,
           text: cleanText,
           expiresAt: expiresAtIso || undefined,
           createdAt: mine.createdAt || new Date().toISOString(),
           senderEmail: myEmail || ""
         });
-        if (expiresAtMs) upsertMessageExpiry(mine.id, expiresAtMs, activeContactId);
-        shouldStickToBottomRef.current = true;
-        setTimeout(() => scrollThreadToBottom("smooth"), 50);
+        if (expiresAtMs) upsertMessageExpiry(mine.id, expiresAtMs, targetContactId);
+        if (isActiveTarget) {
+          shouldStickToBottomRef.current = true;
+          setTimeout(() => scrollThreadToBottom("smooth"), 50);
+        }
         if (typeof onSent === "function") onSent();
         return true;
       }
@@ -10349,8 +10265,8 @@ function useChatController() {
       const res = await requestChatMutation({
         method: "POST",
         endpoints: [
-          `/api/chat/${activeContactId}/send`,
-          `/chat/${activeContactId}/send`
+          `/api/chat/${targetContactId}/send`,
+          `/chat/${targetContactId}/send`
         ],
         data: { text: cleanText }
       });
@@ -10362,28 +10278,36 @@ function useChatController() {
           expiresAt: expiresAtIso || undefined,
           mine: true,
           senderId: myUserId,
-          receiverId: activeContactId,
+          receiverId: targetContactId,
           createdAt: (res?.data || {})?.createdAt || new Date().toISOString()
         },
-        activeContactId
+        targetContactId
       );
-      if (expiresAtMs) upsertMessageExpiry(sent.id, expiresAtMs, activeContactId);
+      if (expiresAtMs) upsertMessageExpiry(sent.id, expiresAtMs, targetContactId);
       setMessagesByContact((prev) => ({
         ...prev,
-        [activeContactId]: [...(prev[activeContactId] || []), sent]
+        [targetContactId]: [...(prev[targetContactId] || []), sent]
       }));
-      setContacts((prev) => prev.map((c) => (c.id === activeContactId ? { ...c, lastMessage: previewText } : c)));
+      setContacts((prev) =>
+        prev.map((c) =>
+          String(c?.id || "") === targetContactId
+            ? { ...c, lastMessage: previewText, lastMessageAt: sent?.createdAt || new Date().toISOString() }
+            : c
+        )
+      );
       emitLocalPacket({
         id: sent.id,
         senderId: sent.senderId || Number(myUserId) || myUserId,
-        receiverId: sent.receiverId || Number(activeContactId) || activeContactId,
+        receiverId: sent.receiverId || Number(targetContactId) || targetContactId,
         text: cleanText,
         expiresAt: expiresAtIso || undefined,
         createdAt: sent.createdAt || new Date().toISOString(),
         senderEmail: myEmail || ""
       });
-      shouldStickToBottomRef.current = true;
-      setTimeout(() => scrollThreadToBottom("smooth"), 50);
+      if (isActiveTarget) {
+        shouldStickToBottomRef.current = true;
+        setTimeout(() => scrollThreadToBottom("smooth"), 50);
+      }
       if (typeof onSent === "function") onSent();
       return true;
     } catch (err) {
@@ -10424,640 +10348,6 @@ function useChatController() {
       clearComposer: true,
       previewText: text,
       onSent: () => setReplyDraft(null)
-    });
-  };
-
-  const sendSignAssistMessage = async ({ text = null, source = "video-call", clearAfter = true, silent = false } = {}) => {
-    const plainText = String(text ?? signAssistText ?? "").trim();
-    if (!plainText) {
-      if (!silent) setSignAssistStatus("Type translated sign text first.");
-      return;
-    }
-    if (signAssistSendingRef.current) return;
-    signAssistSendingRef.current = true;
-    const payloadText = encodeSignAssistText(plainText, signAssistVoiceGender, source);
-    if (!payloadText) {
-      if (!silent) setSignAssistStatus("Unable to prepare sign message.");
-      signAssistSendingRef.current = false;
-      return;
-    }
-
-    const ok = await sendTextPayload(payloadText, {
-      previewText: `Sign: ${plainText}`,
-      onSent: () => {
-        if (!silent) setSignAssistStatus("Sign message sent.");
-        if (clearAfter) setSignAssistText("");
-      }
-    });
-
-    if (!ok) {
-      if (!silent) setSignAssistStatus("Failed to send sign message.");
-    }
-    signAssistSendingRef.current = false;
-  };
-
-  const ensureSequenceModel = useCallback(async () => {
-    const modelUrl = String(import.meta.env.VITE_SIGN_SEQUENCE_MODEL_URL || "").trim();
-    if (!modelUrl) {
-      updateSignAssistDebug({ sequenceModelStatus: "not-configured" });
-      return null;
-    }
-    if (signSequenceModelRef.current) {
-      updateSignAssistDebug({ sequenceModelStatus: "loaded" });
-      return signSequenceModelRef.current;
-    }
-    if (!signSequenceModelLoadingRef.current) {
-      updateSignAssistDebug({ sequenceModelStatus: "loading" });
-      signSequenceModelLoadingRef.current = (async () => {
-        await loadExternalScript(modelUrl, "sign-sequence-model");
-        const model =
-          window?.SocialSeaSignSequenceModel ||
-          window?.SignSequenceModel ||
-          window?.signSequenceModel ||
-          null;
-        if (model?.load && !model._loaded) {
-          await model.load();
-          model._loaded = true;
-        }
-        return model;
-      })();
-    }
-    try {
-      signSequenceModelRef.current = await signSequenceModelLoadingRef.current;
-      updateSignAssistDebug({
-        sequenceModelStatus: signSequenceModelRef.current ? "loaded" : "unavailable"
-      });
-      return signSequenceModelRef.current;
-    } catch (err) {
-      signSequenceModelLoadingRef.current = null;
-      updateSignAssistDebug({
-        sequenceModelStatus: "failed",
-        lastError: String(err?.message || "Failed to load sequence model")
-      });
-      return null;
-    }
-  }, [updateSignAssistDebug]);
-
-  const pushSequenceFrame = (landmarks) => {
-    if (!Array.isArray(landmarks) || !landmarks.length) return;
-    const frames = signSequenceFramesRef.current;
-    frames.push({ landmarks, at: Date.now() });
-    if (frames.length > SIGN_SEQUENCE_FRAME_WINDOW) {
-      frames.splice(0, frames.length - SIGN_SEQUENCE_FRAME_WINDOW);
-    }
-  };
-
-  const detectSequenceSignText = useCallback(async () => {
-    try {
-      const model = await ensureSequenceModel();
-      if (!model) return "";
-      const frames = signSequenceFramesRef.current;
-      if (frames.length < Math.min(8, SIGN_SEQUENCE_FRAME_WINDOW)) return "";
-      const payload = frames.map((f) => f.landmarks);
-      if (typeof model.predict === "function") {
-        const result = await model.predict(payload);
-        const text = String(result?.text || result || "").trim();
-        if (text) {
-          updateSignAssistDebug({
-            lastDetection: text,
-            lastDetectionSource: "sequence",
-            lastDetectionAt: Date.now()
-          });
-        }
-        return text;
-      }
-      if (typeof model.infer === "function") {
-        const result = await model.infer(payload);
-        const text = String(result?.text || result || "").trim();
-        if (text) {
-          updateSignAssistDebug({
-            lastDetection: text,
-            lastDetectionSource: "sequence",
-            lastDetectionAt: Date.now()
-          });
-        }
-        return text;
-      }
-      return "";
-    } catch (err) {
-      updateSignAssistDebug({
-        sequenceModelStatus: "error",
-        lastError: String(err?.message || "Sequence detection failed")
-      });
-      return "";
-    }
-  }, [ensureSequenceModel, updateSignAssistDebug]);
-
-  const detectLocalSignText = useCallback(async (videoEl) => {
-    if (!videoEl || !videoEl.videoWidth || !videoEl.videoHeight) return "";
-    try {
-      if (!signLocalModelRef.current && !signLocalModelLoadingRef.current) {
-        updateSignAssistDebug({ localModelStatus: "loading" });
-      }
-      await loadExternalScript(SIGN_LOCAL_TF_SCRIPT, "tfjs-chat-sign");
-      await loadExternalScript(SIGN_LOCAL_HANDPOSE_SCRIPT, "handpose-chat-sign");
-      if (!window?.handpose) {
-        updateSignAssistDebug({
-          localModelStatus: "unavailable",
-          lastError: "handpose library missing"
-        });
-        return "";
-      }
-
-      if (!signLocalModelRef.current) {
-        if (!signLocalModelLoadingRef.current) {
-          signLocalModelLoadingRef.current = window.handpose.load();
-        }
-        signLocalModelRef.current = await signLocalModelLoadingRef.current;
-        updateSignAssistDebug({ localModelStatus: "loaded", lastError: "" });
-      }
-
-      const predictions = await signLocalModelRef.current.estimateHands(videoEl, true);
-      if (!Array.isArray(predictions) || predictions.length === 0) return "";
-      const landmarks = predictions[0]?.landmarks || [];
-      pushSequenceFrame(landmarks);
-      const sequenceText = await detectSequenceSignText();
-      if (sequenceText) {
-        updateSignAssistDebug({
-          lastDetection: sequenceText,
-          lastDetectionSource: "sequence",
-          lastDetectionAt: Date.now()
-        });
-        return sequenceText;
-      }
-      const localText = inferLocalSignText(landmarks);
-      if (localText) {
-        updateSignAssistDebug({
-          lastDetection: localText,
-          lastDetectionSource: "local",
-          lastDetectionAt: Date.now()
-        });
-      }
-      return localText;
-    } catch (err) {
-      updateSignAssistDebug({
-        localModelStatus: "error",
-        lastError: String(err?.message || "Local detection failed")
-      });
-      return "";
-    }
-  }, [detectSequenceSignText, updateSignAssistDebug]);
-
-  const captureLocalSignBurst = useCallback(async (videoEl, attempts = 6, delayMs = 180) => {
-    if (!videoEl) return "";
-    const total = Math.max(1, Math.floor(Number(attempts) || 1));
-    for (let i = 0; i < total; i += 1) {
-      const detected = String(await detectLocalSignText(videoEl)).trim();
-      if (detected) return detected;
-      if (i < total - 1) {
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
-      }
-    }
-    return "";
-  }, [detectLocalSignText]);
-
-  const resetSignLiveBuffer = () => {
-    const buffer = signLiveBufferRef.current;
-    if (buffer.flushTimer) {
-      clearTimeout(buffer.flushTimer);
-      buffer.flushTimer = null;
-    }
-    buffer.parts = [];
-    buffer.lastDetected = "";
-    buffer.lastAt = 0;
-    buffer.lastSent = "";
-    buffer.lastContinuousAt = 0;
-    buffer.lastContinuousText = "";
-    signLastDetectedAtRef.current = 0;
-    signLastDetectedTextRef.current = "";
-    signSequenceFramesRef.current = [];
-  };
-
-  const flushSignLiveBuffer = (reason = "idle") => {
-    const buffer = signLiveBufferRef.current;
-    if (!buffer.parts.length) return;
-    const message = buffer.parts.join(" ").replace(/\s+/g, " ").trim();
-    if (!message) return;
-    if (buffer.lastSent && buffer.lastSent === message) return;
-    buffer.lastSent = message;
-    buffer.parts = [];
-    setSignAssistText("");
-    setSignAssistStatus(
-      reason === "idle" ? "Sending sign message..." : "Sending sign message..."
-    );
-    void sendSignAssistMessage({ text: message, source: "live", clearAfter: true, silent: true });
-  };
-
-  const pushSignLiveBuffer = (detected) => {
-    const clean = String(detected || "").trim();
-    if (!clean) return;
-    const buffer = signLiveBufferRef.current;
-    if (buffer.lastDetected === clean) return;
-    buffer.lastDetected = clean;
-    buffer.lastAt = Date.now();
-    if (!buffer.parts.length || buffer.parts[buffer.parts.length - 1] !== clean) {
-      buffer.parts.push(clean);
-    }
-    let text = buffer.parts.join(" ").replace(/\s+/g, " ").trim();
-    while (text.length > SIGN_LIVE_MAX_BUFFER_CHARS && buffer.parts.length > 1) {
-      buffer.parts.shift();
-      text = buffer.parts.join(" ").replace(/\s+/g, " ").trim();
-    }
-    setSignAssistText(text);
-    setSignAssistStatus("Live sign detected. Auto-sending when you pause.");
-    if (buffer.flushTimer) clearTimeout(buffer.flushTimer);
-    buffer.flushTimer = setTimeout(() => {
-      buffer.flushTimer = null;
-      flushSignLiveBuffer("idle");
-    }, SIGN_LIVE_DEBOUNCE_MS);
-  };
-
-  const handleContinuousSign = (detected) => {
-    const clean = String(detected || "").trim();
-    if (!clean) return;
-    const buffer = signLiveBufferRef.current;
-    const now = Date.now();
-    if (buffer.lastContinuousText === clean && now - buffer.lastContinuousAt < SIGN_LIVE_CONTINUOUS_COOLDOWN_MS) {
-      return;
-    }
-    buffer.lastContinuousText = clean;
-    buffer.lastContinuousAt = now;
-    setSignAssistText(clean);
-    setSignAssistStatus("Sending sign message...");
-    void sendSignAssistMessage({ text: clean, source: "live-continuous", clearAfter: true, silent: true });
-  };
-
-  useEffect(() => {
-    if (!signAssistEnabled || callState.mode !== "video" || callState.phase === "idle") {
-      if (signLivePollTimerRef.current) {
-        clearInterval(signLivePollTimerRef.current);
-        signLivePollTimerRef.current = null;
-      }
-      resetSignLiveBuffer();
-      return;
-    }
-
-    signLastDetectedTextRef.current = "";
-    signLastDetectedAtRef.current = 0;
-    setSignAssistStatus((prev) => prev || "Sign Assist is live. Show your hand to camera.");
-
-    const tick = async () => {
-      if (signAssistBusy) return;
-      const video = localVideoRef.current;
-      if (!video || !video.videoWidth || !video.videoHeight) return;
-      const detected = String(await detectLocalSignText(video)).trim();
-      if (!detected) return;
-      const now = Date.now();
-      if (
-        detected === signLastDetectedTextRef.current &&
-        now - signLastDetectedAtRef.current < SIGN_LIVE_CONTINUOUS_COOLDOWN_MS
-      ) {
-        return;
-      }
-      signLastDetectedTextRef.current = detected;
-      signLastDetectedAtRef.current = now;
-      if (signAssistContinuousMode) {
-        handleContinuousSign(detected);
-      } else {
-        pushSignLiveBuffer(detected);
-      }
-    };
-
-    void tick();
-    signLivePollTimerRef.current = setInterval(() => {
-      void tick();
-    }, 900);
-
-    return () => {
-      if (signLivePollTimerRef.current) {
-        clearInterval(signLivePollTimerRef.current);
-        signLivePollTimerRef.current = null;
-      }
-      resetSignLiveBuffer();
-    };
-  }, [signAssistEnabled, callState.mode, callState.phase, signAssistBusy, detectLocalSignText]);
-
-  const captureSignAssistFromVideo = async () => {
-    const video = localVideoRef.current;
-    if (!video || !video.videoWidth || !video.videoHeight) {
-      setSignAssistStatus("Camera feed not ready. Keep camera on and try again.");
-      updateSignAssistDebug({
-        apiStatus: "camera-not-ready",
-        lastError: "Camera feed not ready"
-      });
-      return;
-    }
-
-    setSignAssistBusy(true);
-    setSignAssistStatus("Capturing sign frame...");
-    updateSignAssistDebug({
-      apiStatus: signApiUnavailableRef.current ? "local-fallback" : "requesting",
-      lastError: ""
-    });
-
-    try {
-      const canvas = document.createElement("canvas");
-      const maxW = 640;
-      const scale = Math.min(1, maxW / video.videoWidth);
-      canvas.width = Math.max(160, Math.floor(video.videoWidth * scale));
-      canvas.height = Math.max(120, Math.floor(video.videoHeight * scale));
-      const ctx = canvas.getContext("2d");
-      if (!ctx) throw new Error("No canvas context");
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-      const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const data = img?.data || [];
-      let sum = 0;
-      for (let i = 0; i < data.length; i += 16) {
-        sum += (data[i] + data[i + 1] + data[i + 2]) / 3;
-      }
-      const samples = Math.max(1, Math.floor(data.length / 16));
-      const avg = sum / samples;
-      const draft =
-        avg < 45
-          ? "Please turn on more light. I am trying to sign."
-          : avg < 85
-            ? "I am signing now. Please watch and confirm."
-            : "I am signing a message. Please review and respond.";
-
-      if (signApiUnavailableRef.current) {
-        const localDetected = await captureLocalSignBurst(video);
-        if (localDetected) {
-          setSignAssistText(localDetected);
-          setSignAssistStatus("Sign detected locally. Review and send.");
-          updateSignAssistDebug({ apiStatus: "local-fallback", lastError: "" });
-        } else {
-          setSignAssistText((prev) => String(prev || "").trim() || draft);
-          setSignAssistStatus("Sign draft ready. Edit and send.");
-          updateSignAssistDebug({ apiStatus: "local-fallback" });
-        }
-        return;
-      }
-
-      const blob = await new Promise((resolve, reject) => {
-        canvas.toBlob((b) => {
-          if (b) resolve(b);
-          else reject(new Error("Frame capture failed"));
-        }, "image/jpeg", 0.9);
-      });
-
-      const defaultBase = String(api?.defaults?.baseURL || "").replace(/\/+$/, "");
-      const envBase = String(getApiBaseUrl() || "").replace(/\/+$/, "");
-      const baseCandidates = [
-        defaultBase,
-        envBase,
-        "http://localhost:8080",
-        "http://127.0.0.1:8080",
-      ].filter((v, i, arr) => v && arr.indexOf(v) === i);
-
-      const endpointCandidates = [
-        "/api/accessibility/sign-to-text",
-        "/api/sign-language/translate",
-        "/api/sign-to-text"
-      ];
-
-      let translated = "";
-      let translatedNote = "";
-      let translatedConfidence = NaN;
-      let success = false;
-      let onlyMissingRoutes = true;
-
-      for (const base of baseCandidates) {
-        if (success) break;
-        for (const endpoint of endpointCandidates) {
-          const form = new FormData();
-          form.append("frame", blob, "sign-frame.jpg");
-          form.append("lang", speechLang || "en-IN");
-          form.append("contactId", String(activeContactId || ""));
-          try {
-            const res = await api.post(endpoint, form, {
-              baseURL: base,
-              headers: { "Content-Type": "multipart/form-data" },
-              suppressAuthRedirect: true
-            });
-            translatedNote = String(res?.data?.note || "").trim().toLowerCase();
-            translatedConfidence = Number(res?.data?.confidence);
-            translated = String(res?.data?.text || res?.data?.translation || res?.data?.message || "").trim();
-            success = true;
-            signApiUnavailableRef.current = false;
-            updateSignAssistDebug({ apiStatus: "online", lastError: "" });
-            break;
-          } catch (err) {
-            const status = Number(err?.response?.status || 0);
-            if (!(status === 404 || status === 405 || status === 0)) {
-              onlyMissingRoutes = false;
-            }
-          }
-        }
-      }
-
-      if (translated) {
-        const note = String(translatedNote || "").trim().toLowerCase();
-        const guidanceNotes = new Set([
-          "captured",
-          "low_light",
-          "low_contrast",
-          "invalid_image",
-          "io_error",
-          "not_configured",
-          "translate_error"
-        ]);
-        const looksLikeGuidance =
-          guidanceNotes.has(note) ||
-          /^sign captured\b/i.test(translated) ||
-          /^please (turn on|increase) (more )?light/i.test(translated) ||
-          /^move hand closer\b/i.test(translated);
-
-        if (!looksLikeGuidance) {
-          setSignAssistText(translated);
-          setSignAssistStatus("Sign translated. Review and send.");
-        } else {
-          setSignAssistText((prev) => String(prev || "").trim() || draft);
-          if (note === "not_configured") {
-            setSignAssistStatus("Sign translation is not configured on the server.");
-          } else if (note === "translate_error") {
-            setSignAssistStatus("Sign captured, but translation failed. Try again.");
-          } else if (Number.isFinite(translatedConfidence) && translatedConfidence < 0.35) {
-            setSignAssistStatus("No text detected. Try better lighting/hand visibility.");
-          } else {
-            setSignAssistStatus("Sign captured. Edit the draft and send.");
-          }
-        }
-      } else {
-        if (success) {
-          setSignAssistStatus("No text detected. Try better lighting/hand visibility.");
-        } else {
-          const localDetected = await captureLocalSignBurst(video);
-          if (localDetected) {
-            setSignAssistText(localDetected);
-            setSignAssistStatus("Sign detected locally. Review and send.");
-            return;
-          }
-          setSignAssistText((prev) => String(prev || "").trim() || draft);
-          if (onlyMissingRoutes) {
-            signApiUnavailableRef.current = true;
-            setSignAssistStatus("Sign draft ready. Edit and send.");
-            updateSignAssistDebug({ apiStatus: "missing-route" });
-          } else {
-            setSignAssistStatus("Sign draft ready. Edit and send.");
-            updateSignAssistDebug({
-              apiStatus: "error",
-              lastError: "Sign API request failed"
-            });
-          }
-        }
-      }
-    } catch (err) {
-      updateSignAssistDebug({
-        apiStatus: "error",
-        lastError: String(err?.message || "Capture failed")
-      });
-      setSignAssistStatus("Capture complete. Edit the draft and send.");
-    } finally {
-      setSignAssistBusy(false);
-    }
-  };
-
-  const speakSignAssistText = (text, voiceGender = "female") => {
-    const cleanText = String(text || "").trim();
-    if (!cleanText || !("speechSynthesis" in window)) return;
-
-    const synth = window.speechSynthesis;
-    const utter = new SpeechSynthesisUtterance(cleanText);
-    const targetLang = normalizeLangCode(speechLang || navigator.language || "en-IN");
-    const targetBase = targetLang.split("-")[0];
-    utter.lang = targetLang;
-
-    const voices = synth.getVoices ? synth.getVoices() : [];
-    const gender = String(voiceGender || "neutral").toLowerCase();
-    const femaleHints = ["female", "woman", "zira", "susan", "samantha", "heera", "kalpana"];
-    const maleHints = ["male", "man", "david", "mark", "alex", "ravi", "hemant"];
-    const hints = gender === "female" ? femaleHints : gender === "male" ? maleHints : [];
-    const exactLangVoices = voices.filter((v) => normalizeLangCode(v?.lang).toLowerCase() === targetLang.toLowerCase());
-    const baseLangVoices = voices.filter((v) => normalizeLangCode(v?.lang).toLowerCase().startsWith(`${targetBase.toLowerCase()}-`));
-    const langVoices = exactLangVoices.length ? exactLangVoices : (baseLangVoices.length ? baseLangVoices : voices);
-
-    let picked = null;
-    if (hints.length) {
-      picked = langVoices.find((v) => hints.some((h) => String(v?.name || "").toLowerCase().includes(h)));
-    }
-    if (!picked) {
-      picked = langVoices[0] || voices[0] || null;
-    }
-    if (picked) utter.voice = picked;
-
-    try {
-      synth.speak(utter);
-    } catch {
-      // ignore speech failures
-    }
-  };
-
-  const setAutoSpeakEnabled = (nextValue) => {
-    const next = Boolean(nextValue);
-    setSignAssistAutoSpeak(next);
-    const enabledAt = next ? Date.now() : 0;
-    autoSpeakEnabledAtRef.current = enabledAt;
-    try {
-      localStorage.setItem(CHAT_AUTOSPEAK_KEY, JSON.stringify({
-        enabled: next,
-        enabledAt
-      }));
-    } catch {
-      // ignore storage failures
-    }
-    if (next) {
-      const contactKey = String(activeContactId || "");
-      if (contactKey) {
-        autoSpeakBootstrappedByContactRef.current[contactKey] = false;
-      }
-      spokenSignMessageIdsRef.current = new Set();
-    }
-    if (!next && "speechSynthesis" in window) {
-      try {
-        window.speechSynthesis.cancel();
-      } catch {
-        // ignore speech cancel failures
-      }
-    }
-  };
-
-  const setContinuousModeEnabled = (nextValue) => {
-    const next = Boolean(nextValue);
-    setSignAssistContinuousMode(next);
-    resetSignLiveBuffer();
-  };
-
-  useEffect(() => {
-    if (!signAssistAutoSpeak || !activeContactId) return;
-    const contactKey = String(activeContactId || "");
-    const visibleIds = getVisibleThreadMessageIds();
-    const enabledAt = autoSpeakEnabledAtRef.current || 0;
-    const shouldSpeakMessage = (msg) => {
-      const createdAtMs = toEpochMs(msg?.createdAt || 0);
-      if (enabledAt && createdAtMs && createdAtMs < enabledAt) return false;
-      return true;
-    };
-    if (!autoSpeakBootstrappedByContactRef.current[contactKey]) {
-      const visibleQueue = [];
-      activeMessages.forEach((msg) => {
-        if (!msg || msg.mine) return;
-        const msgId = String(msg?.id || "");
-        const payload = getSpeakableIncomingPayload(msg);
-        if (!msgId || !payload?.text) return;
-        if (!shouldSpeakMessage(msg)) return;
-        if (visibleIds.has(msgId)) {
-          visibleQueue.push({ msgId, payload });
-        }
-      });
-      autoSpeakBootstrappedByContactRef.current[contactKey] = true;
-      visibleQueue.forEach(({ msgId, payload }) => {
-        if (spokenSignMessageIdsRef.current.has(msgId)) return;
-        spokenSignMessageIdsRef.current.add(msgId);
-        speakSignAssistText(payload.text, payload.voiceGender || "female");
-      });
-      return;
-    }
-
-    activeMessages.forEach((msg) => {
-      if (!msg || msg.mine) return;
-      const msgId = String(msg?.id || "");
-      if (!msgId || spokenSignMessageIdsRef.current.has(msgId)) return;
-      const payload = getSpeakableIncomingPayload(msg);
-      if (!payload?.text) return;
-      if (!shouldSpeakMessage(msg)) return;
-
-      spokenSignMessageIdsRef.current.add(msgId);
-      if (visibleIds.has(msgId)) {
-        speakSignAssistText(payload.text, payload.voiceGender || "female");
-      }
-    });
-  }, [activeMessages, activeContactId, signAssistAutoSpeak, speechLang, translatorEnabled, translatedIncomingById, speechVoiceGender]);
-
-  useEffect(() => {
-    const contactKey = String(activeContactId || "");
-    if (contactKey) {
-      autoSpeakBootstrappedByContactRef.current[contactKey] = false;
-      spokenSignMessageIdsRef.current = new Set();
-    }
-  }, [activeContactId]);
-
-  const processVisibleAutoSpeak = () => {
-    if (!signAssistAutoSpeak || !activeContactId) return;
-    const visibleIds = getVisibleThreadMessageIds();
-    if (!visibleIds.size) return;
-    const enabledAt = autoSpeakEnabledAtRef.current || 0;
-    activeMessages.forEach((msg) => {
-      if (!msg || msg.mine) return;
-      const msgId = String(msg?.id || "");
-      if (!msgId || spokenSignMessageIdsRef.current.has(msgId)) return;
-      if (!visibleIds.has(msgId)) return;
-      const createdAtMs = toEpochMs(msg?.createdAt || 0);
-      if (enabledAt && createdAtMs && createdAtMs < enabledAt) return;
-      const payload = getSpeakableIncomingPayload(msg);
-      if (!payload?.text) return;
-      spokenSignMessageIdsRef.current.add(msgId);
-      speakSignAssistText(payload.text, payload.voiceGender || "female");
     });
   };
 
@@ -11220,7 +10510,13 @@ function useChatController() {
       ...prev,
       [activeContactId]: [...(prev[activeContactId] || []), localPreview]
     }));
-    setContacts((prev) => prev.map((c) => (c.id === activeContactId ? { ...c, lastMessage: localPreview.text } : c)));
+    setContacts((prev) =>
+      prev.map((c) =>
+        String(c?.id || "") === String(activeContactId || "")
+          ? { ...c, lastMessage: localPreview.text, lastMessageAt: localPreview?.createdAt || new Date().toISOString() }
+          : c
+      )
+    );
     shouldStickToBottomRef.current = true;
     setTimeout(() => scrollThreadToBottom("smooth"), 50);
 
@@ -11254,8 +10550,12 @@ function useChatController() {
       }));
       setContacts((prev) =>
         prev.map((c) => (
-          c.id === activeContactId
-            ? { ...c, lastMessage: sent.text || (kind === "audio" ? "Voice message" : "[File]") }
+          String(c?.id || "") === String(activeContactId || "")
+            ? {
+                ...c,
+                lastMessage: sent.text || (kind === "audio" ? "Voice message" : "[File]"),
+                lastMessageAt: sent?.createdAt || new Date().toISOString()
+              }
             : c
         ))
       );
@@ -12149,9 +11449,77 @@ function useChatController() {
     };
   };
 
+  const {
+    signAssistEnabled,
+    setSignAssistEnabled,
+    signAssistText,
+    setSignAssistText,
+    signAssistVoiceGender,
+    setSignAssistVoiceGender,
+    readAutoSpeakPrefs,
+    autoSpeakPrefsRef,
+    autoSpeakEnabledAtRef,
+    signAssistAutoSpeak,
+    setSignAssistAutoSpeak,
+    signAssistContinuousMode,
+    setSignAssistContinuousMode,
+    signAssistBusy,
+    setSignAssistBusy,
+    signAssistStatus,
+    setSignAssistStatus,
+    signAssistDebugOpen,
+    setSignAssistDebugOpen,
+    signAssistDebug,
+    spokenSignMessageIdsRef,
+    autoSpeakBootstrappedByContactRef,
+    signApiUnavailableRef,
+    signLocalModelRef,
+    signLocalModelLoadingRef,
+    signLivePollTimerRef,
+    signLastDetectedTextRef,
+    signLastDetectedAtRef,
+    signLiveBufferRef,
+    signAssistSendingRef,
+    signSequenceFramesRef,
+    signSequenceModelRef,
+    signSequenceModelLoadingRef,
+    sendSignAssistMessage,
+    ensureSequenceModel,
+    pushSequenceFrame,
+    detectSequenceSignText,
+    detectLocalSignText,
+    resetSignLiveBuffer,
+    flushSignLiveBuffer,
+    pushSignLiveBuffer,
+    handleContinuousSign,
+    captureSignAssistFromVideo,
+    speakSignAssistText,
+    setAutoSpeakEnabled,
+    setContinuousModeEnabled,
+    processVisibleAutoSpeak
+  } = useSignAssist({
+    chatAutoSpeakKey: CHAT_AUTOSPEAK_KEY,
+    callState,
+    localStreamRef,
+    setIsCameraOff,
+    localVideoRef,
+    sendTextPayload,
+    speechLang,
+    activeContactId,
+    activeMessages,
+    getVisibleThreadMessageIds,
+    getSpeakableIncomingPayload,
+    toEpochMs,
+    translatorEnabled,
+    translatedIncomingById,
+    speechVoiceGender
+  });
+
   const translateText = async (text, targetLang) => {
     const raw = String(text || "").trim();
-    const lang = String(targetLang || "").trim().toLowerCase();
+    const lang = normalizeLangCode(String(targetLang || "").trim().toLowerCase());
+    const targetBaseLang = String(lang.split("-")[0] || "").trim();
+    const myMemoryTargetLang = targetBaseLang || lang;
     if (!raw || !lang) return raw;
     const cacheKey = `${lang}|${raw}`;
     if (translationCacheRef.current[cacheKey]) return translationCacheRef.current[cacheKey];
@@ -12195,6 +11563,58 @@ function useChatController() {
       return chunks;
     };
 
+    const hasScript = (value, regex) => regex.test(String(value || ""));
+
+    const detectLikelySourceLang = (value) => {
+      const sample = String(value || "");
+      if (!sample.trim()) return "";
+      if (hasScript(sample, /[\u0C00-\u0C7F]/u)) return "te";
+      if (hasScript(sample, /[\u0B80-\u0BFF]/u)) return "ta";
+      if (hasScript(sample, /[\u0C80-\u0CFF]/u)) return "kn";
+      if (hasScript(sample, /[\u0D00-\u0D7F]/u)) return "ml";
+      if (hasScript(sample, /[\u0980-\u09FF]/u)) return "bn";
+      if (hasScript(sample, /[\u0A80-\u0AFF]/u)) return "gu";
+      if (hasScript(sample, /[\u0A00-\u0A7F]/u)) return "pa";
+      if (hasScript(sample, /[\u0900-\u097F]/u)) return "hi";
+      if (hasScript(sample, /[\u0600-\u06FF]/u)) return "ar";
+      if (hasScript(sample, /[\u0400-\u04FF]/u)) return "ru";
+      if (hasScript(sample, /[\u3040-\u30FF]/u)) return "ja";
+      if (hasScript(sample, /[\uAC00-\uD7AF]/u)) return "ko";
+      if (hasScript(sample, /[\u4E00-\u9FFF]/u)) return "zh";
+      return "en";
+    };
+
+    const buildSourceLangCandidates = (value) => {
+      const candidates = [];
+      const add = (next) => {
+        const normalized = String(next || "").trim().toLowerCase();
+        const base = String(normalized.split("-")[0] || "").trim();
+        if (!base || base === targetBaseLang) return;
+        if (candidates.includes(base)) return;
+        candidates.push(base);
+      };
+
+      add(detectLikelySourceLang(value));
+      const browserLang =
+        typeof navigator !== "undefined" && typeof navigator.language === "string"
+          ? navigator.language
+          : "";
+      add(normalizeLangCode(browserLang).toLowerCase());
+      add("en");
+
+      return candidates.length ? candidates : ["en"];
+    };
+
+    const isProviderErrorText = (value) => {
+      const normalized = String(value || "").trim().toLowerCase();
+      if (!normalized) return true;
+      return (
+        normalized.includes("is an invalid source language") ||
+        normalized.includes("example: langpair=") ||
+        normalized.includes("using 2 letter iso")
+      );
+    };
+
     const restoreProtected = (value) => {
       let out = String(value || "");
       protectedParts.forEach((part, idx) => {
@@ -12230,13 +11650,27 @@ function useChatController() {
       },
       async () => {
         return translateChunks(async (chunk) => {
-          const url =
-            `https://api.mymemory.translated.net/get?q=${encodeURIComponent(chunk)}&langpair=auto|${encodeURIComponent(lang)}`;
-          const res = await fetch(url);
-          if (!res.ok) throw new Error(`mymemory failed: ${res.status}`);
-          const data = await res.json();
-          const translated = decodeHtmlEntities(String(data?.responseData?.translatedText || "").trim());
-          return translated || "";
+          const sourceCandidates = buildSourceLangCandidates(chunk);
+          let lastError = null;
+
+          for (const sourceLang of sourceCandidates) {
+            try {
+              const url =
+                `https://api.mymemory.translated.net/get?q=${encodeURIComponent(chunk)}&langpair=${encodeURIComponent(sourceLang)}|${encodeURIComponent(myMemoryTargetLang)}`;
+              const res = await fetch(url);
+              if (!res.ok) throw new Error(`mymemory failed: ${res.status}`);
+              const data = await res.json();
+              const translated = decodeHtmlEntities(String(data?.responseData?.translatedText || "").trim());
+              if (!translated || isProviderErrorText(translated)) {
+                throw new Error("mymemory returned invalid translation payload");
+              }
+              return translated;
+            } catch (error) {
+              lastError = error;
+            }
+          }
+
+          throw lastError || new Error("mymemory failed for all source languages");
         });
       }
     ];
@@ -12443,13 +11877,21 @@ function useChatController() {
     messages.forEach((msg) => {
       const share = extractReelShare(msg?.raw?.text || msg?.text || "");
       const id = String(share?.id || "").trim();
-      if (!id) return;
       const directFields = pickReelPreviewFields(msg?.raw || msg);
       const directSrc = resolveMediaUrl(directFields.video);
       const directPoster = resolveMediaUrl(directFields.poster);
-      if (directSrc || directPoster) {
+      const inlineSrc = resolveMediaUrl(share?.src || "");
+      const inlinePoster = resolveMediaUrl(share?.poster || "");
+      if (id && (directSrc || directPoster || inlineSrc || inlinePoster)) {
         directPreviewById[id] = { src: directSrc, poster: directPoster };
       }
+      if (id && (inlineSrc || inlinePoster)) {
+        directPreviewById[id] = {
+          src: directSrc || inlineSrc,
+          poster: directPoster || inlinePoster
+        };
+      }
+      if (!id) return;
       if (Object.prototype.hasOwnProperty.call(reelPreviewById, id)) return;
       pendingIds.add(id);
     });
@@ -12494,11 +11936,37 @@ function useChatController() {
       );
     };
     const fetchReelById = async (id) => {
+      const encodedId = encodeURIComponent(String(id || "").trim());
+      const encodedContactId = encodeURIComponent(String(activeContactId || "").trim());
+      if (encodedId) {
+        try {
+          const direct = await requestChatObject({
+            endpoints: [
+              `/api/feed/${encodedId}`,
+              `/feed/${encodedId}`,
+              `/api/reels/${encodedId}`,
+              `/reels/${encodedId}`
+            ],
+            params: { _: Date.now() }
+          });
+          const directData = normalizeReelCandidate(direct?.data || direct || null);
+          if (directData && getReelIdValue(directData) === String(id)) return directData;
+          if (directData) {
+            const candidatePreview = pickReelPreviewFields(directData);
+            if (candidatePreview.video || candidatePreview.poster) return directData;
+          }
+        } catch {
+          // ignore direct lookup failures and continue list fallback
+        }
+      }
       const listEndpoints = [
         ["/api/reels"],
         ["/api/feed"],
         ["/api/profile/me/posts"],
-        ["/api/profile/posts"]
+        ["/api/profile/posts"],
+        ...(encodedContactId
+          ? [[`/api/profile/${encodedContactId}/posts`], [`/profile/${encodedContactId}/posts`]]
+          : [])
       ];
       for (const endpoints of listEndpoints) {
         try {
@@ -12545,7 +12013,7 @@ function useChatController() {
     return () => {
       cancelled = true;
     };
-  }, [activeMessages, reelPreviewById]);
+  }, [activeMessages, reelPreviewById, activeContactId]);
 
   useEffect(() => {
     const messages = Array.isArray(activeMessages) ? activeMessages : [];
@@ -12556,22 +12024,24 @@ function useChatController() {
     messages.forEach((msg) => {
       const share = extractFeedShare(msg?.raw?.text || msg?.text || "");
       const id = String(share?.id || "").trim();
-      if (!id) return;
       const directFields = pickReelPreviewFields(msg?.raw || msg);
       const directSrc = resolveMediaUrl(directFields.video);
       const directPoster = resolveMediaUrl(directFields.poster);
+      const inlineSrc = resolveMediaUrl(share?.src || "");
+      const inlinePoster = resolveMediaUrl(share?.poster || "");
       const directTitle = trimReplyPreview(
         String(msg?.raw?.text || msg?.text || "")
           .replace(String(share?.match || ""), "")
           .trim()
       );
-      if (directSrc || directPoster || directTitle) {
+      if (id && (directSrc || directPoster || inlineSrc || inlinePoster || directTitle)) {
         directPreviewById[id] = {
-          src: directSrc,
-          poster: directPoster,
+          src: directSrc || inlineSrc,
+          poster: directPoster || inlinePoster,
           title: directTitle
         };
       }
+      if (!id) return;
       if (Object.prototype.hasOwnProperty.call(feedPreviewById, id)) return;
       pendingIds.add(id);
     });
@@ -12633,11 +12103,37 @@ function useChatController() {
       );
     };
     const fetchPostById = async (id) => {
+      const encodedId = encodeURIComponent(String(id || "").trim());
+      const encodedContactId = encodeURIComponent(String(activeContactId || "").trim());
+      if (encodedId) {
+        try {
+          const direct = await requestChatObject({
+            endpoints: [
+              `/api/feed/${encodedId}`,
+              `/feed/${encodedId}`,
+              `/api/reels/${encodedId}`,
+              `/reels/${encodedId}`
+            ],
+            params: { _: Date.now() }
+          });
+          const directData = normalizeReelCandidate(direct?.data || direct || null);
+          if (directData && getReelIdValue(directData) === String(id)) return directData;
+          if (directData) {
+            const candidatePreview = pickReelPreviewFields(directData);
+            if (candidatePreview.video || candidatePreview.poster) return directData;
+          }
+        } catch {
+          // ignore direct lookup failures and continue list fallback
+        }
+      }
       const listEndpoints = [
         ["/api/feed"],
         ["/api/reels"],
         ["/api/profile/me/posts"],
-        ["/api/profile/posts"]
+        ["/api/profile/posts"],
+        ...(encodedContactId
+          ? [[`/api/profile/${encodedContactId}/posts`], [`/profile/${encodedContactId}/posts`]]
+          : [])
       ];
       for (const endpoints of listEndpoints) {
         try {
@@ -12684,7 +12180,7 @@ function useChatController() {
     return () => {
       cancelled = true;
     };
-  }, [activeMessages, feedPreviewById]);
+  }, [activeMessages, feedPreviewById, activeContactId]);
 
   useEffect(() => {
     const messages = Array.isArray(activeMessages) ? activeMessages : [];
@@ -12700,8 +12196,8 @@ function useChatController() {
       if (reelShare) {
         const reelId = String(reelShare?.id || "").trim();
         const reelPreview = reelId ? reelPreviewById[reelId] : null;
-        const reelSrc = directSrc || reelPreview?.src || "";
-        const reelPoster = directPoster || reelPreview?.poster || "";
+        const reelSrc = directSrc || reelPreview?.src || resolveMediaUrl(reelShare?.src || "") || "";
+        const reelPoster = directPoster || reelPreview?.poster || resolveMediaUrl(reelShare?.poster || "") || "";
         if (reelSrc && !reelPoster && !Object.prototype.hasOwnProperty.call(reelPosterBySrc, reelSrc)) {
           pendingSrcs.add(reelSrc);
         }
@@ -12711,8 +12207,8 @@ function useChatController() {
       if (feedShare) {
         const feedId = String(feedShare?.id || "").trim();
         const feedPreview = feedId ? feedPreviewById[feedId] : null;
-        const feedSrc = directSrc || feedPreview?.src || "";
-        const feedPoster = directPoster || feedPreview?.poster || "";
+        const feedSrc = directSrc || feedPreview?.src || resolveMediaUrl(feedShare?.src || "") || "";
+        const feedPoster = directPoster || feedPreview?.poster || resolveMediaUrl(feedShare?.poster || "") || "";
         if (feedSrc && !feedPoster && !Object.prototype.hasOwnProperty.call(reelPosterBySrc, feedSrc)) {
           pendingSrcs.add(feedSrc);
         }
@@ -12844,11 +12340,6 @@ function useChatController() {
     } catch {
       // ignore broadcast failures
     }
-    try {
-      sendSignal(key, packet);
-    } catch {
-      // ignore signaling failures; local receipt channels still apply
-    }
     // Persist and broadcast canonical read state from backend.
     void requestChatMutation({
       method: "POST",
@@ -12857,7 +12348,7 @@ function useChatController() {
     }).catch(() => {
       // ignore mark-read fallback failures
     });
-  }, [isConversationRoute, myUserId, activeContactId, activeMessages, markThreadRead, sendSignal, requestChatMutation]);
+  }, [isConversationRoute, myUserId, activeContactId, activeMessages, markThreadRead, requestChatMutation]);
 
   useEffect(() => {
     if (!isConversationRoute) return;

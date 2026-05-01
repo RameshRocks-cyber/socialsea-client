@@ -320,6 +320,18 @@ const parseNumericAlertId = (value) => {
   const n = Number(text);
   return Number.isFinite(n) ? n : null;
 };
+const toServerAlertId = (value) => {
+  const n = parseNumericAlertId(value);
+  return n == null ? "" : String(n);
+};
+const isLivekitAbortError = (err) => {
+  const msg = String(err?.message || err || "").toLowerCase();
+  return (
+    msg.includes("abort handler called") ||
+    msg.includes("could not establish signal connection")
+  );
+};
+const waitMs = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const alertIdsMatch = (a, b) => {
   const left = normalizeAlertId(a);
   const right = normalizeAlertId(b);
@@ -582,7 +594,7 @@ export default function SOSPage() {
             if (disposed) return;
             sosStompRef.current = client;
             setSosSocketStatus("connected");
-            const alertId = String(sosStompAlertRef.current || "").trim();
+            const alertId = toServerAlertId(sosStompAlertRef.current);
             if (alertId) {
               try {
                 sosStompSubRef.current?.unsubscribe();
@@ -655,10 +667,19 @@ export default function SOSPage() {
   }, []);
 
   useEffect(() => {
-    const activeAlertId = normalizeAlertId(routeAlertId || alertId || alertDisplayId);
+    const activeAlertId = toServerAlertId(routeAlertId || alertId || alertDisplayId);
     sosStompAlertRef.current = activeAlertId;
     const client = sosStompRef.current;
-    if (!client || !client.connected || !activeAlertId) return;
+    if (!client || !client.connected) return;
+    if (!activeAlertId) {
+      try {
+        sosStompSubRef.current?.unsubscribe();
+      } catch {
+        // ignore
+      }
+      sosStompSubRef.current = null;
+      return;
+    }
     try {
       sosStompSubRef.current?.unsubscribe();
     } catch {
@@ -770,7 +791,7 @@ export default function SOSPage() {
 
   const publishSosSignal = (packet) => {
     const client = sosStompRef.current;
-    const alertLikeId = normalizeAlertId(packet?.alertId);
+    const alertLikeId = toServerAlertId(packet?.alertId);
     if (!client || !client.connected || !alertLikeId) return;
     try {
       client.publish({
@@ -1806,6 +1827,7 @@ export default function SOSPage() {
     }
     const stream = mediaStreamRef.current;
     const activeId = String(alertId || alertDisplayId || "").trim();
+    const isServerBacked = Boolean(toServerAlertId(activeId));
     if (!stream || !activeId) return undefined;
 
     let disposed = false;
@@ -1901,7 +1923,11 @@ export default function SOSPage() {
           at: nowIso(),
           offer
         });
-        setBackendStatus("Live stream initializing...");
+        setBackendStatus(
+          isServerBacked
+            ? "Live stream initializing..."
+            : "Local live preview mode (same browser/device only)"
+        );
       } catch {
         setBackendStatus("Live stream signaling failed");
       }
@@ -2028,8 +2054,13 @@ export default function SOSPage() {
       return undefined;
     }
     const activeId = String(alertId || alertDisplayId || "").trim();
+    const serverAlertId = toServerAlertId(activeId);
     const stream = mediaStreamRef.current;
     if (!activeId || !stream) return undefined;
+    if (!serverAlertId) {
+      stopSosLivekit("disabled");
+      return undefined;
+    }
     if (sosLivekitRoomRef.current || sosLivekitConnectingRef.current) return undefined;
 
     let cancelled = false;
@@ -2043,17 +2074,43 @@ export default function SOSPage() {
         sosLivekitConnectingRef.current = true;
         setSosLivekitStatus("connecting");
         setSosLivekitError("");
-        const roomId = `sos_${activeId}`;
+        const roomId = `sos_${serverAlertId}`;
         const token = await requestLivekitToken({
           room: roomId,
           mode: "host",
           identity: getSosLivekitIdentity("sender")
         });
-        const room = new Room({ adaptiveStream: true, dynacast: true });
-        room.on(RoomEvent.Disconnected, () => {
-          setSosLivekitStatus("disconnected");
-        });
-        await room.connect(LIVEKIT_URL, token);
+
+        const maxAttempts = 2;
+        let room = null;
+        let connected = false;
+        let lastConnectErr = null;
+        for (let attempt = 1; attempt <= maxAttempts && !connected; attempt += 1) {
+          room = new Room({ adaptiveStream: true, dynacast: true });
+          room.on(RoomEvent.Disconnected, () => {
+            setSosLivekitStatus("disconnected");
+          });
+          try {
+            await room.connect(LIVEKIT_URL, token);
+            connected = true;
+          } catch (connectErr) {
+            lastConnectErr = connectErr;
+            try {
+              room.disconnect();
+            } catch {
+              // ignore
+            }
+            room = null;
+            if (attempt < maxAttempts && isLivekitAbortError(connectErr) && !cancelled) {
+              await waitMs(600);
+              continue;
+            }
+            throw connectErr;
+          }
+        }
+        if (!connected || !room) {
+          throw lastConnectErr || new Error("LiveKit connect failed");
+        }
         if (cancelled) {
           room.disconnect();
           return;
@@ -2092,7 +2149,12 @@ export default function SOSPage() {
     if (!livekitEnabled) return undefined;
     if (!isLiveView) return undefined;
     const routeId = normalizeAlertId(routeAlertId);
+    const serverRouteId = toServerAlertId(routeId);
     if (!routeId) return undefined;
+    if (!serverRouteId) {
+      stopSosLivekit("disabled");
+      return undefined;
+    }
     if (sosLivekitRoomRef.current || sosLivekitConnectingRef.current) return undefined;
 
     let cancelled = false;
@@ -2106,41 +2168,67 @@ export default function SOSPage() {
         sosLivekitConnectingRef.current = true;
         setSosLivekitStatus("connecting");
         setSosLivekitError("");
-        const roomId = `sos_${routeId}`;
+        const roomId = `sos_${serverRouteId}`;
         const token = await requestLivekitToken({
           room: roomId,
           mode: "viewer",
           identity: getSosLivekitIdentity("viewer")
         });
-        const room = new Room({ adaptiveStream: true, dynacast: true });
-        room.on(RoomEvent.Disconnected, () => {
-          setSosLivekitStatus("disconnected");
-          setLiveStreamAvailable(false);
-        });
-        room.on(RoomEvent.TrackSubscribed, (track) => {
-          if (!track) return;
-          let stream = sosLivekitRemoteStreamRef.current;
-          if (!stream) {
-            stream = new MediaStream();
-            sosLivekitRemoteStreamRef.current = stream;
-          }
+
+        const maxAttempts = 2;
+        let room = null;
+        let connected = false;
+        let lastConnectErr = null;
+        for (let attempt = 1; attempt <= maxAttempts && !connected; attempt += 1) {
+          room = new Room({ adaptiveStream: true, dynacast: true });
+          room.on(RoomEvent.Disconnected, () => {
+            setSosLivekitStatus("disconnected");
+            setLiveStreamAvailable(false);
+          });
+          room.on(RoomEvent.TrackSubscribed, (track) => {
+            if (!track) return;
+            let stream = sosLivekitRemoteStreamRef.current;
+            if (!stream) {
+              stream = new MediaStream();
+              sosLivekitRemoteStreamRef.current = stream;
+            }
+            try {
+              stream.addTrack(track.mediaStreamTrack);
+            } catch {
+              // ignore duplicate tracks
+            }
+            const node = liveRemoteVideoRef.current;
+            if (node) {
+              node.srcObject = stream;
+              node.muted = true;
+              node.autoplay = true;
+              node.playsInline = true;
+              node.play().catch(() => {});
+            }
+            setLiveStreamAvailable(true);
+            setSosLivekitStatus("connected");
+          });
           try {
-            stream.addTrack(track.mediaStreamTrack);
-          } catch {
-            // ignore duplicate tracks
+            await room.connect(LIVEKIT_URL, token);
+            connected = true;
+          } catch (connectErr) {
+            lastConnectErr = connectErr;
+            try {
+              room.disconnect();
+            } catch {
+              // ignore
+            }
+            room = null;
+            if (attempt < maxAttempts && isLivekitAbortError(connectErr) && !cancelled) {
+              await waitMs(600);
+              continue;
+            }
+            throw connectErr;
           }
-          const node = liveRemoteVideoRef.current;
-          if (node) {
-            node.srcObject = stream;
-            node.muted = true;
-            node.autoplay = true;
-            node.playsInline = true;
-            node.play().catch(() => {});
-          }
-          setLiveStreamAvailable(true);
-          setSosLivekitStatus("connected");
-        });
-        await room.connect(LIVEKIT_URL, token);
+        }
+        if (!connected || !room) {
+          throw lastConnectErr || new Error("LiveKit connect failed");
+        }
         if (cancelled) {
           room.disconnect();
           return;

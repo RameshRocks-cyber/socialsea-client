@@ -767,9 +767,98 @@ export default function ChatMessages() {
   const [storyInsightsLoading, setStoryInsightsLoading] = useState(false);
   const [storyInsightsError, setStoryInsightsError] = useState("");
   const [storyInsightsItems, setStoryInsightsItems] = useState([]);
+  const [multiShareSelectedById, setMultiShareSelectedById] = useState({});
+  const [multiShareSending, setMultiShareSending] = useState(false);
+  const isMultiShareMode = Boolean(String(pendingShareDraft || "").trim());
+  const selectedMultiShareIds = useMemo(
+    () => Object.keys(multiShareSelectedById).filter((id) => multiShareSelectedById[id]),
+    [multiShareSelectedById]
+  );
 
   const [inlineSearchOpen, setInlineSearchOpen] = useState(false);
   const isInlineSearchOpen = inlineSearchOpen;
+
+  useEffect(() => {
+    if (isMultiShareMode) return;
+    setMultiShareSelectedById({});
+    setMultiShareSending(false);
+  }, [isMultiShareMode]);
+
+  const toggleMultiShareRecipient = useCallback((contactId) => {
+    const id = String(contactId || "").trim();
+    if (!id) return;
+    setMultiShareSelectedById((prev) => {
+      const next = { ...prev };
+      if (next[id]) delete next[id];
+      else next[id] = true;
+      return next;
+    });
+  }, []);
+
+  const cancelMultiShare = useCallback(() => {
+    if (multiShareSending) return;
+    setMultiShareSelectedById({});
+    setPendingShareDraft("");
+    setShareHint("");
+  }, [multiShareSending, setPendingShareDraft, setShareHint]);
+
+  const sendMultiShare = useCallback(async () => {
+    if (multiShareSending) return;
+    const draft = String(pendingShareDraft || "").trim();
+    if (!draft) return;
+    const myId = String(myUserId || "").trim();
+    const targetIds = Array.from(
+      new Set(
+        selectedMultiShareIds
+          .map((id) => String(id || "").trim())
+          .filter((id) => id && id !== myId)
+      )
+    );
+    if (!targetIds.length) {
+      setShareHint("Select at least one chat.");
+      setTimeout(() => setShareHint(""), 1600);
+      return;
+    }
+
+    setMultiShareSending(true);
+    setError("");
+    let sentCount = 0;
+    let failedCount = 0;
+
+    for (const targetId of targetIds) {
+      // Use shared send pipeline so API/fallback behavior stays consistent.
+      const ok = await sendTextPayload(draft, {
+        targetContactId: targetId,
+        previewText: draft
+      });
+      if (ok) sentCount += 1;
+      else failedCount += 1;
+    }
+
+    setMultiShareSending(false);
+    setMultiShareSelectedById({});
+    if (sentCount > 0) {
+      setPendingShareDraft("");
+      setError("");
+      setShareHint(
+        failedCount > 0
+          ? `Sent to ${sentCount} chat${sentCount === 1 ? "" : "s"}. Failed: ${failedCount}.`
+          : `Sent to ${sentCount} chat${sentCount === 1 ? "" : "s"}.`
+      );
+    } else {
+      setShareHint("Could not send. Try again.");
+    }
+    setTimeout(() => setShareHint(""), 2400);
+  }, [
+    multiShareSending,
+    pendingShareDraft,
+    myUserId,
+    selectedMultiShareIds,
+    sendTextPayload,
+    setPendingShareDraft,
+    setShareHint,
+    setError
+  ]);
 
   const getMediaItemType = useCallback((message) => {
     const mediaType = String(message?.mediaType || (message?.audioUrl ? "audio" : "")).toLowerCase();
@@ -1177,6 +1266,32 @@ export default function ChatMessages() {
         />
         {error && <p className="chat-error">{error}</p>}
         {!error && !!shareHint && <p className="chat-empty">{shareHint}</p>}
+        {isMultiShareMode && (
+          <div className="chat-share-multi-bar">
+            <div className="chat-share-multi-copy">
+              <strong>Share To Multiple Chats</strong>
+              <small>{selectedMultiShareIds.length} selected</small>
+            </div>
+            <div className="chat-share-multi-actions">
+              <button
+                type="button"
+                className="chat-share-multi-btn is-ghost"
+                onClick={cancelMultiShare}
+                disabled={multiShareSending}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="chat-share-multi-btn"
+                onClick={sendMultiShare}
+                disabled={multiShareSending || selectedMultiShareIds.length === 0}
+              >
+                {multiShareSending ? "Sending..." : `Send (${selectedMultiShareIds.length})`}
+              </button>
+            </div>
+          </div>
+        )}
         <div className="chat-contact-list">
            {filteredContacts.map((c) => {
              const presence = getContactPresence(c);
@@ -1190,28 +1305,77 @@ export default function ChatMessages() {
                ? messagesByContact[contactId]
                : [];
              const threadLast = threadMessages.length ? threadMessages[threadMessages.length - 1] : null;
+             const serverPreview = String(c?.lastMessage || "").trim();
+             const serverPreviewTs = toEpochMs(c?.lastMessageAt || 0);
+             const threadPreview = String(getMessagePreviewLabel(threadLast) || "").trim();
+             const threadPreviewTs = toEpochMs(threadLast?.createdAt || 0);
+             const contactCallHistory = contactId && Array.isArray(callHistoryByContact?.[contactId])
+               ? callHistoryByContact[contactId]
+               : [];
+             const latestCall = contactCallHistory.reduce((latest, entry) => {
+               const entryTs = toEpochMs(entry?.at || 0);
+               if (!Number.isFinite(entryTs) || entryTs <= 0) return latest;
+               if (!latest) return entry;
+               const latestTs = toEpochMs(latest?.at || 0);
+               return entryTs >= latestTs ? entry : latest;
+             }, null);
+             const callPreview = latestCall ? String(formatCallStatus(latestCall) || "").trim() : "";
+             const callPreviewTs = toEpochMs(latestCall?.at || 0);
+
+             const previewCandidates = [
+               { text: threadPreview, ts: threadPreviewTs },
+               { text: callPreview, ts: callPreviewTs },
+               { text: serverPreview, ts: serverPreviewTs }
+             ].filter((item) => String(item?.text || "").trim());
+             const newestTimedPreview = previewCandidates
+               .filter((item) => Number.isFinite(item.ts) && item.ts > 0)
+               .sort((a, b) => b.ts - a.ts)[0];
              const previewText =
-               String(c?.lastMessage || "").trim() ||
-               String(getMessagePreviewLabel(threadLast) || "").trim() ||
+               newestTimedPreview?.text ||
+               threadPreview ||
+               callPreview ||
+               serverPreview ||
                "Tap to start chatting";
              const showUnread = unreadCount > 0 && !isActive;
-             const showActions = Boolean(contactId) && String(contactActionId) === contactId;
+             const showActions = Boolean(contactId) && String(contactActionId) === contactId && !isMultiShareMode;
+             const isShareSelected = isMultiShareMode && Boolean(multiShareSelectedById[contactId]);
              const contactKey = contactId || c?.email || displayName;
              return (
                <div key={contactKey} className={`chat-contact-card ${isActive ? "active" : ""}`}>
                  <button
                    type="button"
-                   className={`chat-contact ${isActive ? "active" : ""} ${showUnread ? "has-unread" : ""}`}
-                   onPointerDown={startContactLongPress(contactId)}
-                   onPointerUp={(e) => handleContactPointerUp(e, c)}
-                   onPointerLeave={stopContactLongPress}
-                   onPointerCancel={stopContactLongPress}
+                   className={`chat-contact ${isActive ? "active" : ""} ${showUnread ? "has-unread" : ""} ${isShareSelected ? "is-share-selected" : ""}`}
+                   onPointerDown={isMultiShareMode ? undefined : startContactLongPress(contactId)}
+                   onPointerUp={(e) => {
+                     if (isMultiShareMode) {
+                       e.preventDefault();
+                       e.stopPropagation();
+                       toggleMultiShareRecipient(contactId);
+                       return;
+                     }
+                     handleContactPointerUp(e, c);
+                   }}
+                   onPointerLeave={isMultiShareMode ? undefined : stopContactLongPress}
+                   onPointerCancel={isMultiShareMode ? undefined : stopContactLongPress}
                   onContextMenu={(e) => {
                     e.preventDefault();
+                    if (isMultiShareMode) return;
                     toggleContactActions(contactId);
                   }}
-                  onDoubleClick={() => openContact(c)}
-                  onKeyDown={(e) => handleContactKeyDown(e, c)}
+                  onDoubleClick={() => {
+                    if (isMultiShareMode) return;
+                    openContact(c);
+                  }}
+                  onKeyDown={(e) => {
+                    if (isMultiShareMode) {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        toggleMultiShareRecipient(contactId);
+                      }
+                      return;
+                    }
+                    handleContactKeyDown(e, c);
+                  }}
                 >
                   <span className="chat-avatar">
                     {c.profilePic ? <img src={c.profilePic} alt={displayName} className="chat-avatar-img" /> : c.avatar}
@@ -1226,12 +1390,16 @@ export default function ChatMessages() {
                      </span>
                      <small>{previewText}</small>
                     </span>
-                   <span className="chat-contact-right" aria-hidden={!showUnread}>
-                     {showUnread && (
+                   <span className="chat-contact-right" aria-hidden={!showUnread && !isMultiShareMode}>
+                     {isMultiShareMode ? (
+                       <span className={`chat-share-target-toggle ${isShareSelected ? "selected" : ""}`}>
+                         {isShareSelected ? "✓" : ""}
+                       </span>
+                     ) : showUnread ? (
                        <span className="chat-unread-badge" aria-label={`${unreadCount} unread messages`}>
                          {unreadCount > 99 ? "99+" : unreadCount}
                        </span>
-                     )}
+                     ) : null}
                    </span>
                  </button>
                  {showActions && (
@@ -1806,13 +1974,15 @@ export default function ChatMessages() {
                     if (reelShare?.href) navigate(reelShare.href);
                   };
                   const preview = reelShare?.id ? reelPreviewById[reelShare.id] : null;
-                  const previewSrc = mediaUrl || preview?.src || "";
-                  const previewPoster = preview?.poster || reelPosterBySrc[previewSrc] || "";
+                  const inlinePreviewSrc = resolveMediaUrl(reelShare?.src || "");
+                  const inlinePreviewPoster = resolveMediaUrl(reelShare?.poster || "");
+                  const previewSrc = mediaUrl || preview?.src || inlinePreviewSrc || "";
+                  const previewPoster = preview?.poster || inlinePreviewPoster || reelPosterBySrc[previewSrc] || "";
                   return (
                     <div className="chat-reel-wrap">
                       <div className={`chat-reel-card ${item.mine ? "mine" : "their"}`}>
                         <button type="button" className="chat-reel-media" onClick={openReel}>
-                          {previewSrc && previewPoster ? (
+                          {previewSrc ? (
                             <video
                               className="chat-reel-video"
                               src={previewSrc}
@@ -1828,8 +1998,6 @@ export default function ChatMessages() {
                               alt="Reel preview"
                               loading="lazy"
                             />
-                          ) : previewSrc ? (
-                            <div className="chat-reel-video chat-reel-placeholder">Loading...</div>
                           ) : (
                             <div className="chat-reel-video chat-reel-placeholder">REEL</div>
                           )}
@@ -1854,8 +2022,10 @@ export default function ChatMessages() {
                     }
                   };
                   const preview = feedShare?.id ? feedPreviewById[feedShare.id] : null;
-                  const previewSrc = mediaUrl || preview?.src || "";
-                  const previewPoster = preview?.poster || reelPosterBySrc[previewSrc] || "";
+                  const inlinePreviewSrc = resolveMediaUrl(feedShare?.src || "");
+                  const inlinePreviewPoster = resolveMediaUrl(feedShare?.poster || "");
+                  const previewSrc = mediaUrl || preview?.src || inlinePreviewSrc || "";
+                  const previewPoster = preview?.poster || inlinePreviewPoster || reelPosterBySrc[previewSrc] || "";
                   const destinationLabel = feedShare?.kind === "watch" ? "Open in Long Videos" : "Open in Feed";
                   const title =
                     preview?.title ||
@@ -1871,7 +2041,7 @@ export default function ChatMessages() {
                         onClick={openSharedPost}
                       >
                         <div className="chat-feed-share-media">
-                          {previewSrc && previewPoster ? (
+                          {previewSrc ? (
                             <video
                               className="chat-feed-share-video"
                               src={previewSrc}
@@ -1887,8 +2057,6 @@ export default function ChatMessages() {
                               alt="Shared post preview"
                               loading="lazy"
                             />
-                          ) : previewSrc ? (
-                            <div className="chat-feed-share-video chat-reel-placeholder">Loading...</div>
                           ) : (
                             <div className="chat-feed-share-video chat-reel-placeholder">VIDEO</div>
                           )}

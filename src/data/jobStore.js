@@ -99,6 +99,27 @@ const parseServerJobs = (payload) => {
   return list.map(normalizeJob);
 };
 
+const extractErrorMessage = (error, fallback) => {
+  const data = error?.response?.data;
+  if (typeof data === "string" && data.trim()) return data.trim();
+  if (data && typeof data === "object") {
+    const candidates = [data.message, data.error, data.details, data.title];
+    for (const value of candidates) {
+      if (typeof value === "string" && value.trim()) return value.trim();
+    }
+  }
+  const message = String(error?.message || "").trim();
+  if (message) return message;
+  return fallback;
+};
+
+const buildJobStoreError = (error, fallback) => {
+  const wrapped = new Error(extractErrorMessage(error, fallback));
+  wrapped.status = Number(error?.response?.status || 0);
+  wrapped.cause = error;
+  return wrapped;
+};
+
 function mergeById(jobs) {
   const map = new Map();
   (Array.isArray(jobs) ? jobs : []).forEach((entry) => {
@@ -140,6 +161,7 @@ export const syncJobsFromServer = async (options = {}) => {
   const includeExpired = Boolean(options?.includeExpired);
   const includeClosed = Boolean(options?.includeClosed);
   const mine = Boolean(options?.mine);
+  const throwOnError = Boolean(options?.throwOnError);
   const endpoint = mine ? "/api/jobs/mine" : "/api/jobs";
   try {
     const response = await api.get(endpoint, {
@@ -161,17 +183,24 @@ export const syncJobsFromServer = async (options = {}) => {
     }
     dispatchJobsChanged();
     return getStoredJobs();
-  } catch {
+  } catch (error) {
+    if (throwOnError) {
+      throw buildJobStoreError(error, "Could not load jobs from server.");
+    }
     return getStoredJobs();
   }
 };
 
-export const addCompanyJob = async (payload) => {
-  const stored = readStoredJobs();
+export const addCompanyJob = async (payload, options = {}) => {
+  const optimisticLocal = options?.optimisticLocal !== false;
+  const throwOnError = Boolean(options?.throwOnError);
   const draft = normalizeJob(payload);
-  stored.unshift(draft);
-  writeStoredJobs(mergeById(stored));
-  dispatchJobsChanged();
+  if (optimisticLocal) {
+    const stored = readStoredJobs();
+    stored.unshift(draft);
+    writeStoredJobs(mergeById(stored));
+    dispatchJobsChanged();
+  }
   try {
     const response = await api.post("/api/jobs", draft, { suppressAuthRedirect: true });
     const saved = normalizeJob(response?.data || draft);
@@ -180,12 +209,22 @@ export const addCompanyJob = async (payload) => {
     writeStoredJobs(mergeById(next));
     dispatchJobsChanged();
     return saved;
-  } catch {
+  } catch (error) {
+    if (optimisticLocal && throwOnError) {
+      const rollback = readStoredJobs().filter((item) => item.id !== draft.id);
+      writeStoredJobs(mergeById(rollback));
+      dispatchJobsChanged();
+    }
+    if (throwOnError) {
+      throw buildJobStoreError(error, "Could not publish job to server.");
+    }
     return draft;
   }
 };
 
-export const updateCompanyJob = async (jobId, payload) => {
+export const updateCompanyJob = async (jobId, payload, options = {}) => {
+  const optimisticLocal = options?.optimisticLocal !== false;
+  const throwOnError = Boolean(options?.throwOnError);
   const id = ensureString(jobId);
   if (!id) return null;
   const stored = readStoredJobs();
@@ -198,9 +237,11 @@ export const updateCompanyJob = async (jobId, payload) => {
     id: existing.id,
     createdAt: existing.createdAt
   });
-  stored[index] = updated;
-  writeStoredJobs(mergeById(stored));
-  dispatchJobsChanged();
+  if (optimisticLocal) {
+    stored[index] = updated;
+    writeStoredJobs(mergeById(stored));
+    dispatchJobsChanged();
+  }
   try {
     const response = await api.put(`/api/jobs/${encodeURIComponent(id)}`, payload || {}, { suppressAuthRedirect: true });
     const saved = normalizeJob(response?.data || updated);
@@ -208,22 +249,43 @@ export const updateCompanyJob = async (jobId, payload) => {
     writeStoredJobs(mergeById(next));
     dispatchJobsChanged();
     return saved;
-  } catch {
-    return updated;
+  } catch (error) {
+    if (optimisticLocal && throwOnError) {
+      const rollback = readStoredJobs().map((item) => (item.id === id ? existing : item));
+      writeStoredJobs(mergeById(rollback));
+      dispatchJobsChanged();
+    }
+    if (throwOnError) {
+      throw buildJobStoreError(error, "Could not update job on server.");
+    }
+    return optimisticLocal ? updated : existing;
   }
 };
 
-export const removeCompanyJob = async (jobId) => {
+export const removeCompanyJob = async (jobId, options = {}) => {
+  const optimisticLocal = options?.optimisticLocal !== false;
+  const throwOnError = Boolean(options?.throwOnError);
   const id = ensureString(jobId);
   if (!id) return;
   const stored = readStoredJobs();
-  const next = stored.filter((job) => job.id !== id);
-  writeStoredJobs(mergeById(next));
-  dispatchJobsChanged();
+  const snapshot = stored.find((job) => job.id === id) || null;
+  if (optimisticLocal) {
+    const next = stored.filter((job) => job.id !== id);
+    writeStoredJobs(mergeById(next));
+    dispatchJobsChanged();
+  }
   try {
     await api.delete(`/api/jobs/${encodeURIComponent(id)}`, { suppressAuthRedirect: true });
-  } catch {
-    // keep local deletion if backend is unreachable
+  } catch (error) {
+    if (optimisticLocal && throwOnError && snapshot) {
+      const rollback = readStoredJobs();
+      rollback.unshift(snapshot);
+      writeStoredJobs(mergeById(rollback));
+      dispatchJobsChanged();
+    }
+    if (throwOnError) {
+      throw buildJobStoreError(error, "Could not delete job on server.");
+    }
   }
 };
 

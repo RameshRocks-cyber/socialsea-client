@@ -1037,7 +1037,25 @@ export default function Reels() {
   };
 
   const shareReel = async (reel) => {
-    const shareUrl = `${window.location.origin}/reels?post=${reel.id}`;
+    const reelId = String(reel?.id || "").trim();
+    const previewMedia = String(reel?.contentUrl || reel?.mediaUrl || reel?.videoUrl || "").trim();
+    const previewPoster = String(
+      reel?.thumbnailUrl ||
+      reel?.thumbUrl ||
+      reel?.previewUrl ||
+      reel?.coverUrl ||
+      reel?.coverImageUrl ||
+      reel?.coverImage ||
+      reel?.posterUrl ||
+      reel?.poster ||
+      reel?.imageUrl ||
+      ""
+    ).trim();
+    const shareUrlObj = new URL("/reels", window.location.origin);
+    if (reelId) shareUrlObj.searchParams.set("post", reelId);
+    if (previewMedia) shareUrlObj.searchParams.set("media", previewMedia);
+    if (previewPoster) shareUrlObj.searchParams.set("poster", previewPoster);
+    const shareUrl = shareUrlObj.toString();
     const shareText = `${reel.description || reel.content || "Check this reel"} ${shareUrl}`;
     try {
       recordRepostActivity({ item: reel, source: "reels", via: "chat" });

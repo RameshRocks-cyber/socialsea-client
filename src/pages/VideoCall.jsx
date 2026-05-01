@@ -202,6 +202,7 @@ export default function VideoCall({ placement = "page" }) {
   const showVideoCallMini =
     callActive && (callState.mode === "video" || groupCallActive) && Boolean(videoCallMinimized);
   const canSwapPrimaryViews = !groupCallActive && !remoteShouldUseScreenStyle && !isScreenSharing;
+  const isScreenShareMode = !groupCallActive && (remoteShouldUseScreenStyle || isScreenSharing);
   const signDebugTime = signAssistDebug?.lastDetectionAt
     ? new Date(signAssistDebug.lastDetectionAt).toLocaleTimeString()
     : "--";
@@ -500,7 +501,9 @@ export default function VideoCall({ placement = "page" }) {
 
       {showVideoCallScreen && (
         <div
-          className={`wa-video-call-screen ${isLocalPrimaryView ? "is-local-primary" : ""}`}
+          className={`wa-video-call-screen ${isLocalPrimaryView ? "is-local-primary" : ""} ${
+            isScreenShareMode ? "is-screen-share-mode" : ""
+          }`}
           role="dialog"
           aria-live="polite"
           aria-label="Video call screen"

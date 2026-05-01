@@ -141,6 +141,46 @@ body.ss-theme-white .chat-contact.active {
   background: #f7f9fc !important;
 }
 
+body.ss-theme-white .chat-contact.is-share-selected {
+  border-color: rgba(27, 122, 81, 0.46) !important;
+  background: rgba(232, 247, 238, 0.96) !important;
+}
+
+body.ss-theme-white .chat-share-multi-bar {
+  border-color: rgba(27, 122, 81, 0.32) !important;
+  background: linear-gradient(145deg, rgba(240, 252, 246, 0.98), rgba(230, 246, 238, 0.98)) !important;
+}
+
+body.ss-theme-white .chat-share-multi-copy strong {
+  color: #123122 !important;
+}
+
+body.ss-theme-white .chat-share-multi-copy small {
+  color: #2c694e !important;
+}
+
+body.ss-theme-white .chat-share-multi-btn {
+  border-color: rgba(27, 122, 81, 0.5) !important;
+  background: rgba(27, 122, 81, 0.93) !important;
+  color: #ffffff !important;
+}
+
+body.ss-theme-white .chat-share-multi-btn.is-ghost {
+  border-color: rgba(159, 111, 74, 0.28) !important;
+  background: #ffffff !important;
+  color: #2b1d12 !important;
+}
+
+body.ss-theme-white .chat-share-target-toggle {
+  border-color: rgba(128, 150, 178, 0.6) !important;
+  background: #ffffff !important;
+}
+
+body.ss-theme-white .chat-share-target-toggle.selected {
+  border-color: rgba(27, 122, 81, 0.7) !important;
+  background: rgba(27, 122, 81, 0.95) !important;
+}
+
 body.ss-theme-white .chat-contact-open,
 body.ss-theme-white .chat-contact-delete {
   background: #ffffff !important;
@@ -1911,6 +1951,89 @@ body.ss-theme-white .chat-story-insights-engagement {
 .chat-contact.active {
   border-color: rgba(72, 72, 72, 0.72);
   background: rgba(24, 24, 24, 0.95);
+}
+
+.chat-contact.is-share-selected {
+  border-color: rgba(44, 186, 122, 0.78);
+  background: rgba(18, 38, 29, 0.86);
+}
+
+.chat-share-multi-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 8px 0 6px 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(58, 120, 96, 0.52);
+  background: linear-gradient(145deg, rgba(14, 31, 24, 0.92), rgba(8, 20, 15, 0.9));
+}
+
+.chat-share-multi-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.chat-share-multi-copy strong {
+  font-size: 0.86rem;
+  color: #e8fff3;
+  font-weight: 700;
+}
+
+.chat-share-multi-copy small {
+  font-size: 0.74rem;
+  color: #9fd8bc;
+}
+
+.chat-share-multi-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-share-multi-btn {
+  border: 1px solid rgba(53, 157, 113, 0.64);
+  background: rgba(26, 88, 63, 0.95);
+  color: #eafff3;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.chat-share-multi-btn.is-ghost {
+  border-color: rgba(129, 155, 142, 0.5);
+  background: rgba(35, 42, 38, 0.85);
+  color: #d9e6de;
+}
+
+.chat-share-multi-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.chat-share-target-toggle {
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  border: 1px solid rgba(113, 130, 154, 0.7);
+  background: rgba(24, 28, 34, 0.9);
+  color: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.chat-share-target-toggle.selected {
+  border-color: rgba(44, 186, 122, 0.92);
+  background: rgba(26, 120, 84, 0.98);
+  color: #ffffff;
 }
 
 .chat-contact-card {
@@ -4526,6 +4649,10 @@ body.ss-theme-white .chat-feed-share-play {
   position: fixed;
   inset: 0;
   z-index: 23000;
+  --wa-pip-width: clamp(104px, 20vw, 160px);
+  --wa-pip-top: 82px;
+  --wa-pip-right: 14px;
+  --wa-pip-radius: 12px;
   background:
     radial-gradient(58% 44% at 15% 10%, rgba(74, 74, 74, 0.2), transparent 72%),
     radial-gradient(42% 34% at 86% 14%, rgba(34, 34, 34, 0.18), transparent 74%),
@@ -4573,6 +4700,7 @@ body.ss-theme-white .chat-feed-share-play {
 }
 
 .wa-video-remote {
+  display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -4591,9 +4719,10 @@ body.ss-theme-white .chat-feed-share-play {
   background: #000;
 }
 
-/* Keep thumbnails safe, but make main shared screen fill better */
+/* Shared screen should stay fully visible, like WhatsApp screen-share mode. */
 .wa-video-remote.is-main.is-screen {
-  object-fit: cover;
+  object-fit: contain;
+  background: #000;
 }
 
 .wa-video-remote-fallback {
@@ -4655,13 +4784,15 @@ body.ss-theme-white .chat-feed-share-play {
 
 .wa-video-local {
   position: absolute;
-  right: 14px;
-  top: 82px;
-  width: clamp(104px, 20vw, 160px);
+  right: var(--wa-pip-right);
+  top: var(--wa-pip-top);
+  width: var(--wa-pip-width);
   aspect-ratio: 3 / 4;
-  max-height: min(34vh, 220px);
+  height: auto;
+  max-height: min(34vh, 228px);
+  display: block;
   object-fit: cover;
-  border-radius: 12px;
+  border-radius: var(--wa-pip-radius);
   border: 1px solid rgba(112, 112, 112, 0.42);
   background: #101010;
   box-shadow: 0 10px 26px rgba(0, 0, 0, 0.45);
@@ -4671,8 +4802,11 @@ body.ss-theme-white .chat-feed-share-play {
 }
 
 .wa-video-remote.is-main {
-  position: relative;
+  position: absolute;
   inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
   z-index: 1;
 }
 
@@ -4680,8 +4814,8 @@ body.ss-theme-white .chat-feed-share-play {
   z-index: 2;
 }
 
-.wa-video-call-screen.is-local-primary .wa-video-local.is-main {
-  position: relative;
+.wa-video-local.is-main {
+  position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
@@ -4692,15 +4826,21 @@ body.ss-theme-white .chat-feed-share-play {
   touch-action: auto;
 }
 
+.wa-video-call-screen.is-local-primary .wa-video-local.is-main {
+  position: absolute;
+}
+
 .wa-video-call-screen.is-local-primary .wa-video-remote.is-thumbnail {
   position: absolute;
-  right: 14px;
-  top: 82px;
-  width: clamp(104px, 20vw, 160px);
+  right: var(--wa-pip-right);
+  top: var(--wa-pip-top);
+  width: var(--wa-pip-width);
   aspect-ratio: 3 / 4;
-  max-height: min(34vh, 220px);
+  height: auto;
+  max-height: min(34vh, 228px);
+  display: block;
   object-fit: cover;
-  border-radius: 12px;
+  border-radius: var(--wa-pip-radius);
   border: 1px solid rgba(112, 112, 112, 0.42);
   background: #101010;
   box-shadow: 0 10px 26px rgba(0, 0, 0, 0.45);
@@ -4719,6 +4859,12 @@ body.ss-theme-white .chat-feed-share-play {
 .wa-video-local.is-screen {
   transform: none !important;
   object-fit: contain;
+  background: #000;
+}
+
+.wa-video-call-screen.is-screen-share-mode .wa-video-local.is-main.is-screen,
+.wa-video-call-screen.is-screen-share-mode .wa-video-remote.is-main.is-screen {
+  object-fit: contain !important;
   background: #000;
 }
 

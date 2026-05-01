@@ -246,6 +246,53 @@ export const syncStoryCachesForIdentity = (identity, incomingStories) => {
   };
 };
 
+export const removeStoryEntries = (targets) => {
+  const input = Array.isArray(targets) ? targets : [targets];
+  const keySet = new Set();
+  const idSet = new Set();
+  const mediaSet = new Set();
+
+  input.forEach((item) => {
+    const normalized = normalizeStoryEntry(item);
+    if (!normalized) return;
+    const storageKey = normalized.archiveId || resolveStoryStorageKey(normalized);
+    const storyId = ensureString(normalized.id || normalized.storyId);
+    const mediaUrl = ensureString(normalized.mediaUrl).toLowerCase();
+    if (storageKey) keySet.add(storageKey);
+    if (storyId) idSet.add(storyId);
+    if (mediaUrl) mediaSet.add(mediaUrl);
+  });
+
+  if (!keySet.size && !idSet.size && !mediaSet.size) {
+    return {
+      active: readActiveStories(),
+      archive: readArchivedStories()
+    };
+  }
+
+  const shouldRemove = (entry) => {
+    const normalized = normalizeStoryEntry(entry);
+    if (!normalized) return false;
+    const storageKey = normalized.archiveId || resolveStoryStorageKey(normalized);
+    if (storageKey && keySet.has(storageKey)) return true;
+
+    const storyId = ensureString(normalized.id || normalized.storyId);
+    if (storyId && idSet.has(storyId)) return true;
+
+    const mediaUrl = ensureString(normalized.mediaUrl).toLowerCase();
+    if (mediaUrl && mediaSet.has(mediaUrl)) return true;
+    return false;
+  };
+
+  const nextActive = readActiveStories().filter((entry) => !shouldRemove(entry));
+  const nextArchive = readArchivedStories().filter((entry) => !shouldRemove(entry));
+
+  const active = writeStoryList(STORY_ACTIVE_STORAGE_KEY, nextActive, STORY_ACTIVE_LIMIT);
+  const archive = writeStoryList(STORY_ARCHIVE_STORAGE_KEY, nextArchive, STORY_ARCHIVE_LIMIT);
+
+  return { active, archive };
+};
+
 export const addStoryEntry = (story, options = {}) => {
   const normalized = normalizeStoryEntry(story);
   if (!normalized) return null;

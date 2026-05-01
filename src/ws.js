@@ -71,6 +71,25 @@ export const connectUserNotifications = (email, onMessage) => {
   if (!wsBase) return () => {};
 
   let disposed = false;
+  const seenKeys = new Set();
+  const remember = (payload) => {
+    const key = [
+      String(payload?.id ?? ""),
+      String(payload?.type ?? ""),
+      String(payload?.recipient ?? ""),
+      String(payload?.message ?? ""),
+      String(payload?.createdAt ?? payload?.time ?? payload?.at ?? "")
+    ].join("|");
+    if (!key || key === "||||") return true;
+    if (seenKeys.has(key)) return false;
+    seenKeys.add(key);
+    if (seenKeys.size > 1200) {
+      const recent = Array.from(seenKeys).slice(-600);
+      seenKeys.clear();
+      recent.forEach((item) => seenKeys.add(item));
+    }
+    return true;
+  };
   const client = new Client({
     webSocketFactory: () => new SockJS(`${wsBase}/ws?token=${encodeURIComponent(token)}`),
     connectHeaders: { Authorization: `Bearer ${token}` },
@@ -81,7 +100,7 @@ export const connectUserNotifications = (email, onMessage) => {
   const handleFrame = (frame) => {
     try {
       const payload = JSON.parse(frame?.body || "{}");
-      if (!disposed && payload && typeof payload === "object") {
+      if (!disposed && payload && typeof payload === "object" && remember(payload)) {
         onMessage(payload);
       }
     } catch {

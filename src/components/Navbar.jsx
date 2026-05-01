@@ -801,16 +801,58 @@ export default function Navbar() {
       if (disposed || busy) return;
       busy = true;
       try {
-        const res = await api.get("/api/chat/conversations", {
-          params: { page: 0, size: 200 },
-          timeout: 6500,
-          suppressAuthRedirect: true,
-        });
-        const conversations = toArrayPayload(res?.data);
-        const serverUnread = sumUnreadFromConversations(conversations);
+        let serverUnread = null;
+        try {
+          const unreadRes = await api.get("/api/chat/unread-count", {
+            timeout: 4500,
+            suppressAuthRedirect: true,
+          });
+          const parsed = Number(unreadRes?.data);
+          if (Number.isFinite(parsed)) {
+            serverUnread = Math.max(0, Math.floor(parsed));
+          }
+        } catch {
+          // fallback to conversations endpoint below
+        }
+
+        if (serverUnread == null) {
+          const res = await api.get("/api/chat/conversations", {
+            params: { page: 0, size: 200 },
+            timeout: 6500,
+            suppressAuthRedirect: true,
+          });
+          const conversations = toArrayPayload(res?.data);
+          serverUnread = sumUnreadFromConversations(conversations);
+        }
+
         const localUnread = readChatUnreadFromThreadState();
-        const nextCount = Math.max(localUnread, serverUnread);
+        const nextCount = serverUnread > 0 ? serverUnread : 0;
         if (!disposed) setChatUnreadCount(nextCount);
+
+        if (serverUnread === 0 && localUnread > 0) {
+          try {
+            const raw = localStorage.getItem(CHAT_THREAD_READ_STATE_KEY);
+            const parsed = raw ? JSON.parse(raw) : {};
+            if (parsed && typeof parsed === "object") {
+              let changed = false;
+              const next = { ...parsed };
+              Object.keys(next).forEach((key) => {
+                const entry = next[key];
+                if (!entry || typeof entry !== "object") return;
+                const unread = Math.max(0, Math.floor(Number(entry?.unread || 0)));
+                if (unread > 0) {
+                  next[key] = { ...entry, unread: 0 };
+                  changed = true;
+                }
+              });
+              if (changed) {
+                localStorage.setItem(CHAT_THREAD_READ_STATE_KEY, JSON.stringify(next));
+              }
+            }
+          } catch {
+            // ignore storage cleanup errors
+          }
+        }
       } catch {
         if (!disposed) setChatUnreadCount(readChatUnreadFromThreadState());
       } finally {

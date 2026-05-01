@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import api from "../api/axios";
 import { toApiUrl } from "../api/baseUrl";
 import {
@@ -183,6 +183,7 @@ const StorySection = ({ title, emptyText, items, onOpen }) => (
 
 export default function StoriesPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const identity = useMemo(() => readStoryIdentity(), []);
   const [stories, setStories] = useState(() => readStoriesForIdentity(identity));
   const [loading, setLoading] = useState(() => stories.length === 0);
@@ -244,6 +245,24 @@ export default function StoriesPage() {
       (a, b) => toStoryEpochMs(b?.createdAt || 0) - toStoryEpochMs(a?.createdAt || 0)
     );
   }, [stories]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search || "");
+    const targetStoryId = String(params.get("story") || params.get("storyId") || "").trim();
+    if (!targetStoryId) return;
+    const target = sortedStories.find((story) => {
+      const id = String(story?.id ?? story?.storyId ?? "").trim();
+      if (id && id === targetStoryId) return true;
+      const archiveId = String(story?.archiveId ?? "").trim();
+      return archiveId && archiveId === targetStoryId;
+    });
+    if (!target) return;
+    setActiveStory({
+      ...target,
+      mediaUrl: resolveMediaUrl(target?.mediaUrl || target?.url || target?.fileUrl || target?.storyUrl || "")
+    });
+    navigate("/stories", { replace: true });
+  }, [location.search, sortedStories, navigate]);
 
   const activeStories = useMemo(
     () =>

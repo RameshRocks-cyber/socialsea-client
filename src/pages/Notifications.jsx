@@ -14,6 +14,8 @@ const NOTIFICATIONS_CACHE_TTL_MS = 2 * 60 * 1000;
 const isServerNotificationId = (value) => /^\d+$/.test(String(value || "").trim());
 const POST_ID_MARKER_REGEX = /\[postid\s*:\s*(\d+)\]/i;
 const POST_ID_MARKER_CLEAN_REGEX = /\s*\[postid\s*:\s*\d+\]\s*/gi;
+const STORY_ID_MARKER_REGEX = /\[storyid\s*:\s*(\d+)\]/i;
+const STORY_ID_MARKER_CLEAN_REGEX = /\s*\[storyid\s*:\s*\d+\]\s*/gi;
 
 const readFollowingCache = () => {
   try {
@@ -149,9 +151,10 @@ const normalizeLiveUrl = (rawUrl, fallbackAlertId = "") => {
 
 const normalizeKey = (value) => String(value || "").trim().toLowerCase();
 
-const stripPostMarker = (message) =>
+const stripTargetMarkers = (message) =>
   String(message || "")
     .replace(POST_ID_MARKER_CLEAN_REGEX, " ")
+    .replace(STORY_ID_MARKER_CLEAN_REGEX, " ")
     .replace(/\s{2,}/g, " ")
     .trim();
 
@@ -313,6 +316,141 @@ const resolveNotificationTargetPath = (item, message) => {
   return "";
 };
 
+const isLikelyStoryRoute = (pathname, search = "") => {
+  const path = String(pathname || "").toLowerCase();
+  if (!path) return false;
+  if (path.startsWith("/stories")) return true;
+  if (path.startsWith("/story/")) return true;
+  const params = new URLSearchParams(String(search || ""));
+  const queryStoryId = String(params.get("story") || params.get("storyId") || "").trim();
+  return /^\d+$/.test(queryStoryId);
+};
+
+const extractStoryRoutePath = (value) => {
+  if (value == null) return "";
+  const raw = String(value).trim();
+  if (!raw) return "";
+
+  const base = typeof window !== "undefined" ? window.location.origin : "http://localhost";
+  const toPath = (parsed) => {
+    const pathname = String(parsed?.pathname || "").trim();
+    const search = String(parsed?.search || "");
+    const hash = String(parsed?.hash || "");
+    if (!isLikelyStoryRoute(pathname, search)) return "";
+    if (!pathname) return "";
+    const normalizedPath = pathname.startsWith("/") ? pathname : `/${pathname.replace(/^\/+/, "")}`;
+    return `${normalizedPath}${search}${hash}`;
+  };
+
+  try {
+    const parsed = new URL(raw, base);
+    const path = toPath(parsed);
+    if (path) return path;
+  } catch {
+    // keep fallback handling below
+  }
+
+  if (/^stories\?/i.test(raw)) {
+    try {
+      const parsed = new URL(`/${raw.replace(/^\/+/, "")}`, base);
+      return toPath(parsed);
+    } catch {
+      // ignore malformed relative values
+    }
+  }
+
+  return "";
+};
+
+const extractStoryIdFromValue = (value) => {
+  if (value == null) return "";
+  const text = String(value).trim();
+  if (!text) return "";
+  if (/^\d+$/.test(text)) return text;
+
+  const markerMatch = text.match(STORY_ID_MARKER_REGEX);
+  if (markerMatch?.[1]) return markerMatch[1];
+
+  try {
+    const base = typeof window !== "undefined" ? window.location.origin : "http://localhost";
+    const parsed = new URL(text, base);
+    const storyParam = String(parsed.searchParams.get("story") || parsed.searchParams.get("storyId") || "").trim();
+    if (/^\d+$/.test(storyParam)) return storyParam;
+    const pathMatch = parsed.pathname.match(/\/(?:stories|story)\/(\d+)(?:\/|$)/i);
+    if (pathMatch?.[1]) return pathMatch[1];
+  } catch {
+    // keep fallback regex handling below
+  }
+
+  const fallbackMatch = text.match(/(?:\?|&|\/)story(?:id)?(?:=|\/)(\d+)/i);
+  if (fallbackMatch?.[1]) return fallbackMatch[1];
+
+  return "";
+};
+
+const resolveNotificationStoryId = (item, message) => {
+  const directCandidates = [
+    item?.storyId,
+    item?.storyID,
+    item?.story_id,
+    item?.targetStoryId,
+    item?.target?.storyId,
+    item?.payload?.storyId,
+    item?.story?.id
+  ];
+
+  for (const candidate of directCandidates) {
+    const id = extractStoryIdFromValue(candidate);
+    if (id) return id;
+  }
+
+  const urlCandidates = [item?.storyUrl, item?.storyURL, item?.url, item?.targetUrl, item?.link];
+  for (const candidate of urlCandidates) {
+    const id = extractStoryIdFromValue(candidate);
+    if (id) return id;
+  }
+
+  return extractStoryIdFromValue(message);
+};
+
+const resolveNotificationStoryPath = (item, message) => {
+  const routeCandidates = [item?.storyUrl, item?.storyURL, item?.target?.storyUrl, item?.payload?.storyUrl, item?.url];
+  for (const candidate of routeCandidates) {
+    const route = extractStoryRoutePath(candidate);
+    if (route) return route;
+  }
+
+  const storyId = resolveNotificationStoryId(item, message);
+  if (storyId) return `/stories?story=${encodeURIComponent(storyId)}`;
+
+  const inlineCandidates = String(message || "").match(/(?:https?:\/\/\S+|\/(?:stories|story)\/\S+|stories\?[^\s]+)/gi) || [];
+  for (const candidate of inlineCandidates) {
+    const route = extractStoryRoutePath(candidate.replace(/[),.;]+$/g, ""));
+    if (route) return route;
+  }
+
+  return "";
+};
+
+const extractInAppRouteFromUrl = (value) => {
+  if (value == null) return "";
+  const raw = String(value).trim();
+  if (!raw) return "";
+  const base = typeof window !== "undefined" ? window.location.origin : "http://localhost";
+  try {
+    const parsed = new URL(raw, base);
+    const path = String(parsed.pathname || "");
+    const search = String(parsed.search || "");
+    const hash = String(parsed.hash || "");
+    const sameOrigin = !parsed.origin || parsed.origin === new URL(base).origin;
+    if (!sameOrigin) return "";
+    if (!path.startsWith("/")) return "";
+    return `${path}${search}${hash}`;
+  } catch {
+    return raw.startsWith("/") ? raw : "";
+  }
+};
+
 const mapFollowRequestToNotification = (request) => {
   const sender = request?.sender || {};
   const senderName = sender?.name || sender?.email || "User";
@@ -382,7 +520,7 @@ export default function Notifications() {
 
   const normalizeMessage = (message) => {
     if (!message) return "";
-    const cleaned = stripPostMarker(message);
+    const cleaned = stripTargetMarkers(message);
     return cleaned.replace(EMAIL_REGEX, (email) => emailToName(email));
   };
 
@@ -745,27 +883,33 @@ export default function Notifications() {
           const requestBusy = followRequestId ? !!requestBusyById[String(followRequestId)] : false;
           const typeLabel = isFollowRequest ? "Request" : label;
           const postTargetPath = !isFollowRequest ? resolveNotificationTargetPath(n, n?.message) : "";
-          const canOpenPostFromNotification = Boolean(postTargetPath);
+          const storyTargetPath = !isFollowRequest ? resolveNotificationStoryPath(n, n?.message) : "";
+          const emergencyRoute = kind === "emergency" ? extractInAppRouteFromUrl(emergency.liveUrl) : "";
+          const followRoute = !isFollowRequest && kind === "follow" && actorIdentifier
+            ? buildProfilePath(actorIdentifier)
+            : "";
+          const notificationTargetPath = postTargetPath || storyTargetPath || emergencyRoute || followRoute || (isFollowRequest ? "/follow-requests" : "");
+          const canOpenFromNotification = Boolean(notificationTargetPath);
 
           const handleCardClick = () => {
-            if (!canOpenPostFromNotification) return;
+            if (!canOpenFromNotification) return;
             if (idText) {
               markReadLocal(idText);
               void markReadOnServer(idText);
             }
-            navigate(postTargetPath);
+            navigate(notificationTargetPath);
           };
 
           return (
             <article
               key={n.id}
-              className={`notify-card ${isRead ? "is-read" : "is-unread"} ${canOpenPostFromNotification ? "is-clickable" : ""}`}
+              className={`notify-card ${isRead ? "is-read" : "is-unread"} ${canOpenFromNotification ? "is-clickable" : ""}`}
               onMouseEnter={() => markReadLocal(n?.id)}
               onClick={handleCardClick}
-              role={canOpenPostFromNotification ? "button" : undefined}
-              tabIndex={canOpenPostFromNotification ? 0 : undefined}
+              role={canOpenFromNotification ? "button" : undefined}
+              tabIndex={canOpenFromNotification ? 0 : undefined}
               onKeyDown={(event) => {
-                if (!canOpenPostFromNotification) return;
+                if (!canOpenFromNotification) return;
                 if (event.key === "Enter" || event.key === " ") {
                   event.preventDefault();
                   handleCardClick();
