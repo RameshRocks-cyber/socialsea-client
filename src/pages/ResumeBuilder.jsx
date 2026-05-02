@@ -260,7 +260,6 @@ export default function ResumeBuilder() {
       form.append("file", file);
       try {
         const res = await api.post("/api/resume/media", form, {
-          headers: { "Content-Type": "multipart/form-data" },
           suppressAuthRedirect: true,
         });
         const url = res?.data?.mediaUrl || res?.data?.url || "";
@@ -293,7 +292,6 @@ export default function ResumeBuilder() {
     form.append("file", file);
     try {
       const res = await api.post("/api/resume/media", form, {
-        headers: { "Content-Type": "multipart/form-data" },
         suppressAuthRedirect: true,
       });
       const url = res?.data?.mediaUrl || res?.data?.url || "";

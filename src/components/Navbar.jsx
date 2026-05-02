@@ -989,6 +989,21 @@ export default function Navbar() {
     }
 
     let cancelled = false;
+    const resolveProfileNavPic = (value) => {
+      const raw = String(value || "").trim();
+      if (!raw) return "";
+      if (
+        raw.startsWith("http://") ||
+        raw.startsWith("https://") ||
+        raw.startsWith("blob:") ||
+        raw.startsWith("data:") ||
+        raw.startsWith("/default-avatar") ||
+        raw.startsWith("/assets/")
+      ) {
+        return raw;
+      }
+      return toApiUrl(raw);
+    };
     const loadProfilePic = async () => {
       try {
         const res = await api.get("/api/profile/me");
@@ -999,7 +1014,7 @@ export default function Navbar() {
           payload?.avatarUrl ||
           payload?.avatar ||
           "";
-        const nextPic = rawPic ? toApiUrl(rawPic) : "";
+        const nextPic = resolveProfileNavPic(rawPic);
         if (!cancelled) setProfileNavPic(String(nextPic || "").trim());
       } catch {
         if (!cancelled) setProfileNavPic("");

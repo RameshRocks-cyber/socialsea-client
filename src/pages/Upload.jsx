@@ -29,7 +29,11 @@ import { CONTENT_TYPE_OPTIONS, readContentTypePrefs } from "./contentPrefs";
 import "./Upload.css";
 
 const POST_GENRE_MAP_KEY = "socialsea_post_genre_map_v1";
-const MAX_UPLOAD_FILE_SIZE_BYTES = 80 * 1024 * 1024;
+const MAX_UPLOAD_FILE_SIZE_MB = Math.max(
+  1,
+  Number(import.meta.env.VITE_MAX_UPLOAD_FILE_SIZE_MB || 200)
+);
+const MAX_UPLOAD_FILE_SIZE_BYTES = MAX_UPLOAD_FILE_SIZE_MB * 1024 * 1024;
 
 const ASPECT_OPTIONS = [
   { label: "Original", value: "orig" },
@@ -936,7 +940,9 @@ export default function Upload() {
         const currentFile = filesToUpload[i];
         if (Number(currentFile?.size || 0) > MAX_UPLOAD_FILE_SIZE_BYTES) {
           failedCount += 1;
-          failedMessages.push(`${currentFile?.name || "file"} is too large (max 80MB).`);
+          failedMessages.push(
+            `${currentFile?.name || "file"} is too large (max ${MAX_UPLOAD_FILE_SIZE_MB}MB).`
+          );
           continue;
         }
         const currentIsImage = !!currentFile?.type?.startsWith("image/");
@@ -980,21 +986,34 @@ export default function Upload() {
         try {
           let res = null;
           try {
-            res = await api.post("/api/posts/upload", form, {
-              headers: { "Content-Type": "multipart/form-data" }
-            });
+            res = await api.post("/api/posts/upload", form);
           } catch (firstErr) {
             const status = Number(firstErr?.response?.status || 0);
-            // Some backend variants fail on extra multipart fields; retry with strict file-only payload.
-            if (status >= 500) {
-              if (isReelUpload || isLongVideoUpload) throw firstErr;
-              const fallbackForm = new FormData();
-              fallbackForm.append("file", uploadFile);
-              res = await api.post("/api/posts/upload", fallbackForm, {
-                headers: { "Content-Type": "multipart/form-data" }
-              });
+            if (status === 400 && currentIsVideo) {
+              // Some deployed backends reject optional multipart fields (videoSettings/coverImage).
+              // Retry with minimal payload so uploads still work.
+              const minimalForm = new FormData();
+              minimalForm.append("file", uploadFile);
+              if (caption?.trim()) minimalForm.append("caption", caption.trim());
+              if (isReelUpload) {
+                minimalForm.append("isReel", "true");
+                minimalForm.append("reel", "true");
+                minimalForm.append("type", "reel");
+              } else if (isLongVideoUpload) {
+                minimalForm.append("isLongVideo", "true");
+                minimalForm.append("type", "long_video");
+              }
+              res = await api.post("/api/posts/upload", minimalForm);
             } else {
-              throw firstErr;
+            // Some backend variants fail on extra multipart fields; retry with strict file-only payload.
+              if (status >= 500) {
+                if (isReelUpload || isLongVideoUpload) throw firstErr;
+                const fallbackForm = new FormData();
+                fallbackForm.append("file", uploadFile);
+                res = await api.post("/api/posts/upload", fallbackForm);
+              } else {
+                throw firstErr;
+              }
             }
           }
           if (!res) throw new Error("Upload failed");

@@ -666,7 +666,6 @@ export const useSignAssist = ({
           try {
             const res = await api.post(endpoint, form, {
               baseURL: base,
-              headers: { "Content-Type": "multipart/form-data" },
               suppressAuthRedirect: true
             });
             translatedNote = String(res?.data?.note || "").trim().toLowerCase();

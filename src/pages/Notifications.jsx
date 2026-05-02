@@ -149,6 +149,31 @@ const normalizeLiveUrl = (rawUrl, fallbackAlertId = "") => {
   return raw;
 };
 
+const normalizeNavigateUrl = (rawUrl, fallbackAlertId = "") => {
+  const raw = String(rawUrl || "").trim();
+  const fallbackId = String(fallbackAlertId || "").trim();
+  const appOrigin = typeof window !== "undefined" ? String(window.location.origin || "").replace(/\/+$/, "") : "";
+
+  const toNavigatePath = (id) => {
+    const safeId = String(id || "").trim();
+    if (!safeId) return "";
+    const path = `/sos/navigate/${encodeURIComponent(safeId)}`;
+    return appOrigin ? `${appOrigin}${path}` : path;
+  };
+
+  if (!raw) return toNavigatePath(fallbackId);
+
+  try {
+    const parsed = new URL(raw, appOrigin || "http://localhost");
+    const navigateMatch = parsed.pathname.match(/\/sos\/navigate\/([^/?#]+)/i);
+    if (navigateMatch?.[1]) return toNavigatePath(decodeURIComponent(navigateMatch[1]));
+  } catch {
+    // keep original URL if parsing fails
+  }
+
+  return raw;
+};
+
 const normalizeKey = (value) => String(value || "").trim().toLowerCase();
 
 const stripTargetMarkers = (message) =>
@@ -562,7 +587,7 @@ export default function Notifications() {
     const resolvedAlertId = String(item?.alertId || item?.emergencyAlertId || item?.emergencyId || "").trim();
     return {
       liveUrl: normalizeLiveUrl(item?.liveUrl || pick("/sos/live/") || pick("/sos/"), resolvedAlertId),
-      navigateUrl: String(item?.navigateUrl || pick("/sos/navigate/") || "").trim(),
+      navigateUrl: normalizeNavigateUrl(item?.navigateUrl || pick("/sos/navigate/"), resolvedAlertId),
       mapsUrl: String(item?.mapsUrl || pick("google.com/maps") || "").trim(),
     };
   };

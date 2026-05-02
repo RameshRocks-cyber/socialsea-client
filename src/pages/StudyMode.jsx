@@ -1176,7 +1176,6 @@ export default function StudyMode() {
         const form = new FormData();
         form.append("file", file);
         const response = await api.post("/api/public/study-assistant/upload", form, {
-          headers: { "Content-Type": "multipart/form-data" },
           skipAuth: true,
           baseURL: isLocalHost() ? getLocalApiBase() : undefined
         });
@@ -1188,7 +1187,6 @@ export default function StudyMode() {
             const form = new FormData();
             form.append("file", file);
             const response = await api.post("/api/public/study-assistant/upload", form, {
-              headers: { "Content-Type": "multipart/form-data" },
               baseURL: getLocalApiBase(),
               skipAuth: true
             });

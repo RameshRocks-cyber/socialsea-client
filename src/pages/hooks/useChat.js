@@ -10536,8 +10536,7 @@ function useChatController() {
           `/api/chat/${activeContactId}/sendMedia`,
           `/chat/${activeContactId}/sendMedia`
         ],
-        data: form,
-        headers: { "Content-Type": "multipart/form-data" }
+        data: form
       });
       const sent = normalizeMessage(
         { ...(res?.data || {}), expiresAt: expiresAtIso || undefined, mine: true },

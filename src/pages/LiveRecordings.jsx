@@ -523,7 +523,6 @@ export default function LiveRecordings() {
             form.append("sharedFrom", "sos-recording");
             await api.post(url, form, {
               baseURL,
-              headers: { "Content-Type": "multipart/form-data" },
               timeout: 25000,
               suppressAuthRedirect: true,
             });
