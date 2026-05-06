@@ -60,6 +60,11 @@ export default function ForgotPassword() {
         payload?.debugOtp != null && String(payload.debugOtp).trim()
           ? String(payload.debugOtp).trim()
           : "";
+      if (deliveryFailed && !receivedDebugOtp) {
+        const reason = String(payload?.failureReason || payload?.message || "").trim();
+        setError(reason || "Unable to deliver OTP right now. Please try again later.");
+        return;
+      }
       setOtpSent(true);
       if (deliveryFailed) {
         setSuccess("Email delivery failed on server.");

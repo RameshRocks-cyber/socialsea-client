@@ -101,6 +101,11 @@ const buildLoginBaseCandidates = () => {
   return candidates.length ? candidates : [undefined];
 };
 
+const shouldSkipEndpointForBase = (baseURL, endpoint) => {
+  const base = String(baseURL || "").trim().replace(/\/+$/, "").toLowerCase();
+  return base.endsWith("/api") && endpoint.startsWith("/api/");
+};
+
 export const sendOtp = (email) => {
   const value = String(email || "").trim();
   const payloads = [
@@ -321,23 +326,18 @@ export const forgotPassword = (emailOrUsername) => {
   const looksLikeEmail = /@/.test(value);
   const payloads = looksLikeEmail
     ? [
+        { email: value, identifier: value },
         { email: value },
         { identifier: value },
-        { email: value, identifier: value },
-        { username: value },
       ]
     : [
+        { username: value, identifier: value },
         { username: value },
         { identifier: value },
-        { username: value, identifier: value },
-        { email: value },
       ];
   const endpoints = [
     "/api/auth/send-otp",
     "/auth/send-otp",
-    "/api/auth/forgot-password",
-    "/auth/forgot-password",
-    "/api/auth/forgotPassword",
   ];
 
   const isOtpAccepted = (payload) => {
@@ -370,6 +370,9 @@ export const forgotPassword = (emailOrUsername) => {
     let lastError = null;
     for (const baseURL of baseCandidates) {
       for (const url of endpoints) {
+        if (shouldSkipEndpointForBase(baseURL, url)) {
+          continue;
+        }
         for (const body of payloads) {
           try {
             const res = await api.request({
@@ -438,7 +441,10 @@ export const resetPasswordWithOtp = ({ identifier, otp, newPassword }) => {
 
   const primaryEndpoints = [
     "/api/auth/reset-password",
-    "/api/auth/resetPassword",  ];
+    "/api/auth/resetPassword",
+    "/auth/reset-password",
+    "/auth/resetPassword",
+  ];
   const fallbackEndpoints = [];
 
   const payloads = [
@@ -469,6 +475,9 @@ export const resetPasswordWithOtp = ({ identifier, otp, newPassword }) => {
     const tryEndpoints = async (endpoints) => {
       for (const baseURL of baseCandidates) {
         for (const url of endpoints) {
+          if (shouldSkipEndpointForBase(baseURL, url)) {
+            continue;
+          }
           let routeUnavailable = false;
           for (const body of payloads) {
             if (routeUnavailable) break;
