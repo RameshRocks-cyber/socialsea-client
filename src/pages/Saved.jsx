@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../api/axios";
+import { resolveMediaUrl } from "../utils/mediaUrl";
 import "./Saved.css";
 
 const LONG_VIDEO_SECONDS = 90;
@@ -51,13 +52,6 @@ export default function Saved() {
       mounted = false;
     };
   }, []);
-
-  const resolveUrl = (url) => {
-    if (!url) return "";
-    if (url.startsWith("http")) return url;
-    const base = api.defaults.baseURL || "";
-    return `${base}${url}`;
-  };
 
   const usernameFor = (item) => {
     const raw = item?.user?.name || item?.username || item?.user?.email || "User";
@@ -136,7 +130,7 @@ export default function Saved() {
       <section className="saved-grid">
         {savedItems.map((item) => {
           const raw = item?.contentUrl || item?.mediaUrl || "";
-          const mediaUrl = resolveUrl(String(raw).trim());
+          const mediaUrl = resolveMediaUrl(String(raw).trim());
           if (!mediaUrl) return null;
           const video = isVideo(item);
           return (

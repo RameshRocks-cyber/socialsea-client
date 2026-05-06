@@ -1,10 +1,11 @@
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import api from "../api/axios";
-import { getApiBaseUrl, toApiUrl } from "../api/baseUrl";
+import { getApiBaseUrl } from "../api/baseUrl";
 import { recordCommentActivity, recordSearchActivity, recordWatchHistory } from "../services/activityStore";
 import { readIdMapFromStorage, writeIdMapToStorage } from "../utils/idStorage";
 import { readLiveBroadcast, subscribeLiveBroadcast } from "../utils/liveBroadcast";
+import { resolveMediaUrl } from "../utils/mediaUrl";
 import { isYouTubeMedia } from "../utils/youtubeMedia";
 import {
   FEED_WATCH_PROGRESS_MILESTONES,
@@ -299,13 +300,7 @@ export default function LongVideos() {
     return merged;
   };
 
-  const resolveUrl = (url) => {
-    const raw = String(url || "").trim();
-    if (!raw) return "";
-    if (/^(blob:|data:)/i.test(raw)) return raw;
-    if (raw.startsWith("//")) return `https:${raw}`;
-    return toApiUrl(raw);
-  };
+  const resolveUrl = resolveMediaUrl;
   const readIdMap = (key) => {
     return readIdMapFromStorage(key);
   };

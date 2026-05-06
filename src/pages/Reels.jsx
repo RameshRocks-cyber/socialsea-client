@@ -10,10 +10,11 @@ import { BsBookmarkFill } from "react-icons/bs";
 import { HiHandThumbUp, HiOutlineHandThumbUp } from "react-icons/hi2";
 import { IoArrowRedoOutline } from "react-icons/io5";
 import api from "../api/axios";
-import { getApiBaseUrl, toApiUrl } from "../api/baseUrl";
+import { getApiBaseUrl } from "../api/baseUrl";
 import { recordCommentActivity, recordRepostActivity, recordWatchHistory } from "../services/activityStore";
 import { addStoryEntry, readStoryIdentity } from "../services/storyStorage";
 import { readIdMapFromStorage, writeIdMapToStorage } from "../utils/idStorage";
+import { resolveMediaUrl } from "../utils/mediaUrl";
 import { classifyVideoBucket } from "../utils/videoFeedClassifier";
 import { isYouTubeMedia } from "../utils/youtubeMedia";
 import {
@@ -344,7 +345,7 @@ export default function Reels() {
           if (!item) return;
           if (getMediaType(item) !== "VIDEO") return;
           const rawUrl = item.contentUrl || item.mediaUrl || "";
-          const mediaUrl = resolveUrl(String(rawUrl).trim());
+          const mediaUrl = resolveMediaUrl(String(rawUrl).trim());
           if (!mediaUrl) return;
 
           const durationHint = durationFromPost(item);
@@ -576,12 +577,6 @@ export default function Reels() {
       .catch(() => {});
   };
 
-  const resolveUrl = (url) => {
-    if (!url) return "";
-    if (url.startsWith("http")) return url;
-    return toApiUrl(url);
-  };
-
   const getMediaType = (item) => {
     const rawType = String(
       item?.type || item?.mediaType || item?.contentType || "",
@@ -798,7 +793,7 @@ export default function Reels() {
       reel?.avatarUrl ||
       reel?.avatar ||
       "";
-    return raw ? resolveUrl(String(raw).trim()) : "";
+    return raw ? resolveMediaUrl(String(raw).trim()) : "";
   };
   const myUserId = Number(localStorage.getItem("userId"));
 
@@ -840,7 +835,7 @@ export default function Reels() {
               user?.avatar ||
               "";
             if (rawPic) {
-              found = resolveUrl(String(rawPic).trim());
+              found = resolveMediaUrl(String(rawPic).trim());
               break;
             }
           } catch {
@@ -1436,7 +1431,7 @@ export default function Reels() {
 
         {reels.map((reel, idx) => {
           const rawUrl = reel.contentUrl || reel.mediaUrl || "";
-          const videoUrl = resolveUrl(rawUrl.trim());
+          const videoUrl = resolveMediaUrl(rawUrl.trim());
           if (!videoUrl || isYouTubeMedia(reel)) return null;
 
           const comments = commentsByPost[reel.id] || [];

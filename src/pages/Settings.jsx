@@ -12,6 +12,7 @@ import {
 import { COLOR_THEME_OPTIONS, readTheme, setTheme, readCustomThemeColors, setCustomThemeColors } from "../theme";
 import { recordAccountHistoryEntry } from "../services/activityStore";
 import { getLanguageLabel } from "../i18n/languages";
+import { resolveMediaUrl } from "../utils/mediaUrl";
 import "./Settings.css";
 
 const CLOSE_FRIENDS_KEY = "socialsea_close_friends_v1";
@@ -366,13 +367,6 @@ export default function Settings() {
       clearTimeout(timer);
     };
   }, [activePanel, userQuery]);
-
-  const resolveUrl = (url) => {
-    if (!url) return "";
-    if (url.startsWith("http")) return url;
-    const base = api.defaults.baseURL || "";
-    return `${base}${url}`;
-  };
 
   const emailToName = (email) => {
     const raw = (email || "").split("@")[0] || "";
@@ -874,7 +868,7 @@ export default function Settings() {
 
             {!loading && panelItems.map((item) => {
               const rawUrl = item?.contentUrl || item?.mediaUrl || "";
-              const mediaUrl = resolveUrl(String(rawUrl).trim());
+              const mediaUrl = resolveMediaUrl(String(rawUrl).trim());
               const type = (item?.type || "").toUpperCase() || (item?.reel ? "VIDEO" : "IMAGE");
               const title = item?.description || item?.content || "Untitled post";
               const author = usernameFor(item);

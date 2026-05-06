@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import api from "./api/axios";
 import { successToast, errorToast } from "./toast";
 import PermissionGate from "./PermissionGate";
+import { resolveMediaUrl } from "./utils/mediaUrl";
 
 export default function PendingAnonymousPosts() {
   const [posts, setPosts] = useState([]);
@@ -54,13 +55,6 @@ export default function PendingAnonymousPosts() {
     }
   };
 
-  const resolveUrl = (url) => {
-    if (!url) return "";
-    if (url.startsWith("http")) return url;
-    const base = api.defaults.baseURL || "";
-    return `${base}${url}`;
-  };
-
   const isVideo = (post) => {
     const type = (post?.type || "").toLowerCase();
     return type === "video" || type.startsWith("video");
@@ -85,14 +79,14 @@ export default function PendingAnonymousPosts() {
         >
           {isVideo(p) ? (
             <video
-              src={resolveUrl(p.contentUrl)}
+              src={resolveMediaUrl(p.contentUrl)}
               controls
               width="320"
               style={{ display: "block" }}
             />
           ) : (
             <img
-              src={resolveUrl(p.contentUrl)}
+              src={resolveMediaUrl(p.contentUrl)}
               alt={p.description || "Anonymous post"}
               width="320"
               style={{ display: "block" }}

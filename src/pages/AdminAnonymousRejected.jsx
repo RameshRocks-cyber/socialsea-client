@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import api from "../api/axios";
-import { toApiUrl } from "../api/baseUrl";
+import { resolveMediaUrl } from "../utils/mediaUrl";
 
 export default function AdminAnonymousRejected() {
   const [posts, setPosts] = useState([]);
@@ -25,12 +25,6 @@ export default function AdminAnonymousRejected() {
       .catch((err) => console.error("Restore failed", err));
   };
 
-  const resolveUrl = (url) => {
-    if (!url) return "";
-    if (url.startsWith("http")) return url;
-    return toApiUrl(url);
-  };
-
   return (
     <div style={styles.container}>
       <h2>❌ Rejected Anonymous Posts</h2>
@@ -41,9 +35,9 @@ export default function AdminAnonymousRejected() {
             {post.contentUrl && (
               <div style={styles.mediaBox}>
                 {post.type === "VIDEO" || post.contentUrl.endsWith(".mp4") ? (
-                  <video src={resolveUrl(post.contentUrl)} controls style={styles.media} />
+                  <video src={resolveMediaUrl(post.contentUrl)} controls style={styles.media} />
                 ) : (
-                  <img src={resolveUrl(post.contentUrl)} alt="Preview" style={styles.media} />
+                  <img src={resolveMediaUrl(post.contentUrl)} alt="Preview" style={styles.media} />
                 )}
               </div>
             )}

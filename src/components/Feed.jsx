@@ -4,10 +4,11 @@ import { FiBookmark } from "react-icons/fi";
 import { BsBookmarkFill } from "react-icons/bs";
 import { IoArrowRedoOutline } from "react-icons/io5";
 import api from "../api/axios";
-import { getApiBaseUrl, toApiUrl } from "../api/baseUrl";
+import { getApiBaseUrl } from "../api/baseUrl";
 import { recordCommentActivity, recordRepostActivity, recordSearchActivity } from "../services/activityStore";
 import { readIdListFromStorage, readIdMapFromStorage, writeIdListToStorage, writeIdMapToStorage } from "../utils/idStorage";
 import { readLiveBroadcast, subscribeLiveBroadcast } from "../utils/liveBroadcast";
+import { resolveMediaUrl } from "../utils/mediaUrl";
 import { buildProfilePath } from "../utils/profileRoute";
 import { classifyVideoBucket, isExplicitReelPost, mediaTypeForPost, SHORT_VIDEO_SECONDS } from "../utils/videoFeedClassifier";
 import { isYouTubeMedia } from "../utils/youtubeMedia";
@@ -899,11 +900,6 @@ export default function Feed() {
     setFeedMenuOpen(false);
   };
 
-  const resolveUrl = (url) => {
-    if (!url) return "";
-    return toApiUrl(url);
-  };
-
   const normalizeDisplayName = (value) => {
     const raw = String(value || "").trim();
     if (!raw) return "User";
@@ -1063,7 +1059,7 @@ export default function Feed() {
       post?.avatarUrl ||
       post?.avatar ||
       "";
-    return raw ? resolveUrl(String(raw).trim()) : "";
+    return raw ? resolveMediaUrl(String(raw).trim()) : "";
   };
 
   useEffect(() => {
@@ -1101,7 +1097,7 @@ export default function Feed() {
                 user?.avatar ||
                 "";
               if (rawPic) {
-                found = resolveUrl(String(rawPic).trim());
+                found = resolveMediaUrl(String(rawPic).trim());
                 break;
               }
             } catch {
@@ -2132,7 +2128,7 @@ export default function Feed() {
           )}
           {longVideoFeedPosts.map((post) => {
             const rawUrl = post.contentUrl || post.mediaUrl || "";
-            const mediaUrl = rawUrl.trim() ? resolveUrl(rawUrl.trim()) : "";
+            const mediaUrl = rawUrl.trim() ? resolveMediaUrl(rawUrl.trim()) : "";
             if (!mediaUrl) return null;
             const user = usernameFor(post);
             const profilePic = profilePicFor(post);
@@ -2278,7 +2274,7 @@ export default function Feed() {
         )}
         {feedPosts.map((post) => {
           const rawUrl = post.contentUrl || post.mediaUrl || "";
-          const mediaUrl = rawUrl.trim() ? resolveUrl(rawUrl.trim()) : "";
+          const mediaUrl = rawUrl.trim() ? resolveMediaUrl(rawUrl.trim()) : "";
           const type = mediaTypeFor(post);
           if (!mediaUrl) return null;
 
@@ -2332,7 +2328,7 @@ export default function Feed() {
             {viewerPosts.map((post, idx) => {
               const isPrimary = idx === 0;
               const raw = post.contentUrl || post.mediaUrl || "";
-              const mediaUrl = raw.trim() ? resolveUrl(raw.trim()) : "";
+              const mediaUrl = raw.trim() ? resolveMediaUrl(raw.trim()) : "";
               const type = mediaTypeFor(post);
               const ownerKey = ownerKeyFor(post) || String(post?.id || "");
               const followState = followStateByOwner[ownerKey] || followStateHintFor(post);

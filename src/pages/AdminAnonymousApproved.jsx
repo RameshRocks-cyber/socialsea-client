@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import api from "../api/axios";
-import { toApiUrl } from "../api/baseUrl";
+import { resolveMediaUrl } from "../utils/mediaUrl";
 
 export default function AdminAnonymousApproved() {
   const [posts, setPosts] = useState([]);
@@ -10,12 +10,6 @@ export default function AdminAnonymousApproved() {
       .then((res) => setPosts(Array.isArray(res.data) ? res.data : []))
       .catch((err) => console.error("Failed to load approved posts", err));
   }, []);
-
-  const resolveUrl = (url) => {
-    if (!url) return "";
-    if (url.startsWith("http")) return url;
-    return toApiUrl(url);
-  };
 
   return (
     <div style={styles.container}>
@@ -27,9 +21,9 @@ export default function AdminAnonymousApproved() {
             {post.contentUrl && (
               <div style={styles.mediaBox}>
                 {post.type === "VIDEO" || post.contentUrl.endsWith(".mp4") ? (
-                  <video src={resolveUrl(post.contentUrl)} controls style={styles.media} />
+                  <video src={resolveMediaUrl(post.contentUrl)} controls style={styles.media} />
                 ) : (
-                  <img src={resolveUrl(post.contentUrl)} alt="Preview" style={styles.media} />
+                  <img src={resolveMediaUrl(post.contentUrl)} alt="Preview" style={styles.media} />
                 )}
               </div>
             )}

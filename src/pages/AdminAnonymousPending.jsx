@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import api from "../api/axios";
+import { resolveMediaUrl } from "../utils/mediaUrl";
 
 export default function AdminAnonymousPending() {
   const [posts, setPosts] = useState([]);
@@ -30,12 +31,6 @@ export default function AdminAnonymousPending() {
       .catch((err) => console.error("Reject failed", err));
   };
 
-  const resolveUrl = (url) => {
-    if (!url) return "";
-    if (url.startsWith("http")) return url;
-    return `${import.meta.env.VITE_API_URL}${url}`;
-  };
-
   return (
     <section className="admin-table-panel">
       <header className="admin-table-head">
@@ -49,9 +44,9 @@ export default function AdminAnonymousPending() {
             <div className="admin-anon-media">
               {post.contentUrl ? (
                 post.type === "VIDEO" || String(post.contentUrl).includes(".mp4") ? (
-                  <video src={resolveUrl(post.contentUrl)} controls />
+                  <video src={resolveMediaUrl(post.contentUrl)} controls />
                 ) : (
-                  <img src={resolveUrl(post.contentUrl)} alt="anonymous" />
+                  <img src={resolveMediaUrl(post.contentUrl)} alt="anonymous" />
                 )
               ) : (
                 <span>No media</span>
