@@ -23,6 +23,7 @@ server {
 
     root /var/www/socialsea;
     index index.html;
+    client_max_body_size 2G;
 
     # SPA routing
     location / {

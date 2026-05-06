@@ -187,7 +187,7 @@ const isLikelyPostRoute = (pathname, search = "") => {
   const path = String(pathname || "").toLowerCase();
   if (!path) return false;
   if (path.startsWith("/feed")) return true;
-  if (path.startsWith("/reels")) return true;
+  if (path.startsWith("/reels") || path.startsWith("/clips")) return true;
   if (path.startsWith("/watch/")) return true;
   if (/\/(?:post|posts)\/\d+(?:\/|$)/i.test(path)) return true;
   const params = new URLSearchParams(String(search || ""));
@@ -219,7 +219,7 @@ const extractPostRoutePath = (value) => {
     // keep fallback handling below
   }
 
-  if (/^(feed|reels)\?/i.test(raw)) {
+  if (/^(feed|reels|clips)\?/i.test(raw)) {
     try {
       const parsed = new URL(`/${raw.replace(/^\/+/, "")}`, base);
       return toPath(parsed);
@@ -245,7 +245,7 @@ const extractPostIdFromValue = (value) => {
     const parsed = new URL(text, base);
     const postParam = String(parsed.searchParams.get("post") || "").trim();
     if (/^\d+$/.test(postParam)) return postParam;
-    const pathMatch = parsed.pathname.match(/\/(?:feed|post|posts)\/(\d+)(?:\/|$)/i);
+    const pathMatch = parsed.pathname.match(/\/(?:feed|reels|clips|post|posts)\/(\d+)(?:\/|$)/i);
     if (pathMatch?.[1]) return pathMatch[1];
   } catch {
     // keep fallback regex handling below
@@ -289,20 +289,22 @@ const resolveNotificationTargetPath = (item, message) => {
     item?.reel === true ||
     item?.post?.reel === true ||
     item?.target?.isReel === true ||
-    messageText.includes(" your reel");
+    messageText.includes(" your reel") ||
+    messageText.includes(" your clip");
 
   const rewriteToReels = (route) => {
     if (!prefersReels) return route;
     const value = String(route || "").trim();
     if (!value) return value;
-    if (value.startsWith("/reels")) return value;
+    if (value.startsWith("/clips")) return value;
+    if (value.startsWith("/reels")) return value.replace(/^\/reels/i, "/clips");
     if (!value.startsWith("/feed")) return value;
     try {
       const base = typeof window !== "undefined" ? window.location.origin : "http://localhost";
       const parsed = new URL(value, base);
       const postId = String(parsed.searchParams.get("post") || "").trim();
       if (!postId) return value;
-      return `/reels?post=${encodeURIComponent(postId)}`;
+      return `/clips?post=${encodeURIComponent(postId)}`;
     } catch {
       return value;
     }
@@ -328,11 +330,11 @@ const resolveNotificationTargetPath = (item, message) => {
 
   const postId = resolveNotificationPostId(item, message);
   if (postId) {
-    const base = prefersReels ? "/reels" : "/feed";
+    const base = prefersReels ? "/clips" : "/feed";
     return `${base}?post=${encodeURIComponent(postId)}`;
   }
 
-  const inlineCandidates = String(message || "").match(/(?:https?:\/\/\S+|\/(?:feed|reels|watch|posts?)\/\S+|(?:feed|reels)\?[^\s]+)/gi) || [];
+  const inlineCandidates = String(message || "").match(/(?:https?:\/\/\S+|\/(?:feed|reels|clips|watch|posts?)\/\S+|(?:feed|reels|clips)\?[^\s]+)/gi) || [];
   for (const candidate of inlineCandidates) {
     const route = extractPostRoutePath(candidate.replace(/[),.;]+$/g, ""));
     if (route) return rewriteToReels(route);
@@ -652,7 +654,7 @@ export default function Notifications() {
         };
 
         const [notifResult, followResult] = await Promise.allSettled([
-          api.get("/api/notifications", { params: { limit: 120 } }),
+          api.get("/api/notifications", { params: { limit: 50 } }),
           fetchFollowRequests()
         ]);
 
@@ -708,7 +710,7 @@ export default function Notifications() {
     };
 
     load(!hasCache);
-    const timer = setInterval(() => load(false), 15000);
+    const timer = setInterval(() => load(false), 25000);
     return () => {
       active = false;
       clearInterval(timer);

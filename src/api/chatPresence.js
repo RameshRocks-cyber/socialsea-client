@@ -4,6 +4,16 @@ import { getApiBaseUrl } from "./baseUrl";
 const CHAT_SERVER_BASE_KEY = "socialsea_chat_server_base_v1";
 const CHAT_PRESENCE_PROBE_KEY = "socialsea_chat_presence_probe_v1";
 const CHAT_PRESENCE_PROBE_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+const PRESENCE_MIN_PING_GAP_MS = 15000;
+const PRESENCE_FAILURE_BACKOFF_BASE_MS = 5000;
+const PRESENCE_FAILURE_BACKOFF_MAX_MS = 120000;
+const PRESENCE_MAX_ROUTES_PER_PING = 3;
+
+let lastPingAttemptAt = 0;
+let lastPingSuccessAt = 0;
+let failureStreak = 0;
+let preferredBase = "";
+let inflightPing = null;
 
 const normalizeBaseCandidate = (rawValue) => {
   const value = String(rawValue || "").trim().replace(/\/+$/, "");
@@ -82,35 +92,76 @@ export const buildChatPresenceBases = () =>
   );
 
 export const pingChatPresence = async ({ timeoutMs = 4000 } = {}) => {
+  const now = Date.now();
+  const failureBackoffMs = failureStreak
+    ? Math.min(PRESENCE_FAILURE_BACKOFF_MAX_MS, PRESENCE_FAILURE_BACKOFF_BASE_MS * (2 ** (failureStreak - 1)))
+    : 0;
+
+  if (inflightPing) return inflightPing;
+  if (now - lastPingAttemptAt < PRESENCE_MIN_PING_GAP_MS) {
+    return now - lastPingSuccessAt < PRESENCE_FAILURE_BACKOFF_MAX_MS;
+  }
+  if (failureBackoffMs > 0 && now - lastPingAttemptAt < failureBackoffMs) {
+    return false;
+  }
+
   const bases = buildChatPresenceBases();
   if (!bases.length) return false;
-  const probe = readPresenceProbe();
-  const endpoints = uniqueList([probe?.url, "/api/chat/presence", "/chat/presence"]);
-  const methods = uniqueList([probe?.method, "GET", "POST"].filter(Boolean));
 
-  for (const baseURL of bases) {
-    for (const url of endpoints) {
-      for (const method of methods) {
-        try {
-          await api.request({
-            method,
-            url,
-            baseURL,
-            timeout: timeoutMs,
-            suppressAuthRedirect: true,
-            allowCrossOriginAuth: true,
-            bypassEndpointGuard: true
-          });
-          writePresenceProbe({ method, url });
-          return true;
-        } catch (err) {
-          const status = Number(err?.response?.status || 0);
-          if (status === 401 || status === 403) {
+  const orderedBases = uniqueList([preferredBase, ...bases]);
+  const probe = readPresenceProbe();
+  const endpoints = probe?.url
+    ? uniqueList([probe.url, "/api/chat/presence", "/chat/presence"])
+    : uniqueList(["/api/chat/presence", "/chat/presence"]);
+  const methods = probe?.method
+    ? uniqueList([probe.method, "GET", "POST"])
+    : ["GET", "POST"];
+
+  const run = async () => {
+    lastPingAttemptAt = Date.now();
+    let routeAttempts = 0;
+
+    for (const baseURL of orderedBases) {
+      for (const url of endpoints) {
+        for (const method of methods) {
+          routeAttempts += 1;
+          if (routeAttempts > PRESENCE_MAX_ROUTES_PER_PING) {
+            failureStreak += 1;
             return false;
+          }
+          try {
+            await api.request({
+              method,
+              url,
+              baseURL,
+              timeout: timeoutMs,
+              suppressAuthRedirect: true,
+              allowCrossOriginAuth: true,
+              bypassEndpointGuard: true,
+              disableAutoRetry: true
+            });
+            writePresenceProbe({ method, url });
+            preferredBase = baseURL;
+            failureStreak = 0;
+            lastPingSuccessAt = Date.now();
+            return true;
+          } catch (err) {
+            const status = Number(err?.response?.status || 0);
+            if (status === 401 || status === 403) {
+              failureStreak += 1;
+              return false;
+            }
           }
         }
       }
     }
-  }
-  return false;
+
+    failureStreak += 1;
+    return false;
+  };
+
+  inflightPing = run().finally(() => {
+    inflightPing = null;
+  });
+  return inflightPing;
 };

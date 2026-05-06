@@ -13,7 +13,7 @@ import { SIGN_VOICE_GENDERS, decodeSignAssistText, useSignAssist } from "./useSi
 
 export { decodeSignAssistText };
 
-const POLL_MS = 4000;
+const POLL_MS = 5000;
 const LOCAL_CHAT_KEY = "socialsea_chat_fallback_v1";
 const CHAT_SERVER_BASE_KEY = "socialsea_chat_server_base_v1";
 const HIDDEN_CHAT_MSG_IDS_KEY = "socialsea_hidden_msg_ids_v1";
@@ -30,7 +30,8 @@ const HIDDEN_CHAT_MSG_IDS_KEY = "socialsea_hidden_msg_ids_v1";
   const CALL_MEDIA_CONNECT_MS = 25000;
   const CALL_RECORDING_SLICE_MS = 250;
   const STORY_STORAGE_KEY = "socialsea_stories_v1";
-  const CALL_POLL_MS = 3000;
+  const CALL_POLL_MS = 6000;
+  const CALL_POLL_ERROR_BACKOFF_MAX_MS = 30000;
   const CALL_SIGNAL_MAX_AGE_MS = 45000;
 const CALL_REJOIN_KEY = "socialsea_call_rejoin_v1";
 const CALL_REJOIN_MAX_AGE_MS = 10 * 60 * 1000;
@@ -40,8 +41,8 @@ const CALL_REFRESH_GRACE_MS = 20000;
 const CALL_REFRESH_GRACE_KEY = "socialsea_call_refresh_grace_v1";
 const INCOMING_CALL_POPUP_POS_KEY = "socialsea_incoming_call_popup_pos_v1";
 const ACTIVE_CALL_POPUP_POS_KEY = "socialsea_active_call_popup_pos_v1";
-const CHAT_CONVO_POLL_MS = 10000;
-const CHAT_THREAD_POLL_BACKGROUND_MS = 15000;
+const CHAT_CONVO_POLL_MS = 15000;
+const CHAT_THREAD_POLL_BACKGROUND_MS = 25000;
 const CHAT_MESSAGE_ALERT_DEDUPE_MS = 10 * 60 * 1000;
 const ONLINE_WINDOW_MS = Number(import.meta.env.VITE_ONLINE_WINDOW_MS || 5 * 60 * 1000);
 const CHAT_TYPING_SIGNAL_THROTTLE_MS = 1200;
@@ -459,7 +460,9 @@ export const extractReelShare = (value) => {
   if (typeof window === "undefined") return null;
   const text = String(value || "");
   if (!text) return null;
-  const match = text.match(/(https?:\/\/[^\s]+\/reels?[^\s]*|\/reels?(?:\/[^\s?#]+)?(?:\?[^\s]*)?)/i);
+  const match = text.match(
+    /(https?:\/\/[^\s]+\/(?:reels?|clips?)[^\s]*|\/(?:reels?|clips?)(?:\/[^\s?#]+)?(?:\?[^\s]*)?)/i
+  );
   if (!match) return null;
   const rawLink = match[1].replace(/[)\],.!?]+$/, "");
   let url = null;
@@ -477,7 +480,7 @@ export const extractReelShare = (value) => {
     const pathParts = String(url.pathname || "").split("/").filter(Boolean);
     const reelIndex = pathParts.findIndex((part) => {
       const value = String(part || "").toLowerCase();
-      return value === "reels" || value === "reel";
+      return value === "reels" || value === "reel" || value === "clips" || value === "clip";
     });
     if (reelIndex >= 0 && pathParts.length > reelIndex + 1) {
       try {
@@ -488,7 +491,7 @@ export const extractReelShare = (value) => {
     }
   }
   const href = resolvedId
-    ? `/reels?post=${encodeURIComponent(resolvedId)}`
+    ? `/clips?post=${encodeURIComponent(resolvedId)}`
     : `${url.pathname}${url.search}`;
   const src =
     String(
@@ -2556,6 +2559,7 @@ function useChatController() {
             try {
               const notifRes = await requestChatArray({
                 endpoints: ["/api/notifications"],
+                params: { limit: 50 },
                 timeoutMs: 5000,
                 maxAttempts: 4
               });
@@ -2574,6 +2578,7 @@ function useChatController() {
           try {
             const notifRes = await requestChatArray({
               endpoints: ["/api/notifications"],
+              params: { limit: 50 },
               timeoutMs: 5000,
               maxAttempts: 4
             });
@@ -2625,7 +2630,7 @@ function useChatController() {
     };
 
     loadRequests(true);
-    const timer = setInterval(() => loadRequests(false), 10000);
+    const timer = setInterval(() => loadRequests(false), 20000);
     return () => {
       active = false;
       clearInterval(timer);
@@ -5917,12 +5922,17 @@ function useChatController() {
         return;
       }
       const nextMode = signal?.mode === "video" ? "video" : "audio";
+      const isRejoinOffer =
+        signal?.rejoin === true ||
+        String(signal?.rejoin || "")
+          .trim()
+          .toLowerCase() === "true";
       let bypassBusyCheck = false;
       if (
         current.phase !== "idle" &&
         current.peerId === fromId &&
         current.phase !== "dialing" &&
-        current.phase !== "connecting" &&
+        (current.phase !== "connecting" || isRejoinOffer) &&
         signal?.sdp &&
         peerRef.current
       ) {
@@ -5945,6 +5955,41 @@ function useChatController() {
         // if the offer is from the same peer we are dialing, switch to incoming
         // instead of sending busy so at least one side can answer.
         if (current.peerId === fromId && (current.phase === "dialing" || current.phase === "connecting")) {
+          if (current.phase === "connecting") {
+            const graceUntil = Number(rejoinGraceUntilRef.current || 0);
+            if (graceUntil && Date.now() < graceUntil) {
+              return;
+            }
+          }
+          if (isRejoinOffer && signal?.sdp) {
+            try {
+              const stream = localStreamRef.current || await ensureLocalStream(nextMode);
+              closePeer();
+              const pc = createPeerConnection(fromId, nextMode);
+              stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+              tuneSendersForQuality(pc, nextMode);
+              kickstartRemotePlayback();
+              await pc.setRemoteDescription({ type: "offer", sdp: signal.sdp });
+              const answer = await pc.createAnswer();
+              answer.sdp = applySdpQualityHints(answer.sdp, nextMode);
+              await pc.setLocalDescription(answer);
+              sendSignal(fromId, { type: "answer", mode: nextMode, sdp: answer.sdp, rejoin: true });
+              setCallState((prev) => ({
+                ...prev,
+                mode: nextMode,
+                peerId: fromId,
+                peerName: prev.peerName || normalizeDisplayName(resolveContactName(fromId) || `User ${fromId}`),
+                phase: "connecting"
+              }));
+              setCallPhaseNote("Reconnecting...");
+              armMediaConnectTimeout();
+              if (nextMode === "video") setIsCameraOff(false);
+              return;
+            } catch {
+              finishCall(false, "Could not reconnect this call");
+              return;
+            }
+          }
           clearCallTimer();
           closePeer();
           resetMedia();
@@ -7313,7 +7358,7 @@ function useChatController() {
       : Promise.resolve([]);
     const reelsPromise = broad
       ? fromEndpoints({
-        endpoints: ["/api/reels"],
+        endpoints: ["/api/clips", "/api/reels"],
           pickUser: (entry) => entry?.user || entry?.owner || entry?.author || entry
         })
       : Promise.resolve([]);
@@ -8355,8 +8400,28 @@ function useChatController() {
     if (!myUserId) return undefined;
     let disposed = false;
     let busy = false;
+    let failureStreak = 0;
+    let timer = 0;
+
+    const nextDelayMs = () => {
+      const hiddenMultiplier =
+        typeof document !== "undefined" && document.visibilityState === "hidden" ? 2 : 1;
+      const baseDelay = CALL_POLL_MS * hiddenMultiplier;
+      if (!failureStreak) return baseDelay;
+      const backoff = baseDelay * (2 ** Math.min(failureStreak, 3));
+      return Math.min(CALL_POLL_ERROR_BACKOFF_MAX_MS, backoff);
+    };
+
+    const scheduleNext = () => {
+      if (disposed) return;
+      timer = window.setTimeout(poll, nextDelayMs());
+    };
+
     const poll = async () => {
-      if (disposed || busy) return;
+      if (disposed || busy) {
+        scheduleNext();
+        return;
+      }
       busy = true;
       try {
         const res = await requestChatArray({
@@ -8400,17 +8465,27 @@ function useChatController() {
         coalesced.forEach((signal) => {
           onSignal(signal);
         });
+        failureStreak = 0;
       } catch {
-        // ignore polling issues
+        failureStreak += 1;
       } finally {
         busy = false;
+        scheduleNext();
       }
     };
+
     poll();
-    const timer = setInterval(poll, CALL_POLL_MS);
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") {
+        failureStreak = 0;
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+
     return () => {
       disposed = true;
-      clearInterval(timer);
+      if (timer) clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [myUserId, requestChatArray]);
 
@@ -9290,6 +9365,25 @@ function useChatController() {
     const apiBase = normalizeBase(getApiBaseUrl());
     const relPath = value.startsWith("/") ? value : `/${value.replace(/^\/+/, "")}`;
     const relPathNoApi = relPath.replace(/^\/api(?=\/|$)/i, "") || relPath;
+    const looksLikeStandaloneMedia = (path) => {
+      const clean = String(path || "").trim().split(/[?#]/)[0];
+      if (!clean) return false;
+      const part = clean.replace(/^\/+/, "");
+      if (!part || part.includes("/")) return false;
+      return /\.(mp4|mov|webm|mkv|m4v|avi|mpg|mpeg|3gp|ogv|jpg|jpeg|png|gif|webp|bmp|svg|heic|heif)$/i.test(part);
+    };
+    const toUploadsPath = (path) => {
+      const rawPath = String(path || "").trim();
+      if (!rawPath) return "";
+      const split = rawPath.split(/([?#].*)/, 2);
+      const basePart = split[0] || "";
+      const suffix = split[1] || "";
+      const normalized = basePart.startsWith("/") ? basePart : `/${basePart}`;
+      if (/^\/uploads\//i.test(normalized)) return `${normalized}${suffix}`;
+      if (!looksLikeStandaloneMedia(normalized)) return "";
+      return `/uploads/${normalized.replace(/^\/+/, "")}${suffix}`;
+    };
+    const uploadsRelPath = toUploadsPath(relPath);
     const devProxyBase = normalizeBase(import.meta.env?.VITE_DEV_PROXY_TARGET);
     const apiFallbackBase = normalizeBase(import.meta.env?.VITE_API_FALLBACK || "");
     const localBases = (() => {
@@ -9312,7 +9406,11 @@ function useChatController() {
         addBase(base, path);
       }
     };
-    const uploadApiPath = relPath.startsWith("/uploads/") ? `/api${relPath}` : "";
+    const uploadApiPath = relPath.startsWith("/uploads/")
+      ? `/api${relPath}`
+      : uploadsRelPath
+        ? `/api${uploadsRelPath}`
+        : "";
     const stripApiPath = (base) => {
       const normalized = normalizeBase(base);
       if (!normalized) return "";
@@ -9353,6 +9451,14 @@ function useChatController() {
 
       if (relPath.startsWith("/uploads/")) {
         addLocalBases(relPath);
+      }
+      if (uploadsRelPath) {
+        add(uploadsRelPath);
+        if (typeof window !== "undefined") add(`${window.location.origin}${uploadsRelPath}`);
+        if (apiBase) addBase(apiBase, uploadsRelPath);
+        if (devProxyBase) addBase(devProxyBase, uploadsRelPath);
+        if (apiFallbackBase) addBase(apiFallbackBase, uploadsRelPath);
+        addLocalBases(uploadsRelPath);
       }
       add(toApiUrl(relPath));
       if (typeof window !== "undefined") {
@@ -9435,6 +9541,22 @@ function useChatController() {
           addLocalBases(apiPath);
           if (apiBaseNoPath) addBase(apiBaseNoPath, apiPath);
           if (apiBaseNoSub) addBase(apiBaseNoSub, apiPath);
+        }
+        const uploadsPathWithQuery = toUploadsPath(pathWithQuery);
+        if (uploadsPathWithQuery && uploadsPathWithQuery !== pathWithQuery) {
+          add(uploadsPathWithQuery);
+          if (typeof window !== "undefined") add(`${window.location.origin}${uploadsPathWithQuery}`);
+          if (devProxyBase) addBase(devProxyBase, uploadsPathWithQuery);
+          if (apiBase) addBase(apiBase, uploadsPathWithQuery);
+          if (apiFallbackBase) addBase(apiFallbackBase, uploadsPathWithQuery);
+          addLocalBases(uploadsPathWithQuery);
+          const uploadsApiPath = `/api${uploadsPathWithQuery}`;
+          add(uploadsApiPath);
+          if (typeof window !== "undefined") add(`${window.location.origin}${uploadsApiPath}`);
+          if (devProxyBase) addBase(devProxyBase, uploadsApiPath);
+          if (apiBase) addBase(apiBase, uploadsApiPath);
+          if (apiFallbackBase) addBase(apiFallbackBase, uploadsApiPath);
+          addLocalBases(uploadsApiPath);
         }
       }
     } catch {
@@ -11943,6 +12065,8 @@ function useChatController() {
             endpoints: [
               `/api/feed/${encodedId}`,
               `/feed/${encodedId}`,
+              `/api/clips/${encodedId}`,
+              `/clips/${encodedId}`,
               `/api/reels/${encodedId}`,
               `/reels/${encodedId}`
             ],
@@ -11959,6 +12083,7 @@ function useChatController() {
         }
       }
       const listEndpoints = [
+        ["/api/clips"],
         ["/api/reels"],
         ["/api/feed"],
         ["/api/profile/me/posts"],
@@ -12110,6 +12235,8 @@ function useChatController() {
             endpoints: [
               `/api/feed/${encodedId}`,
               `/feed/${encodedId}`,
+              `/api/clips/${encodedId}`,
+              `/clips/${encodedId}`,
               `/api/reels/${encodedId}`,
               `/reels/${encodedId}`
             ],
@@ -12127,6 +12254,7 @@ function useChatController() {
       }
       const listEndpoints = [
         ["/api/feed"],
+        ["/api/clips"],
         ["/api/reels"],
         ["/api/profile/me/posts"],
         ["/api/profile/posts"],

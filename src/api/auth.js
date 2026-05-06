@@ -5,7 +5,7 @@ const looksLikeHtml = (value) =>
   typeof value === "string" &&
   (/^\s*<!doctype html/i.test(value) || /<html[\s>]/i.test(value));
 
-const BAD_OTP_HOSTS = new Set(["43.205.213.14"]);
+const BAD_OTP_HOSTS = new Set(["43.205.229.211"]);
 
 const normalizeBaseCandidate = (rawValue) => {
   const value = String(rawValue || "").trim().replace(/\/+$/, "");

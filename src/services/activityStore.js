@@ -19,21 +19,21 @@ const DEFAULT_LIMIT = 80;
 const LONG_VIDEO_SECONDS = 90;
 
 export const ACTIVITY_SECTIONS = {
-  likes: { id: "likes", title: "Likes", description: "Posts and reels you liked", iconKey: "heart", emptyMessage: "Your likes will show up here." },
+  likes: { id: "likes", title: "Likes", description: "Posts and clips you liked", iconKey: "heart", emptyMessage: "Your likes will show up here." },
   comments: { id: "comments", title: "Comments", description: "Comments you've posted", iconKey: "message-circle", emptyMessage: "Your comments will show up here." },
-  reposts: { id: "reposts", title: "Reposts", description: "Posts and reels you've shared", iconKey: "repeat", emptyMessage: "Anything you share will appear here." },
+  reposts: { id: "reposts", title: "Reposts", description: "Posts and clips you've shared", iconKey: "repeat", emptyMessage: "Anything you share will appear here." },
   tags: { id: "tags", title: "Tags", description: "Mentions and tag notifications", iconKey: "tag", emptyMessage: "Tags and mentions will show up here." },
   stickerResponses: { id: "stickerResponses", title: "Sticker responses", description: "Sticker replies you've sent", iconKey: "smile", emptyMessage: "Sticker responses will show up here." },
   reviews: { id: "reviews", title: "Reviews", description: "Reviews and ratings you've left", iconKey: "star", emptyMessage: "Reviews you leave will show up here." },
   recentlyDeleted: { id: "recentlyDeleted", title: "Recently deleted", description: "Content removed from your profile", iconKey: "trash", emptyMessage: "Deleted posts will show up here." },
   archived: { id: "archived", title: "Archived", description: "Archived posts and stories", iconKey: "archive", emptyMessage: "Archived posts and stories will show up here." },
   posts: { id: "posts", title: "Posts", description: "Content you've shared", iconKey: "grid", emptyMessage: "Your posts will show up here." },
-  reels: { id: "reels", title: "Reels", description: "Short videos you've shared", iconKey: "play-circle", emptyMessage: "Your reels will show up here." },
+  reels: { id: "reels", title: "Clips", description: "Short videos you've shared", iconKey: "play-circle", emptyMessage: "Your clips will show up here." },
   highlights: { id: "highlights", title: "Highlights", description: "Highlights saved on your profile", iconKey: "sparkles", emptyMessage: "Your highlights will show up here." },
   notInterested: { id: "notInterested", title: "Not interested", description: "Content and creators you've hidden", iconKey: "eye-off", emptyMessage: "Hidden content will show up here." },
   interested: { id: "interested", title: "Interested", description: "Things you've saved or liked", iconKey: "heart-plus", emptyMessage: "Liked, saved and watch later content will show up here." },
   timeSpent: { id: "timeSpent", title: "Time spent", description: "Where you're spending time in SocialSea", iconKey: "clock", emptyMessage: "Time spent will appear after you browse the app." },
-  watchHistory: { id: "watchHistory", title: "Watch history", description: "Videos and reels you've watched", iconKey: "history", emptyMessage: "Watched videos will show up here." },
+  watchHistory: { id: "watchHistory", title: "Watch history", description: "Videos and clips you've watched", iconKey: "history", emptyMessage: "Watched videos will show up here." },
   accountHistory: { id: "accountHistory", title: "Account history", description: "Recent account and settings changes", iconKey: "shield", emptyMessage: "Account changes will show up here." },
   recentSearches: { id: "recentSearches", title: "Recent searches", description: "People, posts and jobs you've searched", iconKey: "search", emptyMessage: "Recent searches will show up here." },
   linkHistory: { id: "linkHistory", title: "Link History", description: "External links you've opened", iconKey: "link", emptyMessage: "External links you open will show up here." }
@@ -173,7 +173,7 @@ const buildContentRoute = (item, source = "feed") => {
   if (!id) return "/feed";
   if (source === "stories") return "/stories";
   if (source === "highlights") return "/profile/me";
-  if (source === "reels" || isLikelyReel(item, source)) return `/reels?post=${encodeURIComponent(id)}`;
+  if (source === "reels" || isLikelyReel(item, source)) return `/clips?post=${encodeURIComponent(id)}`;
   if (source === "watch") return `/watch/${encodeURIComponent(id)}`;
   return isVideoContent(item) ? `/watch/${encodeURIComponent(id)}` : "/feed";
 };
@@ -307,7 +307,7 @@ export const resolveRouteLabel = (pathname) => {
   const value = normalizeString(pathname).split("?")[0].split("#")[0];
   if (!value || value === "/") return "Home";
   if (value.startsWith("/feed")) return "Feed";
-  if (value.startsWith("/reels")) return "Reels";
+  if (value.startsWith("/reels") || value.startsWith("/clips")) return "Clips";
   if (value.startsWith("/watch")) return "Watch";
   if (value.startsWith("/chat")) return "Chat";
   if (value.startsWith("/notifications")) return "Notifications";
@@ -409,7 +409,7 @@ export const recordWatchHistory = ({ item, source = "watch" }) => {
       id: contentId || createId("watch"),
       title: resolveContentTitle(item),
       subtitle: resolveOwnerName(item),
-      description: source === "reels" ? "Watched in Reels" : "Watched video",
+      description: source === "reels" ? "Watched in Clips" : "Watched video",
       createdAt: nowIso(),
       mediaUrl: resolveMediaUrl(item),
       isVideo: true,

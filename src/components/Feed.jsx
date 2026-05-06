@@ -901,7 +901,6 @@ export default function Feed() {
 
   const resolveUrl = (url) => {
     if (!url) return "";
-    if (url.startsWith("http")) return url;
     return toApiUrl(url);
   };
 
@@ -1543,7 +1542,7 @@ export default function Feed() {
     ).trim();
     if (mediaType === "VIDEO") {
       if (inferIsShortVideo(candidate)) {
-        const reelUrl = new URL("/reels", window.location.origin);
+        const reelUrl = new URL("/clips", window.location.origin);
         reelUrl.searchParams.set("post", postId);
         if (previewMedia) reelUrl.searchParams.set("media", previewMedia);
         if (previewPoster) reelUrl.searchParams.set("poster", previewPoster);
@@ -1726,7 +1725,7 @@ export default function Feed() {
     const type = mediaTypeFor(post);
     if (feedMode === "all" && type === "VIDEO") {
       trackFeedInteraction(post, "watch");
-      navigate(`/reels?post=${post.id}`);
+      navigate(`/clips?post=${post.id}`);
       return;
     }
     const bucket = classifyVideoBucket(post, {
@@ -1737,7 +1736,7 @@ export default function Feed() {
     const isShortVideo = type === "VIDEO" && bucket === "short";
     if (isShortVideo) {
       trackFeedInteraction(post, "watch");
-      navigate(`/reels?post=${post.id}`);
+      navigate(`/clips?post=${post.id}`);
       return;
     }
     await openPost(post.id, false, false, "watch");

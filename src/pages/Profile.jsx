@@ -16,8 +16,8 @@ const FOLLOWING_CACHE_KEY = "socialsea_following_cache_v1";
 const HIDDEN_PROFILE_POSTS_KEY = "socialsea_hidden_profile_posts_v1";
 const PROFILE_CACHE_KEY = "socialsea_profile_cache_v1";
 const HIGHLIGHTS_STORAGE_KEY = "socialsea_highlights_v1";
-const PROFILE_REQ_TIMEOUT_MS = 2500;
-const POSTS_REQ_TIMEOUT_MS = 2500;
+const PROFILE_REQ_TIMEOUT_MS = 6000;
+const POSTS_REQ_TIMEOUT_MS = 5000;
 const FOLLOWING_REQ_TIMEOUT_MS = 1800;
 const MAX_SHORT_VIDEO_SECONDS = 90;
 
@@ -514,11 +514,14 @@ export default function Profile() {
     const isLocalHost =
       typeof window !== "undefined" &&
       ["localhost", "127.0.0.1"].includes(String(window.location.hostname || "").toLowerCase());
+    const localPreferredBases = isLocalHost
+      ? ["/api", "http://localhost:8080", "http://127.0.0.1:8080"]
+      : [];
     const baseCandidates = [
+      ...localPreferredBases,
       defaultBase || undefined,
       storedBase || undefined,
       envBase || undefined,
-      ...(isLocalHost ? ["http://localhost:8080", "http://127.0.0.1:8080", "/api"] : []),
       "/api"
     ].filter((value, index, arr) => value && arr.indexOf(value) === index);
 
@@ -636,7 +639,7 @@ export default function Profile() {
       let payload = null;
       let lastError = null;
       const primaryBase = baseCandidates[0];
-      const fallbackBases = baseCandidates.filter((base) => base !== primaryBase).slice(0, 2);
+      const fallbackBases = baseCandidates.filter((base) => base !== primaryBase);
 
       try {
         payload = await fetchProfileAtBase(primaryBase);
@@ -1057,7 +1060,7 @@ export default function Profile() {
     const isMeasuredPortrait = measuredWidth > 0 && measuredHeight > 0 && measuredHeight > measuredWidth;
     const isMeasuredShort = measuredDuration > 0 && measuredDuration <= MAX_SHORT_VIDEO_SECONDS;
     if (post?.isShortVideo || isMeasuredShort || isMeasuredPortrait) {
-      navigate(`/reels?post=${encodeURIComponent(postId)}`);
+      navigate(`/clips?post=${encodeURIComponent(postId)}`);
       return;
     }
     navigate(`/watch/${encodeURIComponent(postId)}`);
@@ -1177,9 +1180,9 @@ export default function Profile() {
     activeProfileTab === "reels" ? reels : activeProfileTab === "long-videos" ? longVideos : imagePosts;
   const loadedPostsCount = (imagePosts?.length || 0) + (reels?.length || 0) + (longVideos?.length || 0);
   const profileContentTitle =
-    activeProfileTab === "reels" ? "Reels" : activeProfileTab === "long-videos" ? "Long Videos" : "Posts";
+    activeProfileTab === "reels" ? "Clips" : activeProfileTab === "long-videos" ? "Long Videos" : "Posts";
   const emptyTabMessage =
-    activeProfileTab === "reels" ? "No reels yet" : activeProfileTab === "long-videos" ? "No long videos yet" : "No posts yet";
+    activeProfileTab === "reels" ? "No clips yet" : activeProfileTab === "long-videos" ? "No long videos yet" : "No posts yet";
   const postsCount = postsLoaded
     ? loadedPostsCount
     : Number.isFinite(Number(profile?.postsCount)) && Number(profile?.postsCount) >= 0
@@ -1576,7 +1579,7 @@ export default function Profile() {
                   role="tab"
                   aria-selected={profileTab === "reels"}
                 >
-                  Reels ({reels.length})
+                  Clips ({reels.length})
                 </button>
                 {showLongVideosOnProfile && (
                   <button
@@ -1595,8 +1598,8 @@ export default function Profile() {
             {isPrivateLocked && (
               <div className="profile-private-note">
                 {showLongVideosOnProfile
-                  ? "This account is private. Follow to see posts, reels, and long videos."
-                  : "This account is private. Follow to see posts and reels."}
+                  ? "This account is private. Follow to see posts, clips, and long videos."
+                  : "This account is private. Follow to see posts and clips."}
               </div>
             )}
             <div className="profile-posts-grid">
@@ -1710,7 +1713,7 @@ export default function Profile() {
                   <FiVideo />
                 </span>
                 <div>
-                  <span className="profile-create-label">Reel</span>
+                  <span className="profile-create-label">Clip</span>
                 </div>
               </button>
               <button type="button" className="profile-create-card accent-post" onClick={() => handleCreateAction("post")}>

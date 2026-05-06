@@ -1995,11 +1995,11 @@ export default function ChatMessages() {
                             <img
                               className="chat-reel-video"
                               src={previewPoster}
-                              alt="Reel preview"
+                              alt="Clip preview"
                               loading="lazy"
                             />
                           ) : (
-                            <div className="chat-reel-video chat-reel-placeholder">REEL</div>
+                            <div className="chat-reel-video chat-reel-placeholder">CLIP</div>
                           )}
                           <div className="chat-reel-overlay">
                             <span className="chat-reel-play">Ã¢â€“Â¶</span>

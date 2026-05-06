@@ -435,7 +435,7 @@ export default function Reels() {
       } catch (err) {
         console.error(err);
         if (!cancelled) {
-          setError("Failed to load reels");
+          setError("Failed to load clips");
           setLoading(false);
         }
       }
@@ -1051,12 +1051,12 @@ export default function Reels() {
       reel?.imageUrl ||
       ""
     ).trim();
-    const shareUrlObj = new URL("/reels", window.location.origin);
+    const shareUrlObj = new URL("/clips", window.location.origin);
     if (reelId) shareUrlObj.searchParams.set("post", reelId);
     if (previewMedia) shareUrlObj.searchParams.set("media", previewMedia);
     if (previewPoster) shareUrlObj.searchParams.set("poster", previewPoster);
     const shareUrl = shareUrlObj.toString();
-    const shareText = `${reel.description || reel.content || "Check this reel"} ${shareUrl}`;
+    const shareText = `${reel.description || reel.content || "Check this clip"} ${shareUrl}`;
     try {
       recordRepostActivity({ item: reel, source: "reels", via: "chat" });
       addStoryEntry(
@@ -1289,7 +1289,7 @@ export default function Reels() {
   const startGestureControl = async () => {
     if (gestureRunningRef.current) return;
     if (!reels.length) {
-      setGestureStatus("No reels to control");
+      setGestureStatus("No clips to control");
       return;
     }
     setGestureError("");
@@ -1371,7 +1371,7 @@ export default function Reels() {
             ) {
               lastScrollAtRef.current = now;
               poseConsumedRef.current = true;
-              setGestureStatus("Index finger: next reel");
+              setGestureStatus("Index finger: next clip");
               scrollToIndex(currentIndexRef.current + 1);
             } else if (
               pose === "threeFingers" &&
@@ -1381,7 +1381,7 @@ export default function Reels() {
             ) {
               lastScrollAtRef.current = now;
               poseConsumedRef.current = true;
-              setGestureStatus("Three fingers: previous reel");
+              setGestureStatus("Three fingers: previous clip");
               scrollToIndex(currentIndexRef.current - 1);
             } else if (
               pose === "thumbBent" &&
@@ -1392,7 +1392,7 @@ export default function Reels() {
               poseConsumedRef.current = true;
               const reel = reelsRef.current[currentIndexRef.current];
               if (reel) {
-                setGestureStatus("Thumb bent: liking reel");
+                setGestureStatus("Thumb bent: liking clip");
                 likeReel(reel.id);
               }
             }
@@ -1426,11 +1426,11 @@ export default function Reels() {
       >
         {error && <p className="reel-state is-error">{error}</p>}
         {!error && loading && reels.length === 0 && (
-          <p className="reel-state">Loading reels...</p>
+          <p className="reel-state">Loading clips...</p>
         )}
         {!error && !loading && reels.length === 0 && (
           <p className="reel-state">
-            No reels yet (only videos up to 60 seconds are shown).
+            No clips yet (only videos up to 60 seconds are shown).
           </p>
         )}
 
@@ -1450,7 +1450,7 @@ export default function Reels() {
           const isOwnReel = Number(reel?.user?.id) === myUserId;
           const isFollowing = !!followingByKey[ownerKey];
           const caption =
-            reel?.description || reel?.content || "Watch this reel";
+            reel?.description || reel?.content || "Watch this clip";
 
           return (
             <section className="reel-item" key={reel.id} data-reel-idx={idx}>
@@ -1485,7 +1485,7 @@ export default function Reels() {
                   <div className="reel-gradient-top" />
                   <div className="reel-gradient-bottom" />
                   <div className="reel-top-bar">
-                    <h3 className="reel-top-title">Reels</h3>
+                    <h3 className="reel-top-title">Clips</h3>
                     <span className="reel-top-chip">For You</span>
                   </div>
                 </div>
@@ -1499,7 +1499,7 @@ export default function Reels() {
                     type="button"
                     className="reel-action-btn"
                     onClick={toggleMute}
-                    title={allMuted ? "Unmute all reels" : "Mute all reels"}
+                    title={allMuted ? "Unmute all clips" : "Mute all clips"}
                   >
                     <span>{allMuted ? <FiVolumeX /> : <FiVolume2 />}</span>
                   </button>

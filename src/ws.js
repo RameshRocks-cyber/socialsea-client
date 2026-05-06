@@ -2,6 +2,10 @@ import { Client } from "@stomp/stompjs";
 import SockJS from "sockjs-client/dist/sockjs";
 import { getApiBaseUrl } from "./api/baseUrl";
 
+const WS_RECONNECT_DELAY_MS = 12000;
+const WS_MAX_RECONNECT_DELAY_MS = 60000;
+const SOCKJS_OPTIONS = { transports: ["websocket"] };
+
 const getStoredToken = () =>
   sessionStorage.getItem("accessToken") ||
   sessionStorage.getItem("token") ||
@@ -25,9 +29,10 @@ export const connectAdminNotifications = (onMessage) => {
 
   let disposed = false;
   const client = new Client({
-    webSocketFactory: () => new SockJS(`${wsBase}/ws?token=${encodeURIComponent(token)}`),
+    webSocketFactory: () => new SockJS(`${wsBase}/ws?token=${encodeURIComponent(token)}`, undefined, SOCKJS_OPTIONS),
     connectHeaders: { Authorization: `Bearer ${token}` },
-    reconnectDelay: 3000,
+    reconnectDelay: WS_RECONNECT_DELAY_MS,
+    maxReconnectDelay: WS_MAX_RECONNECT_DELAY_MS,
     debug: () => {},
   });
 
@@ -91,9 +96,10 @@ export const connectUserNotifications = (email, onMessage) => {
     return true;
   };
   const client = new Client({
-    webSocketFactory: () => new SockJS(`${wsBase}/ws?token=${encodeURIComponent(token)}`),
+    webSocketFactory: () => new SockJS(`${wsBase}/ws?token=${encodeURIComponent(token)}`, undefined, SOCKJS_OPTIONS),
     connectHeaders: { Authorization: `Bearer ${token}` },
-    reconnectDelay: 3000,
+    reconnectDelay: WS_RECONNECT_DELAY_MS,
+    maxReconnectDelay: WS_MAX_RECONNECT_DELAY_MS,
     debug: () => {}
   });
 

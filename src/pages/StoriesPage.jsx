@@ -16,7 +16,7 @@ import "./StoriesPage.css";
 
 const resolveMediaUrl = (raw) => {
   if (!raw) return "";
-  return String(raw).startsWith("http") ? String(raw) : toApiUrl(String(raw));
+  return toApiUrl(String(raw));
 };
 
 const isVideoUrl = (url) =>

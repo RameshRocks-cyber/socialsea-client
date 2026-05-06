@@ -7,7 +7,7 @@ import "./NotificationBuddy.css";
 
 
 const SETTINGS_STORAGE_KEY = "socialsea_settings_v1";
-const POLL_MS = 12000;
+const POLL_MS = 20000;
 const LONG_PRESS_MS = 520;
 const WALK_INTERVAL_MS = 220;
 const WALK_STEP_PX = 5;
@@ -1191,7 +1191,7 @@ export default function NotificationBuddy({ enabled = true }) {
       if (document.visibilityState === "hidden") return;
       try {
         const [notifResult, followResult, convoResult] = await Promise.allSettled([
-          api.get("/api/notifications", { params: { limit: 120 } }),
+          api.get("/api/notifications", { params: { limit: 50 } }),
           fetchFollowRequests(),
           api.get("/api/chat/conversations", {
             params: { page: 0, size: 100 },

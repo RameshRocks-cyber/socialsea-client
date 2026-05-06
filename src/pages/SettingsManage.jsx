@@ -30,9 +30,9 @@ const BOOL_OPTIONS = [
   {
     id: "study-mode",
     title: "Study Mode",
-    subtitle: "Hide reels while studying.",
+    subtitle: "Hide clips while studying.",
     prefKey: "studyModeReels",
-    label: "Study mode (hide Reels)"
+    label: "Study mode (hide Clips)"
   },
   {
     id: "gesture-cursor",

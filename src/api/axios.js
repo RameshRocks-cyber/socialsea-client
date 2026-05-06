@@ -48,6 +48,71 @@ const TRUSTED_API_ORIGIN = (() => {
   }
 })();
 
+const RETRYABLE_HTTP_STATUS = new Set([408, 429, 500, 502, 503, 504]);
+const RETRYABLE_METHODS = new Set(["get", "head", "options"]);
+const MAX_AUTO_RETRIES = 2;
+const BASE_RETRY_DELAY_MS = 700;
+const MAX_RETRY_DELAY_MS = 9000;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const parseRetryAfterMs = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return 0;
+  const asSeconds = Number(raw);
+  if (Number.isFinite(asSeconds) && asSeconds >= 0) {
+    return Math.min(MAX_RETRY_DELAY_MS, asSeconds * 1000);
+  }
+  const asDateMs = new Date(raw).getTime();
+  if (!Number.isFinite(asDateMs)) return 0;
+  return Math.min(MAX_RETRY_DELAY_MS, Math.max(0, asDateMs - Date.now()));
+};
+
+const isTimeoutLikeError = (error) => {
+  const code = String(error?.code || "").toUpperCase();
+  if (code === "ECONNABORTED" || code === "ETIMEDOUT") return true;
+  const message = String(error?.message || "").toLowerCase();
+  return message.includes("timeout");
+};
+
+const isNetworkLikeError = (error) => {
+  const code = String(error?.code || "").toUpperCase();
+  if (code === "ERR_NETWORK") return true;
+  const message = String(error?.message || "");
+  return message === "Network Error";
+};
+
+const getMaxRetries = (config) => {
+  const parsed = Number(config?.maxRetries);
+  if (Number.isFinite(parsed) && parsed >= 0) return Math.floor(parsed);
+  return MAX_AUTO_RETRIES;
+};
+
+const isAutoRetryAllowed = (error, config) => {
+  if (!config || config.disableAutoRetry === true) return false;
+  const method = String(config.method || "get").toLowerCase();
+  const forceRetry = config.retryable === true;
+  if (!forceRetry && !RETRYABLE_METHODS.has(method)) return false;
+
+  const retryCount = Number(config.__networkRetryCount || 0);
+  if (retryCount >= getMaxRetries(config)) return false;
+
+  const status = Number(error?.response?.status || 0);
+  if (status === 401 || status === 403) return false;
+  if (RETRYABLE_HTTP_STATUS.has(status)) return true;
+
+  if (!status && (isTimeoutLikeError(error) || isNetworkLikeError(error))) return true;
+  return false;
+};
+
+const computeRetryDelayMs = (error, retryCount) => {
+  const retryAfterMs = parseRetryAfterMs(error?.response?.headers?.["retry-after"]);
+  if (retryAfterMs > 0) return retryAfterMs;
+  const exponentialMs = Math.min(MAX_RETRY_DELAY_MS, BASE_RETRY_DELAY_MS * (2 ** retryCount));
+  const jitterMs = Math.floor(Math.random() * 250);
+  return exponentialMs + jitterMs;
+};
+
 if (previousBase && nextBase && previousBase !== nextBase) {
   clearAuthStorage();
   try {
@@ -83,6 +148,8 @@ function normalizeApiPath(config) {
 
 // 🔹 Attach Access Token Automatically
 api.interceptors.request.use((config) => {
+  config.__networkRetryCount = Number(config.__networkRetryCount || 0);
+
   const guardKey = getEndpointGuardKey(config);
   const bypassEndpointGuard = config?.bypassEndpointGuard === true;
   if (guardKey && !bypassEndpointGuard && shouldSkipEndpoint(guardKey)) {
@@ -164,6 +231,9 @@ api.interceptors.response.use(
   },
   async (error) => {
     const originalRequest = error.config;
+    if (!originalRequest) {
+      return Promise.reject(error);
+    }
     const status = error?.response?.status;
     const guardKey = getEndpointGuardKey(originalRequest);
     const bypassEndpointGuard = originalRequest?.bypassEndpointGuard === true;
@@ -181,6 +251,14 @@ api.interceptors.response.use(
       } else if (!status && error?.message === "Network Error") {
         markEndpointDown(guardKey, { status: 0, reason: "network-error" });
       }
+    }
+
+    if (isAutoRetryAllowed(error, originalRequest)) {
+      const retryCount = Number(originalRequest.__networkRetryCount || 0);
+      const delayMs = computeRetryDelayMs(error, retryCount);
+      originalRequest.__networkRetryCount = retryCount + 1;
+      await sleep(delayMs);
+      return api(originalRequest);
     }
 
     if (originalRequest?.skipAuth) {

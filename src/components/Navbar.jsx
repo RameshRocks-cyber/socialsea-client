@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   FiBell,
@@ -24,7 +24,7 @@ import "./Navbar.css";
 
 const ITEMS = [
   { to: "/feed", icon: FiHome, label: "Feed", match: (p) => p === "/feed" },
-  { to: "/reels", icon: FiVideo, label: "Reels", match: (p) => p === "/reels" },
+  { to: "/clips", icon: FiVideo, label: "Clips", match: (p) => p === "/clips" || p === "/reels" },
   { to: "/chat", icon: FiMessageSquare, label: "Chat", match: (p) => p === "/chat" || p.startsWith("/chat/") },
   { to: "/notifications", icon: FiBell, label: "Alerts", match: (p) => p === "/notifications" },
   { to: "/profile/me", icon: FiUser, label: "Profile", match: (p) => p.startsWith("/profile") },
@@ -56,9 +56,12 @@ const SOS_ALERT_STALE_MS =
   Number.isFinite(SOS_ALERT_STALE_MINUTES) && SOS_ALERT_STALE_MINUTES > 0
     ? SOS_ALERT_STALE_MINUTES * 60 * 1000
     : 0;
-const SOS_EMERGENCY_POLL_MS = Number(import.meta.env.VITE_SOS_EMERGENCY_POLL_MS || 2500);
-const SOS_NOTIFICATION_POLL_MS = Number(import.meta.env.VITE_SOS_NOTIFICATION_POLL_MS || 5000);
-const TRAFFIC_NOTIFICATION_POLL_MS = Number(import.meta.env.VITE_TRAFFIC_NOTIFICATION_POLL_MS || 5500);
+const SOS_EMERGENCY_POLL_MS = Number(import.meta.env.VITE_SOS_EMERGENCY_POLL_MS || 6000);
+const SOS_NOTIFICATION_POLL_MS = Number(import.meta.env.VITE_SOS_NOTIFICATION_POLL_MS || 12000);
+const TRAFFIC_NOTIFICATION_POLL_MS = Number(import.meta.env.VITE_TRAFFIC_NOTIFICATION_POLL_MS || 14000);
+const CALL_INBOX_POLL_MS = Number(import.meta.env.VITE_CALL_INBOX_POLL_MS || 4000);
+const CALL_INBOX_BACKOFF_MAX_MS = 30000;
+const CHAT_UNREAD_POLL_MS = Number(import.meta.env.VITE_CHAT_UNREAD_POLL_MS || 20000);
 const allowSelfEmergencyPopup = (() => {
   if (typeof window === "undefined") return false;
   const host = String(window.location.hostname || "").toLowerCase().trim();
@@ -90,7 +93,7 @@ const isPrivateIpHost = (host) => {
 const BAD_EMERGENCY_HOSTS = new Set([
   "localhost",
   "127.0.0.1",
-  "43.205.213.14",
+  "43.205.229.211",
   "socialsea.co.in",
   "www.socialsea.co.in"
 ]);
@@ -452,12 +455,12 @@ const readIsSosActive = () => {
 };
 
 const SNAP_LENSES = [
-  { id: "off", label: "Off", badge: "⦿", thumb: "linear-gradient(135deg, #131313, #282828)", filter: "none", mask: "" },
-  { id: "natural", label: "Natural", badge: "🍃", thumb: "linear-gradient(135deg, #50755f, #9ed8a0)", filter: "none", mask: "" },
+  { id: "off", label: "Off", badge: "?", thumb: "linear-gradient(135deg, #131313, #282828)", filter: "none", mask: "" },
+  { id: "natural", label: "Natural", badge: "??", thumb: "linear-gradient(135deg, #50755f, #9ed8a0)", filter: "none", mask: "" },
   {
     id: "colorful",
     label: "Colorful",
-    badge: "🎨",
+    badge: "??",
     thumb: "linear-gradient(135deg, #19a6ff, #7ce2ff 55%, #5adb88)",
     filter: "saturate(1.62) contrast(1.18) brightness(1.06)",
     mask: ""
@@ -465,7 +468,7 @@ const SNAP_LENSES = [
   {
     id: "cartoon",
     label: "Cartoon",
-    badge: "🧩",
+    badge: "??",
     thumb: "linear-gradient(135deg, #6f5eff, #f08dff)",
     filter: "contrast(1.34) saturate(1.34) brightness(1.08)",
     mask: ""
@@ -473,7 +476,7 @@ const SNAP_LENSES = [
   {
     id: "girl",
     label: "Girl",
-    badge: "💖",
+    badge: "??",
     thumb: "linear-gradient(135deg, #ff94ca, #ffa3a3)",
     filter: "brightness(1.1) saturate(1.16) sepia(0.08) hue-rotate(-10deg)",
     mask: ""
@@ -481,7 +484,7 @@ const SNAP_LENSES = [
   {
     id: "kawaii",
     label: "Kawaii",
-    badge: "🎀",
+    badge: "??",
     thumb: "linear-gradient(135deg, #ffd6ea, #ffeabf)",
     filter: "brightness(1.12) saturate(1.2) hue-rotate(-8deg)",
     maskType: "emoji-float",
@@ -490,7 +493,7 @@ const SNAP_LENSES = [
   {
     id: "angel",
     label: "Angel",
-    badge: "😇",
+    badge: "??",
     thumb: "linear-gradient(135deg, #e6f5ff, #fff3d8)",
     filter: "brightness(1.1) contrast(1.04) saturate(1.05)",
     maskType: "emoji-float",
@@ -499,7 +502,7 @@ const SNAP_LENSES = [
   {
     id: "party",
     label: "Party",
-    badge: "🥳",
+    badge: "??",
     thumb: "linear-gradient(135deg, #ffcf7a, #ff7adf)",
     filter: "brightness(1.08) saturate(1.24) contrast(1.06)",
     maskType: "emoji-float",
@@ -508,7 +511,7 @@ const SNAP_LENSES = [
   {
     id: "mood",
     label: "Mood",
-    badge: "😌",
+    badge: "??",
     thumb: "linear-gradient(135deg, #c7d2ff, #ffd1f2)",
     filter: "brightness(1.06) saturate(1.12) hue-rotate(-4deg)",
     maskType: "emoji-float",
@@ -517,101 +520,101 @@ const SNAP_LENSES = [
   {
     id: "glow",
     label: "Glow",
-    badge: "✨",
+    badge: "?",
     thumb: "linear-gradient(135deg, #ffe3f2, #ffd7a8)",
     filter: "brightness(1.12) contrast(1.05) saturate(1.18) hue-rotate(-6deg)",
-    mask: "✨"
+    mask: "?"
   },
   {
     id: "blush",
     label: "Blush",
-    badge: "💗",
+    badge: "??",
     thumb: "linear-gradient(135deg, #ffb6d5, #ffd1e8)",
     filter: "brightness(1.08) saturate(1.22) hue-rotate(-12deg)",
-    mask: "💗"
+    mask: "??"
   },
   {
     id: "sparkle",
     label: "Sparkle",
-    badge: "✦",
+    badge: "?",
     thumb: "linear-gradient(135deg, #e9f4ff, #fbe6ff)",
     filter: "brightness(1.1) contrast(1.04) saturate(1.1)",
-    mask: "✨✨"
+    mask: "??"
   },
   {
     id: "crown",
     label: "Crown",
-    badge: "👑",
+    badge: "??",
     thumb: "linear-gradient(135deg, #ffe29a, #f7c15a)",
     filter: "contrast(1.08) saturate(1.12) brightness(1.06)",
-    mask: "👑"
+    mask: "??"
   },
   {
     id: "butterfly",
     label: "Butterfly",
-    badge: "🦋",
+    badge: "??",
     thumb: "linear-gradient(135deg, #9ad0ff, #e1b3ff)",
     filter: "saturate(1.2) brightness(1.05)",
-    mask: "🦋"
+    mask: "??"
   },
   {
     id: "bunny",
     label: "Bunny",
-    badge: "🐰",
+    badge: "??",
     thumb: "linear-gradient(135deg, #ffe5f0, #ffc7dd)",
     filter: "brightness(1.08) saturate(1.16) hue-rotate(-6deg)",
-    mask: "🐰"
+    mask: "??"
   },
   {
     id: "pastel",
     label: "Pastel",
-    badge: "☁",
+    badge: "?",
     thumb: "linear-gradient(135deg, #d6f4ff, #ffe4f6)",
     filter: "brightness(1.05) saturate(1.05) contrast(0.98) hue-rotate(8deg)",
-    mask: "☁"
+    mask: "?"
   },
   {
     id: "dream",
     label: "Dream",
-    badge: "🌙",
+    badge: "??",
     thumb: "linear-gradient(135deg, #9fa7ff, #f5b3ff)",
     filter: "brightness(1.1) contrast(1.06) saturate(1.1) hue-rotate(-8deg)",
-    mask: "🌙"
+    mask: "??"
   },
   {
     id: "cartoon-dog",
     label: "Cartoon Dog",
-    badge: "🐶",
+    badge: "??",
     thumb: "linear-gradient(135deg, #f7c896, #f2a35f)",
     filter: "contrast(1.35) saturate(1.45) brightness(1.08)",
-    mask: "🐶",
+    mask: "??",
     maskAnchor: "center",
     maskScale: 2.25
   },
   {
     id: "dog-face",
     label: "Dog Face",
-    badge: "🐾",
+    badge: "??",
     thumb: "linear-gradient(135deg, #f3c08b, #eaa763)",
     filter: "contrast(1.2) saturate(1.25) brightness(1.05)",
-    mask: "🐶",
+    mask: "??",
     maskAnchor: "center",
     maskScale: 2.9
   },
   {
     id: "cartoon-cat",
     label: "Cartoon Cat",
-    badge: "🐱",
+    badge: "??",
     thumb: "linear-gradient(135deg, #f7d49a, #f5b65d)",
     filter: "contrast(1.32) saturate(1.42) brightness(1.07)",
-    mask: "🐱",
+    mask: "??",
     maskAnchor: "center",
     maskScale: 2.2
   },
   {
     id: "boy",
     label: "Boy",
-    badge: "♂",
+    badge: "?",
     thumb: "linear-gradient(135deg, #59a4ff, #7ed0ff)",
     filter: "contrast(1.12) saturate(0.92) hue-rotate(8deg)",
     mask: ""
@@ -619,29 +622,29 @@ const SNAP_LENSES = [
   {
     id: "aging",
     label: "Aging",
-    badge: "⏳",
+    badge: "?",
     thumb: "linear-gradient(135deg, #ae8f75, #d0bda3)",
     filter: "sepia(0.28) contrast(1.16) grayscale(0.18)",
     mask: ""
   },
-  { id: "cat", label: "Cat", badge: "CAT", thumb: "linear-gradient(135deg, #f7ab56, #f9d179)", filter: "none", mask: "🐱" },
-  { id: "dog", label: "Dog", badge: "DOG", thumb: "linear-gradient(135deg, #c48f63, #e5cb9f)", filter: "none", mask: "🐶" }
+  { id: "cat", label: "Cat", badge: "CAT", thumb: "linear-gradient(135deg, #f7ab56, #f9d179)", filter: "none", mask: "??" },
+  { id: "dog", label: "Dog", badge: "DOG", thumb: "linear-gradient(135deg, #c48f63, #e5cb9f)", filter: "none", mask: "??" }
 ];
 
 const SNAP_TOOLS = [
   { id: "text", label: "Aa", title: "Add text" },
-  { id: "loop", label: "∞", title: "Auto emoji" },
-  { id: "sparkle", label: "✧", title: "Sparkle" },
-  { id: "flip", label: "⌄", title: "Flip camera" }
+  { id: "loop", label: "8", title: "Auto emoji" },
+  { id: "sparkle", label: "?", title: "Sparkle" },
+  { id: "flip", label: "?", title: "Flip camera" }
 ];
 
 const EMOJI_PACKS = [
-  { id: "kawaii", label: "Kawaii", emojis: ["🎀", "🌸", "💗", "✨", "🫧", "💖"] },
-  { id: "hearts", label: "Hearts", emojis: ["💗", "💖", "💞", "💕", "💘", "❤️"] },
-  { id: "sparkle", label: "Sparkle", emojis: ["✨", "✦", "✧", "🌟", "💫", "🫧"] },
-  { id: "angel", label: "Angel", emojis: ["😇", "👼", "✨", "☁", "🕊️", "💗"] },
-  { id: "party", label: "Party", emojis: ["🥳", "🎉", "🎊", "✨", "💃", "🪩"] },
-  { id: "mood", label: "Mood", emojis: ["😌", "😊", "🫶", "💫", "🌙", "✨"] }
+  { id: "kawaii", label: "Kawaii", emojis: ["??", "??", "??", "?", "??", "??"] },
+  { id: "hearts", label: "Hearts", emojis: ["??", "??", "??", "??", "??", "??"] },
+  { id: "sparkle", label: "Sparkle", emojis: ["?", "?", "?", "??", "??", "??"] },
+  { id: "angel", label: "Angel", emojis: ["??", "??", "?", "?", "???", "??"] },
+  { id: "party", label: "Party", emojis: ["??", "??", "??", "?", "??", "??"] },
+  { id: "mood", label: "Mood", emojis: ["??", "??", "??", "??", "??", "?"] }
 ];
 
 export default function Navbar() {
@@ -753,7 +756,7 @@ export default function Navbar() {
 
   const items = ITEMS.map((item) => {
     if (item.label === "Profile") return { ...item, to: profileTarget };
-    if (item.to === "/reels") {
+    if (item.to === "/clips") {
       if (ambulanceNavigationEnabled) {
         return {
           ...item,
@@ -860,7 +863,7 @@ export default function Navbar() {
       }
     };
     pollUnread();
-    const timer = setInterval(pollUnread, 12000);
+    const timer = setInterval(pollUnread, CHAT_UNREAD_POLL_MS);
     return () => {
       disposed = true;
       clearInterval(timer);
@@ -1143,6 +1146,9 @@ export default function Navbar() {
     // Chat page handles call inbox polling itself; avoid draining the same inbox twice.
     if (!myUserId || onChatRoute) return undefined;
     let disposed = false;
+    let busy = false;
+    let failureStreak = 0;
+    let timer = 0;
 
     const normalizeName = (value) => {
       const raw = String(value || "").trim();
@@ -1157,8 +1163,31 @@ export default function Navbar() {
         .join(" ");
     };
 
+    const nextDelayMs = () => {
+      const hiddenMultiplier =
+        typeof document !== "undefined" && document.visibilityState === "hidden" ? 2 : 1;
+      const baseDelay = Math.max(2500, CALL_INBOX_POLL_MS) * hiddenMultiplier;
+      if (!failureStreak) return baseDelay;
+      const backoff = baseDelay * (2 ** Math.min(failureStreak, 3));
+      return Math.min(CALL_INBOX_BACKOFF_MAX_MS, backoff);
+    };
+
+    const scheduleNext = () => {
+      if (disposed) return;
+      timer = window.setTimeout(pollCalls, nextDelayMs());
+    };
+
     const pollCalls = async () => {
+      if (disposed || busy) {
+        scheduleNext();
+        return;
+      }
+      busy = true;
       try {
+        if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+          failureStreak = 0;
+          return;
+        }
         const res = await api.get("/api/calls/inbox", { params: { includeTyping: false } });
         if (disposed) return;
         const list = Array.isArray(res.data) ? res.data : [];
@@ -1223,16 +1252,27 @@ export default function Navbar() {
           });
           break;
         }
+        failureStreak = 0;
       } catch {
-        // ignore transient poll failures
+        failureStreak += 1;
+      } finally {
+        busy = false;
+        scheduleNext();
       }
     };
 
     pollCalls();
-    const timer = setInterval(pollCalls, 1200);
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") {
+        failureStreak = 0;
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+
     return () => {
       disposed = true;
-      clearInterval(timer);
+      if (timer) clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [myUserId, onChatRoute]);
 
@@ -1979,7 +2019,7 @@ export default function Navbar() {
     };
 
     pollEmergency();
-    const timer = setInterval(pollEmergency, Math.max(1200, SOS_EMERGENCY_POLL_MS));
+    const timer = setInterval(pollEmergency, Math.max(4000, SOS_EMERGENCY_POLL_MS));
     return () => {
       disposed = true;
       clearInterval(timer);
@@ -2066,7 +2106,7 @@ export default function Navbar() {
     };
 
     pollEmergencyNotifications();
-    const timer = setInterval(pollEmergencyNotifications, Math.max(2500, SOS_NOTIFICATION_POLL_MS));
+    const timer = setInterval(pollEmergencyNotifications, Math.max(8000, SOS_NOTIFICATION_POLL_MS));
     return () => {
       disposed = true;
       clearInterval(timer);
@@ -2236,7 +2276,7 @@ export default function Navbar() {
     };
 
     pollTrafficNotifications();
-    const timer = setInterval(pollTrafficNotifications, Math.max(3000, TRAFFIC_NOTIFICATION_POLL_MS));
+    const timer = setInterval(pollTrafficNotifications, Math.max(10000, TRAFFIC_NOTIFICATION_POLL_MS));
     return () => {
       disposed = true;
       clearInterval(timer);
@@ -2463,7 +2503,7 @@ export default function Navbar() {
 
   const getEmojiOverlayItems = () => {
     const pack = activeEmojiPack || EMOJI_PACKS[0];
-    const emojis = pack?.emojis || ["✨"];
+    const emojis = pack?.emojis || ["?"];
     const baseOffsets = [
       { x: -0.18, y: -0.2 },
       { x: 0, y: -0.26 },
@@ -3576,7 +3616,7 @@ export default function Navbar() {
                           animationDelay: `${sparkle.delay}s`
                         }}
                       >
-                        ✨
+                        ?
                       </span>
                     ))}
                   </div>
@@ -3679,7 +3719,7 @@ export default function Navbar() {
                 </div>
 
                 <div className="ss-snap-pill">
-                  <span className="ss-snap-pill-mark">🔖</span>
+                  <span className="ss-snap-pill-mark">??</span>
                   <span className="ss-snap-pill-label">{activeLens.label}</span>
                   <button
                     type="button"

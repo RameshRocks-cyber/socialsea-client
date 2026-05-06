@@ -1883,7 +1883,7 @@ export default function LiveStart({ mode = "host" }) {
               <span className={`live-start-pill ${liveState ? "is-live" : ""}`}>
                 {liveState ? "Live now" : "Not live"}
               </span>
-              {liveState && <small>Shared across long videos, short videos, and reels.</small>}
+              {liveState && <small>Shared across long videos, short videos, and clips.</small>}
             </div>
             <div className="live-start-actions">
               <button

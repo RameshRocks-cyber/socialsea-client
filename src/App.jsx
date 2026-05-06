@@ -4,69 +4,8 @@ import { useLayoutEffect } from "react";
 import Navbar from "./components/Navbar";
 import NotificationBuddyBoundary from "./components/NotificationBuddyBoundary";
 import GestureCursor from "./components/GestureCursor";
-import Feed from "./components/Feed";
-import Login from "./pages/Login";
-import Register from "./pages/Register";
-import ForgotPassword from "./pages/ForgotPassword";
-import Upload from "./pages/Upload";
-import Reels from "./pages/Reels";
-import HighlightsCreate from "./pages/HighlightsCreate";
-import Notifications from "./pages/Notifications";
-import Profile from "./pages/Profile";
-import AnonymousFeed from "./pages/AnonymousFeed";
-import AnonymousUpload from "./pages/AnonymousUpload";
-import AdminDashboard from "./AdminDashboard";
-import AdminUsers from "./pages/AdminUsers";
-import AdminPosts from "./pages/AdminPosts";
-import AdminReports from "./pages/AdminReports";
-import AdminLiveRecordings from "./pages/AdminLiveRecordings";
-import AdminAnonymousPending from "./pages/AdminAnonymousPending";
-import AdminAmbulanceRequests from "./pages/AdminAmbulanceRequests";
-import NotificationsPage from "./NotificationsPage";
-import Dashboard from "./Dashboard";
 import ProtectedRoute from "./components/ProtectedRoute";
-import Unauthorized from "./pages/Unauthorized";
-import ProfileSetup from "./pages/ProfileSetup";
-import Settings from "./pages/Settings";
-import SettingsAppearance from "./pages/SettingsAppearance";
-import YourActivity from "./pages/YourActivity";
-import SettingsContentTypes from "./pages/SettingsContentTypes";
-import SettingsSounds from "./pages/SettingsSounds";
-import SettingsLocation from "./pages/SettingsLocation";
-import SettingsLanguage from "./pages/SettingsLanguage";
-import SettingsLoginActivity from "./pages/SettingsLoginActivity";
-import NotificationBuddySettings from "./pages/NotificationBuddySettings";
-import SettingsManage from "./pages/SettingsManage";
-import SOSPage from "./pages/SOSPage";
-import SOSNavigate from "./pages/SOSNavigate";
-import AmbulanceNavigation from "./pages/AmbulanceNavigation";
-import AdminLayout from "./AdminLayout";
-import Saved from "./pages/Saved";
 import { applyUiLanguageFromStorage, readPreferredLanguageSetting, syncPreferredLanguageFromBackend } from "./i18n/uiLanguage";
-import FollowRequests from "./pages/FollowRequests";
-import LongVideos from "./pages/LongVideos";
-import FollowConnections from "./pages/FollowConnections";
-import LiveRecordings from "./pages/LiveRecordings";
-import StorageVault from "./pages/StorageVault";
-import StorageVaultUnlock from "./pages/StorageVaultUnlock";
-import CallRecordings from "./pages/CallRecordings";
-import LiveStart from "./pages/LiveStart";
-import VideoCall from "./pages/VideoCall";
-import { ChatProvider } from "./pages/hooks/useChat";
-import StoryCreate from "./pages/StoryCreate";
-import StoriesPage from "./pages/StoriesPage";
-import Jobs from "./pages/Jobs";
-import CompanyProfile from "./pages/CompanyProfile";
-import CompanyHub from "./pages/CompanyHub";
-import JobDetail from "./pages/JobDetail";
-import JobApply from "./pages/JobApply";
-import JobNotifications from "./pages/JobNotifications";
-import JobProfile from "./pages/JobProfile";
-import PostJob from "./pages/PostJob";
-import ResumeBuilder from "./pages/ResumeBuilder";
-import ApplicantInbox from "./pages/ApplicantInbox.jsx";
-import AppliedJobs from "./pages/AppliedJobs.jsx";
-import ApplicantProfile from "./pages/ApplicantProfile.jsx";
 import { getUserRole, isAuthenticated } from "./auth";
 import { getApiBaseUrl } from "./api/baseUrl";
 import api from "./api/axios";
@@ -76,8 +15,66 @@ import { recordExternalLinkActivity, recordTimeSpent, resolveRouteLabel } from "
 import { lazyWithRetry } from "./utils/lazyWithRetry";
 import "./App.css";
 
+const Feed = lazy(lazyWithRetry(() => import("./components/Feed"), "feed-page"));
+const Login = lazy(lazyWithRetry(() => import("./pages/Login"), "login-page"));
+const Register = lazy(lazyWithRetry(() => import("./pages/Register"), "register-page"));
+const ForgotPassword = lazy(lazyWithRetry(() => import("./pages/ForgotPassword"), "forgot-password-page"));
+const Upload = lazy(lazyWithRetry(() => import("./pages/Upload"), "upload-page"));
+const Reels = lazy(lazyWithRetry(() => import("./pages/Reels"), "reels-page"));
+const HighlightsCreate = lazy(lazyWithRetry(() => import("./pages/HighlightsCreate"), "highlights-create-page"));
+const Notifications = lazy(lazyWithRetry(() => import("./pages/Notifications"), "notifications-page"));
+const Profile = lazy(lazyWithRetry(() => import("./pages/Profile"), "profile-page"));
+const AnonymousFeed = lazy(lazyWithRetry(() => import("./pages/AnonymousFeed"), "anonymous-feed-page"));
+const AnonymousUpload = lazy(lazyWithRetry(() => import("./pages/AnonymousUpload"), "anonymous-upload-page"));
+const AdminDashboard = lazy(lazyWithRetry(() => import("./AdminDashboard"), "admin-dashboard-page"));
+const AdminUsers = lazy(lazyWithRetry(() => import("./pages/AdminUsers"), "admin-users-page"));
+const AdminPosts = lazy(lazyWithRetry(() => import("./pages/AdminPosts"), "admin-posts-page"));
+const AdminReports = lazy(lazyWithRetry(() => import("./pages/AdminReports"), "admin-reports-page"));
+const AdminLiveRecordings = lazy(lazyWithRetry(() => import("./pages/AdminLiveRecordings"), "admin-live-recordings-page"));
+const AdminAnonymousPending = lazy(lazyWithRetry(() => import("./pages/AdminAnonymousPending"), "admin-anonymous-pending-page"));
+const AdminAmbulanceRequests = lazy(lazyWithRetry(() => import("./pages/AdminAmbulanceRequests"), "admin-ambulance-page"));
+const NotificationsPage = lazy(lazyWithRetry(() => import("./NotificationsPage"), "admin-notifications-page"));
+const Unauthorized = lazy(lazyWithRetry(() => import("./pages/Unauthorized"), "unauthorized-page"));
+const ProfileSetup = lazy(lazyWithRetry(() => import("./pages/ProfileSetup"), "profile-setup-page"));
+const Settings = lazy(lazyWithRetry(() => import("./pages/Settings"), "settings-page"));
+const SettingsAppearance = lazy(lazyWithRetry(() => import("./pages/SettingsAppearance"), "settings-appearance-page"));
+const YourActivity = lazy(lazyWithRetry(() => import("./pages/YourActivity"), "your-activity-page"));
+const SettingsContentTypes = lazy(lazyWithRetry(() => import("./pages/SettingsContentTypes"), "settings-content-types-page"));
+const SettingsSounds = lazy(lazyWithRetry(() => import("./pages/SettingsSounds"), "settings-sounds-page"));
+const SettingsLocation = lazy(lazyWithRetry(() => import("./pages/SettingsLocation"), "settings-location-page"));
+const SettingsLanguage = lazy(lazyWithRetry(() => import("./pages/SettingsLanguage"), "settings-language-page"));
+const SettingsLoginActivity = lazy(lazyWithRetry(() => import("./pages/SettingsLoginActivity"), "settings-login-activity-page"));
+const NotificationBuddySettings = lazy(lazyWithRetry(() => import("./pages/NotificationBuddySettings"), "notification-buddy-settings-page"));
+const SettingsManage = lazy(lazyWithRetry(() => import("./pages/SettingsManage"), "settings-manage-page"));
+const SOSPage = lazy(lazyWithRetry(() => import("./pages/SOSPage"), "sos-page"));
+const SOSNavigate = lazy(lazyWithRetry(() => import("./pages/SOSNavigate"), "sos-navigate-page"));
+const AmbulanceNavigation = lazy(lazyWithRetry(() => import("./pages/AmbulanceNavigation"), "ambulance-navigation-page"));
+const AdminLayout = lazy(lazyWithRetry(() => import("./AdminLayout"), "admin-layout-page"));
+const Saved = lazy(lazyWithRetry(() => import("./pages/Saved"), "saved-page"));
+const FollowRequests = lazy(lazyWithRetry(() => import("./pages/FollowRequests"), "follow-requests-page"));
+const LongVideos = lazy(lazyWithRetry(() => import("./pages/LongVideos"), "long-videos-page"));
+const FollowConnections = lazy(lazyWithRetry(() => import("./pages/FollowConnections"), "follow-connections-page"));
+const LiveRecordings = lazy(lazyWithRetry(() => import("./pages/LiveRecordings"), "live-recordings-page"));
+const StorageVault = lazy(lazyWithRetry(() => import("./pages/StorageVault"), "storage-vault-page"));
+const StorageVaultUnlock = lazy(lazyWithRetry(() => import("./pages/StorageVaultUnlock"), "storage-vault-unlock-page"));
+const CallRecordings = lazy(lazyWithRetry(() => import("./pages/CallRecordings"), "call-recordings-page"));
+const LiveStart = lazy(lazyWithRetry(() => import("./pages/LiveStart"), "live-start-page"));
+const StoryCreate = lazy(lazyWithRetry(() => import("./pages/StoryCreate"), "story-create-page"));
+const StoriesPage = lazy(lazyWithRetry(() => import("./pages/StoriesPage"), "stories-page"));
+const Jobs = lazy(lazyWithRetry(() => import("./pages/Jobs"), "jobs-page"));
+const CompanyProfile = lazy(lazyWithRetry(() => import("./pages/CompanyProfile"), "company-profile-page"));
+const CompanyHub = lazy(lazyWithRetry(() => import("./pages/CompanyHub"), "company-hub-page"));
+const JobDetail = lazy(lazyWithRetry(() => import("./pages/JobDetail"), "job-detail-page"));
+const JobApply = lazy(lazyWithRetry(() => import("./pages/JobApply"), "job-apply-page"));
+const JobNotifications = lazy(lazyWithRetry(() => import("./pages/JobNotifications"), "job-notifications-page"));
+const JobProfile = lazy(lazyWithRetry(() => import("./pages/JobProfile"), "job-profile-page"));
+const PostJob = lazy(lazyWithRetry(() => import("./pages/PostJob"), "post-job-page"));
+const ResumeBuilder = lazy(lazyWithRetry(() => import("./pages/ResumeBuilder"), "resume-builder-page"));
+const ApplicantInbox = lazy(lazyWithRetry(() => import("./pages/ApplicantInbox.jsx"), "applicant-inbox-page"));
+const AppliedJobs = lazy(lazyWithRetry(() => import("./pages/AppliedJobs.jsx"), "applied-jobs-page"));
+const ApplicantProfile = lazy(lazyWithRetry(() => import("./pages/ApplicantProfile.jsx"), "applicant-profile-page"));
+const AuthedRealtimeShell = lazy(lazyWithRetry(() => import("./components/AuthedRealtimeShell"), "authed-realtime-shell"));
 const Chat = lazy(lazyWithRetry(() => import("./pages/Chat"), "chat-page"));
-
 const isLoopbackHost = (host) => {
   const value = String(host || "").trim().toLowerCase();
   return value === "localhost" || value === "127.0.0.1";
@@ -98,9 +95,8 @@ const isPrivateIpHost = (host) => {
 const SWIPE_MIN_DISTANCE_PX = 72;
 const SWIPE_MAX_DURATION_MS = 700;
 const SWIPE_DOMINANCE_RATIO = 1.2;
-const PRESENCE_HEARTBEAT_MS = 20000;
+const PRESENCE_HEARTBEAT_MS = 45000;
 const SETTINGS_KEY = "socialsea_settings_v1";
-const SOS_SWIPE_ATTEMPT_EVENT = "ss-sos-activation-gesture";
 
 const readShowSosInNavbar = () => {
   try {
@@ -137,7 +133,7 @@ const getSwipeTabs = () => {
           path: "/ambulance",
           match: (pathname) => pathname === "/ambulance" || pathname.startsWith("/ambulance/")
         }
-      : { path: "/reels", match: (pathname) => pathname === "/reels" },
+      : { path: "/clips", match: (pathname) => pathname === "/clips" || pathname === "/reels" },
     { path: "/chat", match: (pathname) => pathname === "/chat" || pathname.startsWith("/chat/") },
     { path: "/notifications", match: (pathname) => pathname === "/notifications" },
     { path: "/profile/me", match: (pathname) => pathname.startsWith("/profile") },
@@ -195,12 +191,13 @@ function AppRoutes() {
     location.pathname === "/login" ||
     location.pathname === "/register" ||
     location.pathname === "/forgot-password";
-  const isReelsRoute = location.pathname === "/reels";
+  const isReelsRoute = location.pathname === "/reels" || location.pathname === "/clips";
   const isChatRoute = location.pathname === "/chat" || location.pathname.startsWith("/chat/");
   const isChatConversationRoute =
     location.pathname.startsWith("/chat/") && !location.pathname.startsWith("/chat/requests");
+  const isUploadRoute = location.pathname === "/upload";
   const shouldMountUserNavbar = authed && !location.pathname.startsWith("/admin") && !isAuthScreen;
-  const showUserNavbar = shouldMountUserNavbar && !isChatConversationRoute;
+  const showUserNavbar = shouldMountUserNavbar && !isChatConversationRoute && !isUploadRoute;
   const appMainRef = useRef(null);
   const routeTimerRef = useRef({ pathname: "", startedAt: 0 });
   const swipeStateRef = useRef({
@@ -516,7 +513,7 @@ function AppRoutes() {
       if (document.visibilityState === "visible") requestOnce();
     };
     document.addEventListener("visibilitychange", onVisibility);
-    intervalId = setInterval(requestOnce, 10000);
+    intervalId = setInterval(requestOnce, 30000);
 
     return () => {
       active = false;
@@ -625,19 +622,6 @@ function AppRoutes() {
       if (nextIndex < 0 || nextIndex >= activeSwipeTabs.length) return;
       const nextPath = resolveSwipeTabPath(nextIndex, activeSwipeTabs);
       if (!nextPath || nextPath === location.pathname) return;
-      if (nextPath === "/sos") {
-        try {
-          window.dispatchEvent(
-            new CustomEvent(SOS_SWIPE_ATTEMPT_EVENT, {
-              detail: { source: "swipe", direction: direction > 0 ? "left" : "right" }
-            })
-          );
-        } catch {
-          // If event dispatch fails for any reason, keep fallback navigation disabled
-          // to avoid accidental SOS arming from a single swipe.
-        }
-        return;
-      }
       navigate(nextPath);
     };
 
@@ -667,7 +651,8 @@ function AppRoutes() {
       >
         <div className={`app-content ${isReelsRoute ? "reels-content" : ""} ${isChatRoute ? "chat-content" : ""}`}>
           <PageErrorBoundary title="Page crashed">
-            <Routes>
+            <Suspense fallback={<div style={{ padding: 20, color: "#fff" }}>Loading...</div>}>
+              <Routes>
               <Route path="/" element={<Navigate to={isAuthenticated() ? "/feed" : "/login"} replace />} />
               <Route path="/home" element={<Navigate to={isAuthenticated() ? "/feed" : "/login"} replace />} />
               <Route path="/feed" element={<ProtectedRoute><Feed /></ProtectedRoute>} />
@@ -675,7 +660,8 @@ function AppRoutes() {
               <Route path="/register" element={<PublicOnlyRoute><Register /></PublicOnlyRoute>} />
               <Route path="/forgot-password" element={<PublicOnlyRoute><ForgotPassword /></PublicOnlyRoute>} />
               <Route path="/upload" element={<ProtectedRoute><Upload /></ProtectedRoute>} />
-              <Route path="/reels" element={<ProtectedRoute><Reels /></ProtectedRoute>} />
+              <Route path="/clips" element={<ProtectedRoute><Reels /></ProtectedRoute>} />
+              <Route path="/reels" element={<Navigate to="/clips" replace />} />
               <Route path="/watch" element={<ProtectedRoute><LongVideos /></ProtectedRoute>} />
               <Route path="/watch/:postId" element={<ProtectedRoute><LongVideos /></ProtectedRoute>} />
               <Route path="/notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
@@ -783,7 +769,8 @@ function AppRoutes() {
 
               <Route path="/unauthorized" element={<Unauthorized />} />
               <Route path="*" element={<Navigate to={authed ? "/feed" : "/login"} replace />} />
-            </Routes>
+              </Routes>
+            </Suspense>
           </PageErrorBoundary>
         </div>
       </main>
@@ -793,11 +780,9 @@ function AppRoutes() {
   if (!authed) return appShell;
 
   return (
-    <ChatProvider>
-      <VideoCall placement="page" />
-      <VideoCall placement="thread" />
-      {appShell}
-    </ChatProvider>
+    <Suspense fallback={appShell}>
+      <AuthedRealtimeShell>{appShell}</AuthedRealtimeShell>
+    </Suspense>
   );
 }
 
@@ -808,4 +793,5 @@ export default function App() {
     </BrowserRouter>
   );
 }
+
 

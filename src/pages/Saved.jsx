@@ -102,7 +102,7 @@ export default function Saved() {
       if (duration > LONG_VIDEO_SECONDS) {
         navigate(`/watch/${id}`);
       } else {
-        navigate(`/reels?post=${id}`);
+        navigate(`/clips?post=${id}`);
       }
       return;
     }

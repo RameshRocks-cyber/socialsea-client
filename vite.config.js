@@ -35,6 +35,8 @@ export default defineConfig(({ mode }) => {
   const detectedPort = readBackendPort()
   const fallbackDevTarget = detectedPort ? `http://localhost:${detectedPort}` : 'http://localhost:8080'
   const devProxyTarget = (env.VITE_DEV_PROXY_TARGET || '').trim() || fallbackDevTarget
+  const devServerHost = (env.VITE_DEV_SERVER_HOST || '').trim() || '0.0.0.0'
+  const devHmrHost = (env.VITE_DEV_HMR_HOST || '').trim()
   const isLocalProxyTarget = (value) => {
     const raw = String(value || '').trim().toLowerCase()
     if (!raw) return false
@@ -67,7 +69,7 @@ export default defineConfig(({ mode }) => {
       include: ['livekit-client', 'react', 'react-dom', 'react/jsx-runtime'],
     },
     server: {
-      host: 'localhost',
+      host: devServerHost,
       port: 5173,
       strictPort: true,
       proxy: useProxy
@@ -92,7 +94,7 @@ export default defineConfig(({ mode }) => {
         : {},
       hmr: {
         protocol: 'ws',
-        host: 'localhost',
+        ...(devHmrHost ? { host: devHmrHost } : {}),
         port: 5173,
         clientPort: 5173,
       },

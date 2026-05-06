@@ -48,6 +48,67 @@ function isPrivateIpHost(host) {
   return false;
 }
 
+function stripQueryAndHash(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const hashIndex = raw.indexOf("#");
+  const queryIndex = raw.indexOf("?");
+  const endIndex =
+    hashIndex === -1
+      ? queryIndex
+      : queryIndex === -1
+        ? hashIndex
+        : Math.min(hashIndex, queryIndex);
+  return (endIndex >= 0 ? raw.slice(0, endIndex) : raw).trim();
+}
+
+function looksLikeMediaFileName(value) {
+  const clean = stripQueryAndHash(value);
+  if (!clean) return false;
+  const fileName = clean.split("/").pop() || "";
+  if (!fileName || fileName.includes(" ")) return false;
+  return /\.(mp4|mov|webm|mkv|m4v|avi|mpg|mpeg|3gp|ogv|mp3|wav|aac|m4a|jpg|jpeg|png|gif|webp|bmp|svg|heic|heif)$/i.test(
+    fileName
+  );
+}
+
+function normalizeRelativePath(path) {
+  const raw = String(path || "").trim();
+  if (!raw) return "";
+
+  const queryIndex = raw.indexOf("?");
+  const hashIndex = raw.indexOf("#");
+  const splitIndex =
+    hashIndex === -1
+      ? queryIndex
+      : queryIndex === -1
+        ? hashIndex
+        : Math.min(hashIndex, queryIndex);
+
+  const barePath = (splitIndex >= 0 ? raw.slice(0, splitIndex) : raw).replace(/^\/+/, "");
+  const suffix = splitIndex >= 0 ? raw.slice(splitIndex) : "";
+  if (!barePath) return "";
+
+  if (raw.startsWith("/")) {
+    const normalized = `/${barePath}`;
+    if (/^\/(api|uploads)\//i.test(normalized)) {
+      return `${normalized}${suffix}`;
+    }
+    if (!barePath.includes("/") && looksLikeMediaFileName(barePath)) {
+      return `/uploads/${barePath}${suffix}`;
+    }
+    return `${normalized}${suffix}`;
+  }
+
+  if (/^uploads\//i.test(barePath)) {
+    return `/${barePath}${suffix}`;
+  }
+  if (!barePath.includes("/") && looksLikeMediaFileName(barePath)) {
+    return `/uploads/${barePath}${suffix}`;
+  }
+  return `/${barePath}${suffix}`;
+}
+
 function persistAuthBaseUrl(base) {
   const value = String(base || "").trim();
   if (typeof window === "undefined" || !value) return;
@@ -85,9 +146,14 @@ export function getApiBaseUrl() {
       return isLegacySocialSeaApiHost(targetHost);
     };
 
-    // Explicit override must win in all environments (including local dev).
-    // This avoids accidental fallback to localhost when a remote backend is intended.
-    if (forcedUrl && !shouldIgnoreLegacyHostedUrl(forcedUrl)) {
+    // Local development should never be forced to legacy hosted frontend APIs.
+    // This prevents accidental .env values (socialsea.co.in) from breaking local profile/feed calls.
+    const forcedHost = hostFromUrl(forcedUrl);
+    const forcedLooksHostedFrontend = isFrontendLikeHost(forcedHost);
+    const shouldIgnoreForcedOnLocalHost = isLocalHost && forcedLooksHostedFrontend;
+
+    // Explicit override wins in all non-local environments and for valid local overrides.
+    if (forcedUrl && !shouldIgnoreLegacyHostedUrl(forcedUrl) && !shouldIgnoreForcedOnLocalHost) {
       persistAuthBaseUrl(forcedUrl);
       return forcedUrl;
     }
@@ -155,13 +221,24 @@ export function toApiUrl(path = "") {
     try {
       const url = new URL(path);
       const host = url.hostname.toLowerCase();
+      const pathWithQueryAndHash = `${url.pathname || ""}${url.search || ""}${url.hash || ""}`;
+      const normalizedAbsolutePath = normalizeRelativePath(pathWithQueryAndHash);
+      const absolutePathPart = stripQueryAndHash(pathWithQueryAndHash).replace(/^\/+/, "");
+      const hasSinglePathSegment = Boolean(absolutePathPart) && !absolutePathPart.includes("/");
+      const shouldNormalizeFrontendMediaPath =
+        isFrontendLikeHost(host) &&
+        (
+          /^\/api\/uploads\//i.test(pathWithQueryAndHash) ||
+          /^\/uploads\//i.test(pathWithQueryAndHash) ||
+          (hasSinglePathSegment && looksLikeMediaFileName(absolutePathPart))
+        );
       const shouldRebase =
         isLoopbackHost(host) ||
-        isPrivateIpHost(host) ||
-        isFrontendLikeHost(host);
-      if (shouldRebase) {
-        const rebased = `${url.pathname}${url.search}${url.hash}`;
-        path = rebased;
+        isPrivateIpHost(host);
+      if (shouldNormalizeFrontendMediaPath) {
+        path = normalizedAbsolutePath.replace(/^\/api\/uploads\//i, "/uploads/");
+      } else if (shouldRebase) {
+        path = pathWithQueryAndHash;
       } else if (url.pathname.startsWith("/api/uploads/")) {
         url.pathname = url.pathname.replace("/api/uploads/", "/uploads/");
         return url.toString();
@@ -173,7 +250,7 @@ export function toApiUrl(path = "") {
     }
   }
   const baseTrimmed = String(base || "").replace(/\/+$/, "");
-  let normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  let normalizedPath = normalizeRelativePath(path);
   if (normalizedPath.startsWith("/api/uploads/")) {
     normalizedPath = normalizedPath.replace("/api/uploads/", "/uploads/");
   }

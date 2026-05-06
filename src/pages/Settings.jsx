@@ -590,7 +590,7 @@ export default function Settings() {
     { icon: "🎨", title: "Appearance", value: colorThemeLabel, keywords: ["theme", "color"], onClick: () => navigate("/settings/appearance") },
     { icon: "🧩", title: "Content types", value: contentTypeSummary, keywords: ["content", "type"], onClick: () => navigate("/settings/content-types") },
     { icon: "🌐", title: "Language", value: preferredLanguageLabel, keywords: ["language", "translate"], onClick: () => navigate("/settings/language") },
-    { icon: "🎓", title: "Study mode (hide Reels)", value: prefs.studyModeReels ? "On" : "Off", keywords: ["study", "reels"], onClick: () => setToggle("studyModeReels") },
+    { icon: "🎓", title: "Study mode (hide Clips)", value: prefs.studyModeReels ? "On" : "Off", keywords: ["study", "clips"], onClick: () => setToggle("studyModeReels") },
     { icon: "✋", title: "Hand gesture cursor", value: prefs.gestureCursorEnabled ? "On" : "Off", keywords: ["gesture", "cursor"], onClick: () => setToggle("gestureCursorEnabled") },
     { icon: "🚨", title: "SOS on Navbar", value: prefs.showSosInNavbar ? "On" : "Off", keywords: ["sos", "navbar"], onClick: () => setToggle("showSosInNavbar") },
     { icon: "🔔", title: "Notifications", value: prefs.notifications ? "On" : "Off", keywords: ["notification", "alerts"], onClick: () => navigate("/notifications") },
@@ -722,7 +722,7 @@ export default function Settings() {
           <Row icon={"🌐"} title="Language" value={preferredLanguageLabel} onClick={() => navigate("/settings/language")} />
           <Row
             icon={"🎓"}
-            title="Study mode (hide Reels)"
+            title="Study mode (hide Clips)"
             value={prefs.studyModeReels ? "On" : "Off"}
             onClick={() => setToggle("studyModeReels")}
           />

@@ -57,7 +57,7 @@ export default function SettingsContentTypes() {
           <button type="button" className="settings-back" onClick={() => navigate("/settings")}>{"<"}</button>
           <div>
             <h1>Content Types</h1>
-            <p className="settings-subtitle">Choose what shows up when you upload posts, reels, and live.</p>
+            <p className="settings-subtitle">Choose what shows up when you upload posts, clips, and live.</p>
           </div>
         </header>
 

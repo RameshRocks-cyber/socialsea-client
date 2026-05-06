@@ -54,10 +54,9 @@ const JobDetail = () => {
   const [notice, setNotice] = useState("");
   const [applications, setApplications] = useState(() => readApplications());
   const viewerEmail = getViewerEmail();
-  const alreadyApplied = useMemo(
-    () => (job?.id ? hasAppliedForJob(applications, job.id, viewerEmail) : false),
-    [applications, job?.id, viewerEmail]
-  );
+  const alreadyApplied = job?.id
+    ? hasAppliedForJob(applications, job.id, viewerEmail)
+    : false;
 
   useEffect(() => {
     const refresh = () => setApplications(readApplications());

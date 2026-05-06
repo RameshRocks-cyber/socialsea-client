@@ -86,7 +86,7 @@ const isPrivateIpHost = (host) => {
 const BAD_EMERGENCY_HOSTS = new Set([
   "localhost",
   "127.0.0.1",
-  "43.205.213.14",
+  "43.205.229.211",
   "socialsea.co.in",
   "www.socialsea.co.in"
 ]);
