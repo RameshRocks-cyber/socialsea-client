@@ -37,7 +37,8 @@ import { CONTENT_TYPE_OPTIONS, readContentTypePrefs } from "./contentPrefs";
 import "./Upload.css";
 
 const POST_GENRE_MAP_KEY = "socialsea_post_genre_map_v1";
-const MAX_IMAGE_UPLOAD_FILE_SIZE_BYTES = 80 * 1024 * 1024;`r`nconst MAX_VIDEO_UPLOAD_FILE_SIZE_BYTES = 1024 * 1024 * 1024;
+const MAX_IMAGE_UPLOAD_FILE_SIZE_BYTES = 80 * 1024 * 1024;
+const MAX_VIDEO_UPLOAD_FILE_SIZE_BYTES = 1024 * 1024 * 1024;
 
 const ASPECT_OPTIONS = [
   { label: "Original", value: "orig" },
