@@ -19,6 +19,7 @@ import { FaGraduationCap } from "react-icons/fa";
 import api from "../api/axios";
 import { getApiBaseUrl, toApiUrl } from "../api/baseUrl";
 import { pingChatPresence } from "../api/chatPresence";
+import { initializeWebPush } from "../push/webPush";
 import { connectUserNotifications } from "../ws";
 import "./Navbar.css";
 
@@ -2025,6 +2026,36 @@ export default function Navbar() {
       clearInterval(timer);
     };
   }, [myUserId, location.pathname]);
+
+  useEffect(() => {
+    const authToken =
+      sessionStorage.getItem("accessToken") ||
+      sessionStorage.getItem("token") ||
+      localStorage.getItem("accessToken") ||
+      localStorage.getItem("token") ||
+      "";
+    if (!authToken || authToken === "null" || authToken === "undefined") return undefined;
+    if (!myEmail) return undefined;
+
+    let disposed = false;
+    initializeWebPush({ promptIfNeeded: false }).catch(() => {});
+
+    const onFirstInteraction = () => {
+      if (disposed) return;
+      initializeWebPush({ promptIfNeeded: true }).catch(() => {});
+      window.removeEventListener("pointerdown", onFirstInteraction);
+      window.removeEventListener("keydown", onFirstInteraction);
+    };
+
+    window.addEventListener("pointerdown", onFirstInteraction, { passive: true });
+    window.addEventListener("keydown", onFirstInteraction, { passive: true });
+
+    return () => {
+      disposed = true;
+      window.removeEventListener("pointerdown", onFirstInteraction);
+      window.removeEventListener("keydown", onFirstInteraction);
+    };
+  }, [myEmail]);
 
   useEffect(() => {
     const authToken =

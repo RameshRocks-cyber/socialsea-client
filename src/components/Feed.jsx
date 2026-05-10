@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { FiBookmark } from "react-icons/fi";
 import { BsBookmarkFill } from "react-icons/bs";
@@ -10,7 +10,14 @@ import { readIdListFromStorage, readIdMapFromStorage, writeIdListToStorage, writ
 import { readLiveBroadcast, subscribeLiveBroadcast } from "../utils/liveBroadcast";
 import { resolveMediaUrl } from "../utils/mediaUrl";
 import { buildProfilePath } from "../utils/profileRoute";
-import { classifyVideoBucket, isExplicitReelPost, mediaTypeForPost, SHORT_VIDEO_SECONDS } from "../utils/videoFeedClassifier";
+import {
+  classifyVideoBucket,
+  isExplicitReelPost,
+  isPostFeedVideoPost,
+  isVideoFeedVideoPost,
+  mediaTypeForPost,
+  SHORT_VIDEO_SECONDS
+} from "../utils/videoFeedClassifier";
 import { isYouTubeMedia } from "../utils/youtubeMedia";
 import { CONTENT_TYPE_OPTIONS } from "../pages/contentPrefs";
 import "./Feed.css";
@@ -19,7 +26,11 @@ const CHAT_SHARE_DRAFT_KEY = "socialsea_chat_share_draft_v1";
 const POST_GENRE_MAP_KEY = "socialsea_post_genre_map_v1";
 const FEED_CACHE_KEY = "socialsea_feed_cache_v1";
 const LIVE_PREVIEW_FRAME_KEY = "socialsea_live_preview_frame_v1";
-const FEED_YT_RAIL_ITEMS = ["Home", "Trending", "Subscriptions", "History", "Playlists", "Watch Later"];
+const FEED_PAGE_SIZE = (() => {
+  const raw = Number(import.meta.env.VITE_FEED_PAGE_SIZE || 140);
+  if (!Number.isFinite(raw) || raw <= 0) return 140;
+  return Math.max(30, Math.min(300, Math.floor(raw)));
+})();
 const FEED_FILTER_PRIORITY_ORDER = [
   "general",
   "study",
@@ -442,10 +453,18 @@ export default function Feed() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const feedUserKey = useMemo(() => resolveFeedUserKey(), []);
-  const [feedMode, setFeedMode] = useState(() => {
+  const feedMode = useMemo(() => {
     const mode = String(searchParams.get("mode") || "").trim().toLowerCase();
     return mode === "long" ? "long" : "all";
-  });
+  }, [searchParams]);
+  const setFeedMode = useCallback((nextModeValue) => {
+    const nextMode = nextModeValue === "long" ? "long" : "all";
+    if (feedMode === nextMode) return;
+    const nextParams = new URLSearchParams(searchParams);
+    if (nextMode === "long") nextParams.set("mode", "long");
+    else nextParams.delete("mode");
+    setSearchParams(nextParams, { replace: true });
+  }, [feedMode, searchParams, setSearchParams]);
   const [feedMenuOpen, setFeedMenuOpen] = useState(false);
   const [contentTypeFilter, setContentTypeFilter] = useState("all");
   const [contentSubFilter, setContentSubFilter] = useState("all");
@@ -569,22 +588,6 @@ export default function Feed() {
   }, [feedMenuOpen]);
 
   useEffect(() => {
-    const mode = String(searchParams.get("mode") || "").trim().toLowerCase();
-    const nextMode = mode === "long" ? "long" : "all";
-    setFeedMode((prev) => (prev === nextMode ? prev : nextMode));
-  }, [searchParams]);
-
-  useEffect(() => {
-    const mode = String(searchParams.get("mode") || "").trim().toLowerCase();
-    const nextMode = feedMode === "long" ? "long" : "all";
-    if (mode === nextMode || (!mode && nextMode === "all")) return;
-    const nextParams = new URLSearchParams(searchParams);
-    if (nextMode === "long") nextParams.set("mode", "long");
-    else nextParams.delete("mode");
-    setSearchParams(nextParams, { replace: true });
-  }, [feedMode, searchParams, setSearchParams]);
-
-  useEffect(() => {
     const category = normalizeGenre(contentTypeFilter);
     const config = CONTENT_SUB_FILTERS[category];
     if (!config) {
@@ -664,6 +667,7 @@ export default function Feed() {
                 baseURL,
                 timeout: 10000,
                 suppressAuthRedirect: true,
+                params: { size: FEED_PAGE_SIZE },
               });
               const body = r?.data;
               const looksLikeHtml =
@@ -1668,18 +1672,21 @@ export default function Feed() {
   }, [typeFilteredPosts, contentTypeFilter, contentSubFilter, localGenreMap]);
 
   const longVideoPosts = useMemo(() => {
-    // "Video" tab should show all in-app playable videos (direct mp4/webm/etc),
-    // not just >90s content.
-    return subFilteredPosts.filter(
-      (post) => mediaTypeFor(post) === "VIDEO" && !isYouTubeMedia(post) && !isExplicitReelPost(post)
-    );
+    return subFilteredPosts.filter((post) => {
+      if (mediaTypeFor(post) !== "VIDEO") return false;
+      if (isYouTubeMedia(post) || isExplicitReelPost(post)) return false;
+      return isVideoFeedVideoPost(post);
+    });
   }, [subFilteredPosts]);
 
   const longVideoFeedPosts = useMemo(() => longVideoPosts, [longVideoPosts]);
 
   const feedPosts = useMemo(() => {
-    // Feed tab should show only photo posts (not reels / not long videos).
-    return subFilteredPosts.filter((post) => mediaTypeFor(post) !== "VIDEO");
+    return subFilteredPosts.filter((post) => {
+      if (isExplicitReelPost(post)) return false;
+      if (mediaTypeFor(post) === "VIDEO") return isPostFeedVideoPost(post);
+      return true;
+    });
   }, [subFilteredPosts]);
 
   const activeFeedIndex = useMemo(
@@ -1775,17 +1782,22 @@ export default function Feed() {
   };
 
   const activePost = posts.find((p) => p.id === activePostId) || null;
-  const isVideoViewer = activePost ? mediaTypeFor(activePost) === "VIDEO" : false;
+  const isVideoViewer = activePost ? mediaTypeFor(activePost) === "VIDEO" && feedMode === "long" : false;
   const viewerPosts = useMemo(() => {
     if (!activePost) return [];
+    if (feedMode === "all" && activeFeedIndex >= 0 && feedPosts.length) {
+      return [...feedPosts.slice(activeFeedIndex), ...feedPosts.slice(0, activeFeedIndex)];
+    }
     const activeType = mediaTypeFor(activePost);
-    const videoPool = subFilteredPosts.filter((p) => mediaTypeFor(p) === "VIDEO");
+    const videoPool = subFilteredPosts.filter(
+      (p) => mediaTypeFor(p) === "VIDEO" && !isYouTubeMedia(p) && !isExplicitReelPost(p) && isVideoFeedVideoPost(p)
+    );
     const pool = activeType === "VIDEO" ? videoPool : [activePost];
     const idx = pool.findIndex((p) => Number(p?.id) === Number(activePost.id));
     if (idx < 0) return [activePost];
     const ordered = [...pool.slice(idx), ...pool.slice(0, idx)];
     return ordered.length ? ordered : [activePost];
-  }, [activePost, subFilteredPosts]);
+  }, [activePost, feedMode, activeFeedIndex, feedPosts, subFilteredPosts]);
 
   useEffect(() => {
     if (!activePostId) return undefined;
@@ -1803,6 +1815,7 @@ export default function Feed() {
 
     const visibilityByVideo = new Map();
     const observedVideos = new Set();
+    const playAttemptByVideo = new WeakMap();
     const pauseOthers = (keep) => {
       observedVideos.forEach((video) => {
         if (video === keep) return;
@@ -1827,9 +1840,18 @@ export default function Feed() {
 
       pauseOthers(bestVideo);
       if (!bestVideo || bestRatio < 0.6) return;
+      if (!bestVideo.paused && !bestVideo.ended) return;
+      if (playAttemptByVideo.get(bestVideo)) return;
       try {
         const playAttempt = bestVideo.play();
-        if (playAttempt?.catch) playAttempt.catch(() => {});
+        if (playAttempt?.catch) {
+          playAttemptByVideo.set(bestVideo, true);
+          playAttempt
+            .catch(() => {})
+            .finally(() => {
+              playAttemptByVideo.delete(bestVideo);
+            });
+        }
       } catch {
         // ignore autoplay failures
       }
@@ -1853,17 +1875,35 @@ export default function Feed() {
         visibilityByVideo.set(video, 0);
         observer.observe(video);
       });
+      observedVideos.forEach((video) => {
+        if (rootEl.contains(video)) return;
+        observedVideos.delete(video);
+        visibilityByVideo.delete(video);
+        try {
+          observer.unobserve(video);
+        } catch {
+          // ignore unobserve failures
+        }
+      });
+    };
+
+    let rafId = 0;
+    const scheduleSync = () => {
+      if (rafId) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = 0;
+        syncObservedVideos();
+        playMostVisible();
+      });
     };
 
     syncObservedVideos();
-    const syncTimer = setInterval(() => {
-      syncObservedVideos();
-      playMostVisible();
-    }, 220);
-    const rafId = requestAnimationFrame(playMostVisible);
+    scheduleSync();
+    const mutationObserver = new MutationObserver(scheduleSync);
+    mutationObserver.observe(rootEl, { childList: true, subtree: true });
     return () => {
-      cancelAnimationFrame(rafId);
-      clearInterval(syncTimer);
+      if (rafId) cancelAnimationFrame(rafId);
+      mutationObserver.disconnect();
       observer.disconnect();
       pauseOthers(null);
       observedVideos.clear();
@@ -1983,7 +2023,22 @@ export default function Feed() {
   };
 
   return (
-    <div className="feed-page">
+    <div className="feed-page" data-no-page-swipe>
+      <div className="feed-filter-inline" role="tablist" aria-label="Feed options">
+        {FEED_CONTENT_TYPES.map((item) => (
+          <button
+            key={`filter-inline-${item.value}`}
+            type="button"
+            role="tab"
+            aria-selected={contentTypeFilter === item.value}
+            className={contentTypeFilter === item.value ? "is-active" : ""}
+            onClick={() => selectContentType(item.value)}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+      <div className="feed-main-column">
       <div className="feed-top-row">
         <div className="explore-search-wrap">
           <span className="explore-search-icon">{"\u2315"}</span>
@@ -2084,14 +2139,6 @@ export default function Feed() {
 
       {hasLongContent && feedMode === "long" && (
         <section className="feed-yt-shell">
-          <aside className="feed-yt-rail">
-            {FEED_YT_RAIL_ITEMS.map((item, idx) => (
-              <button key={item} type="button" className={`feed-yt-rail-item ${idx === 0 ? "is-active" : ""}`}>
-                {item}
-              </button>
-            ))}
-          </aside>
-
           <div className="feed-yt-main">
             <div className="long-video-feed">
           {liveBroadcast && (
@@ -2289,12 +2336,29 @@ export default function Feed() {
               {type === "VIDEO" ? (
                 <video
                   src={mediaUrl}
-                  autoPlay
                   loop
                   muted
                   playsInline
-                  preload="auto"
+                  preload="metadata"
                   className="explore-media"
+                  onMouseEnter={(event) => {
+                    const node = event.currentTarget;
+                    node.play().catch(() => {});
+                  }}
+                  onMouseLeave={(event) => {
+                    const node = event.currentTarget;
+                    node.pause();
+                    node.currentTime = 0;
+                  }}
+                  onFocus={(event) => {
+                    const node = event.currentTarget;
+                    node.play().catch(() => {});
+                  }}
+                  onBlur={(event) => {
+                    const node = event.currentTarget;
+                    node.pause();
+                    node.currentTime = 0;
+                  }}
                   onLoadedMetadata={(e) => {
                     const duration = Number(e.currentTarget.duration) || 0;
                     setVideoDurationByPost((prev) => {
@@ -2338,7 +2402,7 @@ export default function Feed() {
               const showFollow = !isOwnPost(post);
               return (
                 <article
-                  className={`post-view-card instagram-post-card ${type === "VIDEO" ? "is-video-post" : ""}`.trim()}
+                  className={`post-view-card instagram-post-card ${isVideoViewer && type === "VIDEO" ? "is-video-post" : ""}`.trim()}
                   key={`viewer-${post.id}-${idx}`}
                 >
                   <div className="ig-post-context">
@@ -2391,7 +2455,7 @@ export default function Feed() {
                         playsInline
                         preload="metadata"
                         muted={mutedByPost[post.id] ?? true}
-                        className="feed-media-view is-video-media"
+                        className={`feed-media-view ${isVideoViewer ? "is-video-media" : ""}`.trim()}
                         onClick={() => handleViewerMediaClick(post)}
                         onPlay={(event) => handleViewerVideoPlay(post, event)}
                         onPause={(event) => handleViewerVideoPause(post, event)}
@@ -2475,6 +2539,7 @@ export default function Feed() {
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }

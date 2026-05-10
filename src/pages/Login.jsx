@@ -20,6 +20,9 @@ function parseErrorMessage(err, fallback) {
   const data = err?.response?.data;
   if (typeof data === "string" && data.trim()) {
     const text = data.trim();
+    if (/too many requests/i.test(text)) {
+      return "Too many login attempts. Wait 60 seconds, then try again.";
+    }
     if (/^\s*<!doctype html/i.test(text) || /<html[\s>]/i.test(text)) {
       return "Server route mismatch (received HTML instead of API JSON). Please retry in a few seconds.";
     }

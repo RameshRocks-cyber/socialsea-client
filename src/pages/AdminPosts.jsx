@@ -70,9 +70,7 @@ export default function AdminPosts() {
         try {
           const res = await api.get(endpoint, {
             baseURL: base,
-            skipAuth: true,
-            suppressAuthRedirect: true,
-            skipRefresh: true
+            suppressAuthRedirect: true
           });
 
           const list = dedupePosts(normalizePostList(res?.data).map(toAdminPostShape).filter(isValidPost));

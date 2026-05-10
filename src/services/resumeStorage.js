@@ -1,9 +1,14 @@
 ﻿import api from "../api/axios";
 import { clearAuthStorage } from "../auth";
+import {
+  DEFAULT_RESUME_TEMPLATE,
+  normalizeResumeTemplate,
+} from "../utils/resumeTemplates";
 
 const RESUME_STORAGE_KEY = "socialsea_resume_snapshot_v1";
 
 const DEFAULT_RESUME = {
+  template: DEFAULT_RESUME_TEMPLATE,
   personal: {
     fullName: "",
     title: "",
@@ -76,6 +81,7 @@ const normalizeResume = (value) => {
   return {
     ...base,
     ...safe,
+    template: normalizeResumeTemplate(safe.template),
     personal,
     objective: ensureString(safe.objective),
     skills: ensureString(safe.skills),

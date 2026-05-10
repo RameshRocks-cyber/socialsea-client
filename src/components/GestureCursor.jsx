@@ -2,10 +2,16 @@ import { useEffect, useRef, useState } from "react";
 import { SETTINGS_KEY } from "../pages/soundPrefs";
 import "./GestureCursor.css";
 
-const GESTURE_MEDIAPIPE_WASM_BASE =
-  "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
-const GESTURE_HAND_MODEL_ASSET =
-  "https://storage.googleapis.com/mediapipe-assets/hand_landmarker.task";
+const GESTURE_MEDIAPIPE_WASM_BASES = [
+  "/mediapipe/tasks-vision/wasm",
+  "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm",
+  "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+];
+const GESTURE_HAND_MODEL_ASSETS = [
+  "/mediapipe/models/hand_landmarker.task",
+  "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+  "https://storage.googleapis.com/mediapipe-assets/hand_landmarker.task"
+];
 const GESTURE_CLICK_COOLDOWN_MS = 120;
 const GESTURE_CLICK_HOLD_FRAMES = 1;
 const GESTURE_MOVE_GAIN = 1.0;
@@ -53,6 +59,7 @@ export default function GestureCursor() {
   const cameraStreamRef = useRef(null);
   const detectFrameRef = useRef(0);
   const handLandmarkerRef = useRef(null);
+  const handLandmarkerLoadRef = useRef(null);
   const cursorRef = useRef(null);
   const cursorPosRef = useRef({ x: 0, y: 0, active: false });
   const prevLeftClickPinchRef = useRef(false);
@@ -490,33 +497,85 @@ export default function GestureCursor() {
     }
   };
 
+  const createHandLandmarker = async () => {
+    const vision = await import("@mediapipe/tasks-vision");
+    const { FilesetResolver, HandLandmarker } = vision;
+    // Prefer CPU first for faster and more predictable startup across mixed devices.
+    const delegates = ["CPU", "GPU"];
+    const failures = [];
+
+    for (const wasmBase of GESTURE_MEDIAPIPE_WASM_BASES) {
+      let fileset = null;
+      try {
+        fileset = await FilesetResolver.forVisionTasks(wasmBase);
+      } catch (error) {
+        failures.push(`wasm(${wasmBase}): ${error?.message || error}`);
+        continue;
+      }
+
+      for (const modelAssetPath of GESTURE_HAND_MODEL_ASSETS) {
+        for (const delegate of delegates) {
+          try {
+            return await HandLandmarker.createFromOptions(fileset, {
+              baseOptions: { modelAssetPath, delegate },
+              runningMode: "VIDEO",
+              numHands: 1,
+              minHandDetectionConfidence: 0.55,
+              minHandPresenceConfidence: 0.5,
+              minTrackingConfidence: 0.5
+            });
+          } catch (error) {
+            failures.push(
+              `${delegate}(${wasmBase}, ${modelAssetPath}): ${error?.message || error}`
+            );
+          }
+        }
+      }
+    }
+
+    const summary = failures.slice(0, 4).join(" | ");
+    throw new Error(
+      `Unable to initialize HandLandmarker after fallback attempts${summary ? `: ${summary}` : ""}`
+    );
+  };
+
   const start = async () => {
     if (runningRef.current) return;
+    if (typeof window !== "undefined" && !window.isSecureContext) {
+      throw new Error("Gesture cursor requires HTTPS (or localhost). Open this site on https:// or localhost.");
+    }
     if (!navigator.mediaDevices?.getUserMedia) {
       throw new Error("Camera access is not supported");
     }
     if (!handLandmarkerRef.current) {
-      const vision = await import("@mediapipe/tasks-vision");
-      const { FilesetResolver, HandLandmarker } = vision;
-      const fileset = await FilesetResolver.forVisionTasks(GESTURE_MEDIAPIPE_WASM_BASE);
-      handLandmarkerRef.current = await HandLandmarker.createFromOptions(fileset, {
-        baseOptions: { modelAssetPath: GESTURE_HAND_MODEL_ASSET, delegate: "GPU" },
-        runningMode: "VIDEO",
-        numHands: 1,
-        minHandDetectionConfidence: 0.55,
-        minHandPresenceConfidence: 0.5,
-        minTrackingConfidence: 0.5
+      if (!handLandmarkerLoadRef.current) {
+        handLandmarkerLoadRef.current = createHandLandmarker();
+      }
+      try {
+        handLandmarkerRef.current = await handLandmarkerLoadRef.current;
+      } catch (error) {
+        handLandmarkerLoadRef.current = null;
+        throw error;
+      }
+    }
+    const preferredCameraConstraints = {
+      facingMode: "user",
+      width: { ideal: GESTURE_CAMERA_WIDTH, max: 1280 },
+      height: { ideal: GESTURE_CAMERA_HEIGHT, max: 720 },
+      frameRate: { ideal: 60, max: 60 }
+    };
+    let stream = null;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: preferredCameraConstraints,
+        audio: false
+      });
+    } catch {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: false
       });
     }
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: "user",
-        width: { ideal: GESTURE_CAMERA_WIDTH, max: 1280 },
-        height: { ideal: GESTURE_CAMERA_HEIGHT, max: 720 },
-        frameRate: { ideal: 60, max: 60 }
-      },
-      audio: false
-    });
     cameraStreamRef.current = stream;
 
     const hiddenVideo = document.createElement("video");

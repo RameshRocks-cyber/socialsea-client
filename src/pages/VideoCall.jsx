@@ -154,10 +154,7 @@ export default function VideoCall({ placement = "page" }) {
     setSignAssistEnabled,
     signAssistAutoSpeak,
     setAutoSpeakEnabled,
-    signAssistContinuousMode,
     setContinuousModeEnabled,
-    captureSignAssistFromVideo,
-    signAssistBusy,
     signAssistVoiceGender,
     setSignAssistVoiceGender,
     signAssistText,
@@ -626,14 +623,6 @@ export default function VideoCall({ placement = "page" }) {
                   />
                   Auto-speak incoming
                 </label>
-                <label className="wa-sign-assist-auto">
-                  <input
-                    type="checkbox"
-                    checked={signAssistContinuousMode}
-                    onChange={(e) => setContinuousModeEnabled(e.target.checked)}
-                  />
-                  Continuous mode
-                </label>
                 <button
                   type="button"
                   className="wa-sign-assist-debug-toggle"
@@ -654,14 +643,7 @@ export default function VideoCall({ placement = "page" }) {
                 </div>
               )}
               <div className="wa-sign-assist-row">
-                <button
-                  type="button"
-                  className="wa-sign-assist-capture"
-                  onClick={captureSignAssistFromVideo}
-                  disabled={signAssistBusy}
-                >
-                  {signAssistBusy ? "Capturing..." : "Capture Sign"}
-                </button>
+                <p className="wa-sign-assist-auto-note">Auto capture is active and sends each captured sign instantly.</p>
                 <select
                   className="wa-sign-assist-gender"
                   value={signAssistVoiceGender}
@@ -675,7 +657,7 @@ export default function VideoCall({ placement = "page" }) {
               <textarea
                 className="wa-sign-assist-input"
                 rows={2}
-                placeholder="Type or edit translated sign text..."
+                placeholder="Auto-captured sign text appears here..."
                 value={signAssistText}
                 onChange={(e) => setSignAssistText(e.target.value)}
               />
@@ -820,7 +802,11 @@ export default function VideoCall({ placement = "page" }) {
                   className="wa-video-more-item"
                   onClick={() => {
                     setShowCallMoreMenu(false);
-                    setSignAssistEnabled((prev) => !prev);
+                    setSignAssistEnabled((prev) => {
+                      const next = !prev;
+                      if (next) setContinuousModeEnabled(false);
+                      return next;
+                    });
                   }}
                 >
                   <MdSignLanguage /> Sign assist

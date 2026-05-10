@@ -17,6 +17,7 @@ import {
   resolveFeedUserKey,
   trackFeedPersonalizationSignal,
 } from "../utils/feedPersonalization";
+import { isExplicitReelPost, isVideoFeedVideoPost, mediaTypeForPost } from "../utils/videoFeedClassifier";
 import "./LongVideos.css";
 
 const LONG_VIDEO_SECONDS = 90;
@@ -46,6 +47,15 @@ const QUALITY_OPTIONS = [
   { value: "360", label: "360p" }
 ];
 const PLAYBACK_SPEED_OPTIONS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+const SCREEN_RATIO_OPTIONS = [
+  { value: "fit", label: "Fit screen" },
+  { value: "fill", label: "Fill screen" },
+  { value: "stretch", label: "Stretch" }
+];
+const PLAY_ACTION_COOLDOWN_MS = 1200;
+const PLAY_ACTION_FALLBACK_RELEASE_MS = 2600;
+const PINCH_FILL_ENTER_RATIO = 1.06;
+const PINCH_FIT_EXIT_RATIO = 0.94;
 
 const readCachedWatchPosts = () => {
   try {
@@ -85,6 +95,9 @@ export default function LongVideos() {
   const gestureHudTimerRef = useRef(0);
   const controlsHideTimerRef = useRef(0);
   const quickAdjustHideTimerRef = useRef(0);
+  const playAttemptRef = useRef(false);
+  const playAttemptTimerRef = useRef(0);
+  const lastPlayTapAtRef = useRef(0);
   const [allPosts, setAllPosts] = useState(() => readCachedWatchPosts());
   const [videoDurationByPost, setVideoDurationByPost] = useState({});
   const [isLoading, setIsLoading] = useState(() => readCachedWatchPosts().length === 0);
@@ -99,13 +112,16 @@ export default function LongVideos() {
   const [commentTextByPost, setCommentTextByPost] = useState({});
   const [savedPostIds, setSavedPostIds] = useState({});
   const [watchLaterPostIds, setWatchLaterPostIds] = useState({});
-  const [showComments, setShowComments] = useState(true);
+  const [showComments, setShowComments] = useState(false);
+  const [commentsExpanded, setCommentsExpanded] = useState(false);
+  const [descriptionExpanded, setDescriptionExpanded] = useState(false);
   const [searchText, setSearchText] = useState("");
   const [activeCategory, setActiveCategory] = useState("All");
   const [playerBrightness, setPlayerBrightness] = useState(1);
   const [playerVolume, setPlayerVolume] = useState(1);
   const [gestureHud, setGestureHud] = useState({ text: "", position: "bottom" });
   const [isPlayerPaused, setIsPlayerPaused] = useState(false);
+  const [isPlayActionPending, setIsPlayActionPending] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(false);
   const [isPlayerFullscreen, setIsPlayerFullscreen] = useState(false);
   const [isPlayerMinimized, setIsPlayerMinimized] = useState(false);
@@ -124,6 +140,7 @@ export default function LongVideos() {
   const [isScreenLocked, setIsScreenLocked] = useState(false);
   const [playerPlaybackSpeed, setPlayerPlaybackSpeed] = useState(1);
   const [isLoopVideo, setIsLoopVideo] = useState(false);
+  const [playerScreenRatio, setPlayerScreenRatio] = useState("fit");
   const swipeRef = useRef({
     tracking: false,
     active: false,
@@ -136,7 +153,8 @@ export default function LongVideos() {
   const pinchRef = useRef({
     active: false,
     startDistance: 0,
-    didFullscreenToggle: false
+    didFillToggle: false,
+    didFitToggle: false
   });
   const watchProgressByPostRef = useRef({});
   const feedUserKeyRef = useRef(resolveFeedUserKey());
@@ -335,26 +353,11 @@ export default function LongVideos() {
         ""
     ).trim();
   const isVideoPost = (post) => {
-    const rawType = String(post?.type || post?.mediaType || post?.contentType || post?.mimeType || "")
-      .trim()
-      .toLowerCase();    if (rawType.includes("video")) return true;    if (rawType.includes("reel") || rawType.includes("short")) return true;    if (rawType.includes("image")) return false;
-    if (post?.reel === true || post?.reel === "true") return true;
-    if (post?.isReel === true || post?.isReel === "true") return true;
-    if (post?.isShort === true || post?.isShortVideo === true || post?.shortVideo === true) return true;
-    const url = mediaUrlFor(post).toLowerCase();
-    return /\.(mp4|mov|webm|mkv|m4v|avi|mpg|mpeg|3gp|ogv)(\?|#|$)/.test(url);
+    return mediaTypeForPost(post) === "VIDEO";
   };
 
   const isReelPost = (post) => {
-    if (!post) return false;
-    if (post?.originalReel === true || post?.originalReel === "true") return true;
-    if (post?.reel === true || post?.reel === "true") return true;
-    if (post?.isReel === true || post?.isReel === "true") return true;
-
-    const rawType = String(post?.type || post?.mediaType || post?.contentType || post?.mimeType || "")
-      .trim()
-      .toLowerCase();
-    return rawType.includes("reel");
+    return isExplicitReelPost(post);
   };
 
   const parseDurationLikeValue = (raw) => {    if (raw == null) return 0;    if (typeof raw === "number") {    if (!Number.isFinite(raw) || raw <= 0) return 0;
@@ -635,6 +638,34 @@ export default function LongVideos() {
       .join(" ");
   };
 
+  const profilePicFor = (postLike) => {
+    const raw =
+      postLike?.user?.profilePicUrl ||
+      postLike?.user?.profilePic ||
+      postLike?.user?.avatarUrl ||
+      postLike?.user?.avatar ||
+      postLike?.profilePicUrl ||
+      postLike?.profilePic ||
+      postLike?.avatarUrl ||
+      postLike?.avatar ||
+      "";
+    return raw ? resolveUrl(String(raw).trim()) : "";
+  };
+
+  const commentProfilePicFor = (commentLike) => {
+    const raw =
+      commentLike?.user?.profilePicUrl ||
+      commentLike?.user?.profilePic ||
+      commentLike?.user?.avatarUrl ||
+      commentLike?.user?.avatar ||
+      commentLike?.profilePicUrl ||
+      commentLike?.profilePic ||
+      commentLike?.avatarUrl ||
+      commentLike?.avatar ||
+      "";
+    return raw ? resolveUrl(String(raw).trim()) : "";
+  };
+
   const captionFor = (post) => post?.description || post?.content || "Untitled video";
 
   const uniqueByPostKey = (posts) => {
@@ -648,7 +679,14 @@ export default function LongVideos() {
 
   const videoPosts = useMemo(() => {
     return uniqueByPostKey(
-      allPosts.filter((post) => !!mediaUrlFor(post) && isVideoPost(post) && !isReelPost(post) && !isYouTubeMedia(post))
+      allPosts.filter(
+        (post) =>
+          !!mediaUrlFor(post) &&
+          isVideoPost(post) &&
+          !isReelPost(post) &&
+          !isYouTubeMedia(post) &&
+          isVideoFeedVideoPost(post)
+      )
     );
   }, [allPosts]);
 
@@ -666,20 +704,21 @@ export default function LongVideos() {
   const watchableVideos = useMemo(() => {
     const fallbackNonImage = uniqueByPostKey(
       allPosts.filter((post) => {
-        const mediaUrl = mediaUrlFor(post).toLowerCase();
-        if (!mediaUrl) return false;
+        if (!mediaUrlFor(post)) return false;
+        if (!isVideoPost(post) || isReelPost(post)) return false;
         if (isYouTubeMedia(post)) return false;
-        const rawType = String(post?.type || post?.mediaType || post?.contentType || post?.mimeType || "")
-          .trim()
-          .toLowerCase();
-        if (rawType.includes("image")) return false;
-        if (/\.(png|jpe?g|gif|webp|bmp|avif|svg|heic|heif)(\?|#|$)/.test(mediaUrl)) return false;
-        return true;
+        return isVideoFeedVideoPost(post);
       })
     );
     const baseList = longVideos.length ? longVideos : videoPosts.length ? videoPosts : fallbackNonImage;
     const routePostCandidate = allPosts.find(
-      (post) => String(post?.id ?? "") === String(postId ?? "") && !!mediaUrlFor(post) && !isYouTubeMedia(post)
+      (post) =>
+        String(post?.id ?? "") === String(postId ?? "") &&
+        !!mediaUrlFor(post) &&
+        !isYouTubeMedia(post) &&
+        isVideoFeedVideoPost(post) &&
+        isVideoPost(post) &&
+        !isReelPost(post)
     );
     if (routePostCandidate) return uniqueByPostKey([routePostCandidate, ...baseList]);
     return baseList;
@@ -1057,6 +1096,42 @@ export default function LongVideos() {
     if (desiredVolume === 0 && !video.muted) video.muted = true;
   };
 
+  const clearPlayAttemptLock = () => {
+    playAttemptRef.current = false;
+    setIsPlayActionPending(false);
+    if (playAttemptTimerRef.current) {
+      clearTimeout(playAttemptTimerRef.current);
+      playAttemptTimerRef.current = 0;
+    }
+  };
+
+  const armPlayAttemptLock = () => {
+    playAttemptRef.current = true;
+    setIsPlayActionPending(true);
+    if (playAttemptTimerRef.current) clearTimeout(playAttemptTimerRef.current);
+    playAttemptTimerRef.current = window.setTimeout(() => {
+      clearPlayAttemptLock();
+    }, PLAY_ACTION_FALLBACK_RELEASE_MS);
+  };
+
+  const safePlayVideo = async (video = playerRef.current) => {
+    if (!video) return;
+    const now = Date.now();
+    if (playAttemptRef.current) return;
+    if (now - lastPlayTapAtRef.current < PLAY_ACTION_COOLDOWN_MS) return;
+    lastPlayTapAtRef.current = now;
+    armPlayAttemptLock();
+    ensurePlayerAudio(video);
+    try {
+      const playAttempt = video.play();
+      if (playAttempt?.catch) {
+        await playAttempt.catch(() => {});
+      }
+    } finally {
+      if (video.paused) clearPlayAttemptLock();
+    }
+  };
+
   const applyPlayerVolume = (nextValue, { showHud = false } = {}) => {
     const raw = Number(nextValue);
     const normalized = Number.isFinite(raw) ? clamp(raw, 0, 1) : 1;
@@ -1073,9 +1148,9 @@ export default function LongVideos() {
   const togglePlayPause = () => {
     if (isScreenLocked) return;
     const video = playerRef.current;    if (!video) return;    if (video.paused) {
-      ensurePlayerAudio(video);
-      video.play().catch(() => {});
+      void safePlayVideo(video);
     } else {
+      clearPlayAttemptLock();
       video.pause();
     }
   };
@@ -1371,6 +1446,7 @@ export default function LongVideos() {
   const requestPlayerPictureInPicture = async () => {
     const video = playerRef.current;
     if (!video) return false;
+    if (video.disablePictureInPicture) return false;
     if (!("pictureInPictureEnabled" in document) || !document.pictureInPictureEnabled) return false;
     if (typeof video.requestPictureInPicture !== "function") return false;
     try {
@@ -1516,7 +1592,8 @@ export default function LongVideos() {
       pinchRef.current = {
         active: distance > 0,
         startDistance: Math.max(distance, 1),
-        didFullscreenToggle: false
+        didFillToggle: false,
+        didFitToggle: false
       };
       applyPlayerZoom();
       if (event.cancelable) event.preventDefault();
@@ -1556,12 +1633,17 @@ export default function LongVideos() {
       if (pinch.active) {
         const distance = getTouchDistance(first, second);
         const ratio = distance / Math.max(1, Number(pinch.startDistance || 1));
-        if (!pinch.didFullscreenToggle && ratio > 1.04) {
-          pinch.didFullscreenToggle = true;
-          if (!isPlayerFullscreen) {
-            void enterPlayerFullscreen();
-            showGestureHud("Fullscreen");
-          }
+        if (!pinch.didFillToggle && ratio >= PINCH_FILL_ENTER_RATIO) {
+          pinch.didFillToggle = true;
+          pinch.didFitToggle = false;
+          setPlayerScreenRatio("fill");
+          showGestureHud("Fill screen");
+          applyPlayerZoom();
+        } else if (!pinch.didFitToggle && ratio <= PINCH_FIT_EXIT_RATIO) {
+          pinch.didFitToggle = true;
+          pinch.didFillToggle = false;
+          setPlayerScreenRatio("fit");
+          showGestureHud("Normal screen");
           applyPlayerZoom();
         }
       }
@@ -1607,7 +1689,8 @@ export default function LongVideos() {
     }
     if (pinchRef.current.active) {
       pinchRef.current.active = false;
-      pinchRef.current.didFullscreenToggle = false;
+      pinchRef.current.didFillToggle = false;
+      pinchRef.current.didFitToggle = false;
       swipeRef.current.tracking = false;
       swipeRef.current.active = false;
       swipeRef.current.mode = "fullscreen";
@@ -1700,6 +1783,7 @@ export default function LongVideos() {
       if (gestureHudTimerRef.current) clearTimeout(gestureHudTimerRef.current);
       clearControlsHideTimer();
       clearQuickAdjustHideTimer();
+      clearPlayAttemptLock();
     };
   }, []);
 
@@ -1716,6 +1800,7 @@ export default function LongVideos() {
     const video = playerRef.current;
     const supportsPip =
       !!video &&
+      !video.disablePictureInPicture &&
       "pictureInPictureEnabled" in document &&
       document.pictureInPictureEnabled &&
       typeof video.requestPictureInPicture === "function";
@@ -1740,6 +1825,38 @@ export default function LongVideos() {
       video.removeEventListener("leavepictureinpicture", onLeavePictureInPicture);
     };
   }, [activeVideo?.id]);
+
+  useEffect(() => {
+    return () => {
+      if (typeof document === "undefined") return;
+      const video = playerRef.current;
+      const wrap = playerWrapRef.current;
+      const isVideoInPip =
+        !!video &&
+        "pictureInPictureElement" in document &&
+        document.pictureInPictureElement === video;
+
+      if (!isVideoInPip && video) {
+        try {
+          video.pause();
+        } catch {
+          // no-op
+        }
+        try {
+          video.removeAttribute("src");
+          video.load();
+        } catch {
+          // no-op
+        }
+      }
+
+      if (wrap && document.fullscreenElement === wrap) {
+        void document.exitFullscreen().catch(() => {
+          // no-op
+        });
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!isWatchMode) return;
@@ -1779,6 +1896,11 @@ export default function LongVideos() {
     setIsPlayerInPip(false);
     setIsScreenLocked(false);
     setPlayerZoom({ scale: 1, x: 0, y: 0 });
+    setShowComments(false);
+    setCommentsExpanded(false);
+    setDescriptionExpanded(false);
+    clearPlayAttemptLock();
+    lastPlayTapAtRef.current = 0;
   }, [activeVideo?.id]);
 
   useEffect(() => {    if (!isWatchMode || !activeVideo?.id) return;
@@ -1810,6 +1932,50 @@ export default function LongVideos() {
 
   const relatedVideos = watchableVideos.filter((item) => String(item.id) !== String(activeVideo?.id));
   const showSide = Boolean(activeVideo) || relatedVideos.length > 0;
+  const activeComments = activeVideo?.id ? commentsByPost[activeVideo.id] || [] : [];
+  const visibleComments = commentsExpanded ? activeComments : activeComments.slice(0, 2);
+  const activeCommentCount = activeComments.length;
+  const activeCommentDraft = activeVideo?.id ? commentTextByPost[activeVideo.id] || "" : "";
+  const canSubmitActiveComment = String(activeCommentDraft || "").trim().length > 0;
+  const activeUploaderName = activeVideo ? usernameFor(activeVideo) : "User";
+  const activeUploaderAvatar = activeVideo ? profilePicFor(activeVideo) : "";
+  const activeUploaderInitial = (activeUploaderName.charAt(0) || "U").toUpperCase();
+  const activeDescriptionText = String(activeVideo?.description || activeVideo?.content || "").trim();
+  const currentUserAvatar = (() => {
+    if (typeof window === "undefined") return "";
+    const raw =
+      sessionStorage.getItem("profilePicUrl") ||
+      localStorage.getItem("profilePicUrl") ||
+      sessionStorage.getItem("profilePic") ||
+      localStorage.getItem("profilePic") ||
+      sessionStorage.getItem("avatarUrl") ||
+      localStorage.getItem("avatarUrl") ||
+      sessionStorage.getItem("avatar") ||
+      localStorage.getItem("avatar") ||
+      "";
+    return raw ? resolveUrl(String(raw).trim()) : "";
+  })();
+  const currentUserDisplayName = normalizeDisplayName(
+    (typeof window !== "undefined" &&
+      (sessionStorage.getItem("name") ||
+        localStorage.getItem("name") ||
+        sessionStorage.getItem("username") ||
+        localStorage.getItem("username") ||
+        sessionStorage.getItem("email") ||
+        localStorage.getItem("email"))) ||
+      "You"
+  );
+  const currentUserInitial = (currentUserDisplayName.charAt(0) || "Y").toUpperCase();
+  const toggleCommentsPanel = () => {
+    setShowComments((prev) => {
+      const next = !prev;
+      if (next) {
+        setCommentsExpanded(false);
+        setDescriptionExpanded(false);
+      }
+      return next;
+    });
+  };
   const overlayVisible = controlsVisible && !isScreenLocked;
   const settingsMenuVisible = showQualityMenu && overlayVisible;
   const selectedQualityLabel = QUALITY_OPTIONS.find((opt) => opt.value === selectedQuality)?.label || "Auto";
@@ -1817,6 +1983,8 @@ export default function LongVideos() {
   const selectedSpeedLabel = `${playerPlaybackSpeed}x`;
   const selectedLoopLabel = isLoopVideo ? "On" : "Off";
   const selectedLockLabel = isScreenLocked ? "On" : "Off";
+  const selectedScreenRatioLabel =
+    SCREEN_RATIO_OPTIONS.find((opt) => opt.value === playerScreenRatio)?.label || SCREEN_RATIO_OPTIONS[0].label;
   const selectedVolumeLabel = playerVolume <= 0 ? "Muted" : `${Math.round(playerVolume * 100)}%`;
   const selectedBrightnessLabel = `${Math.round(playerBrightness * 100)}%`;
   const settingsRows = [
@@ -1825,8 +1993,7 @@ export default function LongVideos() {
     { key: "lock", label: "Lock Screen", value: selectedLockLabel },
     { key: "speed", label: "Playback speed", value: selectedSpeedLabel },
     { key: "loop", label: "Loop video", value: selectedLoopLabel },
-    { key: "volume", label: "Volume", value: selectedVolumeLabel },
-    { key: "brightness", label: "Brightness", value: selectedBrightnessLabel }
+    { key: "ratio", label: "Screen ratio", value: selectedScreenRatioLabel }
   ];
   const openSettingsPanel = (key) => {
     if (key === "lock") {
@@ -1863,6 +2030,13 @@ export default function LongVideos() {
     });
   };
 
+  const currentObjectFit = (() => {
+    if (playerZoom.scale > 1.001) return "cover";
+    if (playerScreenRatio === "fill") return "cover";
+    if (playerScreenRatio === "stretch") return "fill";
+    return "contain";
+  })();
+
   return (
     <div className={`yt-watch-page ${isWatchMode ? "is-watch-mode" : ""}`}>
       <header className="yt-topbar">
@@ -1871,7 +2045,7 @@ export default function LongVideos() {
           <input
             type="text"
             className="yt-search-input"
-            placeholder="Search long videos"
+            placeholder="Search videos"
             value={searchText}
             onChange={(e) => setSearchText(e.target.value)}
           />
@@ -1920,8 +2094,8 @@ export default function LongVideos() {
 
           <div className="yt-browse-main">
             <section className="yt-home-grid">
-              {isLoading && <p className="watch-empty">Loading long videos...</p>}
-              {!isLoading && !filteredLongVideos.length && <p className="watch-empty">No long videos found.</p>}
+              {isLoading && <p className="watch-empty">Loading videos...</p>}
+              {!isLoading && !filteredLongVideos.length && <p className="watch-empty">No videos found.</p>}
               {filteredLongVideos.map((video) => {
                 const raw = mediaUrlFor(video);
                 const url = resolveUrl(raw);
@@ -1946,7 +2120,11 @@ export default function LongVideos() {
                         muted
                         playsInline
                         preload="metadata"
+                        draggable={false}
+                        controlsList="nodownload noplaybackrate noremoteplayback"
+                        disablePictureInPicture
                         className="yt-home-thumb"
+                        onContextMenu={(event) => event.preventDefault()}
                         onPlay={(event) => {
                           event.currentTarget.pause();
                           event.currentTarget.currentTime = 0;
@@ -1971,20 +2149,21 @@ export default function LongVideos() {
       ) : (
         <div className="watch-page">
           <section className="watch-main">
-            {isLoading && <p className="watch-empty">Loading long videos...</p>}
+            {isLoading && <p className="watch-empty">Loading videos...</p>}
             {!isLoading && !activeVideo && (
               <p className="watch-empty">
                 {isBlockedYouTubeRoute
                   ? "This video can't be played here. Upload an MP4 to watch in-app."
-                  : "No long videos found."}
+                  : "No videos found."}
               </p>
             )}
 
             {activeVideo && (
               <>
                 <div
-                  className={`watch-player-wrap${isPlayerMinimized ? " is-minimized" : ""}${isPlayerInPip ? " is-pip" : ""}`}
+                  className={`watch-player-wrap${isPlayerMinimized ? " is-minimized" : ""}${isPlayerInPip ? " is-pip" : ""}${settingsMenuVisible ? " is-settings-open" : ""}`}
                   ref={playerWrapRef}
+                  onContextMenu={(event) => event.preventDefault()}
                   onMouseMove={() => {
                     if (!isScreenLocked) showPlayerControls(true);
                   }}
@@ -2006,17 +2185,21 @@ export default function LongVideos() {
                     ref={playerRef}
                     src={activeVideoUrl}
                     controls={false}
+                    controlsList="nodownload noplaybackrate noremoteplayback"
                     disableRemotePlayback
                     autoPlay
                     playsInline
+                    draggable={false}
                     className="watch-player"
                     style={{
                       "--watch-player-brightness": playerBrightness,
                       transform: `translate3d(${playerZoom.x}px, ${playerZoom.y}px, 0) scale(${playerZoom.scale})`,
                       transformOrigin: "center center",
-                      objectFit: playerZoom.scale > 1.001 ? "cover" : "contain"
+                      objectFit: currentObjectFit
                     }}
+                    onContextMenu={(event) => event.preventDefault()}
                     onPlay={() => {
+                      clearPlayAttemptLock();
                       setIsPlayerPaused(false);
                       syncPlayerTime();
                       if (activeVideo) {
@@ -2026,6 +2209,7 @@ export default function LongVideos() {
                       }
                     }}
                     onPause={() => {
+                      clearPlayAttemptLock();
                       setIsPlayerPaused(true);
                       showPlayerControls(true);
                       syncPlayerTime();
@@ -2035,10 +2219,14 @@ export default function LongVideos() {
                       }
                     }}
                     onEnded={() => {
+                      clearPlayAttemptLock();
                       setIsPlayerPaused(true);
                       showPlayerControls(true);
                       syncPlayerTime();
                     }}
+                    onWaiting={clearPlayAttemptLock}
+                    onStalled={clearPlayAttemptLock}
+                    onError={clearPlayAttemptLock}
                     onLoadedMetadata={() => {
                       syncPlayerTime();
                       refreshPlayerTrackOptions();
@@ -2075,11 +2263,12 @@ export default function LongVideos() {
                     </button>
                     <button
                       type="button"
-                      className="watch-nav-btn watch-nav-play"
+                      className={`watch-nav-btn watch-nav-play ${isPlayActionPending ? "is-disabled" : ""}`.trim()}
                       onPointerDown={(e) => e.stopPropagation()}
                       onClick={togglePlayPause}
                       title={isPlayerPaused ? "Play" : "Pause"}
                       aria-label={isPlayerPaused ? "Play" : "Pause"}
+                      disabled={isPlayActionPending}
                     >
                       {isPlayerPaused ? (
                         <svg className="watch-nav-icon" viewBox="0 0 24 24" aria-hidden="true">
@@ -2371,41 +2560,18 @@ export default function LongVideos() {
                             </div>
                           )}
 
-                          {activeSettingsPanel === "volume" && (
-                            <div className="watch-settings-subcontent">
-                              <input
-                                type="range"
-                                min="0"
-                                max="100"
-                                step="1"
-                                value={Math.round(playerVolume * 100)}
-                                className="watch-settings-range"
-                                onPointerDown={startSettingsAdjust}
-                                onPointerUp={stopSettingsAdjust}
-                                onPointerCancel={stopSettingsAdjust}
-                                onBlur={stopSettingsAdjust}
-                                onFocus={startSettingsAdjust}
-                                onChange={(e) => applyPlayerVolume((Number(e.target.value) || 0) / 100)}
-                              />
-                            </div>
-                          )}
-
-                          {activeSettingsPanel === "brightness" && (
-                            <div className="watch-settings-subcontent">
-                              <input
-                                type="range"
-                                min="50"
-                                max="170"
-                                step="1"
-                                value={Math.round(playerBrightness * 100)}
-                                className="watch-settings-range watch-settings-range--brightness"
-                                onPointerDown={startSettingsAdjust}
-                                onPointerUp={stopSettingsAdjust}
-                                onPointerCancel={stopSettingsAdjust}
-                                onBlur={stopSettingsAdjust}
-                                onFocus={startSettingsAdjust}
-                                onChange={(e) => setPlayerBrightness(clamp((Number(e.target.value) || 100) / 100, 0.5, 1.7))}
-                              />
+                          {activeSettingsPanel === "ratio" && (
+                            <div className="watch-settings-options">
+                              {SCREEN_RATIO_OPTIONS.map((opt) => (
+                                <button
+                                  key={opt.value}
+                                  type="button"
+                                  className={`watch-settings-option ${playerScreenRatio === opt.value ? "is-active" : ""}`}
+                                  onClick={() => setPlayerScreenRatio(opt.value)}
+                                >
+                                  {opt.label}
+                                </button>
+                              ))}
                             </div>
                           )}
                         </div>
@@ -2414,7 +2580,7 @@ export default function LongVideos() {
                   )}
                   <button
                     type="button"
-                    className={`watch-corner-fullscreen ${overlayVisible ? "" : "is-hidden"}`}
+                    className={`watch-corner-fullscreen ${overlayVisible && !settingsMenuVisible ? "" : "is-hidden"}`}
                     onPointerDown={(e) => e.stopPropagation()}
                     onClick={togglePlayerFullscreen}
                     title={isPlayerFullscreen ? "Exit fullscreen" : "Fullscreen"}
@@ -2486,9 +2652,21 @@ export default function LongVideos() {
                 </div>
 
                 <h1 className="watch-title">{captionFor(activeVideo)}</h1>
-                <p className="watch-owner">
-                  Posted by {usernameFor(activeVideo)}. {formatCompact(likeCounts[activeVideo.id] || 0)} likes. Uploaded {relativeFrom(activeVideo?.createdAt)}.
-                </p>
+                <div className="watch-channel-row">
+                  {activeUploaderAvatar ? (
+                    <img src={activeUploaderAvatar} alt={activeUploaderName} className="watch-channel-avatar-img" />
+                  ) : (
+                    <span className="watch-channel-avatar" aria-hidden="true">
+                      {activeUploaderInitial}
+                    </span>
+                  )}
+                  <div className="watch-channel-meta">
+                    <p className="watch-channel-name">{activeUploaderName}</p>
+                    <p className="watch-channel-sub">
+                      {formatCompact(likeCounts[activeVideo.id] || 0)} likes • Uploaded {relativeFrom(activeVideo?.createdAt)}
+                    </p>
+                  </div>
+                </div>
 
                 <div className="watch-actions-row">
                   {(() => {
@@ -2513,9 +2691,9 @@ export default function LongVideos() {
                         <button
                           type="button"
                           className="watch-action-btn"
-                          onClick={() => setShowComments((v) => !v)}
+                          onClick={toggleCommentsPanel}
                         >
-                          {"\u{1F4AC}"} {(commentsByPost[activeVideo.id] || []).length}
+                          {"\u{1F4AC}"} {activeCommentCount}
                         </button>
                         <button
                           type="button"
@@ -2536,29 +2714,125 @@ export default function LongVideos() {
                   })()}
                 </div>
 
+                {!showComments && (
+                  <section className={`watch-description-card ${descriptionExpanded ? "is-expanded" : ""}`}>
+                    <button
+                      type="button"
+                      className="watch-description-toggle"
+                      onClick={() => setDescriptionExpanded((prev) => !prev)}
+                    >
+                      <span className="watch-description-stats">
+                        {formatCompact(likeCounts[activeVideo.id] || 0)} likes • {relativeFrom(activeVideo?.createdAt)}
+                      </span>
+                      <span className="watch-description-more">
+                        {descriptionExpanded ? "Show less" : "Show more"}
+                      </span>
+                    </button>
+                    <p className={`watch-description-text ${descriptionExpanded ? "is-expanded" : ""}`}>
+                      {activeDescriptionText || "No description yet."}
+                    </p>
+                  </section>
+                )}
+
                 {showComments && (
-                  <section className="watch-comments">
+                  <section className={`watch-comments ${commentsExpanded ? "is-expanded" : "is-preview"}`}>
+                    <div className="watch-comments-head">
+                      <h3 className="watch-comments-title">Comments</h3>
+                      <div className="watch-comments-head-actions">
+                        <span className="watch-comments-count">{formatCompact(activeCommentCount)}</span>
+                        {activeCommentCount > 2 && !commentsExpanded && (
+                          <button
+                            type="button"
+                            className="watch-comments-expand-btn"
+                            onClick={() => setCommentsExpanded(true)}
+                          >
+                            View all
+                          </button>
+                        )}
+                        {activeCommentCount > 2 && commentsExpanded && (
+                          <button
+                            type="button"
+                            className="watch-comments-expand-btn"
+                            onClick={() => setCommentsExpanded(false)}
+                          >
+                            Show less
+                          </button>
+                        )}
+                      </div>
+                    </div>
                     <div className="watch-comment-input-row">
+                      {currentUserAvatar ? (
+                        <img src={currentUserAvatar} alt={currentUserDisplayName} className="watch-comment-avatar-img is-me" />
+                      ) : (
+                        <span className="watch-comment-avatar is-me" aria-hidden="true">
+                          {currentUserInitial}
+                        </span>
+                      )}
                       <input
                         type="text"
+                        className="watch-comment-input"
                         placeholder="Add a comment..."
-                        value={commentTextByPost[activeVideo.id] || ""}
+                        value={activeCommentDraft}
                         onChange={(e) =>
                           setCommentTextByPost((prev) => ({ ...prev, [activeVideo.id]: e.target.value }))
                         }
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && !e.shiftKey && canSubmitActiveComment) {
+                            e.preventDefault();
+                            submitComment(activeVideo.id);
+                          }
+                        }}
                       />
-                      <button type="button" onClick={() => submitComment(activeVideo.id)}>Post</button>
+                      <button
+                        type="button"
+                        className="watch-comment-submit"
+                        onClick={() => submitComment(activeVideo.id)}
+                        disabled={!canSubmitActiveComment}
+                      >
+                        Post
+                      </button>
                     </div>
-
-                    {(commentsByPost[activeVideo.id] || []).map((comment) => (
-                      <div className="watch-comment-item" key={comment.id}>
-                        <strong>{normalizeDisplayName(comment.user?.name || comment.user?.email || "User")}:</strong>{" "}
-                        {comment.text}
-                      </div>
-                    ))}
-                    {(commentsByPost[activeVideo.id] || []).length === 0 && (
-                      <p className="watch-empty">No comments yet.</p>
+                    {!commentsExpanded && activeCommentCount > 2 && (
+                      <p className="watch-comments-preview-note">Showing 2 of {activeCommentCount} comments</p>
                     )}
+                    <div className={`watch-comments-list ${commentsExpanded ? "is-expanded" : "is-preview"}`}>
+                      {visibleComments.map((comment, index) => {
+                        const author = normalizeDisplayName(
+                          comment?.user?.name ||
+                            comment?.user?.username ||
+                            comment?.user?.email ||
+                            comment?.username ||
+                            comment?.email ||
+                            "User"
+                        );
+                        const commentText = String(comment?.text || comment?.content || "").trim();
+                        if (!commentText) return null;
+                        const authorInitial = (author.charAt(0) || "U").toUpperCase();
+                        const authorAvatar = commentProfilePicFor(comment);
+                        const timeLabel = relativeFrom(
+                          comment?.createdAt || comment?.updatedAt || comment?.timestamp || comment?.time
+                        );
+                        return (
+                          <article className="watch-comment-item" key={comment?.id || `${author}-${index}`}>
+                            {authorAvatar ? (
+                              <img src={authorAvatar} alt={author} className="watch-comment-avatar-img" />
+                            ) : (
+                              <span className="watch-comment-avatar" aria-hidden="true">
+                                {authorInitial}
+                              </span>
+                            )}
+                            <div className="watch-comment-body">
+                              <p className="watch-comment-meta">
+                                <strong>{author}</strong>
+                                {timeLabel ? <span>{timeLabel}</span> : null}
+                              </p>
+                              <p className="watch-comment-text">{commentText}</p>
+                            </div>
+                          </article>
+                        );
+                      })}
+                      {activeCommentCount === 0 && <p className="watch-comments-empty">No comments yet.</p>}
+                    </div>
                   </section>
                 )}
               </>
@@ -2593,7 +2867,11 @@ export default function LongVideos() {
                           muted
                           playsInline
                           preload="metadata"
+                          draggable={false}
+                          controlsList="nodownload noplaybackrate noremoteplayback"
+                          disablePictureInPicture
                           className="watch-item-thumb"
+                          onContextMenu={(event) => event.preventDefault()}
                           onPlay={(event) => {
                             event.currentTarget.pause();
                             event.currentTarget.currentTime = 0;
@@ -2609,7 +2887,7 @@ export default function LongVideos() {
                     </article>
                   );
                 })}
-                {!relatedVideos.length && activeVideo && <p className="watch-empty">No long videos found.</p>}
+                {!relatedVideos.length && activeVideo && <p className="watch-empty">No videos found.</p>}
               </div>
             </aside>
           )}

@@ -1810,7 +1810,7 @@ body.ss-theme-white .profile-post-options-btn.ghost {
   }
 
   .profile-posts-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 
@@ -1840,7 +1840,7 @@ body.ss-theme-white .profile-post-options-btn.ghost {
   }
 
   .profile-posts-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
   }
 }
 
@@ -2022,5 +2022,138 @@ body.ss-theme-white .profile-post-options-btn.ghost {
 @media (max-width: 719px) {
   .profile-action-panel-right .profile-actions-row {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (min-width: 1100px) {
+  .profile-stats-row {
+    gap: 12px;
+  }
+
+  .profile-stat-card {
+    min-height: 82px;
+    padding: 14px 10px;
+    border-radius: 16px;
+    font-size: 11px;
+    transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+  }
+
+  .profile-stat-card b {
+    font-size: 18px;
+  }
+
+  .profile-stat-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(125, 163, 208, 0.62);
+    box-shadow: 0 14px 26px rgba(15, 49, 92, 0.18);
+  }
+
+  .profile-action-panel {
+    padding: 16px;
+    gap: 14px;
+    grid-template-columns: 1fr;
+  }
+
+  .profile-action-panel-left {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .profile-job-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .profile-job-button {
+    min-height: 72px;
+    padding: 14px 16px;
+    border-radius: 14px;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+  }
+
+  .profile-job-button span {
+    font-size: 15px;
+    line-height: 1.2;
+    letter-spacing: 0.1px;
+    font-weight: 800;
+  }
+
+  .profile-job-button small {
+    display: none;
+  }
+
+  .profile-job-button-wide {
+    min-height: 64px;
+  }
+
+  .profile-job-button:hover {
+    transform: translateY(-2px);
+    border-color: rgba(125, 163, 208, 0.65);
+    box-shadow: 0 14px 24px rgba(19, 52, 95, 0.14);
+  }
+
+  .profile-action-panel-right .profile-actions-own {
+    gap: 8px;
+  }
+
+  .profile-action-panel-right .profile-actions-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .profile-action-panel-right .profile-action-primary,
+  .profile-action-panel-right .profile-action-icon,
+  .profile-action-panel-right .profile-action-secondary {
+    min-height: 46px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    font-size: 13px;
+    line-height: 1.1;
+    transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease, filter 0.16s ease;
+  }
+
+  .profile-action-panel-right .profile-action-secondary {
+    font-weight: 800;
+  }
+
+  .profile-action-panel-right .profile-action-primary:hover,
+  .profile-action-panel-right .profile-action-icon:hover,
+  .profile-action-panel-right .profile-action-secondary:hover {
+    transform: translateY(-1px);
+    border-color: rgba(125, 163, 208, 0.62);
+    box-shadow: 0 10px 20px rgba(15, 49, 92, 0.14);
+  }
+
+  body.ss-theme-white .profile-action-panel-right .profile-actions-own {
+    border: 0;
+    overflow: visible;
+    background: transparent;
+  }
+
+  body.ss-theme-white .profile-action-panel-right .profile-action-primary,
+  body.ss-theme-white .profile-action-panel-right .profile-action-icon {
+    background: linear-gradient(145deg, #ffffff 0%, #edf4ff 100%) !important;
+    border: 1px solid rgba(96, 142, 191, 0.42) !important;
+    border-radius: 12px !important;
+    box-shadow: 0 8px 18px rgba(30, 77, 130, 0.14) !important;
+  }
+
+  body.ss-theme-white .profile-action-panel-right .profile-action-secondary {
+    background: linear-gradient(135deg, #1f5184 0%, #2e6fae 100%) !important;
+    border: 1px solid rgba(25, 66, 108, 0.72) !important;
+    border-radius: 12px !important;
+    color: #f4f9ff !important;
+    box-shadow: 0 10px 22px rgba(22, 63, 110, 0.24) !important;
+  }
+
+  body.ss-theme-white .profile-action-panel-right .profile-action-primary:hover,
+  body.ss-theme-white .profile-action-panel-right .profile-action-icon:hover,
+  body.ss-theme-white .profile-action-panel-right .profile-action-secondary:hover {
+    filter: brightness(1.02);
   }
 }

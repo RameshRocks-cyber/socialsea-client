@@ -5,7 +5,9 @@ import "./admin/AdminPanel.css";
 
 const NAV_ITEMS = [
   { to: "/admin/dashboard", label: "Dashboard" },
-  { to: "/admin/users", label: "Users" },
+  { to: "/admin/users", label: "Users", end: true },
+  { to: "/admin/users/notices/yellow", label: "Yellow Notices" },
+  { to: "/admin/users/notices/red", label: "Red Notices" },
   { to: "/admin/posts", label: "Posts" },
   { to: "/admin/live-recordings", label: "Live Recordings" },
   { to: "/admin/ambulance", label: "Ambulance Requests" },
@@ -32,6 +34,7 @@ export default function AdminLayout() {
             <NavLink
               key={item.to}
               to={item.to}
+              end={Boolean(item.end)}
               className={({ isActive }) => `admin-nav-link ${isActive ? "active" : ""}`}
               onClick={() => setSidebarOpen(false)}
             >

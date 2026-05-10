@@ -445,6 +445,15 @@ body.ss-theme-white .settings-logout-btn {
   display: block;
 }
 
+.settings-thumb-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ss-muted);
+  font-size: 0.78rem;
+  background: rgba(255, 255, 255, 0.03);
+}
+
 .settings-item-text h4 {
   margin: 0;
   font-size: 0.9rem;
@@ -470,6 +479,33 @@ body.ss-theme-white .settings-logout-btn {
 
 .settings-remove:hover {
   filter: brightness(1.08);
+}
+
+.settings-item-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-action-btn {
+  border: 1px solid rgba(123, 255, 185, 0.62);
+  background: rgba(28, 146, 93, 0.18);
+  color: #e6fff1;
+  border-radius: 9px;
+  padding: 6px 9px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: filter 0.18s ease;
+}
+
+.settings-action-btn:hover {
+  filter: brightness(1.08);
+}
+
+.settings-action-btn:disabled,
+.settings-remove:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .settings-empty {
@@ -748,6 +784,10 @@ body.ss-theme-white .settings-logout-btn {
   }
 
   .settings-remove {
+    width: 100%;
+  }
+
+  .settings-item-actions {
     width: 100%;
   }
 

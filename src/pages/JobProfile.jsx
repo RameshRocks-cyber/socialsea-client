@@ -2,6 +2,7 @@
 import { Link, useNavigate } from "react-router-dom";
 import { getDefaultResume, loadResume } from "../services/resumeStorage";
 import { toApiUrl } from "../api/baseUrl";
+import { getResumeRenderTemplate } from "../utils/resumeTemplates";
 import "./JobPages.css";
 
 const isFilled = (value) => String(value || "").trim().length > 0;
@@ -92,6 +93,7 @@ const JobProfile = () => {
   const education = resume.education?.filter(hasEntry) || [];
   const projects = resume.projects?.filter(hasEntry) || [];
   const skills = splitSkills(resume.skills);
+  const activeTemplate = getResumeRenderTemplate(resume.template);
   const personal = resume.personal || {};
   const avatarUrl = resolveMediaUrl(personal.avatar);
   const fullName = String(personal.fullName || "").trim();
@@ -127,7 +129,7 @@ const JobProfile = () => {
   ].filter((item) => item.value);
 
   return (
-    <div className="job-page">
+    <div className={`job-page job-page-template-${activeTemplate}`}>
       <header className="job-page-header job-page-header-row">
         <div className="job-page-header-left">
           <div className="job-page-identity">
@@ -197,6 +199,9 @@ const JobProfile = () => {
           </button>
           <Link className="job-page-edit" to="/resume-builder">
             Edit Resume
+          </Link>
+          <Link className="job-page-edit" to="/resume-templates?next=/job-profile">
+            Change Template
           </Link>
           <button type="button" className="job-page-download" onClick={handleDownload}>
             Print / Save as PDF

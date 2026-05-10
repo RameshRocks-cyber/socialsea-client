@@ -22,6 +22,7 @@ import {
   FiRotateCw,
   FiScissors,
   FiSettings,
+  FiShield,
   FiSkipBack,
   FiSkipForward,
   FiSliders,
@@ -31,7 +32,7 @@ import {
   FiType,
   FiZap
 } from "react-icons/fi";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import api from "../api/axios";
 import { CONTENT_TYPE_OPTIONS, readContentTypePrefs } from "./contentPrefs";
 import "./Upload.css";
@@ -1527,6 +1528,36 @@ function parseUploadError(err) {
   return "Upload failed";
 }
 
+const buildMediaFileCacheKey = (entry) => {
+  if (!entry) return "";
+  const name = String(entry?.name || "").trim();
+  const type = String(entry?.type || "").trim().toLowerCase();
+  const size = Number(entry?.size || 0);
+  const modified = Number(entry?.lastModified || 0);
+  return [name, type, size, modified].join("::");
+};
+
+const normalizeCopyrightCheckPayload = (raw, sourceFile) => {
+  const payload = raw && typeof raw === "object" ? raw : {};
+  const statusRaw = String(payload?.status || "clear").trim().toLowerCase();
+  const status = ["clear", "review", "blocked"].includes(statusRaw) ? statusRaw : "clear";
+  const exactMatchCount = Math.max(0, Math.floor(Number(payload?.exactMatchCount || 0)));
+  const matches = Array.isArray(payload?.matches) ? payload.matches : [];
+  return {
+    status,
+    blocked: Boolean(payload?.blocked) || status === "blocked",
+    summary: String(payload?.summary || (status === "clear" ? "No exact copyright match found." : "Copyright match found.")).trim(),
+    exactMatchCount,
+    matches,
+    fingerprintShort: String(payload?.fingerprintShort || payload?.fingerprint || "").trim().slice(0, 12),
+    mediaType: String(payload?.mediaType || sourceFile?.type || "").trim(),
+    mediaSizeBytes: Number(payload?.mediaSizeBytes || sourceFile?.size || 0),
+    fileName: String(sourceFile?.name || "file").trim() || "file",
+    fileKey: buildMediaFileCacheKey(sourceFile),
+    checkedAt: new Date().toISOString()
+  };
+};
+
 const sanitizeCreatorSettings = (settings) => {
   const next = { ...(settings || {}) };
   if (!String(next.scheduleAt || "").trim()) {
@@ -1549,6 +1580,7 @@ const readContentTypeConfig = () => {
 
 export default function Upload() {
   const location = useLocation();
+  const navigate = useNavigate();
   const videoRef = useRef(null);
   const sourceMonitorMenuRef = useRef(null);
   const premiereMenuBarRef = useRef(null);
@@ -1564,6 +1596,7 @@ export default function Upload() {
   const blurMediaPipeFaceDetectorRef = useRef(null);
   const blurMediaPipeFaceDetectorLoadRef = useRef(null);
   const blurFaceSubjectCounterRef = useRef(1);
+  const copyrightCheckCacheRef = useRef(new Map());
   const previewStageRef = useRef(null);
   const blurPreviewDragRef = useRef(null);
   const initialContentTypeConfig = readContentTypeConfig();
@@ -1574,6 +1607,8 @@ export default function Upload() {
   const [caption, setCaption] = useState("");
   const [videoTitle, setVideoTitle] = useState("");
   const [msg, setMsg] = useState("");
+  const [copyrightCheckBusy, setCopyrightCheckBusy] = useState(false);
+  const [copyrightCheckResult, setCopyrightCheckResult] = useState(null);
   const [activePremiereMenuKey, setActivePremiereMenuKey] = useState("");
   const [loading, setLoading] = useState(false);
   const [edits, setEdits] = useState(defaultEdits);
@@ -1636,11 +1671,32 @@ export default function Upload() {
     const params = new URLSearchParams(location.search);
     return String(params.get("type") || "").toLowerCase();
   }, [location.search]);
-  const isReelUpload = uploadType === "reel";
+
+  useEffect(() => {
+    if (uploadType !== "reel") return;
+    const params = new URLSearchParams(location.search);
+    params.set("type", "clips");
+    navigate(`${location.pathname}?${params.toString()}`, { replace: true });
+  }, [uploadType, location.pathname, location.search, navigate]);
+
+  const isReelUpload = uploadType === "reel" || uploadType === "clip" || uploadType === "clips";
   const isLongVideoUpload = uploadType === "long-video" || uploadType === "long" || uploadType === "watch";
-  const isPhotoPostUpload = !isReelUpload && !isLongVideoUpload;
-  const preferWhiteVideoWorkspace = isReelUpload;
+  const isFeedPostUpload = !isReelUpload && !isLongVideoUpload;
+  const preferWhiteVideoWorkspace = isReelUpload || isLongVideoUpload;
   const isPublicAudience = creatorSettings.audience === "public";
+  const activeUploadFile =
+    selectedFiles.length > 0
+      ? selectedFiles[activeFileIndex] || selectedFiles[0] || null
+      : file || null;
+  const activeUploadFileKey = buildMediaFileCacheKey(activeUploadFile);
+  useEffect(() => {
+    if (!activeUploadFileKey) {
+      setCopyrightCheckResult(null);
+      return;
+    }
+    const cached = copyrightCheckCacheRef.current.get(activeUploadFileKey);
+    setCopyrightCheckResult(cached || null);
+  }, [activeUploadFileKey]);
   const timelineDuration = Math.max(0.5, Number(videoMeta.duration || 0));
   const formatTimelineDisplayTime = (seconds) => (
     timelineTimecodeDisplay === "seconds"
@@ -5422,6 +5478,9 @@ export default function Upload() {
   const resetUploadForm = () => {
     clearTimelineHistory();
     timelineClipboardRef.current = null;
+    copyrightCheckCacheRef.current.clear();
+    setCopyrightCheckBusy(false);
+    setCopyrightCheckResult(null);
     setFile(null);
     setSelectedFiles([]);
     setActiveFileIndex(0);
@@ -5481,6 +5540,9 @@ export default function Upload() {
   const applyPickedFiles = (fileList) => {
     clearTimelineHistory();
     timelineClipboardRef.current = null;
+    copyrightCheckCacheRef.current.clear();
+    setCopyrightCheckBusy(false);
+    setCopyrightCheckResult(null);
     const nextFiles = Array.from(fileList || []);
     setSelectedFiles(nextFiles);
     setActiveFileIndex(0);
@@ -5533,6 +5595,57 @@ export default function Upload() {
     if (workflow.focusLookControl) setActiveVideoLookControl(workflow.focusLookControl);
   };
 
+  const runCopyrightMatch = async (targetFile = null, options = {}) => {
+    const sourceFile = targetFile || activeUploadFile;
+    const silent = Boolean(options?.silent);
+    const skipState = Boolean(options?.skipState);
+    const force = Boolean(options?.force);
+    if (!sourceFile) {
+      if (!silent) setMsg("Pick a file first to run copyright check.");
+      return null;
+    }
+
+    const fileKey = buildMediaFileCacheKey(sourceFile);
+    if (!force) {
+      const cached = copyrightCheckCacheRef.current.get(fileKey);
+      if (cached) {
+        if (!skipState) setCopyrightCheckResult(cached);
+        if (!silent) {
+          const note = cached.blocked
+            ? `Copyright blocked: ${cached.summary}`
+            : cached.status === "review"
+              ? `Copyright review: ${cached.summary}`
+              : "Copyright check clear.";
+          setMsg(note);
+        }
+        return cached;
+      }
+    }
+
+    if (!silent) setCopyrightCheckBusy(true);
+    try {
+      const form = new FormData();
+      form.append("file", sourceFile);
+      const response = await api.post("/api/posts/copyright-match", form);
+      const normalized = normalizeCopyrightCheckPayload(response?.data, sourceFile);
+      copyrightCheckCacheRef.current.set(fileKey, normalized);
+      if (!skipState) setCopyrightCheckResult(normalized);
+      if (!silent) {
+        if (normalized.blocked) setMsg(`Copyright blocked: ${normalized.summary}`);
+        else if (normalized.status === "review") setMsg(`Copyright review: ${normalized.summary}`);
+        else setMsg("Copyright check clear.");
+      }
+      return normalized;
+    } catch (err) {
+      if (!silent) {
+        setMsg(parseUploadError(err));
+      }
+      return null;
+    } finally {
+      if (!silent) setCopyrightCheckBusy(false);
+    }
+  };
+
   const openCameraStudio = () => {
     if (typeof window.__ssOpenCameraStudio === "function") {
       window.__ssOpenCameraStudio({ forceOpen: true });
@@ -5549,19 +5662,22 @@ export default function Upload() {
     }
     if (isReelUpload || isLongVideoUpload) {
       if (filesToUpload.length !== 1) {
-        setMsg(isReelUpload ? "Please choose a single video for a clip." : "Please choose a single video for a long video post.");
+        setMsg(isReelUpload ? "Please choose a single video for a clip." : "Please choose a single video for a video post.");
         return;
       }
       if (!filesToUpload[0]?.type?.startsWith("video/")) {
-        setMsg(isReelUpload ? "Clips must be a video file." : "Long video uploads must be a video file.");
+        setMsg(isReelUpload ? "Clips must be a video file." : "Video uploads must be a video file.");
         return;
       }
     }
 
-    if (isPhotoPostUpload) {
-      const hasVideo = filesToUpload.some((entry) => String(entry?.type || "").startsWith("video/"));
-      if (hasVideo) {
-        setMsg("Post uploads are photo-only now. Use Long Video to share videos.");
+    if (isFeedPostUpload) {
+      const hasUnsupportedMedia = filesToUpload.some((entry) => {
+        const type = String(entry?.type || "").toLowerCase();
+        return !(type.startsWith("image/") || type.startsWith("video/"));
+      });
+      if (hasUnsupportedMedia) {
+        setMsg("Posts support photos and videos only.");
         return;
       }
     }
@@ -5583,6 +5699,17 @@ export default function Upload() {
           failedMessages.push(`${currentFile?.name || "file"} is too large (max ${limitLabel}).`);
           continue;
         }
+
+        const copyrightCheck = await runCopyrightMatch(currentFile, { silent: true, skipState: true });
+        if (copyrightCheck?.blocked) {
+          failedCount += 1;
+          failedMessages.push(`${currentFile?.name || `File ${i + 1}`}: ${copyrightCheck.summary}`);
+          if (filesToUpload.length === 1 || i === activeFileIndex) {
+            setCopyrightCheckResult(copyrightCheck);
+          }
+          continue;
+        }
+
         const shouldApplyImageEdit = filesToUpload.length === 1 && currentIsImage && file && currentFile === file;
 
         const form = new FormData();
@@ -5602,6 +5729,9 @@ export default function Upload() {
         const changedVideoEdits = currentIsVideo
           ? JSON.stringify(serverVideoEdits || videoEdits || {}) !== JSON.stringify(defaultVideoEdits)
           : false;
+        const videoDistributionSurface = isLongVideoUpload ? "video_feed" : isReelUpload ? "reel" : "post_feed";
+        const videoUploadContext = isLongVideoUpload ? "long_video" : isReelUpload ? "reel" : "post_feed";
+        const videoUploadType = isLongVideoUpload ? "long_video" : isReelUpload ? "reel" : "post_video";
         form.append("file", uploadFile);
         if (safeCaption) form.append("caption", safeCaption);
         if (currentIsVideo && safeVideoTitle) form.append("title", safeVideoTitle);
@@ -5614,6 +5744,8 @@ export default function Upload() {
           form.append("isLongVideo", "true");
           form.append("isShortVideo", "false");
           form.append("type", "long_video");
+        } else if (currentIsVideo) {
+          form.append("type", "post_video");
         }
         if (currentIsVideo) {
           const safeCreatorSettings = sanitizeCreatorSettings(creatorSettings);
@@ -5623,6 +5755,9 @@ export default function Upload() {
             JSON.stringify({
               title: safeVideoTitle || undefined,
               description: safeCaption || undefined,
+              distributionSurface: videoDistributionSurface,
+              uploadContext: videoUploadContext,
+              uploadType: videoUploadType,
               edits: serverVideoEdits || timelineAwareVideoEdits || normalizedVideoEdits || videoEdits,
               creatorSettings: safeCreatorSettings,
               timeline: normalizedTimelineClips.length
@@ -5663,6 +5798,8 @@ export default function Upload() {
               } else if (isLongVideoUpload) {
                 minimalForm.append("isLongVideo", "true");
                 minimalForm.append("type", "long_video");
+              } else {
+                minimalForm.append("type", "post_video");
               }
               res = await api.post("/api/posts/upload", minimalForm);
             } else {
@@ -5732,20 +5869,30 @@ export default function Upload() {
     }
   };
 
-  const uploadHeading = isReelUpload ? "Create Clip" : isLongVideoUpload ? "Create Long Video" : "Create Post";
+  const uploadHeading = isReelUpload ? "Create Clip" : isLongVideoUpload ? "Create Video" : "Create Post";
   const uploadSubtitle = isReelUpload
     ? "Upload a short video for clips."
     : isLongVideoUpload
       ? ""
-      : "Create your photo post.";
-  const filePickerLabel = isReelUpload || isLongVideoUpload ? "Choose video" : "Choose photo";
-  const fileAccept = isReelUpload || isLongVideoUpload ? "video/*" : "image/*";
-  const allowMultipleFiles = isPhotoPostUpload;
-  const isVideoWorkspace = isVideo || preferWhiteVideoWorkspace;
+      : "Create your photo or video post.";
+  const filePickerLabel = isReelUpload || isLongVideoUpload ? "Choose video" : "Choose media";
+  const fileAccept = isReelUpload || isLongVideoUpload ? "video/*" : "image/*,video/*";
+  const allowMultipleFiles = isFeedPostUpload;
+  const hasSelectedVideo = isVideo || selectedFiles.some((entry) => String(entry?.type || "").startsWith("video/"));
+  const isVideoWorkspace = isVideo || (preferWhiteVideoWorkspace && hasSelectedVideo);
   const uploadPageClassName = isVideoWorkspace ? "upload-page video-upload-page" : "upload-page";
   const uploadPanelClassName = isVideoWorkspace ? "upload-panel upload-panel-pro-video" : "upload-panel";
+  const showUploadSubmit = !isVideoWorkspace || activeVideoBottomPage === "publish";
   const activeVideoToolGroupConfig =
     VIDEO_TOOL_GROUPS.find((group) => group.key === activeVideoToolGroup) || VIDEO_TOOL_GROUPS[0];
+  const visibleCopyrightResult =
+    copyrightCheckResult && copyrightCheckResult.fileKey === activeUploadFileKey ? copyrightCheckResult : null;
+  const copyrightStatusLabel =
+    visibleCopyrightResult?.status === "blocked"
+      ? "Blocked"
+      : visibleCopyrightResult?.status === "review"
+        ? "Review"
+        : "Clear";
 
   return (
     <div className={uploadPageClassName}>
@@ -8435,6 +8582,20 @@ export default function Upload() {
                 <p>Set who can watch, comment, remix, or download before you publish.</p>
               </div>
               <div className="studio-heading-actions">
+                <label className="upload-file-pick studio-upload-inline">
+                  <FiFilm />
+                  <span>Upload video</span>
+                  <input
+                    ref={mediaPickerInputRef}
+                    type="file"
+                    accept={fileAccept}
+                    multiple={allowMultipleFiles}
+                    onChange={(e) => {
+                      applyPickedFiles(e.target.files);
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
                 <button
                   type="button"
                   className={showPublishSettings ? "toggle-btn active" : "toggle-btn"}
@@ -8540,6 +8701,50 @@ export default function Upload() {
                       : "Public options are available only for a Public audience."}
                   </p>
                 )}
+
+                <div className="studio-public-settings-row studio-copyright-row">
+                  <div className="studio-public-settings-copy">
+                    <h4>
+                      <FiShield aria-hidden="true" /> Copyright Match
+                    </h4>
+                    <p>YouTube-style exact match check against existing uploads before publish.</p>
+                  </div>
+                  <button
+                    type="button"
+                    className={visibleCopyrightResult?.blocked ? "toggle-btn active" : "toggle-btn"}
+                    onClick={() => void runCopyrightMatch(activeUploadFile, { force: true })}
+                    disabled={copyrightCheckBusy || !activeUploadFile}
+                  >
+                    {copyrightCheckBusy ? "Checking..." : "Run Check"}
+                  </button>
+                </div>
+
+                {visibleCopyrightResult ? (
+                  <div className={`studio-copyright-result is-${visibleCopyrightResult.status}`}>
+                    <div className="studio-copyright-result-head">
+                      <strong>{copyrightStatusLabel}</strong>
+                      <span>{visibleCopyrightResult.exactMatchCount} exact match(es)</span>
+                    </div>
+                    <p>{visibleCopyrightResult.summary}</p>
+                    <p className="studio-copyright-meta">
+                      Fingerprint: <code>{visibleCopyrightResult.fingerprintShort || "n/a"}</code>
+                    </p>
+                    {Array.isArray(visibleCopyrightResult.matches) && visibleCopyrightResult.matches.length > 0 && (
+                      <ul className="studio-copyright-match-list">
+                        {visibleCopyrightResult.matches.slice(0, 3).map((item, index) => (
+                          <li key={`${item?.ownership || "match"}-${item?.uploadedAt || index}-${index}`}>
+                            {String(item?.ownerLabel || item?.ownership || "match")} - {String(item?.surface || "post")} -{" "}
+                            {String(item?.uploadedAt || "").trim() || "Unknown time"}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                ) : (
+                  <p className="studio-helper studio-public-settings-note">
+                    Run check to verify this upload before publishing.
+                  </p>
+                )}
               </>
             ) : (
               <p className="studio-helper studio-public-settings-note">
@@ -8551,8 +8756,8 @@ export default function Upload() {
           </div>
           </div>
         )}
-        {!isVideoWorkspace && (
-          <div className="upload-footer-bar">
+        {showUploadSubmit && (
+          <div className={isVideoWorkspace ? "upload-footer-bar is-video" : "upload-footer-bar"}>
             <button
               className={`upload-submit ${isVideoWorkspace ? "upload-submit-compact" : ""}`}
               onClick={upload}

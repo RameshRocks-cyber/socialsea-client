@@ -1625,6 +1625,8 @@ function useChatController() {
   const activeCallPopupPosRef = useRef(activeCallPopupPos);
   const callStartedAtRef = useRef(null);
   const callConnectedLoggedRef = useRef(false);
+  const staleCallSinceRef = useRef(0);
+  const staleCallKeyRef = useRef("");
   const callRecorderRef = useRef(null);
   const callRecordingStreamRef = useRef(null);
   const callRecordingChunksRef = useRef([]);
@@ -3012,6 +3014,9 @@ function useChatController() {
   };
 
   const shouldNotifyForMessage = (message, contactId = "") => {
+    if (decodeSignAssistText(message?.text || "")) {
+      return false;
+    }
     const contactKey = String(contactId || "");
     if (contactKey && mutedChatsById[contactKey]) {
       return false;
@@ -3973,8 +3978,17 @@ function useChatController() {
   const sendSignal = async (targetUserId, payload, options = {}) => {
     const { allowRestFallback = true } = options || {};
     const client = stompRef.current;
-    if (!targetUserId) return;
+    const normalizedTargetUserId = String(targetUserId || "").trim();
+    if (!normalizedTargetUserId) return;
     const signalType = String(payload?.type || "").trim().toLowerCase();
+    const shouldSurfaceFailure = ["offer", "answer", "livekit-invite", "livekit-accept", "ringing"].includes(signalType);
+    if (!/^\d+$/.test(normalizedTargetUserId)) {
+      if (shouldSurfaceFailure) {
+        setCallError("Call signaling unavailable for this contact.");
+        window.setTimeout(() => setCallError(""), 3000);
+      }
+      return;
+    }
     const attachScreenShareState = new Set([
       "offer",
       "answer",
@@ -3991,14 +4005,13 @@ function useChatController() {
     const signalPayload = attachScreenShareState
       ? { ...(payload || {}), screenShare: outboundScreenShare }
       : { ...(payload || {}) };
-    const shouldSurfaceFailure = ["offer", "answer", "livekit-invite", "livekit-accept", "ringing"].includes(signalType);
     let sentViaWs = false;
     let sentViaRest = false;
     let restStatus = 0;
     try {
       if (client?.connected) {
         client.publish({
-          destination: `/app/call.signal/${targetUserId}`,
+          destination: `/app/call.signal/${normalizedTargetUserId}`,
           body: JSON.stringify(signalPayload)
         });
         sentViaWs = true;
@@ -4008,7 +4021,7 @@ function useChatController() {
     }
     if (!sentViaWs && allowRestFallback) {
       try {
-        const encodedTargetId = encodeURIComponent(String(targetUserId));
+        const encodedTargetId = encodeURIComponent(String(normalizedTargetUserId));
         await requestChatMutation({
           method: "POST",
           endpoints: [`/api/calls/signal/${encodedTargetId}`, `/calls/signal/${encodedTargetId}`],
@@ -4027,7 +4040,7 @@ function useChatController() {
         ...signalPayload,
         fromUserId: Number(myUserId) || null,
         fromEmail: myEmail || "",
-        toUserId: Number(targetUserId) || null,
+        toUserId: Number(normalizedTargetUserId) || null,
         toEmail: targetEmail,
         timestamp: Date.now()
       };
@@ -4035,7 +4048,7 @@ function useChatController() {
         callChannelRef.current.postMessage({
           kind: "call-signal",
           fromTab: tabIdRef.current,
-          toUserId: String(targetUserId),
+          toUserId: String(normalizedTargetUserId),
           signal: signalPacket
         });
       } else {
@@ -5083,14 +5096,22 @@ function useChatController() {
   };
 
   const ensureLocalStream = async (mode) => {
-    const audioConstraints = {
-      echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl: true,
-      channelCount: 2,
-      sampleRate: 48000,
-      sampleSize: 16
-    };
+    const audioConstraintTiers = [
+      {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        channelCount: { ideal: 2 },
+        sampleRate: { ideal: 48000 },
+        sampleSize: { ideal: 16 }
+      },
+      {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      },
+      true
+    ];
 
     const buildVideoConstraint = (w, h, fps) => ({
       width: { ideal: w, max: w },
@@ -5129,12 +5150,39 @@ function useChatController() {
     };
 
     let stream;
+    let lastError = null;
     if (mode === "video") {
       const tiers = buildVideoConstraintTiers(callVideoQualityPreset?.id);
-      let lastError = null;
       for (const video of tiers) {
+        for (const audio of audioConstraintTiers) {
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({ audio, video });
+            lastError = null;
+            break;
+          } catch (err) {
+            lastError = err;
+          }
+        }
+        if (stream) break;
+      }
+      if (!stream) {
+        for (const audio of audioConstraintTiers) {
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({ audio, video: true });
+            lastError = null;
+            break;
+          } catch (err) {
+            lastError = err;
+          }
+        }
+      }
+      if (!stream) {
+        throw lastError || new Error("Unable to start camera");
+      }
+    } else {
+      for (const audio of audioConstraintTiers) {
         try {
-          stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints, video });
+          stream = await navigator.mediaDevices.getUserMedia({ audio, video: false });
           lastError = null;
           break;
         } catch (err) {
@@ -5142,14 +5190,8 @@ function useChatController() {
         }
       }
       if (!stream) {
-        try {
-          stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints, video: true });
-        } catch {
-          throw lastError || new Error("Unable to start camera");
-        }
+        throw lastError || new Error("Unable to start microphone");
       }
-    } else {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints, video: false });
     }
 
     if (!stream.getAudioTracks().length) {
@@ -6433,7 +6475,7 @@ function useChatController() {
 
   const startOutgoingCall = async (mode, options = {}) => {
     const { targetId: overrideTargetId, targetName: overrideTargetName, forceWebrtc = false } = options || {};
-    const resolvedTargetId = String(overrideTargetId || activeContactId || "");
+    const resolvedTargetId = String(overrideTargetId || activeContactId || "").trim();
     if (!resolvedTargetId) return;
     if (resolvedTargetId === myUserId) {
       setCallError("Cannot call your own account");
@@ -7957,7 +7999,9 @@ function useChatController() {
         if (phase === "in-call" || phase === "idle") return;
         if (rejoinRetryCountRef.current >= CALL_REJOIN_MAX_RETRIES) {
           clearCallRejoin();
-          setCallPhaseNote("Reconnecting...");
+          rejoinPayloadRef.current = null;
+          rejoinRetryCountRef.current = 0;
+          finishCall(false, "Could not reconnect previous call");
           return;
         }
         rejoinRetryCountRef.current += 1;
@@ -10950,6 +10994,34 @@ function useChatController() {
   };
 
   const callActive = callState.phase !== "idle" || groupCallActive;
+
+  useEffect(() => {
+    const key = `${callState.phase}|${callState.peerId}|${callState.provider}|${incomingCall ? "1" : "0"}|${groupCallActive ? "1" : "0"}`;
+    if (key !== staleCallKeyRef.current) {
+      staleCallKeyRef.current = key;
+      staleCallSinceRef.current = callState.phase === "idle" ? 0 : Date.now();
+    }
+    if (callState.phase === "idle") {
+      staleCallSinceRef.current = 0;
+    }
+  }, [callState.peerId, callState.phase, callState.provider, groupCallActive, incomingCall]);
+
+  useEffect(() => {
+    if (callState.phase === "idle") return undefined;
+    const timer = setInterval(() => {
+      const currentPhase = String(callStateRef.current?.phase || "idle");
+      if (currentPhase === "idle") return;
+      if (incomingCallRef.current) return;
+      if (groupActiveRef.current) return;
+      if (callTimeoutRef.current || mediaConnectTimeoutRef.current) return;
+      if (peerRef.current || livekitRoomRef.current) return;
+      if (localStreamRef.current || remoteStreamRef.current) return;
+      const since = Number(staleCallSinceRef.current || 0);
+      if (!since || Date.now() - since < 12000) return;
+      finishCall(false, "Call state recovered. Please place the call again.");
+    }, 2000);
+    return () => clearInterval(timer);
+  }, [callState.phase, finishCall]);
 
   useEffect(() => {
     if (!callActive) {

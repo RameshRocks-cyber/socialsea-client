@@ -3,6 +3,7 @@ import { useLocation } from "react-router-dom";
 import { FiBell } from "react-icons/fi";
 import api from "../api/axios";
 import { NOTIFICATION_BUDDY_CHARACTERS, normalizeNotificationBuddyCharacter } from "./notificationBuddyConfig";
+import { decodeSignAssistText } from "../pages/hooks/useSignAssist";
 import "./NotificationBuddy.css";
 
 
@@ -246,8 +247,8 @@ const readConversationSenderName = (item) => {
   return safe.includes("@") ? safe.split("@")[0] : safe;
 };
 
-const readConversationLastText = (item) => {
-  const raw = String(
+const readConversationRawText = (item) =>
+  String(
     item?.lastMessageText ??
       item?.lastMessage ??
       item?.lastMessageContent ??
@@ -256,6 +257,18 @@ const readConversationLastText = (item) => {
       item?.content ??
       ""
   ).replace(/\s+/g, " ").trim();
+
+const decodeEmbeddedSignAssistText = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  const token = "__SS_SIGN_ASSIST__:";
+  const index = raw.indexOf(token);
+  if (index < 0) return null;
+  return decodeSignAssistText(raw.slice(index));
+};
+
+const readConversationLastText = (item) => {
+  const raw = readConversationRawText(item);
   if (!raw) return "sent you a message";
   return raw.length > 120 ? `${raw.slice(0, 117)}...` : raw;
 };
@@ -276,8 +289,10 @@ const readConversationUpdatedAt = (item) => {
 const mapConversationToMessageNotification = (item, localUnreadByContact = null) => {
   const unread = readConversationUnreadCount(item, localUnreadByContact);
   if (!unread) return null;
+  const rawText = readConversationRawText(item);
+  if (decodeEmbeddedSignAssistText(rawText)) return null;
   const senderName = readConversationSenderName(item);
-  const text = readConversationLastText(item);
+  const text = rawText ? (rawText.length > 120 ? `${rawText.slice(0, 117)}...` : rawText) : "sent you a message";
   const idSeed =
     item?.conversationId ??
     item?.chatId ??
@@ -627,9 +642,27 @@ const extractMessageText = (item) => {
   return compact.length > 120 ? `${compact.slice(0, 117)}...` : compact;
 };
 
+const isSignAssistMessageItem = (item) => {
+  if (deriveKind(item) !== "message") return false;
+  const fields = [
+    item?.messageText,
+    item?.lastMessageText,
+    item?.lastMessageContent,
+    item?.lastMessage,
+    item?.preview,
+    item?.body,
+    item?.content,
+    item?.text,
+    item?.message
+  ];
+  return fields.some((value) => decodeEmbeddedSignAssistText(value));
+};
+
 const buildMessageSpeechText = (name, unreadItems, mode, petName = "") => {
   const nextMode = normalizeMessageSpeechMode(mode);
-  const messages = (Array.isArray(unreadItems) ? unreadItems : []).filter((item) => deriveKind(item) === "message");
+  const messages = (Array.isArray(unreadItems) ? unreadItems : [])
+    .filter((item) => deriveKind(item) === "message")
+    .filter((item) => !isSignAssistMessageItem(item));
   if (!messages.length || nextMode === "off" || nextMode === "count") return "";
   const latest = [...messages].sort((a, b) => readItemTimestampMs(b) - readItemTimestampMs(a))[0] || messages[0];
   const listenerName = normalizePetName(petName) || name;
@@ -1010,6 +1043,11 @@ export default function NotificationBuddy({ enabled = true }) {
   );
 
   const unreadCount = unreadItems.length;
+  const speakableUnreadItems = useMemo(
+    () => unreadItems.filter((item) => !isSignAssistMessageItem(item)),
+    [unreadItems]
+  );
+  const speakableUnreadCount = speakableUnreadItems.length;
 
   const kindCounts = useMemo(() => {
     const counts = {
@@ -1267,19 +1305,19 @@ export default function NotificationBuddy({ enabled = true }) {
     const mode = messageSpeechModeRef.current;
     const petName = messagePetNameRef.current;
     const listenerName = normalizePetName(petName) || displayName;
-    const msgText = buildMessageSpeechText(displayName, unreadItems, mode, petName);
+    const msgText = buildMessageSpeechText(displayName, speakableUnreadItems, mode, petName);
     if (!didInitRef.current) {
       didInitRef.current = true;
-      lastUnreadRef.current = unreadCount;
+      lastUnreadRef.current = speakableUnreadCount;
       lastMessageSpeechRef.current = msgText || "";
-      if (unreadCount > 0) {
-        const text = msgText || buildSpeechText(listenerName, unreadCount);
+      if (speakableUnreadCount > 0) {
+        const text = msgText || buildSpeechText(listenerName, speakableUnreadCount);
         showSpeech(text, 4200);
       }
       return;
     }
-    if (unreadCount > lastUnreadRef.current) {
-      const text = msgText || buildSpeechText(listenerName, unreadCount);
+    if (speakableUnreadCount > lastUnreadRef.current) {
+      const text = msgText || buildSpeechText(listenerName, speakableUnreadCount);
       triggerAlert(text, true);
       if (msgText) lastMessageSpeechRef.current = msgText;
     } else if (msgText && msgText !== lastMessageSpeechRef.current) {
@@ -1289,8 +1327,8 @@ export default function NotificationBuddy({ enabled = true }) {
     } else if (!msgText) {
       lastMessageSpeechRef.current = "";
     }
-    lastUnreadRef.current = unreadCount;
-  }, [loaded, unreadCount, unreadItems, displayName, isEnabled]);
+    lastUnreadRef.current = speakableUnreadCount;
+  }, [loaded, speakableUnreadCount, speakableUnreadItems, displayName, isEnabled]);
 
   useEffect(() => {
     if (!softHidden) return;

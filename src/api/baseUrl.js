@@ -127,6 +127,7 @@ export function getApiBaseUrl() {
     const host = String(window.location.hostname || "").toLowerCase();
     const isLocalHost = host === "localhost" || host === "127.0.0.1";
     const isLanHost = isPrivateIpHost(host);
+    const isDevMode = Boolean(import.meta.env?.DEV);
     const isNetlifyHost = host.endsWith(".netlify.app");
     const allowLegacySocialSeaApi =
       String(import.meta.env?.VITE_ALLOW_LEGACY_SOCIALSEA_API || "")
@@ -185,6 +186,11 @@ export function getApiBaseUrl() {
       return envUrl;
     }
     if (isLanHost) {
+      // In Vite dev over LAN, use same-origin proxy to avoid CORS issues from browser-origin checks.
+      if (isDevMode) {
+        persistAuthBaseUrl("/api");
+        return "/api";
+      }
       const envUrl = normalizeApiUrl(import.meta.env.VITE_API_URL);
       const envHost = hostFromUrl(envUrl);
       if (envUrl && !isFrontendLikeHost(envHost) && !isLoopbackHost(envHost)) {

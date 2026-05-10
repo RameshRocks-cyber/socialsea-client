@@ -9,6 +9,7 @@ import { getJobsByOwner, removeCompanyJob } from "../data/jobStore";
 import { recordRecentlyDeleted } from "../services/activityStore";
 import { readActiveStories, readStoryIdentity, syncStoryCachesForIdentity } from "../services/storyStorage";
 import { getVaultCount } from "../services/vaultStorage";
+import { isExplicitReelPost, mediaTypeForPost, readVideoSettingsObject } from "../utils/videoFeedClassifier";
 import { buildProfilePath, getProfileIdentifier, persistProfileIdentity } from "../utils/profileRoute";
 import "./Profile.css";
 
@@ -20,6 +21,63 @@ const PROFILE_REQ_TIMEOUT_MS = 6000;
 const POSTS_REQ_TIMEOUT_MS = 5000;
 const FOLLOWING_REQ_TIMEOUT_MS = 1800;
 const MAX_SHORT_VIDEO_SECONDS = 90;
+const VIDEO_FEED_SURFACE_TOKENS = new Set(["video_feed", "videofeed", "long_video", "longvideo", "watch_feed", "watch"]);
+const POST_FEED_SURFACE_TOKENS = new Set(["post_feed", "postfeed", "feed_post", "post_video", "postvideo", "post"]);
+const LONG_VIDEO_TYPE_TOKENS = new Set(["long_video", "longvideo", "watch", "long", "video_feed", "watch_feed"]);
+const POST_VIDEO_TYPE_TOKENS = new Set(["post_video", "postvideo", "post", "feed_post", "post_feed", "postfeed"]);
+
+const asProfileFeedToken = (value) => String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+
+const readFirstProfileFeedToken = (values) => {
+  for (const value of values) {
+    const token = asProfileFeedToken(value);
+    if (token) return token;
+  }
+  return "";
+};
+
+const classifyProfileFeedBucket = (post) => {
+  if (mediaTypeForPost(post) !== "VIDEO") return "posts";
+  if (isExplicitReelPost(post)) return "reels";
+
+  const settings = readVideoSettingsObject(post);
+  const surfaceToken = readFirstProfileFeedToken([
+    settings?.distributionSurface,
+    settings?.uploadSurface,
+    settings?.feedSurface,
+    settings?.uploadContext,
+    settings?.surface,
+    settings?.context,
+    settings?.destination,
+    settings?.creatorSettings?.distributionSurface,
+    settings?.creatorSettings?.uploadSurface,
+    settings?.creatorSettings?.feedSurface,
+    settings?.creatorSettings?.uploadContext
+  ]);
+  if (VIDEO_FEED_SURFACE_TOKENS.has(surfaceToken)) return "videos";
+  if (POST_FEED_SURFACE_TOKENS.has(surfaceToken)) return "posts";
+
+  const typeToken = readFirstProfileFeedToken([
+    post?.type,
+    post?.sourceType,
+    post?.source,
+    settings?.uploadType,
+    settings?.type,
+    settings?.postType,
+    settings?.sourceType,
+    settings?.uploadContext,
+    settings?.feedSurface,
+    settings?.creatorSettings?.uploadType,
+    settings?.creatorSettings?.type,
+    settings?.creatorSettings?.postType,
+    settings?.creatorSettings?.sourceType
+  ]);
+  if (LONG_VIDEO_TYPE_TOKENS.has(typeToken)) return "videos";
+  if (POST_VIDEO_TYPE_TOKENS.has(typeToken)) return "posts";
+
+  // Keep unknown videos inside Posts so profile tabs never mix by duration heuristics.
+  return "posts";
+};
 
 const readJobMode = () => {
   try {
@@ -377,12 +435,6 @@ const durationFromPost = (post) => {
   return 0;
 };
 
-const isPortraitVideo = (post) => {
-  const width = Number(post?.width || post?.videoWidth || post?.mediaWidth || post?.media?.width || 0);
-  const height = Number(post?.height || post?.videoHeight || post?.mediaHeight || post?.media?.height || 0);
-  return width > 0 && height > 0 && height > width;
-};
-
 export default function Profile() {
   const { username } = useParams();
   const myUserId = sessionStorage.getItem("userId") || localStorage.getItem("userId");
@@ -531,29 +583,17 @@ export default function Profile() {
         return list
           .map((post) => {
             const contentUrl =
-            post?.contentUrl ||
-            post?.mediaUrl ||
-            post?.imageUrl ||
-            post?.videoUrl ||
-            post?.media?.url ||
-            "";
-          const typeRaw = String(post?.type || post?.mediaType || post?.mimeType || post?.contentType || "").toLowerCase();
+              post?.contentUrl ||
+              post?.mediaUrl ||
+              post?.imageUrl ||
+              post?.videoUrl ||
+              post?.media?.url ||
+              "";
             const durationSeconds = durationFromPost(post);
-            const isVideo =
-              post?.reel === true ||
-              typeRaw.includes("video") ||
-              /\.(mp4|webm|ogg|mov|m4v)(\?|$)/i.test(contentUrl);
-            const isShortVideo =
-              post?.reel === true ||
-              post?.isShort === true ||
-              post?.shortVideo === true ||
-              post?.short === true ||
-              post?.isReel === true ||
-              typeRaw.includes("reel") ||
-              typeRaw.includes("short") ||
-              (durationSeconds > 0 && durationSeconds <= MAX_SHORT_VIDEO_SECONDS) ||
-              isPortraitVideo(post);
-            return { ...post, contentUrl, isVideo, isShortVideo, durationSeconds };
+            const isVideo = mediaTypeForPost(post) === "VIDEO";
+            const profileFeedBucket = classifyProfileFeedBucket(post);
+            const isShortVideo = profileFeedBucket === "reels";
+            return { ...post, contentUrl, isVideo, isShortVideo, durationSeconds, profileFeedBucket };
           })
           .filter((post) => {
             const idText = String(post?.id || "").trim();
@@ -1142,12 +1182,6 @@ export default function Profile() {
       clearSuppressClickTimer();
       return;
     }
-    if (isOwnProfile) {
-      event.preventDefault();
-      event.stopPropagation();
-      openPostOptions(post);
-      return;
-    }
     openPostInPlayer(post);
   };
 
@@ -1168,9 +1202,9 @@ export default function Profile() {
     navigate("/login");
   };
 
-  const reels = posts.filter((post) => post?.isVideo && post?.isShortVideo);
-  const longVideos = posts.filter((post) => post?.isVideo && !post?.isShortVideo);
-  const imagePosts = posts.filter((post) => !post?.isVideo);
+  const reels = posts.filter((post) => post?.profileFeedBucket === "reels");
+  const longVideos = posts.filter((post) => post?.profileFeedBucket === "videos");
+  const imagePosts = posts.filter((post) => post?.profileFeedBucket !== "reels" && post?.profileFeedBucket !== "videos");
   const showLongVideosOnProfile = !isOwnProfile || longVideosEnabled;
   const activeProfileTab =
     !showLongVideosOnProfile && profileTab === "long-videos"
@@ -1180,9 +1214,9 @@ export default function Profile() {
     activeProfileTab === "reels" ? reels : activeProfileTab === "long-videos" ? longVideos : imagePosts;
   const loadedPostsCount = (imagePosts?.length || 0) + (reels?.length || 0) + (longVideos?.length || 0);
   const profileContentTitle =
-    activeProfileTab === "reels" ? "Clips" : activeProfileTab === "long-videos" ? "Long Videos" : "Posts";
+    activeProfileTab === "reels" ? "Clips" : activeProfileTab === "long-videos" ? "Videos" : "Posts";
   const emptyTabMessage =
-    activeProfileTab === "reels" ? "No clips yet" : activeProfileTab === "long-videos" ? "No long videos yet" : "No posts yet";
+    activeProfileTab === "reels" ? "No clips yet" : activeProfileTab === "long-videos" ? "No videos yet" : "No posts yet";
   const postsCount = postsLoaded
     ? loadedPostsCount
     : Number.isFinite(Number(profile?.postsCount)) && Number(profile?.postsCount) >= 0
@@ -1589,7 +1623,7 @@ export default function Profile() {
                     role="tab"
                     aria-selected={profileTab === "long-videos"}
                   >
-                    Long Videos ({longVideos.length})
+                    Videos ({longVideos.length})
                   </button>
                 )}
               </div>
@@ -1598,7 +1632,7 @@ export default function Profile() {
             {isPrivateLocked && (
               <div className="profile-private-note">
                 {showLongVideosOnProfile
-                  ? "This account is private. Follow to see posts, clips, and long videos."
+                  ? "This account is private. Follow to see posts, clips, and videos."
                   : "This account is private. Follow to see posts and clips."}
               </div>
             )}

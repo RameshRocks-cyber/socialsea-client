@@ -2,6 +2,15 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import api from "../api/axios";
 import { recordAccountHistoryEntry } from "../services/activityStore";
+import {
+  DELETED_MEDIA_POLICIES,
+  DELETED_MEDIA_POLICY_OPTIONS,
+  normalizeDeletedMediaPolicy,
+  permanentlyDeleteRecentlyDeletedEntry,
+  pruneExpiredRecentlyDeletedEntries,
+  readRecentlyDeletedEntries,
+  restoreRecentlyDeletedEntry
+} from "../services/recentlyDeletedStore";
 import "./Settings.css";
 
 const SETTINGS_KEY = "socialsea_settings_v1";
@@ -21,6 +30,7 @@ const DEFAULT_PREFS = {
   dailyTimeLimit: "2h/day",
   trafficAlerts: false,
   ambulanceNavigation: false,
+  deletedMediaPolicy: DELETED_MEDIA_POLICIES.IMMEDIATE,
   jobMode: "profile",
   showMyStoriesOnProfile: true,
   showAnonymousShortcutsOnProfile: true
@@ -171,12 +181,25 @@ const normalizeJobMode = (mode) => {
   return "profile";
 };
 
+const formatDateTime = (value) => {
+  const timestamp = Date.parse(String(value || "").trim());
+  if (!Number.isFinite(timestamp)) return "";
+  return new Date(timestamp).toLocaleString();
+};
+
+const formatDateOnly = (value) => {
+  const timestamp = Date.parse(String(value || "").trim());
+  if (!Number.isFinite(timestamp)) return "";
+  return new Date(timestamp).toLocaleDateString();
+};
+
 const readPrefs = () => {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
     const parsed = raw ? JSON.parse(raw) : {};
     const next = { ...DEFAULT_PREFS, ...(parsed || {}) };
     next.jobMode = normalizeJobMode(next.jobMode);
+    next.deletedMediaPolicy = normalizeDeletedMediaPolicy(next.deletedMediaPolicy);
     return next;
   } catch {
     return { ...DEFAULT_PREFS };
@@ -224,11 +247,16 @@ export default function SettingsManage() {
   const [blockedUsers, setBlockedUsers] = useState(() => readJsonArray(BLOCKED_KEY));
   const [userQuery, setUserQuery] = useState("");
   const [userResults, setUserResults] = useState([]);
+  const [deletedItems, setDeletedItems] = useState([]);
+  const [deletedBusyId, setDeletedBusyId] = useState("");
+  const [deletedNotice, setDeletedNotice] = useState("");
+  const [deletedError, setDeletedError] = useState("");
 
   const boolConfig = useMemo(() => BOOL_OPTIONS.find((opt) => opt.id === optionId), [optionId]);
   const choiceConfig = useMemo(() => CHOICE_OPTIONS.find((opt) => opt.id === optionId), [optionId]);
   const isJobsConfig = JOB_MODE_ROUTES.has(optionId);
   const isArchiveConfig = optionId === "archive";
+  const isRecentlyDeletedConfig = optionId === "recently-deleted";
   const isCloseFriendsConfig = optionId === "close-friends";
   const isBlockedConfig = optionId === "blocked";
   const isTrafficConfig = optionId === "traffic-alerts";
@@ -332,12 +360,44 @@ export default function SettingsManage() {
     };
   }, [isAmbulanceConfig, isTrafficConfig]);
 
+  useEffect(() => {
+    if (!isRecentlyDeletedConfig) return undefined;
+    const refreshDeletedItems = () => {
+      const pruneSummary = pruneExpiredRecentlyDeletedEntries(new Date());
+      const list = readRecentlyDeletedEntries();
+      setDeletedItems(list);
+      if (pruneSummary.removedCount > 0) {
+        setDeletedNotice(
+          `${pruneSummary.removedCount} item${pruneSummary.removedCount === 1 ? "" : "s"} reached auto-delete time and were permanently removed.`
+        );
+      } else {
+        setDeletedNotice("");
+      }
+      setDeletedError("");
+      setDeletedBusyId("");
+    };
+
+    refreshDeletedItems();
+    window.addEventListener("ss-recently-deleted-update", refreshDeletedItems);
+    window.addEventListener("focus", refreshDeletedItems);
+    return () => {
+      window.removeEventListener("ss-recently-deleted-update", refreshDeletedItems);
+      window.removeEventListener("focus", refreshDeletedItems);
+    };
+  }, [isRecentlyDeletedConfig]);
+
+  const refreshDeletedItems = () => {
+    const list = readRecentlyDeletedEntries();
+    setDeletedItems(list);
+  };
+
   const updatePref = (key, value, label) => {
-    setPrefs((prev) => ({ ...prev, [key]: value }));
-    writePrefs((prev) => ({ ...prev, [key]: value }));
+    const nextValue = key === "deletedMediaPolicy" ? normalizeDeletedMediaPolicy(value) : value;
+    setPrefs((prev) => ({ ...prev, [key]: nextValue }));
+    writePrefs((prev) => ({ ...prev, [key]: nextValue }));
     recordAccountHistoryEntry({
       action: label || key,
-      detail: typeof value === "boolean" ? (value ? "Turned on" : "Turned off") : String(value),
+      detail: typeof nextValue === "boolean" ? (nextValue ? "Turned on" : "Turned off") : String(nextValue),
       source: "settings"
     });
   };
@@ -369,6 +429,38 @@ export default function SettingsManage() {
   const clearArchive = () => {
     setArchiveIds([]);
     localStorage.setItem("archivedPostIds", JSON.stringify([]));
+  };
+
+  const restoreDeletedItem = (entryId) => {
+    const idText = String(entryId || "").trim();
+    if (!idText || deletedBusyId) return;
+    setDeletedBusyId(idText);
+    setDeletedError("");
+    const result = restoreRecentlyDeletedEntry(idText);
+    if (!result.ok) {
+      setDeletedError("Unable to restore this item. It may already be removed.");
+      setDeletedBusyId("");
+      return;
+    }
+    refreshDeletedItems();
+    setDeletedBusyId("");
+  };
+
+  const permanentlyDeleteItem = (entryId) => {
+    const idText = String(entryId || "").trim();
+    if (!idText || deletedBusyId) return;
+    const ok = window.confirm("Permanently delete this item? You won't be able to restore it.");
+    if (!ok) return;
+    setDeletedBusyId(idText);
+    setDeletedError("");
+    const result = permanentlyDeleteRecentlyDeletedEntry(idText);
+    if (!result.ok) {
+      setDeletedError("Unable to permanently delete this item right now.");
+      setDeletedBusyId("");
+      return;
+    }
+    refreshDeletedItems();
+    setDeletedBusyId("");
   };
 
   const addUserToList = (listName, user) => {
@@ -537,6 +629,82 @@ export default function SettingsManage() {
                 </button>
               </div>
             )}
+          </section>
+        </div>
+      </div>
+    );
+  }
+
+  if (isRecentlyDeletedConfig) {
+    const currentPolicy = normalizeDeletedMediaPolicy(prefs.deletedMediaPolicy);
+    return (
+      <div className="settings-page">
+        <div className="settings-shell">
+          {renderHeader("Deleted photos and videos", "Restore deleted media or remove it forever.")}
+          <section className="settings-panel">
+            <header className="settings-panel-head">
+              <h3>Auto-delete timing</h3>
+            </header>
+            <div className="settings-select-grid">
+              {DELETED_MEDIA_POLICY_OPTIONS.map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  className={currentPolicy === opt.id ? "active" : ""}
+                  onClick={() => updatePref("deletedMediaPolicy", opt.id, "Deleted media auto-delete")}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            <p className="settings-note">Choose how long deleted posts stay restorable before they are removed forever.</p>
+          </section>
+
+          <section className="settings-panel">
+            <header className="settings-panel-head">
+              <h3>Recently deleted ({deletedItems.length})</h3>
+            </header>
+            {deletedNotice ? <p className="settings-note">{deletedNotice}</p> : null}
+            {deletedError ? <p className="settings-empty">{deletedError}</p> : null}
+            {deletedItems.length === 0 && <p className="settings-empty">No deleted photos or videos.</p>}
+
+            {deletedItems.map((entry) => {
+              const mediaUrl = resolveMediaUrl(String(entry?.mediaUrl || "").trim());
+              const title = entry?.title || "Untitled post";
+              const deletedAtLabel = formatDateTime(entry?.deletedAt || entry?.createdAt);
+              const expiresAtLabel = formatDateOnly(entry?.expiresAt);
+              const busy = deletedBusyId === entry.id;
+              return (
+                <article className="settings-item" key={`recently-deleted-${entry.id}`}>
+                  <div className="settings-thumb-wrap">
+                    {mediaUrl ? (
+                      entry?.isVideo ? (
+                        <video src={mediaUrl} className="settings-thumb" muted playsInline preload="metadata" />
+                      ) : (
+                        <img src={mediaUrl} alt={title} className="settings-thumb" />
+                      )
+                    ) : (
+                      <div className="settings-thumb settings-thumb-empty">No preview</div>
+                    )}
+                  </div>
+                  <div className="settings-item-text">
+                    <h4>{title}</h4>
+                    <p>{deletedAtLabel ? `Deleted: ${deletedAtLabel}` : "Deleted from profile"}</p>
+                    {expiresAtLabel ? <p>Auto-delete: {expiresAtLabel}</p> : null}
+                  </div>
+                  <div className="settings-item-actions">
+                    {entry?.restoreEligible ? (
+                      <button type="button" className="settings-action-btn" disabled={busy} onClick={() => restoreDeletedItem(entry.id)}>
+                        Restore
+                      </button>
+                    ) : null}
+                    <button type="button" className="settings-remove" disabled={busy} onClick={() => permanentlyDeleteItem(entry.id)}>
+                      {busy ? "Working..." : "Delete now"}
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
           </section>
         </div>
       </div>

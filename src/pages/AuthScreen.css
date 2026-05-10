@@ -391,6 +391,13 @@ body.ss-theme-white .auth-form-new input::placeholder {
   color: #64748b;
 }
 
+body.ss-theme-white .auth-form-new input:focus {
+  background: #ffffff;
+  color: #0f172a;
+  border-color: rgba(59, 130, 246, 0.45);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.16);
+}
+
 body.ss-theme-white .auth-password-toggle {
   background: #eef2f7;
   color: #0f172a;

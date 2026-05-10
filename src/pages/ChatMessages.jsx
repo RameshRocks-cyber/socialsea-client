@@ -1246,7 +1246,6 @@ export default function ChatMessages() {
                     ) : (
                       <span className="chat-story-fallback">{label.slice(0, 1).toUpperCase()}</span>
                     )}
-                    {isVideo && <span className="chat-story-play">Ã¢â€“Â¶</span>}
                   </span>
                   <small>{label.length > 14 ? `${label.slice(0, 12)}...` : label}</small>
                 </button>
@@ -2026,12 +2025,12 @@ export default function ChatMessages() {
                   const inlinePreviewPoster = resolveMediaUrl(feedShare?.poster || "");
                   const previewSrc = mediaUrl || preview?.src || inlinePreviewSrc || "";
                   const previewPoster = preview?.poster || inlinePreviewPoster || reelPosterBySrc[previewSrc] || "";
-                  const destinationLabel = feedShare?.kind === "watch" ? "Open in Long Videos" : "Open in Feed";
+                  const destinationLabel = feedShare?.kind === "watch" ? "Open in Videos" : "Open in Feed";
                   const title =
                     preview?.title ||
                     trimReplyPreview(
                       shareCaption(item.raw?.text || item.text, feedShare?.match) ||
-                        (feedShare?.kind === "watch" ? "Shared long video" : "Shared video")
+                        "Shared video"
                     );
                   return (
                     <div className="chat-feed-share-wrap">
@@ -2181,11 +2180,6 @@ export default function ChatMessages() {
                       ) : (
                         <>
                           <span>{decodeSignAssistText(item.raw?.text || item.text)?.text || item.text}</span>
-                          {item.kind === "message" && decodeSignAssistText(item.raw?.text || item.text) && (
-                            <small className="chat-sign-assist-badge">
-                              Sign Assist - Voice: {decodeSignAssistText(item.raw?.text || item.text)?.voiceGender || "neutral"}
-                            </small>
-                          )}
                           {item.kind === "message" && canTranslateMessage(item.raw) && translatorEnabled && (() => {
                             const msgKey = String(item.raw?.id || `${item.raw?.createdAt}_${item.raw?.text}`);
                             const translated = String(translatedIncomingById[msgKey] || "").trim();

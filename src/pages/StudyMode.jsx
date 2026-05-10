@@ -1277,7 +1277,7 @@ export default function StudyMode() {
   const examScore = Object.values(examResults).filter(Boolean).length;
 
   return (
-    <div className="reels-page reels-study">
+    <div className="reels-page reels-study" data-no-page-swipe>
       <div className="reels-study-card">
         <div className="reels-study-header">
           <div className="reels-study-title">

@@ -1,28 +1,26 @@
 ﻿import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import api from "../api/axios";
-import {
-  formatDateTime,
-  getCreatedAt,
-  getUserDisplayName,
-  loadModerationNotices,
-  saveModerationNotice
-} from "../admin/adminMetrics";
+import { formatDateTime, getCreatedAt, getUserDisplayName } from "../admin/adminMetrics";
+
+const normalizeNoticeList = (payload) => {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.notices)) return payload.notices;
+  if (Array.isArray(payload?.data)) return payload.data;
+  return [];
+};
 
 export default function AdminUsers() {
+  const navigate = useNavigate();
   const [users, setUsers] = useState([]);
   const [userBaseById, setUserBaseById] = useState({});
+  const [notices, setNotices] = useState([]);
+  const [noticeBase, setNoticeBase] = useState("");
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
   const [busyByUserId, setBusyByUserId] = useState({});
+  const [noticeBusyByAction, setNoticeBusyByAction] = useState({});
   const [noticeTextByUserId, setNoticeTextByUserId] = useState({});
-  const [notices, setNotices] = useState([]);
-
-  const normalizeUserList = (payload) => {
-    if (Array.isArray(payload)) return payload;
-    if (Array.isArray(payload?.users)) return payload.users;
-    if (Array.isArray(payload?.data)) return payload.data;
-    return [];
-  };
 
   const toUserShape = (user) => ({
     ...user,
@@ -30,11 +28,19 @@ export default function AdminUsers() {
     banned: Boolean(user?.banned),
     profileCompleted: Boolean(user?.profileCompleted)
   });
+
   const isValidUser = (user) => {
     if (!user || typeof user !== "object") return false;
     const hasId = user.id !== undefined && user.id !== null && `${user.id}`.trim() !== "";
     const hasIdentity = Boolean(user.email || user.name || user.username);
     return hasId && hasIdentity;
+  };
+
+  const normalizeUserList = (payload) => {
+    if (Array.isArray(payload)) return payload;
+    if (Array.isArray(payload?.users)) return payload.users;
+    if (Array.isArray(payload?.data)) return payload.data;
+    return [];
   };
 
   const dedupeUsers = (list) => {
@@ -47,12 +53,12 @@ export default function AdminUsers() {
 
   const getBaseCandidates = () => {
     const defaultBase = String(api?.defaults?.baseURL || "").replace(/\/+$/, "");
-    const storedBase =
-      String(
-        sessionStorage.getItem("socialsea_auth_base_url") ||
+    const storedBase = String(
+      sessionStorage.getItem("socialsea_auth_base_url") ||
         localStorage.getItem("socialsea_auth_base_url") ||
         ""
-      ).replace(/\/+$/, "");
+    ).replace(/\/+$/, "");
+
     return [
       defaultBase,
       storedBase,
@@ -64,37 +70,29 @@ export default function AdminUsers() {
 
   const loadUsers = async () => {
     setError("");
-
     const baseCandidates = getBaseCandidates();
-
-    const endpointCandidates = ["/api/admin/users"];
-
     let bestUsers = [];
     let bestSourceMap = {};
     let lastError = null;
 
     for (const base of baseCandidates) {
-      for (const endpoint of endpointCandidates) {
-        try {
-          const res = await api.get(endpoint, {
-            baseURL: base,
-            skipAuth: true,
-            suppressAuthRedirect: true,
-            skipRefresh: true
-          });
+      try {
+        const res = await api.get("/api/admin/users", {
+          baseURL: base,
+          suppressAuthRedirect: true
+        });
 
-          const list = dedupeUsers(normalizeUserList(res?.data).map(toUserShape).filter(isValidUser));
-          const sourceMap = {};
-          for (const item of list) {
-            sourceMap[String(item.id)] = base;
-          }
-          if (list.length > bestUsers.length) {
-            bestUsers = list;
-            bestSourceMap = sourceMap;
-          }
-        } catch (err) {
-          lastError = err;
+        const list = dedupeUsers(normalizeUserList(res?.data).map(toUserShape).filter(isValidUser));
+        const sourceMap = {};
+        for (const item of list) {
+          sourceMap[String(item.id)] = base;
         }
+        if (list.length > bestUsers.length) {
+          bestUsers = list;
+          bestSourceMap = sourceMap;
+        }
+      } catch (err) {
+        lastError = err;
       }
     }
 
@@ -103,64 +101,156 @@ export default function AdminUsers() {
 
     if (bestUsers.length === 0 && lastError) {
       console.error(lastError);
-      const status = lastError?.response?.status;
+      const status = Number(lastError?.response?.status || 0);
       const message = lastError?.response?.data?.message || lastError?.message || "Failed to load users";
       setError(status ? `Failed to load users (${status}): ${message}` : `Failed to load users: ${message}`);
     }
   };
 
+  const loadModerationNotices = async () => {
+    const baseCandidates = getBaseCandidates();
+    let bestNotices = [];
+    let bestBase = "";
+    let lastError = null;
+
+    for (const baseURL of baseCandidates) {
+      try {
+        const res = await api.get("/api/admin/moderation/notices", {
+          baseURL,
+          suppressAuthRedirect: true
+        });
+        const list = normalizeNoticeList(res?.data).map((notice) => ({
+          ...notice,
+          severity: String(notice?.severity || "").toLowerCase() === "yellow" ? "yellow" : "red"
+        }));
+        if (list.length >= bestNotices.length) {
+          bestNotices = list;
+          bestBase = baseURL;
+        }
+      } catch (err) {
+        lastError = err;
+      }
+    }
+
+    setNotices(bestNotices);
+    setNoticeBase(bestBase);
+
+    if (!bestNotices.length && lastError) {
+      const status = Number(lastError?.response?.status || 0);
+      const message = lastError?.response?.data?.message || lastError?.message || "Failed to load notice history";
+      setError(status ? `Failed to load notice history (${status}): ${message}` : `Failed to load notice history: ${message}`);
+    }
+  };
+
   useEffect(() => {
     loadUsers();
-    setNotices(loadModerationNotices());
+    loadModerationNotices();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const filtered = useMemo(() => {
     if (!query.trim()) return users;
     const q = query.toLowerCase();
     return users.filter((user) =>
-      `${user?.id || ""} ${user?.name || ""} ${user?.email || ""} ${user?.role || ""} ${user?.banned ? "banned" : "active"}`
+      `${user?.id || ""} ${user?.name || ""} ${user?.email || ""} ${user?.role || ""} ${
+        user?.banned ? "banned" : "active"
+      }`
         .toLowerCase()
         .includes(q)
     );
   }, [users, query]);
 
-  const noticeCountByUserId = useMemo(() => {
+  const userNoticeKey = (user) => {
+    if (user?.id !== undefined && user?.id !== null) return `id:${String(user.id)}`;
+    const email = String(user?.email || "").trim().toLowerCase();
+    return email ? `email:${email}` : "";
+  };
+
+  const noticeTargetKey = (notice) => {
+    if (notice?.userId !== undefined && notice?.userId !== null) return `id:${String(notice.userId)}`;
+    const email = String(notice?.userEmail || notice?.recipient || "").trim().toLowerCase();
+    return email ? `email:${email}` : "";
+  };
+
+  const noticeCountByKey = useMemo(() => {
     return notices.reduce((acc, item) => {
-      if (item.targetType !== "user") return acc;
-      acc[item.targetId] = (acc[item.targetId] || 0) + 1;
+      const key = noticeTargetKey(item);
+      if (!key) return acc;
+      acc[key] = (acc[key] || 0) + 1;
       return acc;
     }, {});
   }, [notices]);
 
-  const recentNoticeByUserId = useMemo(() => {
+  const recentNoticeByKey = useMemo(() => {
     return notices.reduce((acc, item) => {
-      if (item.targetType !== "user" || acc[item.targetId]) return acc;
-      acc[item.targetId] = item;
+      const key = noticeTargetKey(item);
+      if (!key || acc[key]) return acc;
+      acc[key] = item;
       return acc;
     }, {});
   }, [notices]);
 
-  const issueNotice = (user, severity) => {
-    const message = String(noticeTextByUserId[user.id] || "").trim() || (severity === "yellow" ? "Policy warning issued." : "Critical violation recorded.");
-    const next = saveModerationNotice({
-      id: `${severity}-${user.id}-${Date.now()}`,
-      targetType: "user",
-      targetId: user.id,
-      targetLabel: getUserDisplayName(user),
-      severity,
-      message,
-      createdAt: new Date().toISOString()
-    });
-    setNotices(next);
-    setNoticeTextByUserId((prev) => ({ ...prev, [user.id]: "" }));
+  const sendNoticeToBackend = async (user, severity, message) => {
+    const sourceBase = String(userBaseById[String(user.id)] || "").trim();
+    const baseCandidates = [sourceBase, noticeBase, ...getBaseCandidates()].filter(
+      (value, index, arr) => value && arr.indexOf(value) === index
+    );
+    let lastErr = null;
+
+    for (const baseURL of baseCandidates) {
+      try {
+        await api.post(
+          `/api/admin/users/${user.id}/notice`,
+          { severity, message },
+          {
+            baseURL,
+            suppressAuthRedirect: true
+          }
+        );
+        return true;
+      } catch (err) {
+        lastErr = err;
+        const status = Number(err?.response?.status || 0);
+        if (status && status !== 404 && status !== 405 && status < 500) {
+          throw err;
+        }
+      }
+    }
+
+    throw lastErr || new Error("Notice endpoint not reachable");
+  };
+
+  const noticeBusyKey = (userId, severity) => `${String(userId)}:${String(severity || "").toLowerCase()}`;
+
+  const issueNotice = async (user, severity) => {
+    const message =
+      String(noticeTextByUserId[user.id] || "").trim() ||
+      (severity === "yellow" ? "Policy warning issued." : "Critical violation recorded.");
+    const busyKey = noticeBusyKey(user.id, severity);
+    setNoticeBusyByAction((prev) => ({ ...prev, [busyKey]: true }));
+    setError("");
+
+    try {
+      await sendNoticeToBackend(user, severity, message);
+      setNoticeTextByUserId((prev) => ({ ...prev, [user.id]: "" }));
+      await loadModerationNotices();
+    } catch (err) {
+      console.error(err);
+      const status = Number(err?.response?.status || 0);
+      const errMessage = err?.response?.data?.message || err?.message || "Failed to send notice";
+      setError(status ? `Notice delivery failed (${status}): ${errMessage}` : `Notice delivery failed: ${errMessage}`);
+    } finally {
+      setNoticeBusyByAction((prev) => ({ ...prev, [busyKey]: false }));
+    }
   };
 
   const setUserBlockedState = async (user, blocked) => {
     setBusyByUserId((prev) => ({ ...prev, [user.id]: true }));
     try {
       await api.post(`/api/admin/users/${user.id}/${blocked ? "block" : "unblock"}`);
-      if (blocked) issueNotice(user, "red");
+      if (blocked) await issueNotice(user, "red");
       await loadUsers();
+      await loadModerationNotices();
     } catch (err) {
       console.error(err);
       setError(blocked ? "Failed to block user account" : "Failed to unblock user account");
@@ -170,14 +260,11 @@ export default function AdminUsers() {
   };
 
   const blockUser = async (user) => setUserBlockedState(user, true);
-
   const unblockUser = async (user) => setUserBlockedState(user, false);
 
   const deleteUser = async (user) => {
     const display = getUserDisplayName(user);
-    const confirmed = window.confirm(
-      `Delete user "${display}" (#${user.id}) permanently?\nThis action cannot be undone.`
-    );
+    const confirmed = window.confirm(`Delete user "${display}" (#${user.id}) permanently?\nThis action cannot be undone.`);
     if (!confirmed) return;
 
     setBusyByUserId((prev) => ({ ...prev, [user.id]: true }));
@@ -185,10 +272,9 @@ export default function AdminUsers() {
 
     try {
       const sourceBase = String(userBaseById[String(user.id)] || "").trim();
-      const baseCandidates = [
-        sourceBase,
-        ...getBaseCandidates()
-      ].filter((value, index, arr) => value && arr.indexOf(value) === index);
+      const baseCandidates = [sourceBase, ...getBaseCandidates()].filter(
+        (value, index, arr) => value && arr.indexOf(value) === index
+      );
       const requestVariants = [
         { method: "delete", url: `/api/admin/users/${user.id}` },
         { method: "post", url: `/api/admin/users/${user.id}/delete` },
@@ -220,9 +306,8 @@ export default function AdminUsers() {
         }
         if (deleted) break;
       }
+
       if (!deleted) {
-        // Backend currently exposes block/unblock but may not expose hard-delete.
-        // Fallback: block user and treat as removed in admin list.
         let blockedFallback = false;
         for (const baseURL of baseCandidates) {
           try {
@@ -248,15 +333,15 @@ export default function AdminUsers() {
         delete next[String(user.id)];
         return next;
       });
-      setNotices((prev) => prev.filter((item) => !(item?.targetType === "user" && String(item?.targetId) === String(user.id))));
       setNoticeTextByUserId((prev) => {
         const next = { ...prev };
         delete next[user.id];
         return next;
       });
+      await loadModerationNotices();
     } catch (err) {
       console.error(err);
-      const status = err?.response?.status;
+      const status = Number(err?.response?.status || 0);
       const message = err?.response?.data?.message || err?.message || "Failed to delete user";
       setError(status ? `Failed to delete user (${status}): ${message}` : `Failed to delete user: ${message}`);
     } finally {
@@ -265,8 +350,8 @@ export default function AdminUsers() {
   };
 
   const activeUsers = users.filter((user) => !user?.banned).length;
-  const redNotices = notices.filter((notice) => notice.targetType === "user" && notice.severity === "red").length;
-  const yellowNotices = notices.filter((notice) => notice.targetType === "user" && notice.severity === "yellow").length;
+  const redNotices = notices.filter((notice) => notice?.severity === "red").length;
+  const yellowNotices = notices.filter((notice) => notice?.severity === "yellow").length;
 
   return (
     <section className="admin-page-grid">
@@ -276,16 +361,24 @@ export default function AdminUsers() {
           <h3>{users.length}</h3>
           <span>{activeUsers} currently active</span>
         </div>
-        <div className="admin-stat-card admin-stat-card-static">
+        <button
+          type="button"
+          className="admin-stat-card"
+          onClick={() => navigate("/admin/users/notices/yellow")}
+        >
           <p>Yellow Notices</p>
           <h3>{yellowNotices}</h3>
-          <span>Early behavior warnings</span>
-        </div>
-        <div className="admin-stat-card admin-stat-card-static">
+          <span>Early behavior warnings - open list</span>
+        </button>
+        <button
+          type="button"
+          className="admin-stat-card"
+          onClick={() => navigate("/admin/users/notices/red")}
+        >
           <p>Red Notices</p>
           <h3>{redNotices}</h3>
-          <span>Critical actions logged</span>
-        </div>
+          <span>Critical actions logged - open list</span>
+        </button>
         <div className="admin-stat-card admin-stat-card-static">
           <p>Removed Access</p>
           <h3>{users.filter((user) => user?.banned).length}</h3>
@@ -302,7 +395,7 @@ export default function AdminUsers() {
           <input
             type="text"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(event) => setQuery(event.target.value)}
             placeholder="Search id, name, email, role or status"
           />
         </header>
@@ -324,16 +417,19 @@ export default function AdminUsers() {
             </thead>
             <tbody>
               {filtered.map((user, index) => {
-                const latestNotice = recentNoticeByUserId[user.id];
-                const noticeCount = noticeCountByUserId[user.id] || 0;
-                const busy = !!busyByUserId[user.id];
+                const key = userNoticeKey(user);
+                const latestNotice = recentNoticeByKey[key];
+                const noticeCount = noticeCountByKey[key] || 0;
+                const busy = Boolean(busyByUserId[user.id]);
+                const yellowNoticeBusy = Boolean(noticeBusyByAction[noticeBusyKey(user.id, "yellow")]);
+                const redNoticeBusy = Boolean(noticeBusyByAction[noticeBusyKey(user.id, "red")]);
 
                 return (
                   <tr key={`${String(user.id)}-${index}`}>
                     <td>
                       <div className="admin-entity-cell">
                         <strong>{getUserDisplayName(user)}</strong>
-                        <span>#{user.id} â€¢ {user.email || "No email"}</span>
+                        <span>#{user.id} - {user.email || "No email"}</span>
                       </div>
                     </td>
                     <td>{user.role || "USER"}</td>
@@ -343,13 +439,28 @@ export default function AdminUsers() {
                         {user.banned ? "Removed access" : "Active"}
                       </span>
                       <div className="admin-row-actions" style={{ marginTop: 8 }}>
-                        <button type="button" className="admin-btn ghost" onClick={() => blockUser(user)} disabled={busy || user?.banned}>
+                        <button
+                          type="button"
+                          className="admin-btn ghost"
+                          onClick={() => blockUser(user)}
+                          disabled={busy || user?.banned}
+                        >
                           {busy && !user?.banned ? "Blocking..." : user?.banned ? "Blocked" : "Block"}
                         </button>
-                        <button type="button" className="admin-btn success" onClick={() => unblockUser(user)} disabled={busy || !user?.banned}>
+                        <button
+                          type="button"
+                          className="admin-btn success"
+                          onClick={() => unblockUser(user)}
+                          disabled={busy || !user?.banned}
+                        >
                           {busy && user?.banned ? "Unblocking..." : user?.banned ? "Unblock" : "Unblocked"}
                         </button>
-                        <button type="button" className="admin-btn danger" onClick={() => deleteUser(user)} disabled={busy}>
+                        <button
+                          type="button"
+                          className="admin-btn danger"
+                          onClick={() => deleteUser(user)}
+                          disabled={busy}
+                        >
                           {busy ? "Working..." : "Delete User"}
                         </button>
                       </div>
@@ -358,23 +469,39 @@ export default function AdminUsers() {
                     <td>
                       <div className="admin-entity-cell">
                         <strong>{noticeCount}</strong>
-                        <span>{latestNotice ? `${latestNotice.severity.toUpperCase()} â€¢ ${latestNotice.message}` : "No notices yet"}</span>
+                        <span>
+                          {latestNotice
+                            ? `${String(latestNotice.severity || "").toUpperCase()} - ${latestNotice.message || ""}`
+                            : "No notices yet"}
+                        </span>
                       </div>
                     </td>
                     <td>
                       <div className="admin-action-stack">
                         <textarea
                           value={noticeTextByUserId[user.id] || ""}
-                          onChange={(e) => setNoticeTextByUserId((prev) => ({ ...prev, [user.id]: e.target.value }))}
+                          onChange={(event) =>
+                            setNoticeTextByUserId((prev) => ({ ...prev, [user.id]: event.target.value }))
+                          }
                           placeholder="Write a moderation note"
                           rows={2}
                         />
                         <div className="admin-row-actions">
-                          <button type="button" className="admin-btn warning" onClick={() => issueNotice(user, "yellow")}>
-                            Yellow Notice
+                          <button
+                            type="button"
+                            className="admin-btn warning"
+                            onClick={() => issueNotice(user, "yellow")}
+                            disabled={yellowNoticeBusy}
+                          >
+                            {yellowNoticeBusy ? "Sending..." : "Yellow Notice"}
                           </button>
-                          <button type="button" className="admin-btn danger" onClick={() => issueNotice(user, "red")}>
-                            Red Notice
+                          <button
+                            type="button"
+                            className="admin-btn danger"
+                            onClick={() => issueNotice(user, "red")}
+                            disabled={redNoticeBusy}
+                          >
+                            {redNoticeBusy ? "Sending..." : "Red Notice"}
                           </button>
                         </div>
                       </div>
@@ -391,5 +518,3 @@ export default function AdminUsers() {
     </section>
   );
 }
-
-

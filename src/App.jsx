@@ -1,9 +1,6 @@
 ﻿import { Suspense, lazy, useEffect, useRef } from "react";
 import { BrowserRouter, Routes, Route, useLocation, Navigate, useNavigate } from "react-router-dom";
 import { useLayoutEffect } from "react";
-import Navbar from "./components/Navbar";
-import NotificationBuddyBoundary from "./components/NotificationBuddyBoundary";
-import GestureCursor from "./components/GestureCursor";
 import ProtectedRoute from "./components/ProtectedRoute";
 import { applyUiLanguageFromStorage, readPreferredLanguageSetting, syncPreferredLanguageFromBackend } from "./i18n/uiLanguage";
 import { getUserRole, isAuthenticated } from "./auth";
@@ -28,6 +25,9 @@ const AnonymousFeed = lazy(lazyWithRetry(() => import("./pages/AnonymousFeed"), 
 const AnonymousUpload = lazy(lazyWithRetry(() => import("./pages/AnonymousUpload"), "anonymous-upload-page"));
 const AdminDashboard = lazy(lazyWithRetry(() => import("./AdminDashboard"), "admin-dashboard-page"));
 const AdminUsers = lazy(lazyWithRetry(() => import("./pages/AdminUsers"), "admin-users-page"));
+const AdminModerationNotices = lazy(
+  lazyWithRetry(() => import("./pages/AdminModerationNotices"), "admin-moderation-notices-page")
+);
 const AdminPosts = lazy(lazyWithRetry(() => import("./pages/AdminPosts"), "admin-posts-page"));
 const AdminReports = lazy(lazyWithRetry(() => import("./pages/AdminReports"), "admin-reports-page"));
 const AdminLiveRecordings = lazy(lazyWithRetry(() => import("./pages/AdminLiveRecordings"), "admin-live-recordings-page"));
@@ -70,11 +70,17 @@ const JobNotifications = lazy(lazyWithRetry(() => import("./pages/JobNotificatio
 const JobProfile = lazy(lazyWithRetry(() => import("./pages/JobProfile"), "job-profile-page"));
 const PostJob = lazy(lazyWithRetry(() => import("./pages/PostJob"), "post-job-page"));
 const ResumeBuilder = lazy(lazyWithRetry(() => import("./pages/ResumeBuilder"), "resume-builder-page"));
+const ResumeTemplates = lazy(lazyWithRetry(() => import("./pages/ResumeTemplates"), "resume-templates-page"));
 const ApplicantInbox = lazy(lazyWithRetry(() => import("./pages/ApplicantInbox.jsx"), "applicant-inbox-page"));
 const AppliedJobs = lazy(lazyWithRetry(() => import("./pages/AppliedJobs.jsx"), "applied-jobs-page"));
 const ApplicantProfile = lazy(lazyWithRetry(() => import("./pages/ApplicantProfile.jsx"), "applicant-profile-page"));
 const AuthedRealtimeShell = lazy(lazyWithRetry(() => import("./components/AuthedRealtimeShell"), "authed-realtime-shell"));
 const Chat = lazy(lazyWithRetry(() => import("./pages/Chat"), "chat-page"));
+const Navbar = lazy(lazyWithRetry(() => import("./components/Navbar"), "navbar"));
+const NotificationBuddyBoundary = lazy(
+  lazyWithRetry(() => import("./components/NotificationBuddyBoundary"), "notification-buddy-boundary")
+);
+const GestureCursor = lazy(lazyWithRetry(() => import("./components/GestureCursor"), "gesture-cursor"));
 const isLoopbackHost = (host) => {
   const value = String(host || "").trim().toLowerCase();
   return value === "localhost" || value === "127.0.0.1";
@@ -207,6 +213,8 @@ function AppRoutes() {
     startAt: 0,
     target: null
   });
+  const currentPlayingVideoRef = useRef(null);
+  const prefetchStartedRef = useRef(false);
 
   useEffect(() => {
     const node = appMainRef.current;
@@ -262,22 +270,113 @@ function AppRoutes() {
       const current = event.target;
       if (!(current instanceof HTMLVideoElement)) return;
       if (current.dataset.allowSimultaneous === "true") return;
-
-      document.querySelectorAll("video").forEach((video) => {
-        if (video !== current && !video.paused && video.dataset.allowSimultaneous !== "true") {
-          video.pause();
+      const previous = currentPlayingVideoRef.current;
+      if (
+        previous &&
+        previous !== current &&
+        previous instanceof HTMLVideoElement &&
+        !previous.paused &&
+        previous.dataset.allowSimultaneous !== "true"
+      ) {
+        try {
+          previous.pause();
+        } catch {
+          // ignore pause failures
         }
-      });
+      }
+      currentPlayingVideoRef.current = current;
     };
 
     document.addEventListener("play", handleVideoPlay, true);
-    return () => document.removeEventListener("play", handleVideoPlay, true);
+    return () => {
+      currentPlayingVideoRef.current = null;
+      document.removeEventListener("play", handleVideoPlay, true);
+    };
   }, []);
 
   useEffect(() => {
     if (!authed) return undefined;
     syncPreferredLanguageFromBackend();
     return undefined;
+  }, [authed]);
+
+  useEffect(() => {
+    if (!authed || prefetchStartedRef.current) return undefined;
+    prefetchStartedRef.current = true;
+    if (typeof window === "undefined") return undefined;
+    const connection =
+      navigator.connection ||
+      navigator.mozConnection ||
+      navigator.webkitConnection ||
+      null;
+    const saveData = Boolean(connection?.saveData);
+    const effectiveType = String(connection?.effectiveType || "").toLowerCase();
+    const isSlowNetwork = effectiveType.includes("2g") || effectiveType === "slow-2g";
+    const deviceMemory = Number(navigator.deviceMemory || 0);
+    const isLowMemoryDevice = Number.isFinite(deviceMemory) && deviceMemory > 0 && deviceMemory <= 2;
+    if (saveData || isSlowNetwork || isLowMemoryDevice) return undefined;
+
+    const warmupImports = [
+      () => import("./components/Navbar"),
+      () => import("./components/NotificationBuddyBoundary"),
+      () => import("./components/GestureCursor"),
+      () => import("./components/Feed"),
+      () => import("./pages/Reels"),
+      () => import("./pages/Chat"),
+      () => import("./pages/Notifications"),
+      () => import("./pages/Profile"),
+      () => import("./pages/LongVideos"),
+      () => import("./pages/Settings"),
+      () => import("./pages/ResumeTemplates")
+    ];
+
+    let cancelled = false;
+    let idleId = 0;
+    let timeoutId = 0;
+    let index = 0;
+
+    const clearTimers = () => {
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+        timeoutId = 0;
+      }
+      if (idleId && typeof window.cancelIdleCallback === "function") {
+        window.cancelIdleCallback(idleId);
+        idleId = 0;
+      }
+    };
+
+    const runNext = () => {
+      if (cancelled || index >= warmupImports.length) return;
+      const load = warmupImports[index];
+      index += 1;
+      Promise.resolve()
+        .then(() => load())
+        .catch(() => {})
+        .finally(() => {
+          if (cancelled || index >= warmupImports.length) return;
+          timeoutId = window.setTimeout(scheduleNext, 180);
+        });
+    };
+
+    const scheduleNext = () => {
+      if (cancelled || index >= warmupImports.length) return;
+      clearTimers();
+      if (typeof window.requestIdleCallback === "function") {
+        idleId = window.requestIdleCallback(() => {
+          idleId = 0;
+          runNext();
+        }, { timeout: 1000 });
+        return;
+      }
+      timeoutId = window.setTimeout(runNext, 220);
+    };
+
+    timeoutId = window.setTimeout(scheduleNext, 700);
+    return () => {
+      cancelled = true;
+      clearTimers();
+    };
   }, [authed]);
 
   useLayoutEffect(() => {
@@ -474,10 +573,12 @@ function AppRoutes() {
     };
 
     const onPos = (pos) => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
       sendPresence(pos?.coords?.latitude, pos?.coords?.longitude);
     };
 
     const requestOnce = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
       navigator.geolocation.getCurrentPosition(onPos, () => {}, {
         enableHighAccuracy: true,
         timeout: 10000,
@@ -506,14 +607,14 @@ function AppRoutes() {
     watchId = navigator.geolocation.watchPosition(onPos, () => {}, {
       enableHighAccuracy: true,
       timeout: 12000,
-      maximumAge: 60000
+      maximumAge: 120000
     });
 
     const onVisibility = () => {
       if (document.visibilityState === "visible") requestOnce();
     };
     document.addEventListener("visibilitychange", onVisibility);
-    intervalId = setInterval(requestOnce, 30000);
+    intervalId = setInterval(requestOnce, 60000);
 
     return () => {
       active = false;
@@ -638,9 +739,21 @@ function AppRoutes() {
 
   const appShell = (
     <>
-      {showUserNavbar && <Navbar />}
-      {showUserNavbar && <NotificationBuddyBoundary enabled={showUserNavbar} />}
-      <GestureCursor />
+      {showUserNavbar && (
+        <Suspense fallback={null}>
+          <Navbar />
+        </Suspense>
+      )}
+      {showUserNavbar && (
+        <Suspense fallback={null}>
+          <NotificationBuddyBoundary enabled={showUserNavbar} />
+        </Suspense>
+      )}
+      {authed && (
+        <Suspense fallback={null}>
+          <GestureCursor />
+        </Suspense>
+      )}
       <main
         ref={appMainRef}
         className={`app-main ${showUserNavbar ? "with-user-nav" : ""} ${isChatRoute ? "chat-main-route" : ""} ${
@@ -710,6 +823,7 @@ function AppRoutes() {
               <Route path="/applied-jobs" element={<ProtectedRoute><AppliedJobs /></ProtectedRoute>} />
               <Route path="/post-job" element={<ProtectedRoute><PostJob /></ProtectedRoute>} />
               <Route path="/resume-builder" element={<ProtectedRoute><ResumeBuilder /></ProtectedRoute>} />
+              <Route path="/resume-templates" element={<ProtectedRoute><ResumeTemplates /></ProtectedRoute>} />
               <Route path="/profile/live-recordings" element={<ProtectedRoute><LiveRecordings /></ProtectedRoute>} />
               <Route path="/live-recordings" element={<ProtectedRoute><LiveRecordings /></ProtectedRoute>} />
               <Route path="/live" element={<Navigate to="/live/start" replace />} />
@@ -759,6 +873,8 @@ function AppRoutes() {
                 <Route index element={<Navigate to="dashboard" replace />} />
                 <Route path="dashboard" element={<AdminDashboard />} />
                 <Route path="users" element={<AdminUsers />} />
+                <Route path="users/notices/yellow" element={<AdminModerationNotices severity="yellow" />} />
+                <Route path="users/notices/red" element={<AdminModerationNotices severity="red" />} />
                 <Route path="posts" element={<AdminPosts />} />
                 <Route path="live-recordings" element={<AdminLiveRecordings />} />
                 <Route path="ambulance" element={<AdminAmbulanceRequests />} />

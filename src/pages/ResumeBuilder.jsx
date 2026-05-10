@@ -316,7 +316,7 @@ export default function ResumeBuilder() {
 
   const viewCv = async () => {
     await saveResume(resume);
-    navigate("/job-profile");
+    navigate("/resume-templates?next=/job-profile");
   };
 
   const viewLabel = hydrated ? "View CV" : "Loading...";

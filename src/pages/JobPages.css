@@ -1,4 +1,6 @@
-﻿.job-page {
+﻿@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Outfit:wght@400;500;600;700&display=swap");
+
+.job-page {
   max-width: 960px;
   margin: 0 auto;
   padding: 24px 16px 48px;
@@ -146,6 +148,50 @@
 
 .job-page-contact-value {
   color: inherit;
+}
+
+.job-template-picker {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.job-template-picker-label {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #8f98a3;
+  font-weight: 700;
+}
+
+.job-template-picker-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.job-template-pill {
+  border: 1px solid #2b2b2b;
+  background: #101010;
+  color: #cfd3d8;
+  border-radius: 999px;
+  padding: 5px 11px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.job-template-pill:hover {
+  border-color: #3a3a3a;
+  color: #eceff3;
+}
+
+.job-template-pill.selected {
+  border-color: rgba(45, 123, 255, 0.52);
+  background: rgba(45, 123, 255, 0.16);
+  color: #b8d4ff;
+  box-shadow: 0 6px 16px rgba(45, 123, 255, 0.24);
 }
 
 .job-search {
@@ -525,6 +571,223 @@
   background: #0f0f0f;
 }
 
+.job-page-template-classic {
+  color: #111827;
+  background: #ffffff;
+  font-family: "Georgia", "Times New Roman", serif;
+}
+
+.job-page-template-classic .job-page-title {
+  color: #111827;
+  font-size: 30px;
+  letter-spacing: 0.01em;
+}
+
+.job-page-template-classic .job-page-subtitle,
+.job-page-template-classic .job-page-subtitle-muted {
+  color: #374151;
+}
+
+.job-page-template-classic .job-page-contact-item,
+.job-page-template-classic .job-page-edit,
+.job-page-template-classic .job-page-download,
+.job-page-template-classic .job-page-exit {
+  background: #ffffff;
+  border-color: #d1d5db;
+  color: #111827;
+}
+
+.job-page-template-classic .job-page-contact-label {
+  color: #6b7280;
+}
+
+.job-page-template-classic .job-section {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  box-shadow: none;
+}
+
+.job-page-template-classic .job-section-title {
+  color: #0d47a1;
+  border-bottom: 2px solid #111827;
+  padding-bottom: 3px;
+  margin-bottom: 10px;
+}
+
+.job-page-template-classic .resume-grid {
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+
+.job-page-template-classic .resume-card {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+}
+
+.job-page-template-classic .resume-card h4 {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-bottom: 2px solid #111827;
+  padding-bottom: 3px;
+  color: #0d47a1;
+}
+
+.job-page-template-classic .resume-item span,
+.job-page-template-classic .job-empty {
+  color: #374151;
+}
+
+.job-page-template-classic .resume-item p {
+  color: #111827;
+}
+
+.job-page-template-classic .job-pill {
+  border-color: #d1d5db;
+  background: transparent;
+  color: #111827;
+}
+
+.job-page-template-sidebar {
+  color: #0f172a;
+  background:
+    radial-gradient(1000px 520px at 20% -10%, rgba(59, 130, 246, 0.12), transparent 62%),
+    radial-gradient(900px 520px at 100% 10%, rgba(45, 212, 191, 0.08), transparent 60%),
+    #f6f8ff;
+  font-family: "Inter", "Segoe UI", sans-serif;
+}
+
+.job-page-template-sidebar .job-page-title {
+  color: #0f172a;
+  font-size: 30px;
+}
+
+.job-page-template-sidebar .job-page-subtitle,
+.job-page-template-sidebar .job-page-subtitle-muted {
+  color: #475569;
+}
+
+.job-page-template-sidebar .job-page-contact-item,
+.job-page-template-sidebar .job-page-edit,
+.job-page-template-sidebar .job-page-download,
+.job-page-template-sidebar .job-page-exit {
+  background: rgba(255, 255, 255, 0.9);
+  border-color: rgba(148, 170, 220, 0.5);
+  color: #0f172a;
+}
+
+.job-page-template-sidebar .job-section {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: rgba(148, 170, 220, 0.55);
+  box-shadow: 0 18px 40px rgba(8, 15, 35, 0.08);
+}
+
+.job-page-template-sidebar .job-section-title {
+  color: #1d4ed8;
+}
+
+.job-page-template-sidebar .resume-card {
+  background: rgba(255, 255, 255, 0.95);
+  border-color: rgba(148, 170, 220, 0.55);
+}
+
+.job-page-template-sidebar .resume-item span,
+.job-page-template-sidebar .job-empty {
+  color: #64748b;
+}
+
+.job-page-template-sidebar .resume-item p {
+  color: #334155;
+}
+
+.job-page-template-sidebar .job-pill {
+  border-color: rgba(148, 170, 220, 0.6);
+  background: rgba(239, 246, 255, 0.9);
+  color: #1e40af;
+}
+
+.job-page-template-graphite {
+  color: #0f172a;
+  background: #ffffff;
+  font-family: "Inter", "Segoe UI", sans-serif;
+}
+
+.job-page-template-graphite .job-page-title {
+  color: #0f172a;
+  font-size: 30px;
+}
+
+.job-page-template-graphite .job-page-subtitle,
+.job-page-template-graphite .job-page-subtitle-muted {
+  color: #475569;
+}
+
+.job-page-template-graphite .job-page-contact-item,
+.job-page-template-graphite .job-page-edit,
+.job-page-template-graphite .job-page-download,
+.job-page-template-graphite .job-page-exit {
+  background: #ffffff;
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+
+.job-page-template-graphite .job-section {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  box-shadow: none;
+}
+
+.job-page-template-graphite .job-section-title {
+  color: #0f172a;
+  border-bottom: 2px solid #0f172a;
+  padding-bottom: 3px;
+  margin-bottom: 10px;
+}
+
+.job-page-template-graphite .resume-grid {
+  grid-template-columns: 1fr;
+  gap: 14px;
+}
+
+.job-page-template-graphite .resume-card {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+}
+
+.job-page-template-graphite .resume-card h4 {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-bottom: 2px solid #0f172a;
+  padding-bottom: 3px;
+  color: #0f172a;
+}
+
+.job-page-template-graphite .resume-item span,
+.job-page-template-graphite .job-empty {
+  color: #475569;
+}
+
+.job-page-template-graphite .resume-item p {
+  color: #0f172a;
+}
+
+.job-page-template-graphite .job-pill {
+  border-color: #cbd5e1;
+  background: transparent;
+  color: #0f172a;
+}
+
 @media (max-width: 860px) {
   .resume-grid {
     grid-template-columns: 1fr;
@@ -656,6 +919,12 @@
     border-top: 1px solid #2b2b2b;
     padding-left: 0;
     padding-top: 10px;
+  }
+
+  .job-template-picker {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
   }
 }
 
@@ -863,3 +1132,30 @@ body.ss-theme-white .job-page-contact-item:hover {
     border-top-color: rgba(96, 142, 191, 0.26);
   }
 }
+
+@media print {
+  .job-template-picker {
+    display: none !important;
+  }
+
+  .job-page-actions {
+    display: none !important;
+  }
+
+  .job-page {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+
+  .job-page-header {
+    padding-left: 0 !important;
+  }
+
+  .job-section,
+  .resume-card {
+    break-inside: avoid;
+  }
+}
+
+
+

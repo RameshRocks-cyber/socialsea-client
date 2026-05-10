@@ -13,6 +13,11 @@ import { COLOR_THEME_OPTIONS, readTheme, setTheme, readCustomThemeColors, setCus
 import { recordAccountHistoryEntry } from "../services/activityStore";
 import { getLanguageLabel } from "../i18n/languages";
 import { resolveMediaUrl } from "../utils/mediaUrl";
+import {
+  getDeletedMediaPolicyLabel,
+  normalizeDeletedMediaPolicy,
+  readRecentlyDeletedCount
+} from "../services/recentlyDeletedStore";
 import "./Settings.css";
 
 const CLOSE_FRIENDS_KEY = "socialsea_close_friends_v1";
@@ -57,6 +62,7 @@ const defaultPrefs = {
   longVideosEnabled: false,
   ambulanceNavigation: false,
   preferredLanguage: "en",
+  deletedMediaPolicy: "immediate",
   contentTypes: DEFAULT_CONTENT_TYPES,
   jobMode: "profile",
   showMyStoriesOnProfile: true,
@@ -77,6 +83,7 @@ const SETTING_LABELS = {
   longVideosEnabled: "Long videos",
   ambulanceNavigation: "Ambulance Navigation",
   preferredLanguage: "Language",
+  deletedMediaPolicy: "Deleted media",
   showMyStoriesOnProfile: "My Stories on profile",
   showAnonymousShortcutsOnProfile: "Anonymous shortcuts on profile"
 };
@@ -137,6 +144,7 @@ const readPrefs = () => {
       normalized.notificationBuddyVoiceGender = normalizeNotificationVoiceGender(
         normalized.notificationBuddyVoiceGender
       );
+      normalized.deletedMediaPolicy = normalizeDeletedMediaPolicy(normalized.deletedMediaPolicy);
       normalized.contentTypes = normalizeContentTypeList(normalized.contentTypes);
       return normalized;
     }
@@ -150,6 +158,7 @@ const readPrefs = () => {
     normalized.notificationBuddyVoiceGender = normalizeNotificationVoiceGender(
       normalized.notificationBuddyVoiceGender
     );
+    normalized.deletedMediaPolicy = normalizeDeletedMediaPolicy(normalized.deletedMediaPolicy);
     normalized.contentTypes = normalizeContentTypeList(normalized.contentTypes);
     return normalized;
   } catch {
@@ -162,6 +171,7 @@ const readPrefs = () => {
     normalized.notificationBuddyVoiceGender = normalizeNotificationVoiceGender(
       normalized.notificationBuddyVoiceGender
     );
+    normalized.deletedMediaPolicy = normalizeDeletedMediaPolicy(normalized.deletedMediaPolicy);
     normalized.contentTypes = normalizeContentTypeList(normalized.contentTypes);
     return normalized;
   }
@@ -213,6 +223,7 @@ export default function Settings() {
   const [ambulanceApproved, setAmbulanceApproved] = useState(false);
   const [trafficAlertsBusy, setTrafficAlertsBusy] = useState(false);
   const [longVideosBusy, setLongVideosBusy] = useState(false);
+  const [recentlyDeletedCount, setRecentlyDeletedCount] = useState(() => readRecentlyDeletedCount());
 
   const [closeFriends, setCloseFriends] = useState(() => readJsonArray(CLOSE_FRIENDS_KEY));
   const [blockedUsers, setBlockedUsers] = useState(() => readJsonArray(BLOCKED_KEY));
@@ -242,6 +253,10 @@ export default function Settings() {
     return `${contentTypeSelection.length} selected`;
   }, [contentTypeSelection]);
   const preferredLanguageLabel = useMemo(() => getLanguageLabel(prefs.preferredLanguage), [prefs.preferredLanguage]);
+  const deletedMediaPolicyLabel = useMemo(
+    () => getDeletedMediaPolicyLabel(prefs.deletedMediaPolicy),
+    [prefs.deletedMediaPolicy]
+  );
 
   useEffect(() => {
     persistSettingsSafely(prefs);
@@ -263,6 +278,17 @@ export default function Settings() {
     const queryValue = String(searchParams.get("q") || "");
     setSettingsSearch((prev) => (prev === queryValue ? prev : queryValue));
   }, [searchParams]);
+
+  useEffect(() => {
+    const syncDeletedCount = () => setRecentlyDeletedCount(readRecentlyDeletedCount());
+    syncDeletedCount();
+    window.addEventListener("ss-recently-deleted-update", syncDeletedCount);
+    window.addEventListener("focus", syncDeletedCount);
+    return () => {
+      window.removeEventListener("ss-recently-deleted-update", syncDeletedCount);
+      window.removeEventListener("focus", syncDeletedCount);
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -605,7 +631,14 @@ export default function Settings() {
     { icon: "🏷️", title: "Tags and mentions", value: prefs.tagsMentions, keywords: ["tags", "mentions"], onClick: () => navigate("/settings/manage/tags-mentions") },
     { icon: "🗨️", title: "Comments", value: prefs.comments, keywords: ["comments"], onClick: () => navigate("/settings/manage/comments") },
     { icon: "🔊", title: "Notification sound", value: getSoundLabel("notification", prefs.notificationSound), keywords: ["sound", "notification"], onClick: () => navigate("/settings/sounds") },
-    { icon: "📳", title: "Ringtone", value: getSoundLabel("ringtone", prefs.ringtoneSound), keywords: ["ringtone", "call"], onClick: () => navigate("/settings/sounds") }
+    { icon: "📳", title: "Ringtone", value: getSoundLabel("ringtone", prefs.ringtoneSound), keywords: ["ringtone", "call"], onClick: () => navigate("/settings/sounds") },
+    {
+      icon: "🗑️",
+      title: "Deleted photos and videos",
+      value: `${recentlyDeletedCount} | ${deletedMediaPolicyLabel}`,
+      keywords: ["deleted", "restore", "trash", "recently deleted", "30 days", "videos", "photos"],
+      onClick: () => navigate("/settings/manage/recently-deleted")
+    }
   ];
 
   const filteredSettingsOptions = settingsSearchTokens.length === 0
@@ -728,6 +761,12 @@ export default function Settings() {
           />
           <Row icon={"🔖"} title="Saved" value={savedIds.length} onClick={() => navigate("/saved")} />
           <Row icon={"🗃️"} title="Archive" value={archiveIds.length} onClick={() => navigate("/settings/manage/archive")} />
+          <Row
+            icon={"🗑️"}
+            title="Deleted photos and videos"
+            value={`${recentlyDeletedCount} | ${deletedMediaPolicyLabel}`}
+            onClick={() => navigate("/settings/manage/recently-deleted")}
+          />
           <Row icon={"📈"} title="Your activity" onClick={() => navigate("/settings/activity")} />
           <Row icon={"🕘"} title="Login activity" value="Open" onClick={() => navigate("/settings/login-activity")} />
           <Row

@@ -23,12 +23,46 @@ const normalizeBaseCandidate = (rawValue) => {
   return value;
 };
 
+const isLoopbackHost = (host) => {
+  const value = String(host || "").trim().toLowerCase();
+  return value === "localhost" || value === "127.0.0.1";
+};
+
+const isPrivateIpHost = (host) => {
+  const value = String(host || "").trim();
+  if (!/^\d{1,3}(?:\.\d{1,3}){3}$/.test(value)) return false;
+  const parts = value.split(".").map((n) => Number(n));
+  if (parts.some((n) => !Number.isFinite(n) || n < 0 || n > 255)) return false;
+  const [a, b] = parts;
+  if (a === 10) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  return false;
+};
+
+const hostFromBaseCandidate = (value) => {
+  const normalized = String(value || "").trim();
+  if (!/^https?:\/\//i.test(normalized)) return "";
+  try {
+    return new URL(normalized).hostname.toLowerCase();
+  } catch {
+    return "";
+  }
+};
+
+const isLoopbackBaseCandidate = (value) => {
+  const host = hostFromBaseCandidate(value);
+  return isLoopbackHost(host);
+};
+
 const buildOtpBaseCandidates = () => {
   const isHttpsPage =
     typeof window !== "undefined" && window.location.protocol === "https:";
+  const pageHost =
+    typeof window !== "undefined" ? String(window.location.hostname || "").toLowerCase() : "";
   const isLocalPage =
-    typeof window !== "undefined" &&
-    (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+    isLoopbackHost(pageHost);
+  const isLanPage = isPrivateIpHost(pageHost);
 
   const storedRaw =
     sessionStorage.getItem(OTP_BASE_KEY) ||
@@ -45,7 +79,14 @@ const buildOtpBaseCandidates = () => {
     defaultBase,
     envBase,
   ];
-  const deployedCandidates = [
+  const deployedCandidates = isLanPage
+    ? [
+        "/api",
+        stored,
+        defaultBase,
+        envBase,
+      ]
+    : [
     stored,
     defaultBase,
     envBase,
@@ -54,6 +95,7 @@ const buildOtpBaseCandidates = () => {
 
   const candidates = (isLocalPage ? localCandidates : deployedCandidates)
     .filter((v, i, arr) => v && arr.indexOf(v) === i)
+    .filter((v) => !(isLanPage && isLoopbackBaseCandidate(v)))
     .filter((v) => !(isHttpsPage && /^http:\/\//i.test(v)));
 
   if (storedRaw && stored && stored !== String(storedRaw).trim().replace(/\/+$/, "")) {
@@ -71,9 +113,11 @@ const buildOtpBaseCandidates = () => {
 const buildLoginBaseCandidates = () => {
   const isHttpsPage =
     typeof window !== "undefined" && window.location.protocol === "https:";
+  const pageHost =
+    typeof window !== "undefined" ? String(window.location.hostname || "").toLowerCase() : "";
   const isLocalPage =
-    typeof window !== "undefined" &&
-    (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+    isLoopbackHost(pageHost);
+  const isLanPage = isPrivateIpHost(pageHost);
   const pageOrigin =
     typeof window !== "undefined" ? String(window.location.origin || "").trim() : "";
 
@@ -87,6 +131,7 @@ const buildLoginBaseCandidates = () => {
     "";
 
   const candidates = [
+    isLanPage ? "/api" : "",
     normalizeBaseCandidate(storedAuthBaseRaw),
     normalizeBaseCandidate(storedOtpBaseRaw),
     normalizeBaseCandidate(api.defaults.baseURL),
@@ -96,6 +141,7 @@ const buildLoginBaseCandidates = () => {
     isLocalPage ? "" : normalizeBaseCandidate(pageOrigin),
   ]
     .filter((v, i, arr) => v && arr.indexOf(v) === i)
+    .filter((v) => !(isLanPage && isLoopbackBaseCandidate(v)))
     .filter((v) => !(isHttpsPage && /^http:\/\//i.test(v)));
 
   return candidates.length ? candidates : [undefined];
@@ -103,7 +149,18 @@ const buildLoginBaseCandidates = () => {
 
 const shouldSkipEndpointForBase = (baseURL, endpoint) => {
   const base = String(baseURL || "").trim().replace(/\/+$/, "").toLowerCase();
-  return base.endsWith("/api") && endpoint.startsWith("/api/");
+  const route = String(endpoint || "").trim().toLowerCase();
+  // For relative /api base, keep /api-prefixed endpoints and skip /auth/... variants,
+  // because /auth/... will not match Vite's /api proxy and leads to frontend 404.
+  if (base === "/api") {
+    return !route.startsWith("/api/");
+  }
+  // If the absolute base already includes /api, prefer non-/api endpoint variants
+  // to avoid producing /api/api/... routes.
+  if (base.endsWith("/api")) {
+    return route.startsWith("/api/");
+  }
+  return false;
 };
 
 export const sendOtp = (email) => {
@@ -231,79 +288,65 @@ export const registerWithPassword = ({ username, email, phoneNumber, password, o
 
 export const loginWithPassword = ({ identifier, password }) => {
   const value = String(identifier || "").trim();
-  const looksLikeEmail = /@/.test(value);
   const baseCandidates = buildLoginBaseCandidates();
-  const endpoints = ["/api/auth/login", "/auth/login"];
-
-  const payloads = looksLikeEmail
-    ? [
-        { email: value, password },
-        { identifier: value, password },
-        { username: value, password },
-      ]
-    : [
-        { username: value, password },
-        { identifier: value, password },
-        { email: value, password },
-      ];
+  const payload = { identifier: value, password };
+  const endpoint = "/api/auth/login";
 
   const run = async () => {
     let lastError = null;
     for (const baseURL of baseCandidates) {
-      for (const url of endpoints) {
-        for (const body of payloads) {
+      try {
+        const res = await api.request({
+          method: "POST",
+          url: endpoint,
+          data: payload,
+          baseURL,
+          skipAuth: true,
+          timeout: 18000,
+        });
+        const textData = typeof res?.data === "string" ? res.data.trim() : "";
+        if (looksLikeHtml(textData)) {
+          const htmlErr = new Error("Received HTML instead of API response");
+          htmlErr.response = { status: 404, data: textData };
+          throw htmlErr;
+        }
+        const usedBase = String(res?.config?.baseURL || baseURL || api.defaults.baseURL || "").trim();
+        if (usedBase) {
           try {
-            const res = await api.request({
-              method: "POST",
-              url,
-              data: body,
-              baseURL,
-              skipAuth: true,
-              timeout: 18000,
-            });
-            const textData = typeof res?.data === "string" ? res.data.trim() : "";
-            if (looksLikeHtml(textData)) {
-              const htmlErr = new Error("Received HTML instead of API response");
-              htmlErr.response = { status: 404, data: textData };
-              throw htmlErr;
-            }
-            const usedBase = String(res?.config?.baseURL || baseURL || api.defaults.baseURL || "").trim();
-            if (usedBase) {
-              try {
-                sessionStorage.setItem("socialsea_auth_base_url", usedBase);
-                localStorage.setItem("socialsea_auth_base_url", usedBase);
-                sessionStorage.setItem(OTP_BASE_KEY, usedBase);
-                localStorage.setItem(OTP_BASE_KEY, usedBase);
-              } catch {
-                // ignore storage errors
-              }
-            }
-            return res;
-          } catch (err) {
-            lastError = err;
-            const status = err?.response?.status;
-            const text = String(
-              err?.response?.data?.message || err?.response?.data || err?.message || ""
-            ).toLowerCase();
-            if (text.includes("otp") && text.includes("required")) {
-              throw new Error("Password login endpoint is misconfigured (OTP required). Contact backend admin.");
-            }
-            if (
-              !(
-                status === 400 ||
-                status === 401 ||
-                status === 403 ||
-                status === 404 ||
-                status === 405 ||
-                (status >= 500 && status <= 599) ||
-                !status
-              )
-            ) {
-              throw err;
-            }
+            sessionStorage.setItem("socialsea_auth_base_url", usedBase);
+            localStorage.setItem("socialsea_auth_base_url", usedBase);
+            sessionStorage.setItem(OTP_BASE_KEY, usedBase);
+            localStorage.setItem(OTP_BASE_KEY, usedBase);
+          } catch {
+            // ignore storage errors
           }
         }
-      } 
+        return res;
+      } catch (err) {
+        lastError = err;
+        const status = err?.response?.status;
+        const text = String(
+          err?.response?.data?.message || err?.response?.data || err?.message || ""
+        ).toLowerCase();
+
+        // If backend is reachable and responded with auth or rate-limit result,
+        // stop fallback probing to avoid request storms.
+        if (status === 400 || status === 401 || status === 403 || status === 429) {
+          throw err;
+        }
+        if (text.includes("otp") && text.includes("required")) {
+          throw new Error("Password login endpoint is misconfigured (OTP required). Contact backend admin.");
+        }
+
+        const canFallback =
+          status === 404 ||
+          status === 405 ||
+          (status >= 500 && status <= 599) ||
+          !status;
+        if (!canFallback) {
+          throw err;
+        }
+      }
     }
     if (lastError?.code === "ECONNABORTED" || !lastError?.response) {
       const isLocalPage =

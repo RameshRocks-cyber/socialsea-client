@@ -25,7 +25,6 @@ import {
   getPostOwner,
   getPostViews,
   getUserDisplayName,
-  loadModerationNotices,
   toNumber
 } from "./admin/adminMetrics";
 
@@ -38,6 +37,7 @@ export default function AdminDashboard() {
   const [users, setUsers] = useState([]);
   const [posts, setPosts] = useState([]);
   const [reports, setReports] = useState([]);
+  const [moderationNotices, setModerationNotices] = useState([]);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -46,10 +46,13 @@ export default function AdminDashboard() {
       api.get("/api/admin/dashboard/charts?days=14"),
       api.get("/api/admin/users"),
       api.get("/api/admin/posts"),
-      api.get("/api/admin/reports")
+      api.get("/api/admin/reports"),
+      api.get("/api/admin/moderation/notices")
     ])
-      .then(([statsRes, chartsRes, usersRes, postsRes, reportsRes]) => {
-        const firstError = [statsRes, chartsRes, usersRes, postsRes, reportsRes].find((item) => item.status === "rejected");
+      .then(([statsRes, chartsRes, usersRes, postsRes, reportsRes, noticesRes]) => {
+        const firstError = [statsRes, chartsRes, usersRes, postsRes, reportsRes, noticesRes].find(
+          (item) => item.status === "rejected"
+        );
         if (firstError) {
           setError("Some admin metrics could not be loaded. Showing available data.");
         }
@@ -64,14 +67,15 @@ export default function AdminDashboard() {
         if (usersRes.status === "fulfilled") setUsers(Array.isArray(usersRes.value.data) ? usersRes.value.data : []);
         if (postsRes.status === "fulfilled") setPosts(Array.isArray(postsRes.value.data) ? postsRes.value.data : []);
         if (reportsRes.status === "fulfilled") setReports(Array.isArray(reportsRes.value.data) ? reportsRes.value.data : []);
+        if (noticesRes.status === "fulfilled") {
+          setModerationNotices(Array.isArray(noticesRes.value.data) ? noticesRes.value.data : []);
+        }
       })
       .catch((err) => {
         console.error(err);
         setError("Failed to load admin dashboard");
       });
   }, []);
-
-  const moderationNotices = useMemo(() => loadModerationNotices(), []);
 
   const topStats = useMemo(() => {
     const totalUsers = Math.max(toNumber(stats?.users ?? stats?.totalUsers), users.length);
@@ -284,7 +288,7 @@ export default function AdminDashboard() {
       <section className="admin-chart-panel">
         <header>
           <h3>Moderation Mix</h3>
-          <p>Warnings and risk indicators based on reports, bans and local admin notice logs.</p>
+          <p>Warnings and risk indicators based on reports, bans and moderation notice history.</p>
         </header>
         <div className="admin-split-chart">
           <div className="admin-chart-wrap">

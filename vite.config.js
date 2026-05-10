@@ -35,6 +35,7 @@ export default defineConfig(({ mode }) => {
   const detectedPort = readBackendPort()
   const fallbackDevTarget = detectedPort ? `http://localhost:${detectedPort}` : 'http://localhost:8080'
   const devProxyTarget = (env.VITE_DEV_PROXY_TARGET || '').trim() || fallbackDevTarget
+  const devProxyOrigin = (env.VITE_DEV_PROXY_ORIGIN || '').trim() || 'http://localhost:5173'
   const devServerHost = (env.VITE_DEV_SERVER_HOST || '').trim() || '0.0.0.0'
   const devHmrHost = (env.VITE_DEV_HMR_HOST || '').trim()
   const isLocalProxyTarget = (value) => {
@@ -52,6 +53,13 @@ export default defineConfig(({ mode }) => {
     return false
   }
   const useProxy = isLocalProxyTarget(devProxyTarget)
+  const configureProxy = (proxy) => {
+    proxy.on('proxyReq', (proxyReq) => {
+      // Backend CORS allowlists often include localhost dev origin but not LAN IP origin.
+      // Force a stable dev origin for proxied requests so LAN access works.
+      proxyReq.setHeader('origin', devProxyOrigin)
+    })
+  }
 
   return {
     plugins: [react()],
@@ -68,6 +76,30 @@ export default defineConfig(({ mode }) => {
     optimizeDeps: {
       include: ['livekit-client', 'react', 'react-dom', 'react/jsx-runtime'],
     },
+    build: {
+      cssCodeSplit: true,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            const normalized = String(id || '').replace(/\\/g, '/').toLowerCase()
+            if (!normalized.includes('/node_modules/')) return undefined
+            if (normalized.includes('/react-dom/') || normalized.includes('/react/')) return 'vendor-react'
+            if (normalized.includes('/react-router')) return 'vendor-router'
+            if (normalized.includes('/react-icons/')) return 'vendor-icons'
+            if (normalized.includes('/livekit-client/')) return 'vendor-livekit'
+            if (
+              normalized.includes('/@mediapipe/') ||
+              normalized.includes('/@tensorflow/') ||
+              normalized.includes('/onnxruntime-web/')
+            ) {
+              return 'vendor-vision'
+            }
+            if (normalized.includes('/heic2any/')) return 'vendor-heic'
+            return undefined
+          },
+        },
+      },
+    },
     server: {
       host: devServerHost,
       port: 5173,
@@ -78,17 +110,29 @@ export default defineConfig(({ mode }) => {
               target: devProxyTarget,
               changeOrigin: true,
               secure: false,
+              configure: configureProxy,
+              headers: {
+                origin: devProxyOrigin,
+              },
             },
             '/uploads': {
               target: devProxyTarget,
               changeOrigin: true,
               secure: false,
+              configure: configureProxy,
+              headers: {
+                origin: devProxyOrigin,
+              },
             },
             '/ws': {
               target: devProxyTarget,
               changeOrigin: true,
               secure: false,
               ws: true,
+              configure: configureProxy,
+              headers: {
+                origin: devProxyOrigin,
+              },
             },
           }
         : {},

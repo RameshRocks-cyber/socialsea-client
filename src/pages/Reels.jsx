@@ -31,12 +31,14 @@ import StudyMode from "./StudyMode";
 import "./Reels.css";
 
 const MAX_REEL_SECONDS = 60;
-const GESTURE_SCROLL_COOLDOWN_MS = 200;
+const GESTURE_SCROLL_COOLDOWN_MS = 1400;
 const GESTURE_LIKE_COOLDOWN_MS = 200;
 const GESTURE_PLAY_TOGGLE_COOLDOWN_MS = 200;
 const GESTURE_POSE_HOLD_FRAMES = 2;
+const GESTURE_SCROLL_POSE_HOLD_FRAMES = 6;
 const GESTURE_TWO_FINGER_HOLD_FRAMES = 2;
-const GESTURE_RESET_HOLD_FRAMES = 3;
+const GESTURE_RESET_HOLD_FRAMES = 8;
+const GESTURE_SCROLL_SETTLE_MS = 1200;
 const GESTURE_SCRIPT_TF =
   "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js";
 const GESTURE_SCRIPT_HANDPOSE =
@@ -47,6 +49,8 @@ const REELS_CACHE_KEY = "socialsea_reels_cache_v1";
 const REELS_CACHE_TTL_MS = 3 * 60 * 1000;
 const MAX_REELS_DEFAULT = 40;
 const REELS_LIMIT = Number(import.meta.env.VITE_REELS_LIMIT || MAX_REELS_DEFAULT);
+const REEL_PLAY_COOLDOWN_MS = 450;
+const REEL_PLAY_FALLBACK_RELEASE_MS = 1800;
 
 const readStudyModeReels = () => {
   try {
@@ -97,6 +101,14 @@ function loadScript(src, id) {
   });
 }
 
+const getGlobalGestureCache = () => {
+  if (typeof window === "undefined") return { model: null, modelPromise: null };
+  if (!window.__socialseaGestureCache) {
+    window.__socialseaGestureCache = { model: null, modelPromise: null };
+  }
+  return window.__socialseaGestureCache;
+};
+
 export default function Reels() {
   const navigate = useNavigate();
   const viewerIdentity = useMemo(() => readStoryIdentity(), []);
@@ -136,6 +148,8 @@ export default function Reels() {
   const cameraStreamRef = useRef(null);
   const detectFrameRef = useRef(0);
   const handModelRef = useRef(null);
+  const gestureAssetsReadyRef = useRef(false);
+  const gesturePreloadPromiseRef = useRef(null);
   const gestureRunningRef = useRef(false);
   const lastScrollAtRef = useRef(0);
   const lastLikeAtRef = useRef(0);
@@ -156,6 +170,9 @@ export default function Reels() {
   const watchProgressByPostRef = useRef({});
   const feedUserKeyRef = useRef(resolveFeedUserKey());
   const feedPersonalizationRef = useRef(readFeedPersonalizationState(feedUserKeyRef.current));
+  const playLockByPostRef = useRef({});
+  const playLockTimerByPostRef = useRef({});
+  const lastPlayTapAtByPostRef = useRef({});
   const location = useLocation();
   const targetPostId = useMemo(() => {
     const params = new URLSearchParams(location.search);
@@ -264,7 +281,7 @@ export default function Reels() {
     const loadShortVideos = async () => {
       try {
         const limitParam = Number.isFinite(REELS_LIMIT) && REELS_LIMIT > 0 ? Math.max(REELS_LIMIT, 30) : 60;
-        const fromReels = await fetchAny(["/api/reels", "/reels"], { limit: limitParam });
+        const fromReels = await fetchAny(["/api/reels", "/reels"], { size: limitParam, limit: limitParam });
 
         const byKey = new Map();
         const pushItem = (item, source) => {
@@ -475,10 +492,10 @@ export default function Reels() {
       if (!video) return;
       video.muted = allMuted;
       if (idx === currentIndex) {
-        video.play().catch(() => {
+        requestReelPlay(reel.id, video).catch(() => {
           video.muted = true;
           setAllMuted(true);
-          video.play().catch(() => {});
+          requestReelPlay(reel.id, video).catch(() => {});
         });
       } else {
         video.pause();
@@ -516,6 +533,12 @@ export default function Reels() {
         clearTimeout(tapTrackerRef.current.singleTapTimer);
       if (scrollIdleTimerRef.current) clearTimeout(scrollIdleTimerRef.current);
       if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current);
+      Object.values(playLockTimerByPostRef.current).forEach((timerId) => {
+        if (timerId) clearTimeout(timerId);
+      });
+      playLockTimerByPostRef.current = {};
+      playLockByPostRef.current = {};
+      lastPlayTapAtByPostRef.current = {};
       watchProgressByPostRef.current = {};
       stopGestureControl();
     };
@@ -559,6 +582,102 @@ export default function Reels() {
       stopGestureControl();
     });
   }, [gestureEnabled]);
+
+  const ensureGestureModelReady = async () => {
+    if (handModelRef.current) {
+      gestureAssetsReadyRef.current = true;
+      return;
+    }
+    const globalGestureCache = getGlobalGestureCache();
+    if (globalGestureCache.model) {
+      handModelRef.current = globalGestureCache.model;
+      gestureAssetsReadyRef.current = true;
+      return;
+    }
+    if (!gesturePreloadPromiseRef.current) {
+      gesturePreloadPromiseRef.current = (async () => {
+        await loadScript(GESTURE_SCRIPT_TF, "tfjs-reels-gesture");
+        await loadScript(GESTURE_SCRIPT_HANDPOSE, "handpose-reels-gesture");
+        if (!window.handpose) {
+          throw new Error("Hand model unavailable in this browser");
+        }
+        if (!globalGestureCache.modelPromise) {
+          globalGestureCache.modelPromise = window.handpose
+            .load()
+            .then((model) => {
+              globalGestureCache.model = model;
+              return model;
+            })
+            .catch((err) => {
+              globalGestureCache.modelPromise = null;
+              throw err;
+            });
+        }
+        handModelRef.current = await globalGestureCache.modelPromise;
+        gestureAssetsReadyRef.current = true;
+      })()
+        .catch((err) => {
+          gestureAssetsReadyRef.current = false;
+          throw err;
+        })
+        .finally(() => {
+          if (!handModelRef.current) {
+            gesturePreloadPromiseRef.current = null;
+          }
+        });
+    }
+    await gesturePreloadPromiseRef.current;
+  };
+
+  const requestGestureCameraStream = () =>
+    navigator.mediaDevices
+      .getUserMedia({
+        video: {
+          facingMode: "user",
+          width: { ideal: 640 },
+          height: { ideal: 360 },
+          frameRate: { ideal: 20, max: 24 },
+        },
+        audio: false,
+      })
+      .catch(() =>
+        navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "user" },
+          audio: false,
+        })
+      );
+
+  useEffect(() => {
+    if (studyModeReels) return undefined;
+    let cancelled = false;
+    let timerId = 0;
+
+    const warmGestureAssets = async () => {
+      try {
+        await ensureGestureModelReady();
+      } catch {
+        // keep silent; we'll retry when user toggles gestures on
+      }
+    };
+
+    if (typeof window.requestIdleCallback === "function") {
+      const idleId = window.requestIdleCallback(() => {
+        if (!cancelled) void warmGestureAssets();
+      }, { timeout: 1400 });
+      return () => {
+        cancelled = true;
+        window.cancelIdleCallback?.(idleId);
+      };
+    }
+
+    timerId = window.setTimeout(() => {
+      if (!cancelled) void warmGestureAssets();
+    }, 260);
+    return () => {
+      cancelled = true;
+      if (timerId) clearTimeout(timerId);
+    };
+  }, [studyModeReels]);
 
   const fetchLikeCount = (postId) => {
     const idText = String(postId || "").trim();
@@ -1137,17 +1256,51 @@ export default function Reels() {
     const currentReel = reels[currentIndexRef.current];
     if (!nextMuted && currentReel) {
       const currentVideo = videoRefs.current[currentReel.id];
-      if (currentVideo?.paused) currentVideo.play().catch(() => {});
+      if (currentVideo?.paused) {
+        requestReelPlay(currentReel.id, currentVideo).catch(() => {});
+      }
     }
   };
+
+  function releaseReelPlayLock(postId) {
+    const key = String(postId || "").trim();
+    if (!key) return;
+    playLockByPostRef.current[key] = false;
+    const timerId = playLockTimerByPostRef.current[key];
+    if (timerId) clearTimeout(timerId);
+    delete playLockTimerByPostRef.current[key];
+  }
+
+  async function requestReelPlay(postId, video) {
+    const key = String(postId || "").trim();
+    if (!key || !video) return;
+    const now = Date.now();
+    const lastTapAt = Number(lastPlayTapAtByPostRef.current[key] || 0);
+    if (playLockByPostRef.current[key]) return;
+    if (now - lastTapAt < REEL_PLAY_COOLDOWN_MS) return;
+
+    lastPlayTapAtByPostRef.current[key] = now;
+    playLockByPostRef.current[key] = true;
+    const prevTimer = playLockTimerByPostRef.current[key];
+    if (prevTimer) clearTimeout(prevTimer);
+    playLockTimerByPostRef.current[key] = window.setTimeout(() => {
+      releaseReelPlayLock(key);
+    }, REEL_PLAY_FALLBACK_RELEASE_MS);
+
+    const playAttempt = video.play();
+    if (playAttempt?.catch) {
+      await playAttempt.catch(() => {});
+    }
+  }
 
   const togglePlayPause = (postId) => {
     const video = videoRefs.current[postId];
     if (!video) return null;
     if (video.paused) {
-      video.play().catch(() => {});
+      requestReelPlay(postId, video).catch(() => {});
       return "playing";
     }
+    releaseReelPlayLock(postId);
     video.pause();
     return "paused";
   };
@@ -1171,24 +1324,10 @@ export default function Reels() {
         pendingScrollIndexRef.current = null;
         gestureScrollLockRef.current = false;
       }
-    }, 550);
+    }, GESTURE_SCROLL_SETTLE_MS);
   };
 
   const handleReelTap = (reel, event) => {
-    const target = event?.currentTarget;
-    if (target && typeof target.getBoundingClientRect === "function") {
-      const rect = target.getBoundingClientRect();
-      const clickY = Number(event?.clientY || 0);
-      const relY = rect.height ? (clickY - rect.top) / rect.height : 0.5;
-      if (relY <= 0.33) {
-        scrollToIndex(currentIndexRef.current - 1);
-        return;
-      }
-      if (relY >= 0.67) {
-        scrollToIndex(currentIndexRef.current + 1);
-        return;
-      }
-    }
     const tapCount = Number(event?.detail || 1);
     if (tapTrackerRef.current.singleTapTimer) {
       clearTimeout(tapTrackerRef.current.singleTapTimer);
@@ -1288,26 +1427,25 @@ export default function Reels() {
       return;
     }
     setGestureError("");
-    setGestureStatus("Starting hand signals...");
-    await loadScript(GESTURE_SCRIPT_TF, "tfjs-reels-gesture");
-    await loadScript(GESTURE_SCRIPT_HANDPOSE, "handpose-reels-gesture");
-    if (!window.handpose)
-      throw new Error("Hand model unavailable in this browser");
+    setGestureStatus(gestureAssetsReadyRef.current ? "Starting camera..." : "Preparing hand signals...");
     if (!navigator.mediaDevices?.getUserMedia)
       throw new Error("Camera access is not supported");
 
-    if (!handModelRef.current) {
-      handModelRef.current = await window.handpose.load();
+    const streamPromise = requestGestureCameraStream();
+    const modelPromise = ensureGestureModelReady();
+    const [streamResult, modelResult] = await Promise.allSettled([
+      streamPromise,
+      modelPromise,
+    ]);
+
+    if (streamResult.status !== "fulfilled") {
+      throw streamResult.reason || new Error("Unable to access camera");
     }
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: "user",
-        width: { ideal: 1920 },
-        height: { ideal: 1080 },
-        frameRate: { ideal: 30, max: 30 },
-      },
-      audio: false,
-    });
+    const stream = streamResult.value;
+    if (modelResult.status !== "fulfilled") {
+      stream.getTracks().forEach((track) => track.stop());
+      throw modelResult.reason || new Error("Unable to load hand model");
+    }
     cameraStreamRef.current = stream;
 
     const hiddenVideo = document.createElement("video");
@@ -1316,6 +1454,7 @@ export default function Reels() {
     hiddenVideo.playsInline = true;
     hiddenVideo.srcObject = stream;
     cameraVideoRef.current = hiddenVideo;
+    setGestureStatus("Starting hand signals...");
     await hiddenVideo.play();
 
     gestureRunningRef.current = true;
@@ -1360,7 +1499,7 @@ export default function Reels() {
           if (!poseConsumedRef.current) {
             if (
               pose === "oneFinger" &&
-              poseFramesRef.current >= GESTURE_POSE_HOLD_FRAMES &&
+              poseFramesRef.current >= GESTURE_SCROLL_POSE_HOLD_FRAMES &&
               !gestureScrollLockRef.current &&
               now - lastScrollAtRef.current > GESTURE_SCROLL_COOLDOWN_MS
             ) {
@@ -1370,7 +1509,7 @@ export default function Reels() {
               scrollToIndex(currentIndexRef.current + 1);
             } else if (
               pose === "threeFingers" &&
-              poseFramesRef.current >= GESTURE_POSE_HOLD_FRAMES &&
+              poseFramesRef.current >= GESTURE_SCROLL_POSE_HOLD_FRAMES &&
               !gestureScrollLockRef.current &&
               now - lastScrollAtRef.current > GESTURE_SCROLL_COOLDOWN_MS
             ) {
@@ -1413,7 +1552,7 @@ export default function Reels() {
   }
 
   return (
-    <div className="reels-page">
+    <div className="reels-page" data-no-page-swipe>
       <div
         className={`reels-container ${error ? "has-error" : ""} ${!error && reels.length === 0 ? "is-empty" : ""}`}
         ref={containerRef}
@@ -1465,11 +1604,16 @@ export default function Reels() {
                     controls={false}
                     className="reel-video"
                     onPlay={(event) => {
+                      releaseReelPlayLock(reel.id);
                       syncWatchProgressCursor(reel.id, event.currentTarget.currentTime || 0);
                     }}
                     onPause={(event) => {
+                      releaseReelPlayLock(reel.id);
                       syncWatchProgressCursor(reel.id, event.currentTarget.currentTime || 0);
                     }}
+                    onWaiting={() => releaseReelPlayLock(reel.id)}
+                    onStalled={() => releaseReelPlayLock(reel.id)}
+                    onError={() => releaseReelPlayLock(reel.id)}
                     onSeeking={(event) => {
                       syncWatchProgressCursor(reel.id, event.currentTarget.currentTime || 0);
                     }}
