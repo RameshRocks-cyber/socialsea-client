@@ -392,7 +392,7 @@ export default function AdminUsers() {
             <h3>User Monitor</h3>
             <p className="admin-head-note">Search every user, review account state and issue yellow or red notices.</p>
           </div>
-          <input
+          <input name="adminusers-input-395"
             type="text"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
@@ -478,7 +478,7 @@ export default function AdminUsers() {
                     </td>
                     <td>
                       <div className="admin-action-stack">
-                        <textarea
+                        <textarea name="adminusers-textarea-481"
                           value={noticeTextByUserId[user.id] || ""}
                           onChange={(event) =>
                             setNoticeTextByUserId((prev) => ({ ...prev, [user.id]: event.target.value }))

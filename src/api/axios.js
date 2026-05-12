@@ -53,8 +53,125 @@ const RETRYABLE_METHODS = new Set(["get", "head", "options"]);
 const MAX_AUTO_RETRIES = 2;
 const BASE_RETRY_DELAY_MS = 700;
 const MAX_RETRY_DELAY_MS = 9000;
+const AUTH_RECOVERY_LOCK_KEY = "socialsea_auth_recovery_lock_v1";
+const AUTH_RECOVERY_LOCK_MAX_AGE_MS = 30 * 60 * 1000;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const normalizePathForAuthLock = (url) => {
+  const raw = String(url || "").trim();
+  if (!raw) return "";
+  try {
+    const parsed = new URL(raw, "http://localhost");
+    return String(parsed.pathname || "").trim().toLowerCase();
+  } catch {
+    return raw.split("?")[0].split("#")[0].trim().toLowerCase();
+  }
+};
+
+const AUTH_LOCK_NOISY_READ_PATHS = new Set([
+  "/api/follow/requests",
+  "/api/follow/pending-requests",
+  "/api/calls/inbox",
+  "/calls/inbox",
+]);
+
+const getAuthTokenSnapshot = () => ({
+  accessToken: String(
+    sessionStorage.getItem("accessToken") ||
+      sessionStorage.getItem("token") ||
+      localStorage.getItem("accessToken") ||
+      localStorage.getItem("token") ||
+      ""
+  ).trim(),
+  refreshToken: String(
+    sessionStorage.getItem("refreshToken") || localStorage.getItem("refreshToken") || ""
+  ).trim(),
+});
+
+const readAuthRecoveryLock = () => {
+  try {
+    const raw =
+      sessionStorage.getItem(AUTH_RECOVERY_LOCK_KEY) ||
+      localStorage.getItem(AUTH_RECOVERY_LOCK_KEY) ||
+      "";
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+    const createdAt = Number(parsed.createdAt || 0);
+    const accessToken = String(parsed.accessToken || "");
+    const refreshToken = String(parsed.refreshToken || "");
+    if (!Number.isFinite(createdAt) || createdAt <= 0) return null;
+    return { createdAt, accessToken, refreshToken };
+  } catch {
+    return null;
+  }
+};
+
+const clearAuthRecoveryLock = () => {
+  try {
+    sessionStorage.removeItem(AUTH_RECOVERY_LOCK_KEY);
+    localStorage.removeItem(AUTH_RECOVERY_LOCK_KEY);
+  } catch {
+    // ignore storage failures
+  }
+};
+
+const persistAuthRecoveryLock = () => {
+  const snapshot = getAuthTokenSnapshot();
+  const payload = JSON.stringify({
+    createdAt: Date.now(),
+    accessToken: snapshot.accessToken,
+    refreshToken: snapshot.refreshToken,
+  });
+  try {
+    sessionStorage.setItem(AUTH_RECOVERY_LOCK_KEY, payload);
+    localStorage.setItem(AUTH_RECOVERY_LOCK_KEY, payload);
+  } catch {
+    // ignore storage failures
+  }
+};
+
+const isAuthEndpointRequest = (config) => {
+  const path = String(config?.url || "").trim().toLowerCase();
+  if (!path) return false;
+  return /^\/?auth(\/|$)/.test(path) || /^\/?api\/auth(\/|$)/.test(path);
+};
+
+const shouldShortCircuitProtectedRead = (config) => {
+  if (!config || config?.skipAuth || isAuthEndpointRequest(config)) return false;
+
+  const method = String(config.method || "get").trim().toLowerCase();
+  if (method !== "get" && method !== "head" && method !== "options") {
+    return false;
+  }
+
+  const lock = readAuthRecoveryLock();
+  if (!lock) return false;
+
+  if (Date.now() - lock.createdAt > AUTH_RECOVERY_LOCK_MAX_AGE_MS) {
+    clearAuthRecoveryLock();
+    return false;
+  }
+
+  const snapshot = getAuthTokenSnapshot();
+  const lockMatchesSnapshot =
+    lock.accessToken === snapshot.accessToken &&
+    lock.refreshToken === snapshot.refreshToken;
+
+  if (!lockMatchesSnapshot) {
+    clearAuthRecoveryLock();
+    return false;
+  }
+
+  // Never block normal data-loading routes. Only quiet known noisy background pollers.
+  const normalizedPath = normalizePathForAuthLock(config?.url);
+  if (!AUTH_LOCK_NOISY_READ_PATHS.has(normalizedPath)) {
+    return false;
+  }
+
+  return true;
+};
 
 const parseRetryAfterMs = (value) => {
   const raw = String(value || "").trim();
@@ -115,6 +232,7 @@ const computeRetryDelayMs = (error, retryCount) => {
 
 if (previousBase && nextBase && previousBase !== nextBase) {
   clearAuthStorage();
+  clearAuthRecoveryLock();
   try {
     localStorage.removeItem("socialsea_profile_cache_v1");
     localStorage.removeItem("socialsea_following_cache_v1");
@@ -149,6 +267,21 @@ function normalizeApiPath(config) {
 // 🔹 Attach Access Token Automatically
 api.interceptors.request.use((config) => {
   config.__networkRetryCount = Number(config.__networkRetryCount || 0);
+
+  if (shouldShortCircuitProtectedRead(config)) {
+    config.skipRefresh = true;
+    config.suppressAuthRedirect = true;
+    config.adapter = async () => ({
+      data: [],
+      status: 204,
+      statusText: "No Content",
+      headers: {
+        "x-socialsea-auth-short-circuit": "1",
+      },
+      config,
+    });
+    return config;
+  }
 
   const guardKey = getEndpointGuardKey(config);
   const bypassEndpointGuard = config?.bypassEndpointGuard === true;
@@ -279,6 +412,7 @@ api.interceptors.response.use(
       sessionStorage.getItem("refreshToken") ||
       localStorage.getItem("refreshToken");
     if (!refreshToken) {
+      persistAuthRecoveryLock();
       if (isTrustedOrigin) {
         clearAuthStorage();
         if (!originalRequest?.suppressAuthRedirect) {
@@ -300,6 +434,8 @@ api.interceptors.response.use(
         throw new Error("No new access token received");
       }
 
+      clearAuthRecoveryLock();
+
       // Keep auth tab-scoped to avoid cross-window account collisions.
       sessionStorage.setItem("accessToken", newAccessToken);
       sessionStorage.setItem("token", newAccessToken);
@@ -310,6 +446,7 @@ api.interceptors.response.use(
 
       return api(originalRequest);
     } catch (refreshError) {
+      persistAuthRecoveryLock();
       if (originalRequest?.suppressAuthRedirect) {
         const refreshStatus = refreshError?.response?.status;
         if (isTrustedOrigin && (refreshStatus === 401 || refreshStatus === 403)) {

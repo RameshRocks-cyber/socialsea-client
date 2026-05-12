@@ -670,7 +670,7 @@ export default function FollowConnections() {
         <h2>{heading}</h2>
 
         <div className="follow-search">
-          <input
+          <input name="followconnections-input-673"
             type="search"
             placeholder=""
             value={searchQuery}

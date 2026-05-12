@@ -13,6 +13,7 @@ const NAV_ITEMS = [
   { to: "/admin/ambulance", label: "Ambulance Requests" },
   { to: "/admin/reports", label: "Reports" },
   { to: "/admin/anonymous/pending", label: "Pending Anonymous" },
+  { to: "/admin/anonymous/videos", label: "Anonymous Videos" },
   { to: "/admin/notifications", label: "Alerts" }
 ];
 

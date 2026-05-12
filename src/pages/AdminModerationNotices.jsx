@@ -199,7 +199,7 @@ export default function AdminModerationNotices({ severity = "yellow" }) {
           <h3>{pageTitle}</h3>
           <p className="admin-head-note">{pageNote}</p>
         </div>
-        <input
+        <input name="adminmoderationnotices-input-202"
           type="text"
           value={query}
           onChange={(event) => setQuery(event.target.value)}

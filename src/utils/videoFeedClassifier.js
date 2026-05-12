@@ -245,10 +245,10 @@ export const classifyVideoBucket = (
   { durationHint = 0, shortSeconds = SHORT_VIDEO_SECONDS, defaultUnknown = "long", sourceHint = "" } = {}
 ) => {
   if (mediaTypeForPost(post) !== "VIDEO") return "non-video";
+  if (isExplicitReelPost(post, sourceHint)) return "reel";
 
   const duration = readDurationSeconds(post, durationHint);
   if (duration > shortSeconds) return "long";
-  if (isExplicitReelPost(post, sourceHint)) return "reel";
   if (isExplicitShortPost(post)) return "short";
   if (duration > 0) return "short";
   return defaultUnknown === "short" ? "short" : "long";

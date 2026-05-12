@@ -3545,7 +3545,7 @@ export default function Navbar() {
                     <h4>Camera Settings</h4>
                     <label className="ss-camera-setting">
                       <span>High Quality</span>
-                      <input
+                      <input name="navbar-input-3548"
                         type="checkbox"
                         checked={cameraHighRes}
                         onChange={(e) => toggleHighRes(e.target.checked)}
@@ -3553,7 +3553,7 @@ export default function Navbar() {
                     </label>
                     <label className="ss-camera-setting">
                       <span>Mirror Front Camera</span>
-                      <input
+                      <input name="navbar-input-3556"
                         type="checkbox"
                         checked={cameraMirrorFront}
                         onChange={(e) => setCameraMirrorFront(e.target.checked)}
@@ -3561,7 +3561,7 @@ export default function Navbar() {
                     </label>
                     <label className="ss-camera-setting">
                       <span>Grid Lines</span>
-                      <input
+                      <input name="navbar-input-3564"
                         type="checkbox"
                         checked={cameraGridOn}
                         onChange={(e) => setCameraGridOn(e.target.checked)}
@@ -3569,7 +3569,7 @@ export default function Navbar() {
                     </label>
                     <label className="ss-camera-setting">
                       <span>Auto Emoji</span>
-                      <input
+                      <input name="navbar-input-3572"
                         type="checkbox"
                         checked={autoEmojiRotate}
                         onChange={(e) => setAutoEmojiRotate(e.target.checked)}
@@ -3577,7 +3577,7 @@ export default function Navbar() {
                     </label>
                     <label className="ss-camera-setting">
                       <span>Sparkle</span>
-                      <input
+                      <input name="navbar-input-3580"
                         type="checkbox"
                         checked={sparkleOn}
                         onChange={(e) => setSparkleOn(e.target.checked)}
@@ -3585,7 +3585,7 @@ export default function Navbar() {
                     </label>
                     <label className="ss-camera-setting">
                       <span>Show Lenses</span>
-                      <input
+                      <input name="navbar-input-3588"
                         type="checkbox"
                         checked={showLensTray}
                         onChange={(e) => setShowLensTray(e.target.checked)}
@@ -3593,7 +3593,7 @@ export default function Navbar() {
                     </label>
                     <label className="ss-camera-setting">
                       <span>Flash/Torch</span>
-                      <input type="checkbox" checked={torchOn} onChange={() => void toggleTorch()} />
+                      <input name="navbar-input-3596" type="checkbox" checked={torchOn} onChange={() => void toggleTorch()} />
                     </label>
                   </div>
                 )}
@@ -3607,7 +3607,7 @@ export default function Navbar() {
                 )}
                 {snapTextOpen && (
                   <div className="ss-camera-text-panel">
-                    <input
+                    <input name="navbar-input-3610"
                       ref={snapTextInputRef}
                       type="text"
                       value={snapText}
@@ -3624,7 +3624,7 @@ export default function Navbar() {
                           onClick={() => setSnapTextColor(color)}
                         />
                       ))}
-                      <input
+                      <input name="navbar-input-3627"
                         type="range"
                         min="18"
                         max="46"
@@ -3764,7 +3764,7 @@ export default function Navbar() {
               </div>
 
               {cameraError && <p className="ss-camera-error">{cameraError}</p>}
-              <input
+              <input name="navbar-input-3767"
                 ref={galleryInputRef}
                 className="ss-camera-gallery-input"
                 type="file"

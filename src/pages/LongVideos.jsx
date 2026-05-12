@@ -1,5 +1,5 @@
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import { getApiBaseUrl } from "../api/baseUrl";
 import { recordCommentActivity, recordSearchActivity, recordWatchHistory } from "../services/activityStore";
@@ -39,6 +39,8 @@ const WATCH_CATEGORIES = [
 ];
 
 const WATCH_RAIL_ITEMS = ["Home", "Trending", "Subscriptions", "History", "Playlists", "Watch Later", "Liked Videos"];
+const WATCH_ANON_VIDEO_URL_HINT_REGEX = /\.(mp4|mov|webm|mkv|m4v|avi|mpg|mpeg|3gp|ogv)(\?|#|$)/i;
+const WATCH_ANON_CLOUDINARY_VIDEO_MARKER = "/video/upload/";
 const QUALITY_OPTIONS = [
   { value: "auto", label: "Auto" },
   { value: "1080", label: "1080p" },
@@ -56,6 +58,63 @@ const PLAY_ACTION_COOLDOWN_MS = 1200;
 const PLAY_ACTION_FALLBACK_RELEASE_MS = 2600;
 const PINCH_FILL_ENTER_RATIO = 1.06;
 const PINCH_FIT_EXIT_RATIO = 0.94;
+
+const normalizeMediaIdentity = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  return raw.replace(/[?#].*$/, "").toLowerCase();
+};
+
+const isAnonymousWatchItem = (item) => {
+  if (!item || typeof item !== "object") return false;
+  if (item.isAnonymous === true || item.anonymous === true) return true;
+  const marker = String(item?.visibility || item?.privacy || item?.postType || "").trim().toLowerCase();
+  if (marker.includes("anonymous")) return true;
+  const name = String(item?.username || item?.name || "").trim().toLowerCase();
+  return name === "anonymous" || name === "anonymous post" || name === "anonymous user";
+};
+
+const isAnonymousVideoCandidateForWatch = (item) => {
+  if (!isAnonymousWatchItem(item)) return false;
+  const type = String(item?.type || item?.mediaType || item?.contentType || item?.mimeType || "").toLowerCase();
+  if (type.includes("video")) return true;
+  const mediaUrl = String(item?.contentUrl || item?.mediaUrl || item?.videoUrl || item?.url || item?.fileUrl || "").toLowerCase();
+  if (!mediaUrl) return false;
+  if (mediaUrl.includes(WATCH_ANON_CLOUDINARY_VIDEO_MARKER)) return true;
+  return WATCH_ANON_VIDEO_URL_HINT_REGEX.test(mediaUrl);
+};
+
+const normalizeAnonymousVideoForWatch = (item) => {
+  if (!isAnonymousVideoCandidateForWatch(item)) return null;
+  const mediaUrl = String(item?.contentUrl || item?.mediaUrl || item?.videoUrl || item?.url || item?.fileUrl || "").trim();
+  if (!mediaUrl) return null;
+  const rawId = String(item?.id || "").trim();
+  const fallbackToken = normalizeMediaIdentity(mediaUrl) || `t-${Date.now()}`;
+  const syntheticId = rawId ? `anon-${rawId}` : `anon-${fallbackToken}`;
+  const normalized = {
+    ...item,
+    id: syntheticId,
+    anonymousPostId: rawId || null,
+    contentUrl: mediaUrl,
+    mediaUrl,
+    videoUrl: String(item?.videoUrl || mediaUrl).trim(),
+    type: "VIDEO",
+    mediaType: "VIDEO",
+    isVideo: true,
+    video: true,
+    reel: false,
+    isReel: false,
+    originalReel: false,
+    anonymous: true,
+    isAnonymous: true,
+    username: String(item?.username || "").trim() || "Anonymous Post",
+    sourceType: String(item?.sourceType || "").trim() || "long_video",
+    videoSettings:
+      String(item?.videoSettings || "").trim() ||
+      "{\"distributionSurface\":\"video_feed\",\"uploadContext\":\"long_video\",\"uploadType\":\"long_video\"}",
+  };
+  return normalized;
+};
 
 const readCachedWatchPosts = () => {
   try {
@@ -76,6 +135,7 @@ const readCachedWatchPosts = () => {
 
 export default function LongVideos() {
   const { postId } = useParams();
+  const [searchParams] = useSearchParams();
   const isWatchMode = Boolean(postId);
   const navigate = useNavigate();
   const [liveBroadcast, setLiveBroadcast] = useState(() => readLiveBroadcast());
@@ -352,6 +412,55 @@ export default function LongVideos() {
         post?.media?.contentUrl ||
         ""
     ).trim();
+  const requestedMedia = String(searchParams.get("media") || "").trim();
+  const requestedPoster = String(searchParams.get("poster") || "").trim();
+  const requestedTitle = String(searchParams.get("title") || "").trim();
+  const requestedAuthor = String(searchParams.get("author") || "").trim();
+  const requestedAnonId = String(searchParams.get("aid") || "").trim();
+  const requestedIsAnonymous = String(searchParams.get("anon") || "").trim() === "1";
+  const requestedMediaIdentity = normalizeMediaIdentity(requestedMedia);
+
+  const requestedVirtualVideo = useMemo(() => {
+    if (!requestedMedia) return null;
+    const routeId = String(postId || "").trim();
+    const fallbackId = requestedAnonId ? `anon-${requestedAnonId}` : `anon-${requestedMediaIdentity || "media"}`;
+    const resolvedId = routeId || fallbackId;
+    return {
+      id: resolvedId,
+      anonymousPostId: requestedAnonId || null,
+      contentUrl: requestedMedia,
+      mediaUrl: requestedMedia,
+      videoUrl: requestedMedia,
+      posterUrl: requestedPoster,
+      thumbnailUrl: requestedPoster,
+      coverImageUrl: requestedPoster,
+      description: requestedTitle,
+      content: requestedTitle,
+      title: requestedTitle,
+      username: requestedAuthor || (requestedIsAnonymous ? "Anonymous Post" : "User"),
+      type: "VIDEO",
+      mediaType: "VIDEO",
+      isVideo: true,
+      video: true,
+      reel: false,
+      isReel: false,
+      originalReel: false,
+      anonymous: requestedIsAnonymous,
+      isAnonymous: requestedIsAnonymous,
+      sourceType: "long_video",
+      videoSettings:
+        "{\"distributionSurface\":\"video_feed\",\"uploadContext\":\"long_video\",\"uploadType\":\"long_video\"}",
+    };
+  }, [
+    requestedMedia,
+    requestedPoster,
+    requestedTitle,
+    requestedAuthor,
+    requestedIsAnonymous,
+    requestedAnonId,
+    requestedMediaIdentity,
+    postId
+  ]);
   const isVideoPost = (post) => {
     return mediaTypeForPost(post) === "VIDEO";
   };
@@ -528,13 +637,17 @@ export default function LongVideos() {
       if (hasCached) setAllPosts(cached);
       setIsLoading(!hasCached);
       try {
-        const [fromVideos, fromFeed, fromMe, fromProfile] = await Promise.all([
+        const [fromVideos, fromFeed, fromMe, fromProfile, fromAnonymousFeed] = await Promise.all([
           fetchAny(["/api/feed/videos"]),
           fetchAny(["/api/feed"]),
           fetchAny(["/api/profile/me/posts"]),
-          fetchAny(["/api/profile/posts"])
+          fetchAny(["/api/profile/posts"]),
+          fetchAny(["/api/feed/anonymous", "/api/anonymous/feed", "/anonymous/feed"])
         ]);
-        let posts = [...fromVideos, ...fromFeed, ...fromMe, ...fromProfile].filter(Boolean);
+        const normalizedAnonymousFeed = (Array.isArray(fromAnonymousFeed) ? fromAnonymousFeed : [])
+          .map((item) => normalizeAnonymousVideoForWatch(item))
+          .filter(Boolean);
+        let posts = [...fromVideos, ...fromFeed, ...fromMe, ...fromProfile, ...normalizedAnonymousFeed].filter(Boolean);
 
         if (postId) {
           const direct = await fetchOne([
@@ -668,10 +781,17 @@ export default function LongVideos() {
 
   const captionFor = (post) => post?.description || post?.content || "Untitled video";
 
+  const postIdentityKey = (post) => {
+    const mediaIdentity = normalizeMediaIdentity(mediaUrlFor(post));
+    if (mediaIdentity) return `media:${mediaIdentity}`;
+    const id = String(post?.id ?? "").trim();
+    return id ? `id:${id}` : "";
+  };
+
   const uniqueByPostKey = (posts) => {
     const seen = new Set();
     return posts.filter((post) => {
-      const key = String(post?.id ?? post?.contentUrl ?? post?.mediaUrl ?? "");    if (!key || seen.has(key)) return false;
+      const key = postIdentityKey(post);    if (!key || seen.has(key)) return false;
       seen.add(key);
       return true;
     });
@@ -702,6 +822,13 @@ export default function LongVideos() {
   }, [videoPosts, videoDurationByPost]);
 
   const watchableVideos = useMemo(() => {
+    const isWatchRouteCandidate = (post) => {
+      if (!mediaUrlFor(post)) return false;
+      if (isYouTubeMedia(post)) return false;
+      if (!isVideoPost(post) || isReelPost(post)) return false;
+      if (isAnonymousWatchItem(post)) return true;
+      return isVideoFeedVideoPost(post);
+    };
     const fallbackNonImage = uniqueByPostKey(
       allPosts.filter((post) => {
         if (!mediaUrlFor(post)) return false;
@@ -711,18 +838,26 @@ export default function LongVideos() {
       })
     );
     const baseList = longVideos.length ? longVideos : videoPosts.length ? videoPosts : fallbackNonImage;
-    const routePostCandidate = allPosts.find(
-      (post) =>
-        String(post?.id ?? "") === String(postId ?? "") &&
-        !!mediaUrlFor(post) &&
-        !isYouTubeMedia(post) &&
-        isVideoFeedVideoPost(post) &&
-        isVideoPost(post) &&
-        !isReelPost(post)
+    const routeCandidateByMedia = requestedMediaIdentity
+      ? allPosts.find(
+          (post) =>
+            normalizeMediaIdentity(mediaUrlFor(post)) === requestedMediaIdentity && isWatchRouteCandidate(post)
+        )
+      : null;
+    const routeCandidateById = allPosts.find(
+      (post) => String(post?.id ?? "") === String(postId ?? "") && isWatchRouteCandidate(post)
     );
-    if (routePostCandidate) return uniqueByPostKey([routePostCandidate, ...baseList]);
+
+    if (routeCandidateByMedia) return uniqueByPostKey([routeCandidateByMedia, ...baseList]);
+    if (requestedMediaIdentity && requestedVirtualVideo && !isYouTubeMedia(requestedVirtualVideo)) {
+      return uniqueByPostKey([requestedVirtualVideo, ...baseList]);
+    }
+    if (routeCandidateById) return uniqueByPostKey([routeCandidateById, ...baseList]);
+    if (requestedVirtualVideo && !isYouTubeMedia(requestedVirtualVideo)) {
+      return uniqueByPostKey([requestedVirtualVideo, ...baseList]);
+    }
     return baseList;
-  }, [longVideos, videoPosts, allPosts, postId]);
+  }, [longVideos, videoPosts, allPosts, postId, requestedMediaIdentity, requestedVirtualVideo]);
 
   useEffect(() => {
     if (isLoading && watchableVideos.length) {
@@ -731,7 +866,21 @@ export default function LongVideos() {
   }, [isLoading, watchableVideos.length]);
 
   useEffect(() => {    if (!watchableVideos.length) return;
+    setLikeCounts((prev) => {
+      const next = { ...prev };
+      watchableVideos.forEach((post) => {
+        const id = String(post?.id || "").trim();
+        if (!id) return;
+        const seeded = Number(post?.likeCount ?? post?.likesCount ?? post?.likes ?? 0);
+        if (Number.isFinite(seeded) && seeded >= 0) {
+          const current = Number(next[id]);
+          if (!Number.isFinite(current) || seeded > current) next[id] = seeded;
+        }
+      });
+      return next;
+    });
     watchableVideos.forEach((post) => {
+      if (isAnonymousWatchItem(post)) return;
       api.get(`/api/likes/${post.id}/count`)
         .then((res) => {
           const count = Number(res?.data) || 0;
@@ -755,15 +904,28 @@ export default function LongVideos() {
   }, [watchableVideos, searchText, activeCategory]);
 
   const requestedPost = useMemo(() => {
-    if (!postId) return null;
-    return allPosts.find((post) => String(post?.id ?? "") === String(postId ?? "")) || null;
-  }, [allPosts, postId]);
+    if (!postId && !requestedMediaIdentity) return requestedVirtualVideo || null;
+    const foundByMedia = requestedMediaIdentity
+      ? allPosts.find((post) => normalizeMediaIdentity(mediaUrlFor(post)) === requestedMediaIdentity)
+      : null;
+    const foundById = allPosts.find((post) => String(post?.id ?? "") === String(postId ?? ""));
+    const found = foundByMedia || foundById;
+    return found || requestedVirtualVideo || null;
+  }, [allPosts, postId, requestedMediaIdentity, requestedVirtualVideo]);
   const isBlockedYouTubeRoute = Boolean(postId) && isYouTubeMedia(requestedPost);
   const activeVideo = isBlockedYouTubeRoute
     ? null
-    : watchableVideos.find((p) => String(p.id) === String(postId)) || filteredLongVideos[0] || watchableVideos[0] || null;
+    : (requestedMediaIdentity
+        ? watchableVideos.find((p) => normalizeMediaIdentity(mediaUrlFor(p)) === requestedMediaIdentity)
+        : null) ||
+      watchableVideos.find((p) => String(p.id) === String(postId)) ||
+      (requestedVirtualVideo && !isYouTubeMedia(requestedVirtualVideo) ? requestedVirtualVideo : null) ||
+      filteredLongVideos[0] ||
+      watchableVideos[0] ||
+      null;
   const watchSequence = filteredLongVideos.length ? filteredLongVideos : watchableVideos;
-  const activeVideoIndex = watchSequence.findIndex((p) => String(p.id) === String(activeVideo?.id));
+  const activeVideoKey = postIdentityKey(activeVideo);
+  const activeVideoIndex = watchSequence.findIndex((p) => postIdentityKey(p) === activeVideoKey);
 
   const withCloudinaryQuality = (url, quality) => {    if (!url || quality === "auto") return url;    if (!url.includes("res.cloudinary.com") || !url.includes("/upload/")) return url;
     const map = {
@@ -890,19 +1052,24 @@ export default function LongVideos() {
     };
   }, []);
 
-  const toggleLike = async (postId) => {    if (!postId) return;
+  const toggleLike = async (postId) => {
+    if (!postId) return;
     const targetPost =
       watchableVideos.find((item) => String(item?.id) === String(postId)) ||
       (String(activeVideo?.id) === String(postId) ? activeVideo : null);
     const wasLiked = Boolean(likedPostIds[postId]);
     const wasDisliked = Boolean(dislikedPostIds[postId]);
+    const anonId = String(targetPost?.anonymousPostId || "").trim();
+    const isAnonymousTarget = Boolean(targetPost && isAnonymousWatchItem(targetPost) && anonId);
 
-    setDislikedPostIds((prev) => {    if (!prev[postId]) return prev;
+    setDislikedPostIds((prev) => {
+      if (!prev[postId]) return prev;
       const next = { ...prev };
       delete next[postId];
       persistIdMap("dislikedPostIds", next);
       return next;
-    });    if (wasDisliked) {
+    });
+    if (wasDisliked) {
       setDislikeCounts((prev) => {
         const next = { ...prev, [postId]: Math.max(0, (Number(prev[postId]) || 0) - 1) };
         try {
@@ -912,7 +1079,30 @@ export default function LongVideos() {
         }
         return next;
       });
-    }    if (wasLiked) {
+    }
+
+    if (isAnonymousTarget) {
+      if (wasLiked) return;
+      setLikedPostIds((prev) => {
+        const next = { ...prev, [postId]: true };
+        persistIdMap("likedPostIds", next);
+        return next;
+      });
+      setLikeCounts((prev) => ({ ...prev, [postId]: (prev[postId] || 0) + 1 }));
+      try {
+        const res = await api.post(`/api/anonymous/${encodeURIComponent(anonId)}/like`);
+        const seeded = Number(res?.data?.likeCount ?? res?.data?.likesCount ?? res?.data?.likes ?? NaN);
+        if (Number.isFinite(seeded) && seeded >= 0) {
+          setLikeCounts((prev) => ({ ...prev, [postId]: seeded }));
+        }
+        if (targetPost) trackFeedSignal(targetPost, "like");
+      } catch {
+        // noop
+      }
+      return;
+    }
+
+    if (wasLiked) {
       setLikedPostIds((prev) => {
         if (!prev[postId]) return prev;
         const next = { ...prev };
@@ -1069,8 +1259,55 @@ export default function LongVideos() {
     return `${years} ${years === 1 ? "year" : "years"} ago`;
   };
 
-  const selectVideo = (id) => {    if (!id) return;
-    navigate(`/watch/${id}`);
+  const buildWatchPathFromPost = (post) => {
+    const id = String(post?.id ?? "").trim();
+    if (!id) return "";
+    const nextParams = new URLSearchParams();
+    const mediaRaw = mediaUrlFor(post);
+    if (mediaRaw) nextParams.set("media", mediaRaw);
+    const posterRaw = String(
+      post?.posterUrl ||
+        post?.thumbnailUrl ||
+        post?.thumbUrl ||
+        post?.coverImageUrl ||
+        post?.coverImage ||
+        post?.previewUrl ||
+        post?.imageUrl ||
+        ""
+    ).trim();
+    if (posterRaw) nextParams.set("poster", posterRaw);
+    const titleRaw = String(captionFor(post) || "").trim();
+    if (titleRaw) nextParams.set("title", titleRaw);
+    const authorRaw = String(usernameFor(post) || "").trim();
+    if (authorRaw) nextParams.set("author", authorRaw);
+    if (isAnonymousWatchItem(post)) {
+      nextParams.set("anon", "1");
+      const anonId = String(post?.anonymousPostId || "").trim();
+      if (anonId) nextParams.set("aid", anonId);
+    }
+    const query = nextParams.toString();
+    const base = `/watch/${encodeURIComponent(id)}`;
+    return query ? `${base}?${query}` : base;
+  };
+
+  const selectVideo = (target) => {
+    const id = typeof target === "object" ? String(target?.id ?? "").trim() : String(target ?? "").trim();
+    if (!id) return;
+    const fromTarget = typeof target === "object" ? target : null;
+    const candidate =
+      fromTarget ||
+      watchSequence.find((item) => String(item?.id ?? "").trim() === id) ||
+      watchableVideos.find((item) => String(item?.id ?? "").trim() === id) ||
+      allPosts.find((item) => String(item?.id ?? "").trim() === id) ||
+      null;
+    if (candidate) {
+      const path = buildWatchPathFromPost(candidate);
+      if (path) {
+        navigate(path);
+        return;
+      }
+    }
+    navigate(`/watch/${encodeURIComponent(id)}`);
   };
 
   const showGestureHud = (text, position = "bottom", timeoutMs = 650) => {
@@ -1080,11 +1317,11 @@ export default function LongVideos() {
 
   const changeVideoByOffset = (offset) => {
     const primary = watchSequence.length > 1 ? watchSequence : watchableVideos;    if (!primary.length) return;
-    const currentId = String(activeVideo?.id || "");
-    const idx = primary.findIndex((p) => String(p?.id) === currentId);
+    const currentKey = postIdentityKey(activeVideo);
+    const idx = primary.findIndex((p) => postIdentityKey(p) === currentKey);
     const currentIndex = idx >= 0 ? idx : 0;
     const nextIndex = (currentIndex + offset + primary.length) % primary.length;
-    const next = primary[nextIndex];    if (next?.id != null) selectVideo(next.id);
+    const next = primary[nextIndex];    if (next?.id != null) selectVideo(next);
   };
 
   const ensurePlayerAudio = (video = playerRef.current) => {
@@ -1930,7 +2167,7 @@ export default function LongVideos() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [isWatchMode, activeVideoIndex, watchSequence]);
 
-  const relatedVideos = watchableVideos.filter((item) => String(item.id) !== String(activeVideo?.id));
+  const relatedVideos = watchableVideos.filter((item) => postIdentityKey(item) !== activeVideoKey);
   const showSide = Boolean(activeVideo) || relatedVideos.length > 0;
   const activeComments = activeVideo?.id ? commentsByPost[activeVideo.id] || [] : [];
   const visibleComments = commentsExpanded ? activeComments : activeComments.slice(0, 2);
@@ -2042,7 +2279,7 @@ export default function LongVideos() {
       <header className="yt-topbar">
         <h2>SocialSea Watch</h2>
         <div className="yt-search-wrap">
-          <input
+          <input name="longvideos-input-2282"
             type="text"
             className="yt-search-input"
             placeholder="Search videos"
@@ -2107,10 +2344,10 @@ export default function LongVideos() {
                     className="yt-home-card"
                     role="button"
                     tabIndex={0}
-                    onClick={() => selectVideo(video.id)}
+                    onClick={() => selectVideo(video)}
                     onKeyDown={(e) => {    if (e.key === "Enter" || e.key === " ") {
                         e.preventDefault();
-                        selectVideo(video.id);
+                        selectVideo(video);
                       }
                     }}
                   >
@@ -2385,7 +2622,7 @@ export default function LongVideos() {
                         <div className="watch-quick-adjust-content watch-quick-adjust-content--brightness">
                           <p className="watch-quick-adjust-label">{selectedBrightnessLabel}</p>
                           <div className="watch-quick-vertical-wrap">
-                            <input
+                            <input name="longvideos-input-2625"
                               type="range"
                               min="50"
                               max="170"
@@ -2423,7 +2660,7 @@ export default function LongVideos() {
                         <div className="watch-quick-adjust-content watch-quick-adjust-content--volume">
                           <p className="watch-quick-adjust-label">{selectedVolumeLabel}</p>
                           <div className="watch-quick-vertical-wrap">
-                            <input
+                            <input name="longvideos-input-2663"
                               type="range"
                               min="0"
                               max="100"
@@ -2618,7 +2855,7 @@ export default function LongVideos() {
                     <span className="watch-time-inline">
                       {formatDuration(playerCurrentTime)} / {formatDuration(playerDuration)}
                     </span>
-                    <input
+                    <input name="longvideos-input-2858"
                       type="range"
                       min="0"
                       max={Math.max(playerDuration, 0.1)}
@@ -2768,7 +3005,7 @@ export default function LongVideos() {
                           {currentUserInitial}
                         </span>
                       )}
-                      <input
+                      <input name="longvideos-input-3008"
                         type="text"
                         className="watch-comment-input"
                         placeholder="Add a comment..."
@@ -2852,11 +3089,11 @@ export default function LongVideos() {
                       className="watch-item"
                       role="button"
                       tabIndex={0}
-                      onClick={() => selectVideo(v.id)}
+                      onClick={() => selectVideo(v)}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" || e.key === " ") {
                           e.preventDefault();
-                          selectVideo(v.id);
+                          selectVideo(v);
                         }
                       }}
                       aria-label={`Select video ${captionFor(v)}`}

@@ -388,7 +388,7 @@ export default function ResumeBuilder() {
                           </div>
                           <div className="resume-avatar-actions">
                             <label className="resume-upload">
-                              <input
+                              <input name="resumebuilder-input-391"
                                 type="file"
                                 accept="image/*"
                                 onChange={(event) => {
@@ -420,7 +420,7 @@ export default function ResumeBuilder() {
                         </div>
                         <label className="resume-field">
                           <span>Full Name</span>
-                          <input
+                          <input name="resumebuilder-input-423"
                             type="text"
                             value={resume.personal.fullName}
                             onChange={(event) =>
@@ -431,7 +431,7 @@ export default function ResumeBuilder() {
                         </label>
                         <label className="resume-field">
                           <span>Headline</span>
-                          <input
+                          <input name="resumebuilder-input-434"
                             type="text"
                             value={resume.personal.title}
                             onChange={(event) =>
@@ -442,7 +442,7 @@ export default function ResumeBuilder() {
                         </label>
                         <label className="resume-field">
                           <span>Email</span>
-                          <input
+                          <input name="resumebuilder-input-445"
                             type="email"
                             value={resume.personal.email}
                             onChange={(event) =>
@@ -453,7 +453,7 @@ export default function ResumeBuilder() {
                         </label>
                         <label className="resume-field">
                           <span>Phone</span>
-                          <input
+                          <input name="resumebuilder-input-456"
                             type="tel"
                             value={resume.personal.phone}
                             onChange={(event) =>
@@ -464,7 +464,7 @@ export default function ResumeBuilder() {
                         </label>
                         <label className="resume-field">
                           <span>Location</span>
-                          <input
+                          <input name="resumebuilder-input-467"
                             type="text"
                             value={resume.personal.location}
                             onChange={(event) =>
@@ -475,7 +475,7 @@ export default function ResumeBuilder() {
                         </label>
                         <label className="resume-field">
                           <span>Website or LinkedIn</span>
-                          <input
+                          <input name="resumebuilder-input-478"
                             type="text"
                             value={resume.personal.website}
                             onChange={(event) =>
@@ -504,7 +504,7 @@ export default function ResumeBuilder() {
                             <div className="resume-field-grid">
                               <label className="resume-field">
                                 <span>Degree</span>
-                                <input
+                                <input name="resumebuilder-input-507"
                                   type="text"
                                   value={item.degree}
                                   onChange={(event) =>
@@ -519,7 +519,7 @@ export default function ResumeBuilder() {
                               </label>
                               <label className="resume-field">
                                 <span>Institution</span>
-                                <input
+                                <input name="resumebuilder-input-522"
                                   type="text"
                                   value={item.school}
                                   onChange={(event) =>
@@ -534,7 +534,7 @@ export default function ResumeBuilder() {
                               </label>
                               <label className="resume-field">
                                 <span>Start</span>
-                                <input
+                                <input name="resumebuilder-input-537"
                                   type="text"
                                   value={item.start}
                                   onChange={(event) =>
@@ -549,7 +549,7 @@ export default function ResumeBuilder() {
                               </label>
                               <label className="resume-field">
                                 <span>End</span>
-                                <input
+                                <input name="resumebuilder-input-552"
                                   type="text"
                                   value={item.end}
                                   onChange={(event) =>
@@ -564,7 +564,7 @@ export default function ResumeBuilder() {
                               </label>
                               <label className="resume-field full">
                                 <span>Details</span>
-                                <textarea
+                                <textarea name="resumebuilder-textarea-567"
                                   rows={3}
                                   value={item.details}
                                   onChange={(event) =>
@@ -608,7 +608,7 @@ export default function ResumeBuilder() {
                             <div className="resume-field-grid">
                               <label className="resume-field">
                                 <span>Role</span>
-                                <input
+                                <input name="resumebuilder-input-611"
                                   type="text"
                                   value={item.role}
                                   onChange={(event) =>
@@ -623,7 +623,7 @@ export default function ResumeBuilder() {
                               </label>
                               <label className="resume-field">
                                 <span>Company</span>
-                                <input
+                                <input name="resumebuilder-input-626"
                                   type="text"
                                   value={item.company}
                                   onChange={(event) =>
@@ -638,7 +638,7 @@ export default function ResumeBuilder() {
                               </label>
                               <label className="resume-field">
                                 <span>Start</span>
-                                <input
+                                <input name="resumebuilder-input-641"
                                   type="text"
                                   value={item.start}
                                   onChange={(event) =>
@@ -653,7 +653,7 @@ export default function ResumeBuilder() {
                               </label>
                               <label className="resume-field">
                                 <span>End</span>
-                                <input
+                                <input name="resumebuilder-input-656"
                                   type="text"
                                   value={item.end}
                                   onChange={(event) =>
@@ -668,7 +668,7 @@ export default function ResumeBuilder() {
                               </label>
                               <label className="resume-field full">
                                 <span>Details</span>
-                                <textarea
+                                <textarea name="resumebuilder-textarea-671"
                                   rows={3}
                                   value={item.details}
                                   onChange={(event) =>
@@ -699,7 +699,7 @@ export default function ResumeBuilder() {
                       <div className="resume-field-stack">
                         <label className="resume-field">
                           <span>Skills</span>
-                          <input
+                          <input name="resumebuilder-input-702"
                             type="text"
                             value={resume.skills}
                             onChange={(event) => updateField("skills", event.target.value)}
@@ -713,7 +713,7 @@ export default function ResumeBuilder() {
                     {section.key === "objective" && (
                       <label className="resume-field">
                         <span>Objective</span>
-                        <textarea
+                        <textarea name="resumebuilder-textarea-716"
                           rows={4}
                           value={resume.objective}
                           onChange={(event) => updateField("objective", event.target.value)}
@@ -725,7 +725,7 @@ export default function ResumeBuilder() {
                     {section.key === "reference" && (
                       <label className="resume-field">
                         <span>References</span>
-                        <textarea
+                        <textarea name="resumebuilder-textarea-728"
                           rows={4}
                           value={resume.references}
                           onChange={(event) => updateField("references", event.target.value)}
@@ -792,7 +792,7 @@ export default function ResumeBuilder() {
                             <div className="resume-field-grid">
                               <label className="resume-field">
                                 <span>Name</span>
-                                <input
+                                <input name="resumebuilder-input-795"
                                   type="text"
                                   value={item.name}
                                   onChange={(event) =>
@@ -807,7 +807,7 @@ export default function ResumeBuilder() {
                               </label>
                               <label className="resume-field full">
                                 <span>Description</span>
-                                <textarea
+                                <textarea name="resumebuilder-textarea-810"
                                   rows={3}
                                   value={item.description}
                                   onChange={(event) =>
@@ -822,7 +822,7 @@ export default function ResumeBuilder() {
                               </label>
                               <label className="resume-field full">
                                 <span>Media URLs</span>
-                                <textarea
+                                <textarea name="resumebuilder-textarea-825"
                                   rows={3}
                                   value={item.media || ""}
                                   onChange={(event) =>
@@ -838,7 +838,7 @@ export default function ResumeBuilder() {
                               </label>
                               <div className="resume-upload-row">
                                 <label className="resume-upload">
-                                  <input
+                                  <input name="resumebuilder-input-841"
                                     type="file"
                                     accept="image/*,video/*"
                                     multiple
@@ -875,7 +875,7 @@ export default function ResumeBuilder() {
                     {section.key === "achievements" && (
                       <label className="resume-field">
                         <span>Achievements and Awards</span>
-                        <textarea
+                        <textarea name="resumebuilder-textarea-878"
                           rows={4}
                           value={resume.achievements}
                           onChange={(event) => updateField("achievements", event.target.value)}
@@ -887,7 +887,7 @@ export default function ResumeBuilder() {
                     {section.key === "coverLetter" && (
                       <label className="resume-field">
                         <span>Cover Letter</span>
-                        <textarea
+                        <textarea name="resumebuilder-textarea-890"
                           rows={5}
                           value={resume.coverLetter}
                           onChange={(event) => updateField("coverLetter", event.target.value)}
@@ -899,7 +899,7 @@ export default function ResumeBuilder() {
                     {section.key === "declaration" && (
                       <label className="resume-field">
                         <span>Declaration</span>
-                        <textarea
+                        <textarea name="resumebuilder-textarea-902"
                           rows={4}
                           value={resume.declaration}
                           onChange={(event) => updateField("declaration", event.target.value)}
@@ -948,7 +948,7 @@ export default function ResumeBuilder() {
                     <div className="resume-field-grid">
                       <label className="resume-field">
                         <span>Title</span>
-                        <input
+                        <input name="resumebuilder-input-951"
                           type="text"
                           value={section.title}
                           onChange={(event) =>
@@ -963,7 +963,7 @@ export default function ResumeBuilder() {
                       </label>
                       <label className="resume-field full">
                         <span>Content</span>
-                        <textarea
+                        <textarea name="resumebuilder-textarea-966"
                           rows={4}
                           value={section.content}
                           onChange={(event) =>

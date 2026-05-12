@@ -351,7 +351,7 @@ export default function StoryCreate() {
             <div className="story-media-row">
               <label className="story-upload-btn">
                 Choose photo/video
-                <input
+                <input name="storycreate-input-354"
                   type="file"
                   accept="image/*,video/*"
                   onChange={(e) => {
@@ -377,7 +377,7 @@ export default function StoryCreate() {
 
           <div className="story-card">
             <h3>Story text</h3>
-            <textarea
+            <textarea name="storycreate-textarea-380"
               rows={3}
               value={storyText}
               onChange={(e) => setStoryText(e.target.value)}
@@ -402,7 +402,7 @@ export default function StoryCreate() {
             <div className="story-text-controls">
               <label className="story-text-control">
                 <span>Color</span>
-                <input
+                <input name="storycreate-input-405"
                   type="color"
                   value={textColor}
                   onChange={(e) => setTextColor(e.target.value)}
@@ -410,7 +410,7 @@ export default function StoryCreate() {
               </label>
               <label className="story-text-control">
                 <span>Size</span>
-                <input
+                <input name="storycreate-input-413"
                   type="range"
                   min="14"
                   max="64"
@@ -477,7 +477,7 @@ export default function StoryCreate() {
 
           <div className="story-card">
             <h3>Caption</h3>
-            <input
+            <input name="storycreate-input-480"
               type="text"
               value={caption}
               onChange={(e) => setCaption(e.target.value)}

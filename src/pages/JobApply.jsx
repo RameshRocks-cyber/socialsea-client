@@ -230,31 +230,31 @@ const JobApply = () => {
               <p>Send your basic details directly to the hiring team.</p>
             </div>
             <form className="job-apply-form" onSubmit={handleSubmit}>
-              <input
+              <input name="jobapply-input-233"
                 type="text"
                 placeholder="Full name"
                 value={form.name}
                 onChange={(event) => updateField("name", event.target.value)}
               />
-              <input
+              <input name="jobapply-input-239"
                 type="email"
                 placeholder="Email address"
                 value={form.email}
                 onChange={(event) => updateField("email", event.target.value)}
               />
-              <input
+              <input name="jobapply-input-245"
                 type="tel"
                 placeholder="Phone number"
                 value={form.phone}
                 onChange={(event) => updateField("phone", event.target.value)}
               />
-              <input
+              <input name="jobapply-input-251"
                 type="text"
                 placeholder="Portfolio or LinkedIn URL"
                 value={form.portfolio}
                 onChange={(event) => updateField("portfolio", event.target.value)}
               />
-              <textarea
+              <textarea name="jobapply-textarea-257"
                 rows={3}
                 placeholder="Short note to the hiring team"
                 value={form.note}

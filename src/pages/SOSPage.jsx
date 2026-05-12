@@ -203,7 +203,15 @@ const sosSocketBaseCandidates = () => {
     typeof window !== "undefined"
       ? localStorage.getItem("socialsea_auth_base_url") || sessionStorage.getItem("socialsea_auth_base_url")
       : "";
+  const runtimeHost =
+    typeof window !== "undefined" ? String(window.location.hostname || "").toLowerCase() : "";
+  const isLoopbackRuntime = runtimeHost === "localhost" || runtimeHost === "127.0.0.1";
+  const preferDirectDevSocketBase =
+    import.meta.env?.DEV && isLoopbackRuntime
+      ? String(import.meta.env.VITE_DEV_PROXY_TARGET || "").trim().replace(/\/+$/, "")
+      : "";
   const raw = uniqueNonEmpty([
+    preferDirectDevSocketBase,
     getApiBaseUrl(),
     api.defaults.baseURL,
     storedBase,
@@ -556,12 +564,21 @@ export default function SOSPage() {
 
     const init = async () => {
       try {
-        const [{ Client }, sockjsModule] = await Promise.all([
-          import("@stomp/stompjs"),
-          import("sockjs-client/dist/sockjs")
-        ]);
+        const { Client } = await import("@stomp/stompjs");
         if (disposed) return;
-        const SockJS = sockjsModule?.default || sockjsModule;
+        const normalizeEndpoint = (value, fallback) => {
+          const raw = String(value || "").trim();
+          if (!raw) return fallback;
+          return raw.startsWith("/") ? raw : `/${raw}`;
+        };
+        const transport = String(import.meta.env?.VITE_WS_TRANSPORT || "").trim().toLowerCase();
+        const isNativeTransport = ["ws", "websocket", "native"].includes(transport);
+        const useSockJS = !isNativeTransport;
+        const nativeWsEndpoint = normalizeEndpoint(import.meta.env?.VITE_WS_NATIVE_ENDPOINT, "/ws-native");
+        const sockJsEndpoint = normalizeEndpoint(import.meta.env?.VITE_WS_SOCKJS_ENDPOINT, "/ws");
+        const sockJsModule = useSockJS ? await import("sockjs-client/dist/sockjs") : null;
+        if (disposed) return;
+        const SockJS = sockJsModule?.default || sockJsModule;
         const candidates = sosSocketBaseCandidates();
         let candidateIndex = 0;
         let activeClient = null;
@@ -583,7 +600,9 @@ export default function SOSPage() {
             // ignore
           }
           client = new Client({
-            webSocketFactory: () => new SockJS(`${base}/ws?token=${encodeURIComponent(token)}`),
+            ...(useSockJS
+              ? { webSocketFactory: () => new SockJS(`${base}${sockJsEndpoint}?token=${encodeURIComponent(token)}`) }
+              : { brokerURL: `${base.replace(/^http/i, "ws")}${nativeWsEndpoint}?token=${encodeURIComponent(token)}` }),
             connectHeaders: { Authorization: `Bearer ${token}` },
             reconnectDelay: 0,
             debug: () => {}

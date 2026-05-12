@@ -326,6 +326,118 @@ const contentSubFilterMatchesPost = (post, selectedCategory, selectedSubFilter, 
   return keywords.some((word) => searchable.includes(word));
 };
 
+const ANON_VIDEO_URL_HINT_REGEX = /\.(mp4|mov|webm|mkv|m4v|avi|mpg|mpeg|3gp|ogv)(\?|#|$)/i;
+const ANON_CLOUDINARY_VIDEO_MARKER = "/video/upload/";
+
+const normalizeMediaIdentity = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  return raw.replace(/[?#].*$/, "").toLowerCase();
+};
+
+const readAnonCount = (item, keys) => {
+  for (const key of keys) {
+    const value = Number(item?.[key]);
+    if (Number.isFinite(value) && value >= 0) return value;
+  }
+  return 0;
+};
+
+const isAnonymousFeedItem = (item) => {
+  if (!item || typeof item !== "object") return false;
+  if (item.isAnonymous === true || item.anonymous === true) return true;
+  const marker = String(item?.visibility || item?.privacy || item?.postType || "").trim().toLowerCase();
+  if (marker.includes("anonymous")) return true;
+  const name = String(item?.username || item?.name || "").trim().toLowerCase();
+  return name === "anonymous" || name === "anonymous post" || name === "anonymous user";
+};
+
+const isGenericProfileLookupLabel = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  const compact = normalized.replace(/[._-]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!compact) return true;
+  return (
+    compact === "anonymous" ||
+    compact === "anonymous post" ||
+    compact === "anonymous user" ||
+    compact === "user" ||
+    compact === "unknown user" ||
+    compact === "unknown" ||
+    /^anonymous\s+(post|user)\b/.test(compact)
+  );
+};
+
+const isAnonymousVideoCandidate = (item) => {
+  if (!isAnonymousFeedItem(item)) return false;
+  const type = String(item?.type || item?.mediaType || item?.contentType || item?.mimeType || "").toLowerCase();
+  if (type.includes("video")) return true;
+  const mediaUrl = String(item?.contentUrl || item?.mediaUrl || item?.videoUrl || item?.url || item?.fileUrl || "").toLowerCase();
+  if (!mediaUrl) return false;
+  if (mediaUrl.includes(ANON_CLOUDINARY_VIDEO_MARKER)) return true;
+  return ANON_VIDEO_URL_HINT_REGEX.test(mediaUrl);
+};
+
+const normalizeAnonymousVideoForFeed = (item) => {
+  if (!isAnonymousVideoCandidate(item)) return null;
+  const mediaUrl = String(item?.contentUrl || item?.mediaUrl || item?.videoUrl || item?.url || item?.fileUrl || "").trim();
+  if (!mediaUrl) return null;
+  const rawId = String(item?.id || "").trim();
+  const fallbackToken = normalizeMediaIdentity(mediaUrl) || `t-${Date.now()}`;
+  const syntheticId = rawId ? `anon-${rawId}` : `anon-${fallbackToken}`;
+  const likeCount = readAnonCount(item, ["likeCount", "likesCount", "likes"]);
+  const viewCount = readAnonCount(item, ["viewCount", "viewsCount", "views"]);
+  return {
+    ...item,
+    id: syntheticId,
+    anonymousPostId: rawId || null,
+    contentUrl: mediaUrl,
+    mediaUrl,
+    videoUrl: String(item?.videoUrl || mediaUrl).trim(),
+    type: "VIDEO",
+    mediaType: "VIDEO",
+    isVideo: true,
+    video: true,
+    reel: false,
+    isReel: false,
+    originalReel: false,
+    anonymous: true,
+    isAnonymous: true,
+    username: String(item?.username || "").trim() || "Anonymous Post",
+    sourceType: String(item?.sourceType || "").trim() || "long_video",
+    videoSettings:
+      String(item?.videoSettings || "").trim() ||
+      "{\"distributionSurface\":\"video_feed\",\"uploadContext\":\"long_video\",\"uploadType\":\"long_video\"}",
+    likeCount,
+    viewCount
+  };
+};
+
+const mergeAnonymousVideosIntoFeed = (mainList, anonymousList) => {
+  const base = Array.isArray(mainList) ? mainList : [];
+  const anon = Array.isArray(anonymousList) ? anonymousList : [];
+  if (!anon.length) return base;
+
+  const seenMedia = new Set(
+    base
+      .map((post) =>
+        normalizeMediaIdentity(post?.contentUrl || post?.mediaUrl || post?.videoUrl || post?.url || post?.fileUrl || "")
+      )
+      .filter(Boolean)
+  );
+
+  const merged = [...base];
+  anon.forEach((item) => {
+    const normalized = normalizeAnonymousVideoForFeed(item);
+    if (!normalized) return;
+    const identity = normalizeMediaIdentity(normalized.contentUrl || normalized.mediaUrl || normalized.videoUrl);
+    if (identity && seenMedia.has(identity)) return;
+    if (identity) seenMedia.add(identity);
+    merged.push(normalized);
+  });
+
+  return merged;
+};
+
 const readCachedFeedPosts = () => {
   try {
     const raw = localStorage.getItem(FEED_CACHE_KEY);
@@ -501,6 +613,7 @@ export default function Feed() {
   const inFlightLoadRef = useRef(false);
   const lastLoadAtRef = useRef(0);
   const postsCountRef = useRef(Array.isArray(posts) ? posts.length : 0);
+  const skippedProfileLookupCandidatesRef = useRef(new Set());
   const closingPostViewRef = useRef(false);
   const menuRef = useRef(null);
   const feedMenuRef = useRef(null);
@@ -627,6 +740,35 @@ export default function Feed() {
             : Array.isArray(payload?.content)
               ? payload.content
               : [];
+    const fetchAnonymousFeedList = async (baseCandidates) => {
+      const endpoints = ["/api/feed/anonymous", "/api/anonymous/feed", "/anonymous/feed"];
+      let fallback = [];
+      for (const baseURL of baseCandidates) {
+        for (const url of endpoints) {
+          try {
+            const res = await api.request({
+              method: "GET",
+              url,
+              baseURL,
+              timeout: 10000,
+              suppressAuthRedirect: true,
+              params: { size: FEED_PAGE_SIZE },
+            });
+            const body = res?.data;
+            const looksLikeHtml =
+              typeof body === "string" && (/^\s*<!doctype html/i.test(body) || /<html[\s>]/i.test(body));
+            if (looksLikeHtml) continue;
+            const list = extractList(body);
+            if (!Array.isArray(list)) continue;
+            if (!fallback.length) fallback = list;
+            if (list.length > 0) return list;
+          } catch {
+            // Best-effort anonymous merge; keep main feed loading resilient.
+          }
+        }
+      }
+      return fallback;
+    };
     const clearRetryTimer = () => {
       if (retryTimerRef.current) {
         clearTimeout(retryTimerRef.current);
@@ -695,9 +837,27 @@ export default function Feed() {
         if (!res && fallbackRes) res = fallbackRes;
         if (!res) throw lastErr || new Error("Failed to load feed");
         const listRaw = Array.isArray(res.data) ? res.data : [];
-        const list = listRaw.filter((post) => post && !isYouTubeMedia(post));
+        const mainFeedList = listRaw.filter((post) => post && !isYouTubeMedia(post));
+        const anonymousFeedList = await fetchAnonymousFeedList(baseCandidates);
+        const list = mergeAnonymousVideosIntoFeed(mainFeedList, anonymousFeedList).filter(
+          (post) => post && !isYouTubeMedia(post)
+        );
         if (!mounted) return;
         setPosts(list);
+        setLikeCounts((prev) => {
+          const next = { ...prev };
+          list.forEach((post) => {
+            const postId = String(post?.id || "").trim();
+            if (!postId) return;
+            const seeded = readAnonCount(post, ["likeCount", "likesCount", "likes"]);
+            if (!Number.isFinite(seeded) || seeded < 0) return;
+            const current = Number(next[postId]);
+            if (!Number.isFinite(current) || seeded > current) {
+              next[postId] = seeded;
+            }
+          });
+          return next;
+        });
         try {
           localStorage.setItem(FEED_CACHE_KEY, JSON.stringify({ updatedAt: Date.now(), posts: list }));
         } catch {
@@ -771,6 +931,7 @@ export default function Feed() {
   useEffect(() => {
     if (!posts.length) return;
     posts.forEach((post) => {
+      if (isAnonymousFeedItem(post)) return;
       api.get(`/api/likes/${post.id}/count`)
         .then((res) => {
           const count = Number(res.data) || 0;
@@ -935,7 +1096,7 @@ export default function Feed() {
       post?.name
     ]
       .map((v) => String(v || "").trim())
-      .filter(Boolean);
+      .filter((value) => value && !isGenericProfileLookupLabel(value));
     return values.filter((v, i, arr) => arr.indexOf(v) === i);
   };
 
@@ -1071,6 +1232,7 @@ export default function Feed() {
     const uniquePostsByOwner = [];
     const seen = new Set();
     posts.forEach((post) => {
+      if (isAnonymousFeedItem(post)) return;
       const ownerKey = ownerKeyFor(post);
       if (!ownerKey || seen.has(ownerKey)) return;
       seen.add(ownerKey);
@@ -1082,6 +1244,7 @@ export default function Feed() {
     const run = async () => {
       const nextMap = {};
       for (const post of uniquePostsByOwner.slice(0, 40)) {
+        if (isAnonymousFeedItem(post)) continue;
         const ownerKey = ownerKeyFor(post);
         if (!ownerKey || profilePicByOwner[ownerKey]) continue;
         if (profilePicFor(post)) continue;
@@ -1089,6 +1252,10 @@ export default function Feed() {
         const candidates = ownerCandidatesFor(post);
         let found = "";
         for (const candidate of candidates) {
+          const normalizedCandidate = String(candidate || "").trim();
+          const candidateKey = normalizedCandidate.toLowerCase();
+          if (!normalizedCandidate || isGenericProfileLookupLabel(normalizedCandidate)) continue;
+          if (skippedProfileLookupCandidatesRef.current.has(candidateKey)) continue;
           const endpoints = [`/api/profile/${encodeURIComponent(candidate)}`];
           for (const url of endpoints) {
             try {
@@ -1104,8 +1271,11 @@ export default function Feed() {
                 found = resolveMediaUrl(String(rawPic).trim());
                 break;
               }
-            } catch {
-              // try next candidate/endpoint
+            } catch (err) {
+              const status = Number(err?.response?.status || 0);
+              if (status === 404 || status === 400) {
+                skippedProfileLookupCandidatesRef.current.add(candidateKey);
+              }
             }
           }
           if (found) break;
@@ -1342,8 +1512,29 @@ export default function Feed() {
     const persistLikedMap = (next) => {
       writeIdMapToStorage("likedPostIds", next);
     };
+    const targetPost = postById[String(postId)];
+    const isAnonymousTarget = isAnonymousFeedItem(targetPost);
 
     try {
+      if (isAnonymousTarget) {
+        if (likedPostIds[postId]) return;
+        const anonId = String(targetPost?.anonymousPostId || "").trim();
+        if (!anonId) return;
+        const res = await api.post(`/api/anonymous/${encodeURIComponent(anonId)}/like`);
+        const seeded = readAnonCount(res?.data || {}, ["likeCount", "likesCount", "likes"]);
+        setLikeCounts((prev) => ({
+          ...prev,
+          [postId]: seeded > 0 ? seeded : (prev[postId] || 0) + 1
+        }));
+        setLikedPostIds((prev) => {
+          const next = { ...prev, [postId]: true };
+          persistLikedMap(next);
+          return next;
+        });
+        if (targetPost) trackFeedInteraction(targetPost, "like");
+        return;
+      }
+
       if (likedPostIds[postId]) {
         await api.delete(`/api/likes/${postId}`);
         setLikedPostIds((prev) => {
@@ -1365,7 +1556,6 @@ export default function Feed() {
           persistLikedMap(next);
           return next;
         });
-        const targetPost = postById[String(postId)];
         if (targetPost) trackFeedInteraction(targetPost, "like");
         return;
       }
@@ -1375,7 +1565,6 @@ export default function Feed() {
         persistLikedMap(next);
         return next;
       });
-      const targetPost = postById[String(postId)];
       if (targetPost) trackFeedInteraction(targetPost, "like");
     } catch {
       // noop
@@ -2042,7 +2231,7 @@ export default function Feed() {
       <div className="feed-top-row">
         <div className="explore-search-wrap">
           <span className="explore-search-icon">{"\u2315"}</span>
-          <input
+          <input name="feed-input-2234"
             type="text"
             placeholder="Search people or captions"
             value={query}
@@ -2192,19 +2381,47 @@ export default function Feed() {
               isMenuOpen && menuPlacement.postId === post.id
                 ? { "--long-feed-menu-max-height": `${menuPlacement.maxHeight}px` }
                 : undefined;
+            const buildWatchPath = () => {
+              const id = String(post?.id || "").trim();
+              const nextParams = new URLSearchParams();
+              const mediaRaw = String(rawUrl || "").trim();
+              if (mediaRaw) nextParams.set("media", mediaRaw);
+              const posterRaw = String(
+                post?.posterUrl ||
+                  post?.thumbnailUrl ||
+                  post?.thumbUrl ||
+                  post?.coverImageUrl ||
+                  post?.coverImage ||
+                  post?.previewUrl ||
+                  post?.imageUrl ||
+                  ""
+              ).trim();
+              if (posterRaw) nextParams.set("poster", posterRaw);
+              const titleRaw = String(captionFor(post) || "").trim();
+              if (titleRaw) nextParams.set("title", titleRaw);
+              if (user) nextParams.set("author", user);
+              if (isAnonymousFeedItem(post)) {
+                nextParams.set("anon", "1");
+                const anonId = String(post?.anonymousPostId || "").trim();
+                if (anonId) nextParams.set("aid", anonId);
+              }
+              const query = nextParams.toString();
+              const base = `/watch/${encodeURIComponent(id)}`;
+              return query ? `${base}?${query}` : base;
+            };
             return (
               <article
                 key={`long-${post.id}`}
                 className="long-feed-card"
                 onClick={() => {
                   trackFeedInteraction(post, "watch");
-                  navigate(`/watch/${post.id}`);
+                  navigate(buildWatchPath());
                 }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
                     trackFeedInteraction(post, "watch");
-                    navigate(`/watch/${post.id}`);
+                    navigate(buildWatchPath());
                   }
                 }}
                 role="button"
@@ -2514,7 +2731,7 @@ export default function Feed() {
                   {isPrimary && (
                     <div className="feed-comments">
                       <div className="feed-comment-input-row">
-                        <input
+                        <input name="feed-input-2734"
                           type="text"
                           placeholder="Add a comment..."
                           value={commentTextByPost[post.id] || ""}

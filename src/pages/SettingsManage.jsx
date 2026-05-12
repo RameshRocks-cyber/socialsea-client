@@ -770,7 +770,7 @@ export default function SettingsManage() {
               <h3>{isCloseFriendsConfig ? "Close Friends" : "Blocked Users"}</h3>
             </header>
 
-            <input
+            <input name="settingsmanage-input-773"
               type="text"
               className="settings-user-search"
               placeholder="Type name or email"

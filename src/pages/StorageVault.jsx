@@ -964,7 +964,7 @@ export default function StorageVault() {
                 Clear all
               </button>
             </div>
-            <input ref={inputRef} type="file" multiple onChange={handleFiles} />
+            <input name="storagevault-input-967" ref={inputRef} type="file" multiple onChange={handleFiles} />
           </div>
           {unsupported && (
             <p className="storage-error">Storage is not supported in this browser.</p>

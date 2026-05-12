@@ -947,7 +947,7 @@ export default function AmbulanceNavigation() {
                   <div className="ambulance-form">
                     <label>
                       Driver name
-                      <input
+                      <input name="ambulancenavigation-input-950"
                         value={requestForm.driverName}
                         onChange={(e) => setRequestForm((p) => ({ ...p, driverName: e.target.value }))}
                         placeholder="Your name"
@@ -955,7 +955,7 @@ export default function AmbulanceNavigation() {
                     </label>
                     <label>
                       Phone
-                      <input
+                      <input name="ambulancenavigation-input-958"
                         value={requestForm.phone}
                         onChange={(e) => setRequestForm((p) => ({ ...p, phone: e.target.value }))}
                         placeholder="Phone number"
@@ -963,7 +963,7 @@ export default function AmbulanceNavigation() {
                     </label>
                     <label>
                       Ambulance / Vehicle number
-                      <input
+                      <input name="ambulancenavigation-input-966"
                         value={requestForm.vehicleNumber}
                         onChange={(e) => setRequestForm((p) => ({ ...p, vehicleNumber: e.target.value }))}
                         placeholder="TN 01 AB 1234"
@@ -971,7 +971,7 @@ export default function AmbulanceNavigation() {
                     </label>
                     <label>
                       Service / Hospital
-                      <input
+                      <input name="ambulancenavigation-input-974"
                         value={requestForm.serviceName}
                         onChange={(e) => setRequestForm((p) => ({ ...p, serviceName: e.target.value }))}
                         placeholder="Service name"
@@ -979,7 +979,7 @@ export default function AmbulanceNavigation() {
                     </label>
                     <label>
                       Note (optional)
-                      <textarea
+                      <textarea name="ambulancenavigation-textarea-982"
                         value={requestForm.note}
                         onChange={(e) => setRequestForm((p) => ({ ...p, note: e.target.value }))}
                         placeholder="Any additional details for admin"
@@ -1019,7 +1019,7 @@ export default function AmbulanceNavigation() {
               <div className="ambulance-form">
                 <label>
                   Hospital name (optional)
-                  <input
+                  <input name="ambulancenavigation-input-1022"
                     value={destinationLabel}
                     onChange={(e) => setDestinationLabel(e.target.value)}
                     placeholder="Eg: City Hospital"
@@ -1027,7 +1027,7 @@ export default function AmbulanceNavigation() {
                 </label>
                 <label>
                   Hospital location
-                  <input
+                  <input name="ambulancenavigation-input-1030"
                     value={destinationInput}
                     onChange={(e) => setDestinationInput(e.target.value)}
                     placeholder="Paste Google Maps link or 'lat,lng'"

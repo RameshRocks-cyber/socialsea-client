@@ -96,7 +96,7 @@ export default function SettingsLanguage() {
             <h3>Choose language</h3>
           </header>
 
-          <input
+          <input name="settingslanguage-input-99"
             type="text"
             className="settings-user-search"
             placeholder="Search language"

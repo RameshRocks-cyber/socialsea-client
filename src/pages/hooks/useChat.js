@@ -3452,6 +3452,39 @@ function useChatController() {
     throw lastError || new Error("Chat object request failed");
   };
 
+  const isPlaceholderProfilePicToken = (value) => {
+    const raw = String(value || "").trim();
+    if (!raw) return true;
+    const lower = raw.toLowerCase();
+    if (
+      lower === "null" ||
+      lower === "undefined" ||
+      lower === "none" ||
+      lower === "n/a" ||
+      lower === "na" ||
+      lower === "nan"
+    ) {
+      return true;
+    }
+    const compact = raw.replace(/\s+/g, "");
+    if (!/[/:.#?]/.test(raw) && /^[a-z]{1,2}$/i.test(compact)) {
+      return true;
+    }
+    const withoutHost = raw.replace(/^https?:\/\/[^/]+/i, "");
+    const cleanPath = withoutHost.split(/[?#]/)[0] || "";
+    if (/^\/?api\/[a-z]{1,2}$/i.test(cleanPath)) return true;
+    if (/^\/?[a-z]{1,2}$/i.test(cleanPath)) return true;
+    return false;
+  };
+
+  const normalizeContactProfilePic = (value) => {
+    const raw = String(value || "").trim();
+    if (!raw || isPlaceholderProfilePicToken(raw)) return "";
+    if (/^(blob:|data:|https?:\/\/)/i.test(raw)) return raw;
+    if (raw.startsWith("//")) return `https:${raw}`;
+    return toApiUrl(raw);
+  };
+
   const mapUserToContact = (u) => {
     const userLike =
       u?.user ||
@@ -3760,7 +3793,7 @@ function useChatController() {
       username: usernameRaw,
       email: emailRaw,
       avatar: (name[0] || "U").toUpperCase(),
-      profilePic: profilePicRaw ? toApiUrl(profilePicRaw) : "",
+      profilePic: normalizeContactProfilePic(profilePicRaw),
       lastMessage: lastMessageText,
       ...(normalizedLastMessageAt ? { lastMessageAt: normalizedLastMessageAt } : {}),
       ...(normalizedLastActiveAt ? { lastActiveAt: normalizedLastActiveAt } : {}),
@@ -3813,7 +3846,9 @@ function useChatController() {
         avatar: ((mergedName || prevName || nextName || "U")[0] || "U").toUpperCase(),
         username: String(c?.username || "").trim() || String(prev?.username || "").trim(),
         email: String(c?.email || "").trim() || String(prev?.email || "").trim(),
-        profilePic: String(c?.profilePic || "").trim() || String(prev?.profilePic || "").trim(),
+        profilePic:
+          normalizeContactProfilePic(c?.profilePic) ||
+          normalizeContactProfilePic(prev?.profilePic),
         lastMessage: mergedLastMessage,
       };
       if (mergedLastMessageAt) {
@@ -8334,15 +8369,22 @@ function useChatController() {
 
     const init = async () => {
       try {
-        const [{ Client }, sockjsModule] = await Promise.all([
-          import("@stomp/stompjs"),
-          import("sockjs-client/dist/sockjs")
-        ]);
+        const { Client } = await import("@stomp/stompjs");
         if (disposed) return;
-        const SockJS = sockjsModule?.default || sockjsModule;
         // Prefer the configured API base (usually same-origin `/api` in production) for WebSockets.
         // Stored absolute bases can be stale and may point at insecure `http://` URLs.
-        const rawBase = normalizeBaseCandidate(getApiBaseUrl()) || resolveAbsoluteChatBase();
+        const runtimeHost =
+          typeof window !== "undefined" ? String(window.location.hostname || "").toLowerCase() : "";
+        const isLoopbackRuntime = runtimeHost === "localhost" || runtimeHost === "127.0.0.1";
+        const devProxyAbsolute = normalizeBaseCandidate(import.meta.env?.VITE_DEV_PROXY_TARGET);
+        const preferDirectDevWs =
+          Boolean(import.meta.env?.DEV) &&
+          isLoopbackRuntime &&
+          !!devProxyAbsolute &&
+          /^https?:\/\//i.test(devProxyAbsolute);
+        const rawBase = preferDirectDevWs
+          ? devProxyAbsolute
+          : (normalizeBaseCandidate(getApiBaseUrl()) || resolveAbsoluteChatBase());
         const origin = typeof window !== "undefined" ? String(window.location.origin || "") : "";
         const base = rawBase && rawBase.startsWith("/") ? `${origin}${rawBase}` : String(rawBase || "");
         if (!base) return;
@@ -8350,11 +8392,22 @@ function useChatController() {
 
         const wsOrigin = wsBase.startsWith("ws") ? wsBase : wsBase.replace(/^http/i, "ws");
         const transport = String(import.meta.env?.VITE_WS_TRANSPORT || "").trim().toLowerCase();
-        const useSockJS = !["ws", "websocket", "native"].includes(transport);
+        const normalizeEndpoint = (value, fallback) => {
+          const raw = String(value || "").trim();
+          if (!raw) return fallback;
+          return raw.startsWith("/") ? raw : `/${raw}`;
+        };
+        const nativeWsEndpoint = normalizeEndpoint(import.meta.env?.VITE_WS_NATIVE_ENDPOINT, "/ws-native");
+        const sockJsEndpoint = normalizeEndpoint(import.meta.env?.VITE_WS_SOCKJS_ENDPOINT, "/ws");
+        const isNativeTransport = ["ws", "websocket", "native"].includes(transport);
+        const useSockJS = !isNativeTransport;
+        const sockJsModule = useSockJS ? await import("sockjs-client/dist/sockjs") : null;
+        if (disposed) return;
+        const SockJS = sockJsModule?.default || sockJsModule;
         const client = new Client({
           ...(useSockJS
-            ? { webSocketFactory: () => new SockJS(`${wsBase}/ws?token=${encodeURIComponent(token)}`) }
-            : { brokerURL: `${wsOrigin}/ws?token=${encodeURIComponent(token)}` }),
+            ? { webSocketFactory: () => new SockJS(`${wsBase}${sockJsEndpoint}?token=${encodeURIComponent(token)}`) }
+            : { brokerURL: `${wsOrigin}${nativeWsEndpoint}?token=${encodeURIComponent(token)}` }),
           connectHeaders: { Authorization: `Bearer ${token}` },
           reconnectDelay: 3000,
           debug: () => {}
@@ -11971,6 +12024,7 @@ function useChatController() {
   const resolveMediaUrl = (value) => {
     const raw = String(value || "").trim();
     if (!raw) return "";
+    if (isPlaceholderProfilePicToken(raw)) return "";
     if (/^(blob:|data:|https?:\/\/)/i.test(raw)) return raw;
     return toApiUrl(raw);
   };

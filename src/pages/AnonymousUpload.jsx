@@ -58,7 +58,7 @@ const AnonymousUpload = () => {
         <p style={styles.subtitle}>Share your thoughts privately. No identity stored.</p>
 
         <label style={styles.uploadBox}>
-          <input
+          <input name="anonymousupload-input-61"
             type="file"
             accept="image/*,video/*"
             onChange={(e) => setFile(e.target.files?.[0] || null)}
@@ -67,14 +67,14 @@ const AnonymousUpload = () => {
           {file ? file.name : "Click to choose a file"}
         </label>
 
-        <textarea
+        <textarea name="anonymousupload-textarea-70"
           placeholder="Write something (optional)..."
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           style={styles.textarea}
         />
 
-        <input
+        <input name="anonymousupload-input-77"
           type="text"
           placeholder="UPI ID (optional)"
           value={upiId}
@@ -82,7 +82,7 @@ const AnonymousUpload = () => {
           style={styles.input}
         />
 
-        <input
+        <input name="anonymousupload-input-85"
           type="text"
           placeholder="Bank Account Number (optional)"
           value={accountNumber}
@@ -90,7 +90,7 @@ const AnonymousUpload = () => {
           style={styles.input}
         />
 
-        <input
+        <input name="anonymousupload-input-93"
           type="text"
           placeholder="IFSC Code (optional)"
           value={ifscCode}

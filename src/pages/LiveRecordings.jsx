@@ -12,6 +12,7 @@ import "./LiveRecordings.css";
 const SOS_HISTORY_KEY = "socialsea_sos_history_v1";
 const LIVE_RECORDINGS_PIN_KEY = "socialsea_live_recordings_pin_v1";
 const LIVE_RECORDINGS_HIDDEN_KEY = "socialsea_live_recordings_hidden_v1";
+let inMemoryRecordingsPin = "";
 
 const formatDuration = (ms) => {
   const totalSec = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
@@ -37,21 +38,74 @@ const readLocalHistory = () => {
   }
 };
 
-const readRecordingsPin = () => {
+const normalizePin = (value) => {
+  const raw = String(value || "").trim();
+  return /^\d{6}$/.test(raw) ? raw : "";
+};
+
+const getStorageRef = (type) => {
   try {
-    const raw = String(localStorage.getItem(LIVE_RECORDINGS_PIN_KEY) || "").trim();
-    return /^\d{6}$/.test(raw) ? raw : "";
+    if (typeof window === "undefined") return null;
+    return type === "session" ? window.sessionStorage : window.localStorage;
+  } catch {
+    return null;
+  }
+};
+
+const readPinFromStorage = (type) => {
+  try {
+    const storage = getStorageRef(type);
+    if (!storage) return "";
+    return normalizePin(storage.getItem(LIVE_RECORDINGS_PIN_KEY));
   } catch {
     return "";
   }
 };
 
+const writePinToStorage = (type, pin) => {
+  try {
+    const storage = getStorageRef(type);
+    if (!storage) return false;
+    storage.setItem(LIVE_RECORDINGS_PIN_KEY, pin);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const removePinFromStorage = (type) => {
+  try {
+    const storage = getStorageRef(type);
+    storage?.removeItem(LIVE_RECORDINGS_PIN_KEY);
+  } catch {
+    // ignore storage errors
+  }
+};
+
+const readRecordingsPin = () => {
+  const localPin = readPinFromStorage("local");
+  if (localPin) return localPin;
+
+  const sessionPin = readPinFromStorage("session");
+  if (sessionPin) return sessionPin;
+
+  return normalizePin(inMemoryRecordingsPin);
+};
+
 const writeRecordingsPin = (pin) => {
-  localStorage.setItem(LIVE_RECORDINGS_PIN_KEY, String(pin || "").trim());
+  const normalized = normalizePin(pin);
+  if (!normalized) return false;
+
+  inMemoryRecordingsPin = normalized;
+  const localOk = writePinToStorage("local", normalized);
+  const sessionOk = writePinToStorage("session", normalized);
+  return localOk || sessionOk || !!inMemoryRecordingsPin;
 };
 
 const clearRecordingsPin = () => {
-  localStorage.removeItem(LIVE_RECORDINGS_PIN_KEY);
+  inMemoryRecordingsPin = "";
+  removePinFromStorage("local");
+  removePinFromStorage("session");
 };
 
 const readHiddenRecordingIds = () => {
@@ -110,6 +164,8 @@ export default function LiveRecordings() {
   const [pinMode, setPinMode] = useState(() => (readRecordingsPin() ? "unlock" : "setup"));
   const [pinInput, setPinInput] = useState("");
   const [pinConfirmInput, setPinConfirmInput] = useState("");
+  const [showPinInput, setShowPinInput] = useState(false);
+  const [showPinConfirmInput, setShowPinConfirmInput] = useState(false);
   const [pinError, setPinError] = useState("");
   const [unlocked, setUnlocked] = useState(false);
   const [localMediaUrls, setLocalMediaUrls] = useState({});
@@ -343,7 +399,7 @@ export default function LiveRecordings() {
   }, [items]);
 
   const handlePinSubmit = (event) => {
-    event.preventDefault();
+    event?.preventDefault?.();
     const pin = String(pinInput || "").trim();
     if (!/^\d{6}$/.test(pin)) {
       setPinError("Enter exactly 6 digits.");
@@ -572,33 +628,57 @@ export default function LiveRecordings() {
 
         <section className="live-recordings-lock-card">
           <h2>{pinMode === "setup" ? "Set 6-digit Password" : "Enter 6-digit Password"}</h2>
-          <form className="live-recordings-lock-form" onSubmit={handlePinSubmit}>
-            <input
-              type="password"
-              inputMode="numeric"
-              pattern="\d{6}"
-              maxLength={6}
-              value={pinInput}
-              onChange={(e) => {
-                setPinInput(String(e.target.value || "").replace(/\D/g, "").slice(0, 6));
-                if (pinError) setPinError("");
-              }}
-              placeholder="Enter 6 digits"
-              autoFocus
-            />
-            {pinMode === "setup" && (
-              <input
-                type="password"
+          <form className="live-recordings-lock-form" onSubmit={handlePinSubmit} noValidate>
+            <div className="live-recordings-pin-row">
+              <input name="liverecordings-input-633"
+                type={showPinInput ? "text" : "password"}
+                className="live-recordings-pin-input"
                 inputMode="numeric"
-                pattern="\d{6}"
                 maxLength={6}
-                value={pinConfirmInput}
+                required
+                value={pinInput}
                 onChange={(e) => {
-                  setPinConfirmInput(String(e.target.value || "").replace(/\D/g, "").slice(0, 6));
+                  setPinInput(String(e.target.value || "").replace(/\D/g, "").slice(0, 6));
                   if (pinError) setPinError("");
                 }}
-                placeholder="Confirm 6 digits"
+                placeholder="Enter 6 digits"
+                autoComplete={pinMode === "setup" ? "new-password" : "current-password"}
+                autoFocus
               />
+              <button
+                type="button"
+                className="live-recordings-pin-toggle"
+                onClick={() => setShowPinInput((prev) => !prev)}
+                aria-label={showPinInput ? "Hide password" : "Show password"}
+              >
+                {showPinInput ? "Hide" : "Show"}
+              </button>
+            </div>
+            {pinMode === "setup" && (
+              <div className="live-recordings-pin-row">
+                <input name="liverecordings-input-659"
+                  type={showPinConfirmInput ? "text" : "password"}
+                  className="live-recordings-pin-input"
+                  inputMode="numeric"
+                  maxLength={6}
+                  required
+                  value={pinConfirmInput}
+                  onChange={(e) => {
+                    setPinConfirmInput(String(e.target.value || "").replace(/\D/g, "").slice(0, 6));
+                    if (pinError) setPinError("");
+                  }}
+                  placeholder="Confirm 6 digits"
+                  autoComplete="new-password"
+                />
+                <button
+                  type="button"
+                  className="live-recordings-pin-toggle"
+                  onClick={() => setShowPinConfirmInput((prev) => !prev)}
+                  aria-label={showPinConfirmInput ? "Hide confirm password" : "Show confirm password"}
+                >
+                  {showPinConfirmInput ? "Hide" : "Show"}
+                </button>
+              </div>
             )}
             {pinError && <p className="live-recordings-error">{pinError}</p>}
             <button type="submit">{pinMode === "setup" ? "Save & Open" : "Unlock"}</button>

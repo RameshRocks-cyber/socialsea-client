@@ -1299,7 +1299,7 @@ export default function StudyMode() {
               }}
             >
               <FiSearch className="reels-study-search-icon" aria-hidden="true" />
-              <input
+              <input name="studymode-input-1302"
                 type="search"
                 value={studyQuery}
                 onChange={(event) => setStudyQuery(event.target.value)}
@@ -1341,7 +1341,7 @@ export default function StudyMode() {
               <div className="reels-study-assistant-title">
                 <div className="reels-study-assistant-name">
                   <span className="reels-study-assistant-badge">{assistantName || "HRS"}</span>
-                  <input
+                  <input name="studymode-input-1344"
                     type="text"
                     value={assistantName}
                     onChange={(event) => setAssistantName(event.target.value.toUpperCase())}
@@ -1392,7 +1392,7 @@ export default function StudyMode() {
                   )}
                 </div>
                 <div className="reels-study-assistant-input">
-                  <input
+                  <input name="studymode-input-1395"
                     type="text"
                     value={chatInput}
                     onChange={(event) => setChatInput(event.target.value)}
@@ -1412,7 +1412,7 @@ export default function StudyMode() {
                   <FiFileText aria-hidden="true" />
                   <h4>Notes</h4>
                 </div>
-                <textarea
+                <textarea name="studymode-textarea-1415"
                   className="reels-study-notes-input"
                   value={assistantNotes}
                   onChange={(event) => setAssistantNotes(event.target.value)}
@@ -1439,7 +1439,7 @@ export default function StudyMode() {
                   <label className="reels-study-upload-btn">
                     <FiUpload aria-hidden="true" />
                     Upload files
-                    <input type="file" multiple onChange={handleFilesSelected} />
+                    <input name="studymode-input-1442" type="file" multiple onChange={handleFilesSelected} />
                   </label>
                   {uploading && <span className="reels-study-uploading">Uploading...</span>}
                   {uploadedFiles.length ? (

@@ -50,7 +50,7 @@ export default function VideoCall({ placement = "page" }) {
                     const displayName = getContactDisplayName(c);
                     return (
                       <label key={c.id} className="group-call-item">
-                        <input
+                        <input name="videocall-input-53"
                           type="checkbox"
                           checked={checked}
                           onChange={() => toggleGroupInvite(c.id)}
@@ -616,7 +616,7 @@ export default function VideoCall({ placement = "page" }) {
               <div className="wa-sign-assist-head">
                 <strong>Sign Assist</strong>
                 <label className="wa-sign-assist-auto">
-                  <input
+                  <input name="videocall-input-619"
                     type="checkbox"
                     checked={signAssistAutoSpeak}
                     onChange={(e) => setAutoSpeakEnabled(e.target.checked)}
@@ -644,7 +644,7 @@ export default function VideoCall({ placement = "page" }) {
               )}
               <div className="wa-sign-assist-row">
                 <p className="wa-sign-assist-auto-note">Auto capture is active and sends each captured sign instantly.</p>
-                <select
+                <select name="videocall-select-647"
                   className="wa-sign-assist-gender"
                   value={signAssistVoiceGender}
                   onChange={(e) => setSignAssistVoiceGender(e.target.value)}
@@ -654,7 +654,7 @@ export default function VideoCall({ placement = "page" }) {
                   <option value="male">Male voice</option>
                 </select>
               </div>
-              <textarea
+              <textarea name="videocall-textarea-657"
                 className="wa-sign-assist-input"
                 rows={2}
                 placeholder="Auto-captured sign text appears here..."

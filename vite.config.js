@@ -134,6 +134,16 @@ export default defineConfig(({ mode }) => {
                 origin: devProxyOrigin,
               },
             },
+            '/ws-native': {
+              target: devProxyTarget,
+              changeOrigin: true,
+              secure: false,
+              ws: true,
+              configure: configureProxy,
+              headers: {
+                origin: devProxyOrigin,
+              },
+            },
           }
         : {},
       hmr: {

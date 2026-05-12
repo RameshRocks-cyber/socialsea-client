@@ -108,7 +108,7 @@ export default function HighlightsCreate() {
         <div className="highlights-form">
           <label className="highlights-field">
             <span>Title</span>
-            <input
+            <input name="highlightscreate-input-111"
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}

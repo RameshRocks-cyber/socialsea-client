@@ -58,7 +58,14 @@
   gap: 10px;
 }
 
+.live-recordings-pin-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
 .live-recordings-lock-form input {
+  width: 100%;
   border: 1px solid var(--ss-theme-border);
   background: color-mix(in srgb, var(--ss-theme-bg) 90%, white 10%);
   color: var(--ss-theme-text);
@@ -69,6 +76,10 @@
 
 .live-recordings-lock-form input::placeholder {
   color: color-mix(in srgb, var(--ss-theme-text) 58%, transparent);
+}
+
+.live-recordings-lock-form .live-recordings-pin-input {
+  padding-right: 78px;
 }
 
 .live-recordings-lock-form button {
@@ -93,6 +104,26 @@
   padding: 8px 12px;
   cursor: pointer;
   font-weight: 600;
+}
+
+.live-recordings-lock-form .live-recordings-pin-toggle {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: 1px solid var(--ss-theme-border);
+  background: color-mix(in srgb, var(--ss-theme-bg-soft) 84%, white 16%);
+  color: var(--ss-theme-text);
+  border-radius: 10px;
+  padding: 6px 10px;
+  min-width: 64px;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 0.82rem;
+}
+
+.live-recordings-lock-form .live-recordings-pin-toggle:hover {
+  background: color-mix(in srgb, var(--ss-theme-bg-soft) 72%, white 28%);
 }
 
 .live-recordings-layout {
@@ -295,4 +326,5 @@
   .live-recording-item-wrap {
     grid-template-columns: 1fr;
   }
+
 }

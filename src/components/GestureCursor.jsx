@@ -27,6 +27,8 @@ const GESTURE_GRAB_PINCH_HOLD_RATIO = 0.34;
 const GESTURE_BUDDY_GRAB_SNAP_PX = 170;
 const GESTURE_FINGER_EXTEND_MARGIN = 0.08;
 const GESTURE_SCROLL_PX_PER_SEC = 900;
+const GESTURE_REELS_SCROLL_COOLDOWN_MS = 850;
+const GESTURE_REELS_SCROLL_SETTLE_MS = 950;
 const GESTURE_TARGET_FPS = 60;
 const GESTURE_CAMERA_WIDTH = 960;
 const GESTURE_CAMERA_HEIGHT = 540;
@@ -73,6 +75,9 @@ export default function GestureCursor() {
   const cursorFlashTimerRef = useRef(0);
   const smoothFingerRef = useRef({ x: 0, y: 0, active: false });
   const lastScrollAtRef = useRef(0);
+  const lastReelsScrollAtRef = useRef(0);
+  const reelsScrollLockRef = useRef(false);
+  const reelsScrollLockTimerRef = useRef(0);
   const grabActiveRef = useRef(false);
   const grabTargetRef = useRef(null);
   const grabPointerIdRef = useRef(10);
@@ -454,14 +459,59 @@ export default function GestureCursor() {
     return null;
   };
 
+  const scrollReelsByStep = (target, direction) => {
+    if (!(target instanceof Element)) return false;
+    const now = Date.now();
+    if (reelsScrollLockRef.current) return true;
+    if (now - lastReelsScrollAtRef.current < GESTURE_REELS_SCROLL_COOLDOWN_MS) {
+      return true;
+    }
+    const sections = Array.from(target.querySelectorAll(".reel-item"));
+    if (!sections.length) return false;
+    const currentTop = Number(target.scrollTop || 0);
+    let currentIndex = 0;
+    let bestDist = Number.POSITIVE_INFINITY;
+    sections.forEach((section, idx) => {
+      const dist = Math.abs((Number(section?.offsetTop) || 0) - currentTop);
+      if (dist < bestDist) {
+        bestDist = dist;
+        currentIndex = idx;
+      }
+    });
+    const nextIndex = clamp(
+      currentIndex + (direction > 0 ? 1 : -1),
+      0,
+      sections.length - 1
+    );
+    if (nextIndex === currentIndex) return true;
+    const nextTop =
+      Number(sections[nextIndex]?.offsetTop) ||
+      nextIndex * Math.max(1, Number(target.clientHeight || 0));
+    reelsScrollLockRef.current = true;
+    lastReelsScrollAtRef.current = now;
+    if (reelsScrollLockTimerRef.current) {
+      clearTimeout(reelsScrollLockTimerRef.current);
+      reelsScrollLockTimerRef.current = 0;
+    }
+    target.scrollTo({ top: nextTop, left: 0, behavior: "smooth" });
+    reelsScrollLockTimerRef.current = window.setTimeout(() => {
+      reelsScrollLockRef.current = false;
+      reelsScrollLockTimerRef.current = 0;
+    }, GESTURE_REELS_SCROLL_SETTLE_MS);
+    return true;
+  };
+
   const scrollByDirection = (direction, screenPos) => {
+    const target = findScrollableTarget(screenPos, direction);
+    if (target?.classList?.contains("reels-container")) {
+      if (scrollReelsByStep(target, direction)) return;
+    }
     const now = performance.now();
     const last = lastScrollAtRef.current || now;
     const deltaMs = Math.min(now - last, 100);
     lastScrollAtRef.current = now;
     const amount = (GESTURE_SCROLL_PX_PER_SEC * deltaMs) / 1000;
     if (!Number.isFinite(amount) || amount <= 0) return;
-    const target = findScrollableTarget(screenPos, direction);
     if (target?.scrollBy) {
       target.scrollBy({ top: amount * direction, left: 0, behavior: "auto" });
       return;
@@ -478,6 +528,12 @@ export default function GestureCursor() {
     rightClickHoldFramesRef.current = 0;
     smoothFingerRef.current = { x: 0, y: 0, active: false };
     lastScrollAtRef.current = 0;
+    lastReelsScrollAtRef.current = 0;
+    reelsScrollLockRef.current = false;
+    if (reelsScrollLockTimerRef.current) {
+      clearTimeout(reelsScrollLockTimerRef.current);
+      reelsScrollLockTimerRef.current = 0;
+    }
     grabActiveRef.current = false;
     grabTargetRef.current = null;
     lastDetectAtRef.current = 0;

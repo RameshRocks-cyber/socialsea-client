@@ -352,7 +352,7 @@ export default function ProfileSetup() {
             <label className="field-label">Profile photo</label>
             <label className="file-btn">
               {photoProcessing ? "Processing..." : "Choose file"}
-              <input
+              <input name="profilesetup-input-355"
                 type="file"
                 accept="image/*"
                 onChange={async (e) => {
@@ -394,7 +394,7 @@ export default function ProfileSetup() {
           ) : null}
           <label className="file-btn">
             {coverProcessing ? "Processing..." : "Choose cover"}
-            <input
+            <input name="profilesetup-input-397"
               type="file"
               accept="image/*"
               onChange={async (e) => {
@@ -430,7 +430,7 @@ export default function ProfileSetup() {
         </div>
 
         <label className="field-label">Username</label>
-        <input
+        <input name="profilesetup-input-433"
           className="text-input"
           placeholder="username"
           value={name}
@@ -460,7 +460,7 @@ export default function ProfileSetup() {
         )}
 
         <label className="field-label">Bio</label>
-        <textarea
+        <textarea name="profilesetup-textarea-463"
           className="text-area"
           placeholder="bio"
           value={bio}

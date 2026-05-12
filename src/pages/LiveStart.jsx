@@ -1789,7 +1789,7 @@ export default function LiveStart({ mode = "host" }) {
                 <div className="live-viewer-controls">
                   <label>
                     Listening language
-                    <select value={viewerLanguage} onChange={(e) => onViewerLanguageChange(e.target.value)}>
+                    <select name="livestart-select-1792" value={viewerLanguage} onChange={(e) => onViewerLanguageChange(e.target.value)}>
                       {LANGUAGE_OPTIONS.map((opt) => (
                         <option key={opt.key} value={opt.key}>
                           {opt.label}
@@ -1831,7 +1831,7 @@ export default function LiveStart({ mode = "host" }) {
             <div className="live-start-toolbar">
               <label>
                 Filter
-                <select value={filterKey} onChange={(e) => setFilterKey(e.target.value)}>
+                <select name="livestart-select-1834" value={filterKey} onChange={(e) => setFilterKey(e.target.value)}>
                   {FILTER_OPTIONS.map((opt) => (
                     <option key={opt.key} value={opt.key}>
                       {opt.label}
@@ -1841,7 +1841,7 @@ export default function LiveStart({ mode = "host" }) {
               </label>
               <label>
                 Screen ratio
-                <select value={hostRatio} onChange={(e) => setHostRatio(e.target.value)}>
+                <select name="livestart-select-1844" value={hostRatio} onChange={(e) => setHostRatio(e.target.value)}>
                   <option value="vertical">Vertical (9:16)</option>
                   <option value="horizontal">Horizontal (16:9)</option>
                   <option value="square">Square (1:1)</option>
@@ -1849,7 +1849,7 @@ export default function LiveStart({ mode = "host" }) {
               </label>
               <label>
                 Content type
-                <select value={contentType} onChange={(e) => setContentType(e.target.value)}>
+                <select name="livestart-select-1852" value={contentType} onChange={(e) => setContentType(e.target.value)}>
                   {contentTypeConfig.options.map((opt) => (
                     <option key={opt.value} value={opt.value}>
                       {opt.label}
@@ -1859,7 +1859,7 @@ export default function LiveStart({ mode = "host" }) {
               </label>
               <label>
                 Language
-                <select value={languageKey} onChange={(e) => setLanguageKey(e.target.value)}>
+                <select name="livestart-select-1862" value={languageKey} onChange={(e) => setLanguageKey(e.target.value)}>
                   {LANGUAGE_OPTIONS.map((opt) => (
                     <option key={opt.key} value={opt.key}>
                       {opt.label}

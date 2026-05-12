@@ -358,7 +358,7 @@ export default function NotificationBuddySettings() {
           <div className="settings-select-grid nb-grid-full">
             <label className="settings-voice-select">
               <span>Voice</span>
-              <select
+              <select name="notificationbuddysettings-select-361"
                 value={prefs.notificationBuddyVoiceName}
                 onChange={(event) =>
                   setPrefs((prev) => ({ ...prev, notificationBuddyVoiceName: event.target.value }))
@@ -446,7 +446,7 @@ export default function NotificationBuddySettings() {
           <div className="settings-select-grid nb-grid-full">
             <label className="settings-voice-select nb-pet-name-row">
               <span>Pet Name</span>
-              <input
+              <input name="notificationbuddysettings-input-449"
                 type="text"
                 className="nb-pet-name-input"
                 value={prefs.notificationBuddyMessagePetName || ""}

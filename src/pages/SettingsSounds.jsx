@@ -244,7 +244,7 @@ export default function SettingsSounds() {
           <div className="settings-custom-ringtone-row">
             <label className="settings-custom-ringtone-upload">
               Upload My Song
-              <input type="file" accept="audio/*" onChange={onCustomRingtonePicked} />
+              <input name="settingssounds-input-247" type="file" accept="audio/*" onChange={onCustomRingtonePicked} />
             </label>
             {!!prefs.customRingtoneDataUrl && (
               <button type="button" className="settings-custom-ringtone-clear" onClick={clearCustomRingtone}>

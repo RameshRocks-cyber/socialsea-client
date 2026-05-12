@@ -30,7 +30,7 @@ import {
 import StudyMode from "./StudyMode";
 import "./Reels.css";
 
-const MAX_REEL_SECONDS = 60;
+const MAX_REEL_SECONDS = 120;
 const GESTURE_SCROLL_COOLDOWN_MS = 1400;
 const GESTURE_LIKE_COOLDOWN_MS = 200;
 const GESTURE_PLAY_TOGGLE_COOLDOWN_MS = 200;
@@ -46,6 +46,7 @@ const GESTURE_SCRIPT_HANDPOSE =
 const CHAT_SHARE_DRAFT_KEY = "socialsea_chat_share_draft_v1";
 const SETTINGS_KEY = "socialsea_settings_v1";
 const REELS_CACHE_KEY = "socialsea_reels_cache_v1";
+const FOLLOWING_CACHE_KEY = "socialsea_following_cache_v1";
 const REELS_CACHE_TTL_MS = 3 * 60 * 1000;
 const MAX_REELS_DEFAULT = 40;
 const REELS_LIMIT = Number(import.meta.env.VITE_REELS_LIMIT || MAX_REELS_DEFAULT);
@@ -88,6 +89,72 @@ const writeReelsCache = (items) => {
   }
 };
 
+const normalizeFollowKey = (value) => String(value || "").trim().toLowerCase();
+
+const readFollowingCache = () => {
+  try {
+    const raw = localStorage.getItem(FOLLOWING_CACHE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    if (!parsed || typeof parsed !== "object") return {};
+    const normalized = {};
+    Object.entries(parsed).forEach(([key, value]) => {
+      const normalizedKey = normalizeFollowKey(key);
+      if (!normalizedKey) return;
+      normalized[normalizedKey] = Boolean(value);
+    });
+    return normalized;
+  } catch {
+    return {};
+  }
+};
+
+const writeFollowingCache = (value) => {
+  try {
+    localStorage.setItem(FOLLOWING_CACHE_KEY, JSON.stringify(value || {}));
+  } catch {
+    // ignore storage failures
+  }
+};
+
+const updateFollowCache = (identifiers, following) => {
+  const keys = (Array.isArray(identifiers) ? identifiers : [])
+    .map((value) => normalizeFollowKey(value))
+    .filter(Boolean);
+  if (!keys.length) return;
+  const cache = readFollowingCache();
+  keys.forEach((key) => {
+    cache[key] = Boolean(following);
+  });
+  writeFollowingCache(cache);
+};
+
+const isGenericProfileLookupLabel = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  const compact = normalized.replace(/[._-]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!compact) return true;
+  return (
+    compact === "anonymous" ||
+    compact === "anonymous post" ||
+    compact === "anonymous user" ||
+    compact === "user" ||
+    compact === "unknown user" ||
+    compact === "unknown" ||
+    /^anonymous\s+(post|user)\b/.test(compact)
+  );
+};
+
+const isAnonymousReel = (reel) => {
+  if (!reel || typeof reel !== "object") return false;
+  if (reel.isAnonymous === true || reel.anonymous === true) return true;
+  const marker = String(reel?.visibility || reel?.privacy || reel?.postType || "").trim().toLowerCase();
+  if (marker.includes("anonymous")) return true;
+  return (
+    isGenericProfileLookupLabel(reel?.username) ||
+    isGenericProfileLookupLabel(reel?.user?.username) ||
+    isGenericProfileLookupLabel(reel?.user?.name)
+  );
+};
+
 function loadScript(src, id) {
   if (document.getElementById(id)) return Promise.resolve();
   return new Promise((resolve, reject) => {
@@ -109,7 +176,7 @@ const getGlobalGestureCache = () => {
   return window.__socialseaGestureCache;
 };
 
-export default function Reels() {
+export default function Clips() {
   const navigate = useNavigate();
   const viewerIdentity = useMemo(() => readStoryIdentity(), []);
   const [reels, setReels] = useState([]);
@@ -128,7 +195,7 @@ export default function Reels() {
   const [savedPostIds, setSavedPostIds] = useState({});
   const [shareMessageByPost, setShareMessageByPost] = useState({});
   const [tapLikeBurstByPost, setTapLikeBurstByPost] = useState({});
-  const [followingByKey, setFollowingByKey] = useState({});
+  const [followingByKey, setFollowingByKey] = useState(() => readFollowingCache());
   const [likeBusyByPost, setLikeBusyByPost] = useState({});
   const [profilePicByOwner, setProfilePicByOwner] = useState({});
   const [allMuted, setAllMuted] = useState(() => {
@@ -170,6 +237,7 @@ export default function Reels() {
   const watchProgressByPostRef = useRef({});
   const feedUserKeyRef = useRef(resolveFeedUserKey());
   const feedPersonalizationRef = useRef(readFeedPersonalizationState(feedUserKeyRef.current));
+  const skippedProfileLookupCandidatesRef = useRef(new Set());
   const playLockByPostRef = useRef({});
   const playLockTimerByPostRef = useRef({});
   const lastPlayTapAtByPostRef = useRef({});
@@ -364,6 +432,14 @@ export default function Reels() {
           const rawUrl = item.contentUrl || item.mediaUrl || "";
           const mediaUrl = resolveMediaUrl(String(rawUrl).trim());
           if (!mediaUrl) return;
+          const explicitReel =
+            item?.reel === true ||
+            item?.isReel === true ||
+            item?.originalReel === true;
+          if (explicitReel) {
+            confirmed.push(item);
+            return;
+          }
 
           const durationHint = durationFromPost(item);
           const bucket = classifyVideoBucket(item, {
@@ -896,8 +972,13 @@ export default function Reels() {
       reel?.userId,
     ]
       .map((v) => String(v || "").trim())
-      .filter(Boolean)
+      .filter((value) => value && !isGenericProfileLookupLabel(value))
       .filter((v, i, arr) => arr.indexOf(v) === i);
+  const reelOwnerFollowKeys = (reel) =>
+    [reelOwnerKey(reel), ...reelOwnerCandidates(reel)]
+      .map((value) => normalizeFollowKey(value))
+      .filter(Boolean)
+      .filter((value, index, arr) => arr.indexOf(value) === index);
   const reelOwnerProfilePic = (reel) => {
     const ownerKey = reelOwnerKey(reel);
     if (ownerKey && profilePicByOwner[ownerKey])
@@ -917,12 +998,78 @@ export default function Reels() {
   const myUserId = Number(localStorage.getItem("userId"));
 
   useEffect(() => {
+    let cancelled = false;
+    const syncFollowing = async () => {
+      const cached = readFollowingCache();
+      if (Object.keys(cached).length) {
+        setFollowingByKey((prev) => ({ ...cached, ...prev }));
+      }
+
+      const identityHints = [
+        localStorage.getItem("userId"),
+        localStorage.getItem("username"),
+        localStorage.getItem("email"),
+        viewerIdentity?.userId,
+        viewerIdentity?.username,
+        viewerIdentity?.email,
+        "me",
+      ]
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+        .filter((value, index, arr) => arr.indexOf(value) === index);
+
+      if (!identityHints.length) return;
+
+      const followedKeys = new Set();
+      for (const identity of identityHints.slice(0, 6)) {
+        try {
+          const res = await api.get(
+            `/api/follow/${encodeURIComponent(identity)}/following/users`,
+            {
+              suppressAuthRedirect: true,
+              timeout: 5000,
+            },
+          );
+          const users = Array.isArray(res?.data)
+            ? res.data
+            : Array.isArray(res?.data?.items)
+              ? res.data.items
+              : [];
+          users.forEach((user) => {
+            [user?.id, user?.email, user?.username, user?.userId]
+              .map((value) => normalizeFollowKey(value))
+              .filter(Boolean)
+              .forEach((key) => followedKeys.add(key));
+          });
+          if (followedKeys.size) break;
+        } catch {
+          // try next identity hint
+        }
+      }
+
+      if (cancelled || !followedKeys.size) return;
+      const next = {};
+      followedKeys.forEach((key) => {
+        next[key] = true;
+      });
+      setFollowingByKey((prev) => ({ ...prev, ...next }));
+      updateFollowCache(Array.from(followedKeys), true);
+    };
+
+    void syncFollowing();
+    return () => {
+      cancelled = true;
+    };
+  }, [viewerIdentity]);
+
+  useEffect(() => {
     if (!reels.length) return;
     const targets = [];
     const seen = new Set();
     const start = Math.max(0, currentIndex - 4);
     const end = Math.min(reels.length, currentIndex + 6);
     reels.slice(start, end).forEach((reel) => {
+      if (isAnonymousReel(reel)) return;
       const ownerKey = reelOwnerKey(reel);
       if (!ownerKey || seen.has(ownerKey)) return;
       seen.add(ownerKey);
@@ -933,11 +1080,16 @@ export default function Reels() {
     const run = async () => {
       const foundByOwner = {};
       for (const reel of targets.slice(0, 12)) {
+        if (isAnonymousReel(reel)) continue;
         const ownerKey = reelOwnerKey(reel);
         const candidates = reelOwnerCandidates(reel);
         if (!ownerKey || !candidates.length) continue;
         let found = "";
         for (const candidate of candidates) {
+          const normalizedCandidate = String(candidate || "").trim();
+          const candidateKey = normalizedCandidate.toLowerCase();
+          if (!normalizedCandidate || isGenericProfileLookupLabel(normalizedCandidate)) continue;
+          if (skippedProfileLookupCandidatesRef.current.has(candidateKey)) continue;
           try {
             const res = await api.get(
               `/api/profile/${encodeURIComponent(candidate)}`,
@@ -957,8 +1109,11 @@ export default function Reels() {
               found = resolveMediaUrl(String(rawPic).trim());
               break;
             }
-          } catch {
-            // try next identifier
+          } catch (err) {
+            const status = Number(err?.response?.status || 0);
+            if (status === 404 || status === 400) {
+              skippedProfileLookupCandidatesRef.current.add(candidateKey);
+            }
           }
         }
         if (found) foundByOwner[ownerKey] = found;
@@ -1228,7 +1383,7 @@ export default function Reels() {
   const followOwner = async (reel) => {
     const followTarget = reel?.user?.email || reel?.username;
     if (!followTarget) return;
-    const key = reelOwnerKey(reel);
+    const followKeys = reelOwnerFollowKeys(reel);
     try {
       const res = await api.post(
         `/api/follow/${encodeURIComponent(followTarget)}`,
@@ -1239,7 +1394,14 @@ export default function Reels() {
         res.status < 300 &&
         status.includes("following")
       ) {
-        setFollowingByKey((prev) => ({ ...prev, [key]: true }));
+        setFollowingByKey((prev) => {
+          const next = { ...prev };
+          followKeys.forEach((key) => {
+            next[key] = true;
+          });
+          return next;
+        });
+        updateFollowCache(followKeys, true);
       }
     } catch {
       // noop
@@ -1564,7 +1726,7 @@ export default function Reels() {
         )}
         {!error && !loading && reels.length === 0 && (
           <p className="reel-state">
-            No clips yet (only videos up to 60 seconds are shown).
+            No clips yet (only videos up to 2 minutes are shown).
           </p>
         )}
 
@@ -1579,10 +1741,10 @@ export default function Reels() {
           const ownerName = ownerNameRaw.includes("@")
             ? emailToName(ownerNameRaw)
             : ownerNameRaw;
-          const ownerKey = reelOwnerKey(reel);
+          const ownerFollowKeys = reelOwnerFollowKeys(reel);
           const ownerPic = reelOwnerProfilePic(reel);
           const isOwnReel = Number(reel?.user?.id) === myUserId;
-          const isFollowing = !!followingByKey[ownerKey];
+          const isFollowing = ownerFollowKeys.some((key) => followingByKey[key] === true);
           const caption =
             reel?.description || reel?.content || "Watch this clip";
 
@@ -1736,7 +1898,7 @@ export default function Reels() {
                 {commentsOpenByPost[reel.id] && (
                   <div className="reel-comments">
                     <div className="reel-comment-input-row">
-                      <input
+                      <input name="reels-input-1901"
                         type="text"
                         placeholder="Write a comment..."
                         value={commentTextByPost[reel.id] || ""}

@@ -169,7 +169,7 @@ const Jobs = () => {
           </button>
         </div>
         <form className="job-list-search" onSubmit={applySearch}>
-          <input
+          <input name="jobs-input-172"
             type="search"
             placeholder="Search companies"
             value={searchInput}

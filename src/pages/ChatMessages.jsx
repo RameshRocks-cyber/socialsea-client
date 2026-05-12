@@ -51,6 +51,15 @@ const MEDIA_FILTER_OPTIONS = [
   { value: "audio", label: "Audio" }
 ];
 
+const normalizeAvatarImageSrc = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const pathOnly = raw.replace(/^https?:\/\/[^/]+/i, "").split(/[?#]/)[0] || "";
+  if (/^\/?api\/[a-z]{1,2}$/i.test(pathOnly)) return "";
+  if (/^\/?[a-z]{1,2}$/i.test(pathOnly)) return "";
+  return raw;
+};
+
 export default function ChatMessages() {
   const {
     navigate,
@@ -1256,7 +1265,7 @@ export default function ChatMessages() {
             )}
           </div>
         </div>
-        <input
+        <input name="chatmessages-input-1268"
           type="text"
           className="chat-search"
           placeholder="Search chats"
@@ -1377,7 +1386,11 @@ export default function ChatMessages() {
                   }}
                 >
                   <span className="chat-avatar">
-                    {c.profilePic ? <img src={c.profilePic} alt={displayName} className="chat-avatar-img" /> : c.avatar}
+                    {normalizeAvatarImageSrc(c.profilePic) ? (
+                      <img src={normalizeAvatarImageSrc(c.profilePic)} alt={displayName} className="chat-avatar-img" />
+                    ) : (
+                      c.avatar
+                    )}
                     <span className={`chat-presence-dot ${presence.online ? "is-online" : ""}`} />
                   </span>
                   <span className="chat-meta">
@@ -1430,7 +1443,7 @@ export default function ChatMessages() {
                   x
                 </button>
               </div>
-              <input
+              <input name="chatmessages-input-1446"
                 type="text"
                 className="chat-search"
                 placeholder="Search people"
@@ -1471,7 +1484,11 @@ export default function ChatMessages() {
                         disabled={!canChat}
                       >
                         <span className="chat-avatar">
-                          {c.profilePic ? <img src={c.profilePic} alt={displayName} className="chat-avatar-img" /> : c.avatar}
+                          {normalizeAvatarImageSrc(c.profilePic) ? (
+                            <img src={normalizeAvatarImageSrc(c.profilePic)} alt={displayName} className="chat-avatar-img" />
+                          ) : (
+                            c.avatar
+                          )}
                         </span>
                         <span className="chat-meta">
                           <strong>{displayName}</strong>
@@ -1536,8 +1553,8 @@ export default function ChatMessages() {
                   return (
                     <div key={requestId || contact.id} className="chat-request-card">
                       <span className="chat-avatar">
-                        {contact.profilePic ? (
-                          <img src={contact.profilePic} alt={displayName} className="chat-avatar-img" />
+                        {normalizeAvatarImageSrc(contact.profilePic) ? (
+                          <img src={normalizeAvatarImageSrc(contact.profilePic)} alt={displayName} className="chat-avatar-img" />
                         ) : (
                           contact.avatar
                         )}
@@ -1590,8 +1607,8 @@ export default function ChatMessages() {
                   return (
                     <div key={`sent-${req?.id || contact.id}`} className="chat-request-card">
                       <span className="chat-avatar">
-                        {contact.profilePic ? (
-                          <img src={contact.profilePic} alt={displayName} className="chat-avatar-img" />
+                        {normalizeAvatarImageSrc(contact.profilePic) ? (
+                          <img src={normalizeAvatarImageSrc(contact.profilePic)} alt={displayName} className="chat-avatar-img" />
                         ) : (
                           contact.avatar
                         )}
@@ -1621,7 +1638,7 @@ export default function ChatMessages() {
               <div className="chat-inline-search" data-no-page-swipe>
                 <label className="chat-inline-search-field">
                   <FiSearch />
-                  <input
+                  <input name="chatmessages-input-1641"
                     ref={chatSearchInputRef}
                     type="search"
                     value={chatSearchQuery}
@@ -1734,7 +1751,7 @@ export default function ChatMessages() {
                     >
                       Remove
                     </button>
-                    <input
+                    <input name="chatmessages-input-1754"
                       ref={wallpaperInputRef}
                       type="file"
                       accept="image/*"
@@ -2253,7 +2270,7 @@ export default function ChatMessages() {
                   <div className="chat-wallpaper-control-grid">
                     <label className="chat-wallpaper-control">
                       <span>Fit</span>
-                      <select
+                      <select name="chatmessages-select-2273"
                         value={String(wallpaperDraft?.fit || "cover")}
                         onChange={(e) => updateWallpaperOptions({ fit: String(e.target.value || "cover") })}
                       >
@@ -2264,7 +2281,7 @@ export default function ChatMessages() {
                     </label>
                     <label className="chat-wallpaper-control">
                       <span>Zoom</span>
-                      <input
+                      <input name="chatmessages-input-2284"
                         type="range"
                         min="60"
                         max="220"
@@ -2275,7 +2292,7 @@ export default function ChatMessages() {
                     </label>
                     <label className="chat-wallpaper-control">
                       <span>Horizontal</span>
-                      <input
+                      <input name="chatmessages-input-2295"
                         type="range"
                         min="0"
                         max="100"
@@ -2286,7 +2303,7 @@ export default function ChatMessages() {
                     </label>
                     <label className="chat-wallpaper-control">
                       <span>Vertical</span>
-                      <input
+                      <input name="chatmessages-input-2306"
                         type="range"
                         min="0"
                         max="100"
@@ -2655,7 +2672,7 @@ export default function ChatMessages() {
                   )}
                   {storyCommentOpen && (
                     <div className="chat-story-comment-row">
-                      <input
+                      <input name="chatmessages-input-2675"
                         type="text"
                         placeholder="Add a comment..."
                         value={storyCommentDraft}

@@ -40,6 +40,8 @@ import "./Upload.css";
 const POST_GENRE_MAP_KEY = "socialsea_post_genre_map_v1";
 const MAX_IMAGE_UPLOAD_FILE_SIZE_BYTES = 80 * 1024 * 1024;
 const MAX_VIDEO_UPLOAD_FILE_SIZE_BYTES = 1024 * 1024 * 1024;
+const MAX_CLIP_DURATION_SECONDS = 2 * 60;
+const CLIP_DURATION_TOLERANCE_SECONDS = 0.35;
 
 const ASPECT_OPTIONS = [
   { label: "Original", value: "orig" },
@@ -809,6 +811,10 @@ const defaultVideoEdits = {
   cropZoom: 100,
   cropX: 50,
   cropY: 50,
+  cropLeft: 0,
+  cropRight: 0,
+  cropTop: 0,
+  cropBottom: 0,
   rotate: 0,
   flipH: false,
   flipV: false,
@@ -927,6 +933,33 @@ const formatTimelineTime = (seconds) => {
   const ms = Math.floor((value - total) * 10);
   return `${mins}:${String(secs).padStart(2, "0")}.${ms}`;
 };
+
+const readVideoDurationFromFile = (videoFile, timeoutMs = 12000) =>
+  new Promise((resolve) => {
+    if (!videoFile) {
+      resolve(0);
+      return;
+    }
+    const blobUrl = URL.createObjectURL(videoFile);
+    const probe = document.createElement("video");
+    let done = false;
+    let timer = 0;
+    const finish = (duration) => {
+      if (done) return;
+      done = true;
+      if (timer) clearTimeout(timer);
+      probe.removeAttribute("src");
+      probe.load();
+      URL.revokeObjectURL(blobUrl);
+      const safeDuration = Number(duration);
+      resolve(Number.isFinite(safeDuration) ? Math.max(0, safeDuration) : 0);
+    };
+    timer = window.setTimeout(() => finish(0), timeoutMs);
+    probe.preload = "metadata";
+    probe.onloadedmetadata = () => finish(Number(probe.duration) || 0);
+    probe.onerror = () => finish(0);
+    probe.src = blobUrl;
+  });
 
 const formatTimelineTimecode = (seconds, fps = 30) => {
   const value = Math.max(0, Number(seconds || 0));
@@ -1202,6 +1235,43 @@ const resolveBlurIntensityForTarget = (edits, targetType) => {
   return 0;
 };
 
+const normalizeSideCropEdges = (sourceLike, maxCombined = 90) => {
+  const source = sourceLike || {};
+  const maxTotal = clampNumber(Number(maxCombined || 90), 10, 95);
+  let left = clampNumber(toNumber(source.cropLeft, 0), 0, 90);
+  let right = clampNumber(toNumber(source.cropRight, 0), 0, 90);
+  let top = clampNumber(toNumber(source.cropTop, 0), 0, 90);
+  let bottom = clampNumber(toNumber(source.cropBottom, 0), 0, 90);
+
+  const horizontalTotal = left + right;
+  if (horizontalTotal > maxTotal) {
+    const ratio = maxTotal / horizontalTotal;
+    left *= ratio;
+    right *= ratio;
+  }
+
+  const verticalTotal = top + bottom;
+  if (verticalTotal > maxTotal) {
+    const ratio = maxTotal / verticalTotal;
+    top *= ratio;
+    bottom *= ratio;
+  }
+
+  const widthPercent = Math.max(1, 100 - left - right);
+  const heightPercent = Math.max(1, 100 - top - bottom);
+  const hasCrop = left + right + top + bottom > 0.01;
+
+  return {
+    left: Number(left.toFixed(3)),
+    right: Number(right.toFixed(3)),
+    top: Number(top.toFixed(3)),
+    bottom: Number(bottom.toFixed(3)),
+    widthPercent: Number(widthPercent.toFixed(3)),
+    heightPercent: Number(heightPercent.toFixed(3)),
+    hasCrop
+  };
+};
+
 const normalizeVideoEditsForServer = (videoEdits) => {
   const source = videoEdits || {};
   const presetKey = String(source.filterPreset || "normal").toLowerCase();
@@ -1319,9 +1389,14 @@ const normalizeVideoEditsForServer = (videoEdits) => {
   const compatLogo = compatMode === "logo" ? blurIntensity : clampNumber(toNumber(source.blurLogo, 0), 0, 100);
   const compatCustom =
     compatMode === "custom" ? blurIntensity : clampNumber(toNumber(source.blurCustom, 0), 0, 100);
+  const sideCrop = normalizeSideCropEdges(source);
 
   const normalized = {
     ...source,
+    cropLeft: sideCrop.left,
+    cropRight: sideCrop.right,
+    cropTop: sideCrop.top,
+    cropBottom: sideCrop.bottom,
     brightness,
     contrast,
     saturation,
@@ -1492,6 +1567,23 @@ const normalizeTrimWindowForServer = (videoEdits, durationSeconds) => {
   next.trimStart = Number(trimStart.toFixed(4));
   next.trimEnd = Number(trimEnd.toFixed(4));
   return next;
+};
+
+const estimateEffectiveClipDurationSeconds = (sourceDurationSeconds, videoEdits) => {
+  const safeDuration = Math.max(0, toNumber(sourceDurationSeconds, 0));
+  if (safeDuration <= 0) return 0;
+
+  const normalizedTrim = normalizeTrimWindowForServer(videoEdits, safeDuration);
+  const trimStart = clampNumber(toNumber(normalizedTrim?.trimStart, 0), 0, Math.max(0, safeDuration - 0.05));
+  const trimEndRaw = toNumber(normalizedTrim?.trimEnd, 0);
+  const trimEnd =
+    trimEndRaw > trimStart + 0.05
+      ? clampNumber(trimEndRaw, trimStart + 0.05, safeDuration)
+      : safeDuration;
+  const trimmedDuration = Math.max(0, trimEnd - trimStart);
+  const playbackSpeed = clampNumber(toNumber(normalizedTrim?.playbackSpeed, 1), 0.5, 2);
+  const effectiveDuration = trimmedDuration / playbackSpeed;
+  return Number(Math.max(0, effectiveDuration).toFixed(4));
 };
 
 const getOverlayPlacementStyle = (position) => {
@@ -2047,6 +2139,63 @@ export default function Upload() {
 
   const setEdit = (key, value) => setEdits((prev) => ({ ...prev, [key]: value, preset: "custom" }));
   const setVideoEdit = (key, value) => setVideoEdits((prev) => ({ ...prev, [key]: value }));
+  const videoSideCrop = useMemo(
+    () => normalizeSideCropEdges(videoEdits),
+    [videoEdits.cropLeft, videoEdits.cropRight, videoEdits.cropTop, videoEdits.cropBottom]
+  );
+  const videoPreviewCropStyle = useMemo(() => {
+    if (!videoSideCrop.hasCrop) return null;
+    const inset = `${videoSideCrop.top}% ${videoSideCrop.right}% ${videoSideCrop.bottom}% ${videoSideCrop.left}%`;
+    return {
+      clipPath: `inset(${inset})`,
+      WebkitClipPath: `inset(${inset})`
+    };
+  }, [videoSideCrop]);
+  const setVideoSideCropEdge = useCallback((edgeKey, value) => {
+    const key = String(edgeKey || "").trim();
+    if (!["cropLeft", "cropRight", "cropTop", "cropBottom"].includes(key)) return;
+    setVideoEdits((prev) => {
+      const nextValue = clampNumber(toNumber(value, 0), 0, 90);
+      const normalized = normalizeSideCropEdges({ ...prev, [key]: nextValue });
+      return {
+        ...prev,
+        cropLeft: normalized.left,
+        cropRight: normalized.right,
+        cropTop: normalized.top,
+        cropBottom: normalized.bottom
+      };
+    });
+  }, []);
+  const resetVideoSideCrop = useCallback(() => {
+    setVideoEdits((prev) => ({
+      ...prev,
+      cropLeft: 0,
+      cropRight: 0,
+      cropTop: 0,
+      cropBottom: 0
+    }));
+  }, []);
+  const applyVideoSideCropPreset = useCallback((preset) => {
+    const key = String(preset || "").trim();
+    const nextValues =
+      key === "sides"
+        ? { cropLeft: 10, cropRight: 10, cropTop: 0, cropBottom: 0 }
+        : key === "top-bottom"
+          ? { cropLeft: 0, cropRight: 0, cropTop: 10, cropBottom: 10 }
+          : key === "cinema"
+            ? { cropLeft: 4, cropRight: 4, cropTop: 10, cropBottom: 10 }
+            : { cropLeft: 0, cropRight: 0, cropTop: 0, cropBottom: 0 };
+    setVideoEdits((prev) => {
+      const normalized = normalizeSideCropEdges({ ...prev, ...nextValues });
+      return {
+        ...prev,
+        cropLeft: normalized.left,
+        cropRight: normalized.right,
+        cropTop: normalized.top,
+        cropBottom: normalized.bottom
+      };
+    });
+  }, []);
   const blurTrackDurationFromEdits = useCallback((editsLike) =>
     Math.max(
       Number(videoMeta.duration || 0),
@@ -3241,7 +3390,7 @@ export default function Upload() {
         <span>{label}</span>
         <strong>{`${value}${suffix}`}</strong>
       </div>
-      <input type="range" min={min} max={max} step={step} value={value} onChange={onChange} />
+      <input name="upload-input-3393" type="range" min={min} max={max} step={step} value={value} onChange={onChange} />
     </label>
   );
 
@@ -5682,6 +5831,31 @@ export default function Upload() {
       }
     }
 
+    if (isReelUpload) {
+      const clipFile = filesToUpload[0] || null;
+      const knownDuration =
+        clipFile && file === clipFile ? Number(videoMeta.duration || 0) : 0;
+      const sourceDurationSeconds =
+        knownDuration > 0
+          ? knownDuration
+          : await readVideoDurationFromFile(clipFile);
+      const normalizedVideoEdits = normalizeVideoEditsForServer(videoEdits);
+      const serverVideoEdits = normalizeTrimWindowForServer(normalizedVideoEdits, sourceDurationSeconds);
+      const selectedClipDurationSeconds = estimateEffectiveClipDurationSeconds(
+        sourceDurationSeconds,
+        serverVideoEdits
+      );
+      if (
+        Number.isFinite(selectedClipDurationSeconds) &&
+        selectedClipDurationSeconds > MAX_CLIP_DURATION_SECONDS + CLIP_DURATION_TOLERANCE_SECONDS
+      ) {
+        setMsg(
+          `Clip must be 2 minutes or less after trim/speed. Selected clip is ${formatTimelineTime(selectedClipDurationSeconds)}s.`
+        );
+        return;
+      }
+    }
+
     try {
       setLoading(true);
       let successCount = 0;
@@ -5716,12 +5890,15 @@ export default function Upload() {
         const uploadFile = shouldApplyImageEdit ? await processImage(currentFile) : currentFile;
         const safeCaption = caption?.trim();
         const safeVideoTitle = videoTitle?.trim();
+        const shouldUseTimelineEdits = currentIsVideo && !isReelUpload;
         const normalizedVideoEdits = currentIsVideo ? normalizeVideoEditsForServer(videoEdits) : null;
-        const normalizedTimelineClips = currentIsVideo
+        const normalizedTimelineClips = shouldUseTimelineEdits
           ? normalizeTimelineClipsForServer(timelineClips, timelineDuration)
           : [];
         const timelineAwareVideoEdits = currentIsVideo
-          ? applyTimelineToVideoEdits(normalizedVideoEdits, normalizedTimelineClips)
+          ? shouldUseTimelineEdits
+            ? applyTimelineToVideoEdits(normalizedVideoEdits, normalizedTimelineClips)
+            : normalizedVideoEdits
           : null;
         const serverVideoEdits = currentIsVideo
           ? normalizeTrimWindowForServer(timelineAwareVideoEdits, timelineDuration)
@@ -5871,7 +6048,7 @@ export default function Upload() {
 
   const uploadHeading = isReelUpload ? "Create Clip" : isLongVideoUpload ? "Create Video" : "Create Post";
   const uploadSubtitle = isReelUpload
-    ? "Upload a short video for clips."
+    ? ""
     : isLongVideoUpload
       ? ""
       : "Create your photo or video post.";
@@ -5880,9 +6057,44 @@ export default function Upload() {
   const allowMultipleFiles = isFeedPostUpload;
   const hasSelectedVideo = isVideo || selectedFiles.some((entry) => String(entry?.type || "").startsWith("video/"));
   const isVideoWorkspace = isVideo || (preferWhiteVideoWorkspace && hasSelectedVideo);
-  const uploadPageClassName = isVideoWorkspace ? "upload-page video-upload-page" : "upload-page";
-  const uploadPanelClassName = isVideoWorkspace ? "upload-panel upload-panel-pro-video" : "upload-panel";
-  const showUploadSubmit = !isVideoWorkspace || activeVideoBottomPage === "publish";
+  const isClipVideoWorkspace = isReelUpload && isVideoWorkspace;
+  const isClipEntryView = isReelUpload && !isVideoWorkspace;
+  const uploadPageClassName = `${isVideoWorkspace ? "upload-page video-upload-page" : "upload-page"}${
+    isClipEntryView ? " clip-entry-page" : ""
+  }`;
+  const uploadPanelClassName = `${isVideoWorkspace ? "upload-panel upload-panel-pro-video" : "upload-panel"}${
+    isClipEntryView ? " upload-panel-clip-entry" : ""
+  }${isClipVideoWorkspace ? " upload-panel-clip-editor" : ""}`;
+  const showUploadSubmit = !isVideoWorkspace || isReelUpload || activeVideoBottomPage === "publish";
+  const uploadSubmitLabel = isReelUpload ? "Publish Clip" : isLongVideoUpload ? "Publish Video" : "Upload Post";
+  const clipSourceDuration = Math.max(0, Number(videoMeta.duration || 0));
+  const clipMinTrimGap = 0.2;
+  const clipSafeStartMax = Math.max(0, clipSourceDuration - clipMinTrimGap);
+  const clipTrimStart = clampNumber(Number(videoEdits.trimStart || 0), 0, clipSafeStartMax);
+  const clipRawTrimEnd = Math.max(0, Number(videoEdits.trimEnd || 0));
+  const clipTrimEndFallback = clipSourceDuration > 0 ? clipSourceDuration : clipMinTrimGap;
+  const clipTrimEnd =
+    clipRawTrimEnd > clipTrimStart + clipMinTrimGap
+      ? clampNumber(clipRawTrimEnd, clipTrimStart + clipMinTrimGap, Math.max(clipTrimEndFallback, clipTrimStart + clipMinTrimGap))
+      : clipTrimEndFallback;
+  const clipSelectedDurationSeconds = useMemo(() => {
+    if (!isReelUpload) return 0;
+    if (clipSourceDuration <= 0) return 0;
+    const normalizedVideoEdits = normalizeVideoEditsForServer(videoEdits);
+    const serverVideoEdits = normalizeTrimWindowForServer(normalizedVideoEdits, clipSourceDuration);
+    return estimateEffectiveClipDurationSeconds(clipSourceDuration, serverVideoEdits);
+  }, [isReelUpload, clipSourceDuration, videoEdits]);
+  const clipPlayheadMax = Math.max(clipSourceDuration, clipMinTrimGap);
+  const clipDurationOverLimit =
+    clipSelectedDurationSeconds > MAX_CLIP_DURATION_SECONDS + CLIP_DURATION_TOLERANCE_SECONDS;
+  const clipCoverSliderMax = Math.max(clipSourceDuration, 0.1);
+  const clipSafePlayhead = clampNumber(Number(timelinePlayhead || 0), 0, Math.max(clipSourceDuration, 0));
+  const clipPreviewBadgeDuration = clipSourceDuration > 0 ? `${formatTimelineTime(clipSourceDuration)}s` : "--";
+  const clipTrimBadgeDuration = `${formatTimelineTime(clipSelectedDurationSeconds || Math.max(0, clipTrimEnd - clipTrimStart))}s`;
+  const clipCoverPreviewLabel = selectedCoverFrame ? `${formatTimelineTime(selectedCoverFrame.time)}s` : "No frame";
+  const clipVolumeValue = clampNumber(Number(videoEdits.volume || 100), 0, 100);
+  const clipSpeedValue = Number(videoEdits.playbackSpeed || 1);
+  const clipSpeedOptions = [0.75, 1, 1.25, 1.5, 2];
   const activeVideoToolGroupConfig =
     VIDEO_TOOL_GROUPS.find((group) => group.key === activeVideoToolGroup) || VIDEO_TOOL_GROUPS[0];
   const visibleCopyrightResult =
@@ -5899,12 +6111,23 @@ export default function Upload() {
       <section className={uploadPanelClassName}>
         <h2>{uploadHeading}</h2>
         {uploadSubtitle ? <p className="upload-subtitle">{uploadSubtitle}</p> : null}
-
+        {isClipEntryView && (
+          <div className="clip-entry-hero">
+            <p className="clip-entry-tagline">
+              Turn raw moments into polished vertical clips and publish fast.
+            </p>
+            <div className="clip-entry-highlights" aria-hidden="true">
+              <span><FiFilm /> Vertical-ready</span>
+              <span><FiZap /> Fast publish</span>
+              <span><FiShield /> Secure checks</span>
+            </div>
+          </div>
+        )}
         {!isVideoWorkspace && (
-          <div className="upload-pick-row">
-            <label className="upload-file-pick">
+          <div className={`upload-pick-row ${isClipEntryView ? "clip-entry-pick-row" : ""}`}>
+            <label className={`upload-file-pick ${isClipEntryView ? "clip-entry-file-pick" : ""}`}>
               {filePickerLabel}
-              <input
+              <input name="upload-input-6130"
                 ref={mediaPickerInputRef}
                 type="file"
                 accept={fileAccept}
@@ -5916,7 +6139,12 @@ export default function Upload() {
               />
             </label>
 
-            <button type="button" className="upload-camera-pick" onClick={openCameraStudio} title="Open Camera">
+            <button
+              type="button"
+              className={`upload-camera-pick ${isClipEntryView ? "clip-entry-camera-pick" : ""}`}
+              onClick={openCameraStudio}
+              title="Open Camera"
+            >
               <FiCamera />
             </button>
           </div>
@@ -6120,7 +6348,433 @@ export default function Upload() {
           </div>
         )}
 
-        {isVideo && (
+        {isVideo && isReelUpload && (
+          <div className="clip-video-editor">
+            <div className="clip-video-editor-head">
+              <div>
+                <h3>Clip Editing Tools</h3>
+                <p>Use short-form controls only: trim, speed, cover, and caption.</p>
+              </div>
+              <div className="clip-video-editor-badges">
+                <span>
+                  <FiFilm />
+                  Source {clipPreviewBadgeDuration}
+                </span>
+                <span>
+                  <FiScissors />
+                  Clip {clipTrimBadgeDuration}
+                </span>
+                <span>
+                  <FiZap />
+                  Limit 2:00
+                </span>
+              </div>
+            </div>
+
+            {clipDurationOverLimit && (
+              <p className="clip-video-warning">
+                Selected clip is longer than 2 minutes after trim/speed. Keep it at 2:00 or less to publish.
+              </p>
+            )}
+
+            <div className="clip-video-editor-grid">
+              <section className="clip-video-preview-panel">
+                <div className="clip-video-preview-shell">
+                  <div
+                    ref={previewStageRef}
+                    className="upload-preview-video-stage clip-video-preview-stage"
+                    style={
+                      videoMeta.width > 0 && videoMeta.height > 0
+                        ? { aspectRatio: `${videoMeta.width} / ${videoMeta.height}` }
+                        : undefined
+                    }
+                  >
+                    <video
+                      ref={videoRef}
+                      src={previewUrl}
+                      className="upload-preview-video"
+                      controls={false}
+                      style={{
+                        filter: previewOriginal ? "none" : videoFilterStyle,
+                        objectFit: videoObjectFit,
+                        objectPosition: videoPreviewObjectPosition,
+                        transform: videoPreviewTransform,
+                        transformOrigin: "center center",
+                        ...(videoPreviewCropStyle || {}),
+                        width: "100%",
+                        height: "100%"
+                      }}
+                      onLoadedMetadata={(e) => {
+                        const v = e.currentTarget;
+                        const duration = Number(v.duration || 0);
+                        setVideoMeta({
+                          duration,
+                          width: Number(v.videoWidth || 0),
+                          height: Number(v.videoHeight || 0)
+                        });
+                        setVideoEdits((prev) => ({
+                          ...prev,
+                          trimStart: 0,
+                          trimEnd: duration,
+                          coverTime: Math.min(duration, Math.max(0, Number(prev.coverTime || 0)))
+                        }));
+                        const baseClip = {
+                          id: makeTimelineClipId("video"),
+                          type: "video",
+                          trackId: "video-1",
+                          start: 0,
+                          end: duration,
+                          label: file?.name || "Main video"
+                        };
+                        setTimelineZoom(1);
+                        setTimelinePlayhead(0);
+                        setTimelineClips([baseClip]);
+                        setTimelineSelectedClipId(baseClip.id);
+                      }}
+                      onTimeUpdate={(e) => {
+                        const v = e.currentTarget;
+                        const current = Number(v.currentTime || 0);
+                        setTimelinePlayhead(current);
+                        const trimStart = Number(videoEdits.trimStart || 0);
+                        const trimEnd = Number(videoEdits.trimEnd || 0);
+                        if (trimEnd > trimStart && v.currentTime > trimEnd) {
+                          v.currentTime = trimStart;
+                          v.play().catch(() => {});
+                        }
+                      }}
+                    />
+                    {!previewOriginal && videoFadeStyle && (
+                      <div className="upload-preview-filter-overlay" style={videoFadeStyle} />
+                    )}
+                    {!previewOriginal && videoTintOverlayStyle && (
+                      <div className="upload-preview-filter-overlay" style={videoTintOverlayStyle} />
+                    )}
+                    {!previewOriginal && videoGrainStyle && (
+                      <div className="upload-preview-filter-overlay upload-preview-grain-overlay" style={videoGrainStyle} />
+                    )}
+                    {!previewOriginal && videoEdits.overlayText && (
+                      <div
+                        className="upload-preview-overlay-text"
+                        style={{
+                          ...getOverlayPlacementStyle(videoEdits.textPosition),
+                          opacity: Math.max(0.1, Number(videoEdits.overlayOpacity || 0) / 100),
+                          fontSize: `${Math.max(18, Number(videoEdits.textSize || 34))}px`,
+                          mixBlendMode: videoEdits.overlayMode
+                        }}
+                      >
+                        {videoEdits.overlayText}
+                      </div>
+                    )}
+                    {!previewOriginal && StickerPreviewIcon && (
+                      <div
+                        className="upload-preview-overlay-sticker"
+                        style={{
+                          ...getOverlayPlacementStyle(videoEdits.stickerPosition),
+                          fontSize: `${Math.max(34, Number(videoEdits.stickerSize || 72))}px`,
+                          mixBlendMode: videoEdits.overlayMode
+                        }}
+                      >
+                        <StickerPreviewIcon />
+                      </div>
+                    )}
+                    {!previewOriginal && videoVignetteStyle && (
+                      <div className="upload-preview-vignette" style={videoVignetteStyle} />
+                    )}
+                  </div>
+                </div>
+
+                <div className="clip-video-play-controls">
+                  <button type="button" className="clip-video-control-btn" onClick={goToMonitorInPoint} title="Go to trim start">
+                    <FiSkipBack />
+                  </button>
+                  <button type="button" className="clip-video-control-btn" onClick={() => stepTimelineByFrame(-1)} title="Step back frame">
+                    <span>&lt;</span>
+                  </button>
+                  <button type="button" className="clip-video-control-btn clip-video-control-btn-play" onClick={toggleTimelinePlayback} title="Play / Pause">
+                    {timelinePreviewPlaying ? <FiPause /> : <FiPlay />}
+                  </button>
+                  <button type="button" className="clip-video-control-btn" onClick={() => stepTimelineByFrame(1)} title="Step forward frame">
+                    <span>&gt;</span>
+                  </button>
+                  <button type="button" className="clip-video-control-btn" onClick={goToMonitorOutPoint} title="Go to trim end">
+                    <FiSkipForward />
+                  </button>
+                </div>
+
+                <div className="clip-video-scrub">
+                  <label htmlFor="clip-playhead-slider">Playhead</label>
+                  <input
+                    id="clip-playhead-slider"
+                    type="range"
+                    min={0}
+                    max={clipPlayheadMax}
+                    step={0.01}
+                    value={clipSafePlayhead}
+                    onChange={(e) => seekVideoToTimelineSeconds(Number(e.target.value))}
+                  />
+                  <div className="clip-video-scrub-times">
+                    <span>{formatTimelineTime(clipSafePlayhead)}s</span>
+                    <span>{clipPreviewBadgeDuration}</span>
+                  </div>
+                </div>
+              </section>
+
+              <section className="clip-video-tools-panel">
+                <article className="clip-tool-card">
+                  <h4>
+                    <FiScissors /> Trim
+                  </h4>
+                  <label>
+                    Start {formatTimelineTime(clipTrimStart)}s
+                    <input name="upload-input-6529"
+                      type="range"
+                      min={0}
+                      max={clipSafeStartMax}
+                      step={0.01}
+                      value={clipTrimStart}
+                      onChange={(e) => {
+                        const nextStart = clampNumber(Number(e.target.value || 0), 0, clipSafeStartMax);
+                        setVideoEdits((prev) => {
+                          const prevEnd = Math.max(0, Number(prev.trimEnd || 0));
+                          const minEnd = Math.min(clipSourceDuration, nextStart + clipMinTrimGap);
+                          const nextEnd =
+                            prevEnd > minEnd
+                              ? clampNumber(prevEnd, minEnd, clipSourceDuration || minEnd)
+                              : Math.max(minEnd, clipSourceDuration);
+                          return {
+                            ...prev,
+                            trimStart: Number(nextStart.toFixed(3)),
+                            trimEnd: Number(nextEnd.toFixed(3))
+                          };
+                        });
+                        if (videoRef.current && videoRef.current.currentTime < nextStart) {
+                          seekVideoToTimelineSeconds(nextStart);
+                        }
+                      }}
+                    />
+                  </label>
+                  <label>
+                    End {formatTimelineTime(clipTrimEnd)}s
+                    <input name="upload-input-6558"
+                      type="range"
+                      min={Math.min(clipTrimStart + clipMinTrimGap, clipSourceDuration || clipTrimStart + clipMinTrimGap)}
+                      max={Math.max(clipSourceDuration, clipTrimStart + clipMinTrimGap)}
+                      step={0.01}
+                      value={clipTrimEnd}
+                      onChange={(e) => {
+                        const rawEnd = Math.max(0, Number(e.target.value || 0));
+                        const minEndNow = Math.min(clipSourceDuration, clipTrimStart + clipMinTrimGap);
+                        const clampedEnd = clampNumber(rawEnd, minEndNow, clipSourceDuration || minEndNow);
+                        setVideoEdits((prev) => {
+                          const start = clampNumber(Number(prev.trimStart || 0), 0, clipSafeStartMax);
+                          const minEnd = Math.min(clipSourceDuration, start + clipMinTrimGap);
+                          const nextEnd = clampNumber(rawEnd, minEnd, clipSourceDuration || minEnd);
+                          return {
+                            ...prev,
+                            trimStart: Number(start.toFixed(3)),
+                            trimEnd: Number(nextEnd.toFixed(3))
+                          };
+                        });
+                        if (videoRef.current && videoRef.current.currentTime > clampedEnd) {
+                          seekVideoToTimelineSeconds(clampedEnd);
+                        }
+                      }}
+                    />
+                  </label>
+                  <p className="clip-tool-note">Selected clip length: {clipTrimBadgeDuration}</p>
+                </article>
+
+                <article className="clip-tool-card">
+                  <h4>
+                    <FiCrop /> Crop Sides
+                  </h4>
+                  <p className="clip-tool-note">Cut exact left, right, top, and bottom areas of the clip.</p>
+                  <div className="clip-crop-grid">
+                    <label>
+                      Left {videoSideCrop.left.toFixed(1)}%
+                      <input name="upload-input-6595"
+                        type="range"
+                        min={0}
+                        max={Math.max(0, 90 - Number(videoSideCrop.right || 0))}
+                        step={0.1}
+                        value={videoSideCrop.left}
+                        onChange={(e) => setVideoSideCropEdge("cropLeft", Number(e.target.value))}
+                      />
+                    </label>
+                    <label>
+                      Right {videoSideCrop.right.toFixed(1)}%
+                      <input name="upload-input-6606"
+                        type="range"
+                        min={0}
+                        max={Math.max(0, 90 - Number(videoSideCrop.left || 0))}
+                        step={0.1}
+                        value={videoSideCrop.right}
+                        onChange={(e) => setVideoSideCropEdge("cropRight", Number(e.target.value))}
+                      />
+                    </label>
+                    <label>
+                      Top {videoSideCrop.top.toFixed(1)}%
+                      <input name="upload-input-6617"
+                        type="range"
+                        min={0}
+                        max={Math.max(0, 90 - Number(videoSideCrop.bottom || 0))}
+                        step={0.1}
+                        value={videoSideCrop.top}
+                        onChange={(e) => setVideoSideCropEdge("cropTop", Number(e.target.value))}
+                      />
+                    </label>
+                    <label>
+                      Bottom {videoSideCrop.bottom.toFixed(1)}%
+                      <input name="upload-input-6628"
+                        type="range"
+                        min={0}
+                        max={Math.max(0, 90 - Number(videoSideCrop.top || 0))}
+                        step={0.1}
+                        value={videoSideCrop.bottom}
+                        onChange={(e) => setVideoSideCropEdge("cropBottom", Number(e.target.value))}
+                      />
+                    </label>
+                  </div>
+                  <p className="clip-tool-note">
+                    Visible area: {videoSideCrop.widthPercent.toFixed(1)}% x {videoSideCrop.heightPercent.toFixed(1)}%
+                  </p>
+                  <div className="clip-crop-actions">
+                    <button type="button" onClick={() => applyVideoSideCropPreset("sides")}>Trim Sides</button>
+                    <button type="button" onClick={() => applyVideoSideCropPreset("top-bottom")}>Trim Top/Bottom</button>
+                    <button type="button" onClick={() => applyVideoSideCropPreset("cinema")}>Cinema</button>
+                    <button type="button" onClick={resetVideoSideCrop} disabled={!videoSideCrop.hasCrop}>Reset</button>
+                  </div>
+                </article>
+
+                <article className="clip-tool-card">
+                  <h4>
+                    <FiZap /> Playback Speed
+                  </h4>
+                  <div className="clip-speed-row">
+                    {clipSpeedOptions.map((speed) => (
+                      <button
+                        key={`clip-speed-${speed}`}
+                        type="button"
+                        className={Math.abs(clipSpeedValue - speed) < 0.001 ? "active" : ""}
+                        onClick={() => setVideoEdit("playbackSpeed", speed)}
+                      >
+                        {speed}x
+                      </button>
+                    ))}
+                  </div>
+                </article>
+
+                <article className="clip-tool-card">
+                  <h4>
+                    <FiImage /> Cover Frame
+                  </h4>
+                  <label>
+                    Cover {formatTimelineTime(Number(videoEdits.coverTime || 0))}s
+                    <input name="upload-input-6673"
+                      type="range"
+                      min={0}
+                      max={clipCoverSliderMax}
+                      step={0.05}
+                      value={clampNumber(Number(videoEdits.coverTime || 0), 0, clipCoverSliderMax)}
+                      onChange={(e) => {
+                        setVideoEdit("coverTime", Number(e.target.value));
+                        setCustomCoverFile(null);
+                      }}
+                    />
+                  </label>
+                  <div className="clip-cover-row" role="list" aria-label="Cover frame options">
+                    {coverFrames.slice(0, 6).map((frame) => {
+                      const isActive = !customCoverFile && Math.abs(Number(videoEdits.coverTime || 0) - frame.time) <= 0.15;
+                      return (
+                        <button
+                          key={`clip-cover-${frame.index}-${frame.time}`}
+                          type="button"
+                          role="listitem"
+                          className={`clip-cover-frame ${isActive ? "active" : ""}`}
+                          onClick={() => {
+                            setVideoEdit("coverTime", frame.time);
+                            setCustomCoverFile(null);
+                          }}
+                          title={`Use frame at ${formatTimelineTime(frame.time)}s`}
+                        >
+                          <img src={frame.src} alt={`Cover frame ${frame.index + 1}`} />
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="clip-tool-note">Current cover: {clipCoverPreviewLabel}</p>
+                </article>
+
+                <article className="clip-tool-card">
+                  <h4>
+                    <FiMic /> Audio
+                  </h4>
+                  <div className="clip-audio-row">
+                    <button
+                      type="button"
+                      className={videoEdits.muted ? "active" : ""}
+                      onClick={() => setVideoEdits((prev) => ({ ...prev, muted: !prev.muted }))}
+                    >
+                      {videoEdits.muted ? "Muted" : "Sound On"}
+                    </button>
+                    <label>
+                      Volume {Math.round(clipVolumeValue)}%
+                      <input name="upload-input-6722"
+                        type="range"
+                        min={0}
+                        max={100}
+                        step={1}
+                        value={clipVolumeValue}
+                        onChange={(e) => setVideoEdit("volume", Number(e.target.value))}
+                      />
+                    </label>
+                  </div>
+                </article>
+
+                <article className="clip-tool-card">
+                  <h4>
+                    <FiType /> Clip Details
+                  </h4>
+                  <label>
+                    Title
+                    <input name="upload-input-6740"
+                      type="text"
+                      value={videoTitle}
+                      onChange={(e) => setVideoTitle(e.target.value)}
+                      placeholder="Add a clip title"
+                      maxLength={180}
+                    />
+                  </label>
+                  <label>
+                    Caption
+                    <textarea name="upload-textarea-6750"
+                      value={caption}
+                      onChange={(e) => setCaption(e.target.value)}
+                      placeholder="Write a short caption..."
+                      rows={3}
+                      maxLength={2200}
+                    />
+                  </label>
+                  <label>
+                    Content type
+                    <select name="upload-select-6760"
+                      value={creatorSettings.category}
+                      onChange={(e) => setCreatorSetting("category", e.target.value)}
+                    >
+                      {contentTypeConfig.options.map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </article>
+              </section>
+            </div>
+          </div>
+        )}
+
+        {isVideo && !isReelUpload && (
           <div className={`video-editor-layout ${activeVideoBottomPage === "timeline" ? "video-editor-layout-timeline" : ""}`}>
             {previewUrl && sourceMonitorPanelVisible && (
               <aside className={`video-preview-dock ${sourceMonitorUndocked ? "is-undocked" : ""}`}>
@@ -6241,6 +6895,7 @@ export default function Upload() {
                           objectPosition: videoPreviewObjectPosition,
                           transform: videoPreviewTransform,
                           transformOrigin: "center center",
+                          ...(videoPreviewCropStyle || {}),
                           width: "100%",
                           height: "100%"
                         }}
@@ -6462,7 +7117,7 @@ export default function Upload() {
                       </span>
                     </div>
                     <div className="premiere-monitor-scrub-row">
-                      <input
+                      <input name="upload-input-7120"
                         type="range"
                         className="premiere-monitor-scrub"
                         min={0}
@@ -6764,7 +7419,7 @@ export default function Upload() {
                 <div className="studio-panel-block video-details-page">
                   <label className="studio-input-field">
                     Video title
-                    <input
+                    <input name="upload-input-7422"
                       type="text"
                       value={videoTitle}
                       onChange={(e) => setVideoTitle(e.target.value)}
@@ -6774,7 +7429,7 @@ export default function Upload() {
                   </label>
                   <label className="studio-input-field">
                     Description
-                    <textarea
+                    <textarea name="upload-textarea-7432"
                       value={caption}
                       onChange={(e) => setCaption(e.target.value)}
                       placeholder="Write a description..."
@@ -6784,7 +7439,7 @@ export default function Upload() {
                   </label>
                   <label>
                     Content type
-                    <select
+                    <select name="upload-select-7442"
                       value={creatorSettings.category}
                       onChange={(e) => setCreatorSetting("category", e.target.value)}
                     >
@@ -7087,7 +7742,21 @@ export default function Upload() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setVideoEdits((prev) => ({ ...prev, cropZoom: 100, cropX: 50, cropY: 50, rotate: 0, flipH: false, flipV: false }))}
+                    onClick={() =>
+                      setVideoEdits((prev) => ({
+                        ...prev,
+                        cropZoom: 100,
+                        cropX: 50,
+                        cropY: 50,
+                        cropLeft: 0,
+                        cropRight: 0,
+                        cropTop: 0,
+                        cropBottom: 0,
+                        rotate: 0,
+                        flipH: false,
+                        flipV: false
+                      }))
+                    }
                   >
                     Reset transform
                   </button>
@@ -7183,7 +7852,7 @@ export default function Upload() {
                 <div className="creator-settings-grid">
                   <label>
                     Mask shape
-                    <select
+                    <select name="upload-select-7855"
                       value={
                         resolveBlurShape(
                           activeBlurTargetType === "face" && activeBlurSubject
@@ -7211,7 +7880,7 @@ export default function Upload() {
                   </label>
                   <label>
                     Tracking
-                    <select
+                    <select name="upload-select-7883"
                       value={
                         resolveBlurTracking(
                           activeBlurTargetType === "face" && activeBlurSubject
@@ -7527,7 +8196,7 @@ export default function Upload() {
                 <div className="creator-settings-grid">
                   <label>
                     Keyframe easing
-                    <select
+                    <select name="upload-select-8199"
                       value={videoEdits.keyframeEase}
                       onChange={(e) => setVideoEdit("keyframeEase", e.target.value)}
                     >
@@ -7642,7 +8311,7 @@ export default function Upload() {
                 <div className="creator-settings-grid">
                   <label>
                     Title template
-                    <select
+                    <select name="upload-select-8314"
                       value={videoEdits.titleTemplate}
                       onChange={(e) => setVideoEdit("titleTemplate", e.target.value)}
                     >
@@ -7653,7 +8322,7 @@ export default function Upload() {
                   </label>
                   <label>
                     Title animation
-                    <select
+                    <select name="upload-select-8325"
                       value={videoEdits.titleAnimation}
                       onChange={(e) => setVideoEdit("titleAnimation", e.target.value)}
                     >
@@ -7665,7 +8334,7 @@ export default function Upload() {
                 </div>
                 <label className="studio-input-field">
                   <span>Lower third text</span>
-                  <input
+                  <input name="upload-input-8337"
                     type="text"
                     value={videoEdits.lowerThirdText}
                     placeholder="Name | Role | Channel"
@@ -7728,7 +8397,7 @@ export default function Upload() {
                   <label className="upload-file-pick studio-upload-inline">
                     <FiImage />
                     <span>{customCoverFile ? "Change custom cover" : "Upload custom cover"}</span>
-                    <input
+                    <input name="upload-input-8400"
                       type="file"
                       accept="image/*"
                       onChange={(e) => {
@@ -7766,7 +8435,7 @@ export default function Upload() {
                 <label className="upload-file-pick studio-upload-inline">
                   <FiFilm />
                   <span>Add supporting clips</span>
-                  <input
+                  <input name="upload-input-8438"
                     type="file"
                     accept="video/*"
                     multiple
@@ -7785,7 +8454,7 @@ export default function Upload() {
               <div className="studio-panel-block">
                 <label className="studio-input-field">
                   <span>Overlay text</span>
-                  <input
+                  <input name="upload-input-8457"
                     type="text"
                     value={videoEdits.overlayText}
                     placeholder="Say something real..."
@@ -7837,7 +8506,7 @@ export default function Upload() {
                 </p>
                 <label>
                   Blend mode
-                  <select
+                  <select name="upload-select-8509"
                     value={videoEdits.overlayMode}
                     onChange={(e) => setVideoEdit("overlayMode", e.target.value)}
                   >
@@ -7849,7 +8518,7 @@ export default function Upload() {
                 </label>
                 <label>
                   Preview framing
-                  <select
+                  <select name="upload-select-8521"
                     value={videoEdits.coverMode}
                     onChange={(e) => setVideoEdit("coverMode", e.target.value)}
                   >
@@ -7909,7 +8578,7 @@ export default function Upload() {
               <div className="studio-panel-block creator-settings-grid">
                 <label>
                   Captions style
-                  <select
+                  <select name="upload-select-8581"
                     value={videoEdits.captionsStyle}
                     onChange={(e) => setVideoEdit("captionsStyle", e.target.value)}
                   >
@@ -7953,7 +8622,7 @@ export default function Upload() {
                 <label className="upload-file-pick studio-upload-inline">
                   <FiMusic />
                   <span>Import soundtrack</span>
-                  <input
+                  <input name="upload-input-8625"
                     type="file"
                     accept="audio/*"
                     onChange={(e) => {
@@ -7987,11 +8656,11 @@ export default function Upload() {
                     <div className="timeline-quick-panel-block">
                       <strong>Timeline Settings</strong>
                       <label className="timeline-inline-check">
-                        <input type="checkbox" checked={timelineSnapEnabled} onChange={(e) => setTimelineSnapEnabled(e.target.checked)} />
+                        <input name="upload-input-8659" type="checkbox" checked={timelineSnapEnabled} onChange={(e) => setTimelineSnapEnabled(e.target.checked)} />
                         Snap to grid
                       </label>
                       <label className="timeline-inline-check">
-                        <input type="checkbox" checked={timelineLinkedClips} onChange={(e) => setTimelineLinkedClips(e.target.checked)} />
+                        <input name="upload-input-8663" type="checkbox" checked={timelineLinkedClips} onChange={(e) => setTimelineLinkedClips(e.target.checked)} />
                         Link clips
                       </label>
                     </div>
@@ -8316,7 +8985,7 @@ export default function Upload() {
                   <div className="timeline-clip-inspector">
                     <label>
                       Track
-                      <select
+                      <select name="upload-select-8988"
                         value={selectedTimelineClip.trackId}
                         onChange={(e) => {
                           const nextTrackId = e.target.value;
@@ -8333,7 +9002,7 @@ export default function Upload() {
                     </label>
                     <label>
                       Start
-                      <input
+                      <input name="upload-input-9005"
                         type="number"
                         step="0.1"
                         min="0"
@@ -8354,7 +9023,7 @@ export default function Upload() {
                     </label>
                     <label>
                       End
-                      <input
+                      <input name="upload-input-9026"
                         type="number"
                         step="0.1"
                         min={Math.min(
@@ -8393,7 +9062,7 @@ export default function Upload() {
                         {!selectedTimelineClipIsShape && (
                           <label className="timeline-clip-wide">
                             Text
-                            <input
+                            <input name="upload-input-9065"
                               type="text"
                               value={String(selectedTimelineClip.payload?.text || "")}
                               onChange={(e) => {
@@ -8415,7 +9084,7 @@ export default function Upload() {
                         {selectedTimelineClipIsShape && (
                           <label>
                             Shape
-                            <select
+                            <select name="upload-select-9087"
                               value={resolveTimelineShapeKind(selectedTimelineClip) || "rectangle"}
                               onChange={(e) =>
                                 updateTimelineClip(selectedTimelineClip.id, (clip) => ({
@@ -8436,7 +9105,7 @@ export default function Upload() {
                         )}
                         <label>
                           {selectedTimelineClipIsShape ? "Size" : "Text Size"}
-                          <input
+                          <input name="upload-input-9108"
                             type="number"
                             min={selectedTimelineClipIsShape ? 24 : 16}
                             max={selectedTimelineClipIsShape ? 240 : 128}
@@ -8458,7 +9127,7 @@ export default function Upload() {
                         </label>
                         <label>
                           Opacity
-                          <input
+                          <input name="upload-input-9130"
                             type="number"
                             min="0"
                             max="100"
@@ -8478,7 +9147,7 @@ export default function Upload() {
                         </label>
                         <label>
                           Position
-                          <select
+                          <select name="upload-select-9150"
                             value={String(selectedTimelineClip.payload?.textPosition || "bottom-center")}
                             onChange={(e) =>
                               updateTimelineClip(selectedTimelineClip.id, (clip) => ({
@@ -8504,7 +9173,7 @@ export default function Upload() {
                       <>
                         <label>
                           Sticker
-                          <select
+                          <select name="upload-select-9176"
                             value={String(selectedTimelineClip.payload?.sticker || "spark")}
                             onChange={(e) =>
                               updateTimelineClip(selectedTimelineClip.id, (clip) => ({
@@ -8527,7 +9196,7 @@ export default function Upload() {
                         </label>
                         <label>
                           Size
-                          <input
+                          <input name="upload-input-9199"
                             type="number"
                             min="34"
                             max="180"
@@ -8547,7 +9216,7 @@ export default function Upload() {
                         </label>
                         <label>
                           Position
-                          <select
+                          <select name="upload-select-9219"
                             value={String(selectedTimelineClip.payload?.stickerPosition || "top-right")}
                             onChange={(e) =>
                               updateTimelineClip(selectedTimelineClip.id, (clip) => ({
@@ -8585,7 +9254,7 @@ export default function Upload() {
                 <label className="upload-file-pick studio-upload-inline">
                   <FiFilm />
                   <span>Upload video</span>
-                  <input
+                  <input name="upload-input-9257"
                     ref={mediaPickerInputRef}
                     type="file"
                     accept={fileAccept}
@@ -8611,7 +9280,7 @@ export default function Upload() {
                 <div className="creator-settings-grid">
                   <label>
                     Audience
-                    <select
+                    <select name="upload-select-9283"
                       value={creatorSettings.audience}
                       onChange={(e) => setCreatorSetting("audience", e.target.value)}
                     >
@@ -8623,7 +9292,7 @@ export default function Upload() {
 
                   <label>
                     Age restriction
-                    <select
+                    <select name="upload-select-9295"
                       value={creatorSettings.ageRestriction}
                       onChange={(e) => setCreatorSetting("ageRestriction", e.target.value)}
                     >
@@ -8635,7 +9304,7 @@ export default function Upload() {
 
                   <label>
                     Schedule (optional)
-                    <input
+                    <input name="upload-input-9307"
                       type="datetime-local"
                       value={creatorSettings.scheduleAt}
                       onChange={(e) => setCreatorSetting("scheduleAt", e.target.value)}
@@ -8757,18 +9426,24 @@ export default function Upload() {
           </div>
         )}
         {showUploadSubmit && (
-          <div className={isVideoWorkspace ? "upload-footer-bar is-video" : "upload-footer-bar"}>
+          <div
+            className={`${isVideoWorkspace ? "upload-footer-bar is-video" : "upload-footer-bar"}${
+              isClipEntryView ? " clip-entry-footer" : ""
+            }${isClipVideoWorkspace ? " clip-video-footer" : ""}`}
+          >
             <button
-              className={`upload-submit ${isVideoWorkspace ? "upload-submit-compact" : ""}`}
+              className={`upload-submit ${isVideoWorkspace ? "upload-submit-compact" : ""}${
+                isClipEntryView ? " clip-entry-submit" : ""
+              }${isClipVideoWorkspace ? " clip-video-submit" : ""}`}
               onClick={upload}
               disabled={loading}
             >
-              {loading ? "Uploading..." : "Upload Post"}
+              {loading ? "Uploading..." : uploadSubmitLabel}
             </button>
           </div>
         )}
 
-        <input
+        <input name="upload-input-9446"
           ref={projectPickerInputRef}
           type="file"
           accept=".json,application/json"
@@ -8776,7 +9451,7 @@ export default function Upload() {
           onChange={onProjectPickerChange}
         />
 
-        {msg && <p className="upload-msg">{msg}</p>}
+        {msg && <p className={`upload-msg ${isClipEntryView ? "clip-entry-msg" : ""}`}>{msg}</p>}
       </section>
     </div>
   );

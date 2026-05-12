@@ -17,7 +17,7 @@ const Login = lazy(lazyWithRetry(() => import("./pages/Login"), "login-page"));
 const Register = lazy(lazyWithRetry(() => import("./pages/Register"), "register-page"));
 const ForgotPassword = lazy(lazyWithRetry(() => import("./pages/ForgotPassword"), "forgot-password-page"));
 const Upload = lazy(lazyWithRetry(() => import("./pages/Upload"), "upload-page"));
-const Reels = lazy(lazyWithRetry(() => import("./pages/Reels"), "reels-page"));
+const ClipsPage = lazy(lazyWithRetry(() => import("./pages/Reels"), "clips-page"));
 const HighlightsCreate = lazy(lazyWithRetry(() => import("./pages/HighlightsCreate"), "highlights-create-page"));
 const Notifications = lazy(lazyWithRetry(() => import("./pages/Notifications"), "notifications-page"));
 const Profile = lazy(lazyWithRetry(() => import("./pages/Profile"), "profile-page"));
@@ -32,6 +32,7 @@ const AdminPosts = lazy(lazyWithRetry(() => import("./pages/AdminPosts"), "admin
 const AdminReports = lazy(lazyWithRetry(() => import("./pages/AdminReports"), "admin-reports-page"));
 const AdminLiveRecordings = lazy(lazyWithRetry(() => import("./pages/AdminLiveRecordings"), "admin-live-recordings-page"));
 const AdminAnonymousPending = lazy(lazyWithRetry(() => import("./pages/AdminAnonymousPending"), "admin-anonymous-pending-page"));
+const AdminAnonymousVideos = lazy(lazyWithRetry(() => import("./pages/AdminAnonymousVideos"), "admin-anonymous-videos-page"));
 const AdminAmbulanceRequests = lazy(lazyWithRetry(() => import("./pages/AdminAmbulanceRequests"), "admin-ambulance-page"));
 const NotificationsPage = lazy(lazyWithRetry(() => import("./NotificationsPage"), "admin-notifications-page"));
 const Unauthorized = lazy(lazyWithRetry(() => import("./pages/Unauthorized"), "unauthorized-page"));
@@ -773,7 +774,7 @@ function AppRoutes() {
               <Route path="/register" element={<PublicOnlyRoute><Register /></PublicOnlyRoute>} />
               <Route path="/forgot-password" element={<PublicOnlyRoute><ForgotPassword /></PublicOnlyRoute>} />
               <Route path="/upload" element={<ProtectedRoute><Upload /></ProtectedRoute>} />
-              <Route path="/clips" element={<ProtectedRoute><Reels /></ProtectedRoute>} />
+              <Route path="/clips" element={<ProtectedRoute><ClipsPage /></ProtectedRoute>} />
               <Route path="/reels" element={<Navigate to="/clips" replace />} />
               <Route path="/watch" element={<ProtectedRoute><LongVideos /></ProtectedRoute>} />
               <Route path="/watch/:postId" element={<ProtectedRoute><LongVideos /></ProtectedRoute>} />
@@ -880,7 +881,10 @@ function AppRoutes() {
                 <Route path="ambulance" element={<AdminAmbulanceRequests />} />
                 <Route path="reports" element={<AdminReports />} />
                 <Route path="anonymous/pending" element={<AdminAnonymousPending />} />
+                <Route path="anonymous/videos" element={<AdminAnonymousVideos />} />
+                <Route path="anonymous-videos" element={<Navigate to="/admin/anonymous/videos" replace />} />
                 <Route path="notifications" element={<NotificationsPage />} />
+                <Route path="*" element={<Navigate to="/admin/dashboard" replace />} />
               </Route>
 
               <Route path="/unauthorized" element={<Unauthorized />} />

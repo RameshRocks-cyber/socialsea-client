@@ -107,7 +107,7 @@ export default function AdminAmbulanceRequests() {
           <p className="admin-muted">Approve drivers who can access the Ambulance Navigation page.</p>
         </div>
         <div className="admin-amb-controls">
-          <select value={status} onChange={(e) => setStatus(e.target.value)} className="admin-amb-select">
+          <select name="adminambulancerequests-select-110" value={status} onChange={(e) => setStatus(e.target.value)} className="admin-amb-select">
             {STATUS_OPTIONS.map((opt) => (
               <option key={opt.id} value={opt.id}>
                 {opt.label}

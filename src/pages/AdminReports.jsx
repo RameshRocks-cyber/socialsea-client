@@ -32,7 +32,7 @@ export default function AdminReports() {
     <section className="admin-table-panel">
       <header className="admin-table-head">
         <h3>Reports</h3>
-        <input
+        <input name="adminreports-input-35"
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}

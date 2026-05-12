@@ -33,8 +33,8 @@ const formatStatus = (story) => {
   const expiresAt = toStoryEpochMs(story?.expiresAt || 0);
   if (story?.sourceType === "reel-share") {
     return isStoryExpired(story)
-      ? `Saved reel - expired ${formatDateTime(expiresAt)}`
-      : `Saved reel - active until ${formatDateTime(expiresAt)}`;
+      ? `Saved clip - expired ${formatDateTime(expiresAt)}`
+      : `Saved clip - active until ${formatDateTime(expiresAt)}`;
   }
   return isStoryExpired(story)
     ? `Expired ${formatDateTime(expiresAt)}`
@@ -44,7 +44,7 @@ const formatStatus = (story) => {
 const getStoryLabel = (story) => {
   const label = String(story?.storyText || story?.caption || "").trim();
   if (label) return label;
-  return story?.sourceType === "reel-share" ? "Shared reel" : "Story";
+  return story?.sourceType === "reel-share" ? "Shared clip" : "Story";
 };
 
 const toCount = (value) => {
@@ -155,7 +155,7 @@ const StorySection = ({ title, emptyText, items, onOpen }) => (
             >
               <div className="stories-thumb">
                 <div className="stories-badge-row">
-                  {isReelShare && <span className="stories-type-badge reel">Shared reel</span>}
+                  {isReelShare && <span className="stories-type-badge reel">Shared clip</span>}
                   {expired && <span className="stories-expired-badge">Expired</span>}
                 </div>
                 {mediaUrl ? (
@@ -165,7 +165,7 @@ const StorySection = ({ title, emptyText, items, onOpen }) => (
                     <img src={mediaUrl} alt={caption || "Story"} />
                   )
                 ) : (
-                  <div className="stories-thumb-empty">{isReelShare ? "Reel" : "Story"}</div>
+                  <div className="stories-thumb-empty">{isReelShare ? "Clip" : "Story"}</div>
                 )}
               </div>
               <div className="stories-meta">

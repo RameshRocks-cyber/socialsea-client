@@ -555,7 +555,7 @@ export default function PostJob() {
               <div className="company-manage-card">
                 <h2>About the Company</h2>
                 {editMode ? (
-                  <textarea
+                  <textarea name="postjob-textarea-558"
                     rows={5}
                     value={draft.overview}
                     onChange={(event) => setDraft((prev) => ({ ...prev, overview: event.target.value }))}
@@ -571,7 +571,7 @@ export default function PostJob() {
               <div className="company-manage-card">
                 <h2>What We Do</h2>
                 {editMode ? (
-                  <textarea
+                  <textarea name="postjob-textarea-574"
                     rows={4}
                     value={draft.whatWeDo}
                     onChange={(event) => setDraft((prev) => ({ ...prev, whatWeDo: event.target.value }))}
@@ -585,7 +585,7 @@ export default function PostJob() {
               <div className="company-manage-card">
                 <h2>Key Features</h2>
                 {editMode ? (
-                  <textarea
+                  <textarea name="postjob-textarea-588"
                     rows={4}
                     value={draft.featuresText}
                     onChange={(event) => setDraft((prev) => ({ ...prev, featuresText: event.target.value }))}
@@ -605,7 +605,7 @@ export default function PostJob() {
               <div className="company-manage-card">
                 <h2>Clients</h2>
                 {editMode ? (
-                  <textarea
+                  <textarea name="postjob-textarea-608"
                     rows={4}
                     value={draft.clientsText}
                     onChange={(event) => setDraft((prev) => ({ ...prev, clientsText: event.target.value }))}
@@ -625,7 +625,7 @@ export default function PostJob() {
               <div className="company-manage-card">
                 <h2>Services</h2>
                 {editMode ? (
-                  <textarea
+                  <textarea name="postjob-textarea-628"
                     rows={4}
                     value={draft.servicesText}
                     onChange={(event) => setDraft((prev) => ({ ...prev, servicesText: event.target.value }))}
@@ -649,7 +649,7 @@ export default function PostJob() {
                     <span className="company-manage-label">
                       Company Name <span className="company-manage-required">Required</span>
                     </span>
-                    <input
+                    <input name="postjob-input-652"
                       type="text"
                       value={draft.name}
                       onChange={(event) => setDraft((prev) => ({ ...prev, name: event.target.value }))}
@@ -657,7 +657,7 @@ export default function PostJob() {
                   </label>
                   <label>
                     Company Logo
-                    <input type="file" accept="image/*" onChange={handleLogoChange} />
+                    <input name="postjob-input-660" type="file" accept="image/*" onChange={handleLogoChange} />
                     {draft.logoUrl && (
                       <button type="button" className="company-manage-inline" onClick={handleRemoveLogo}>
                         Remove Logo
@@ -666,7 +666,7 @@ export default function PostJob() {
                   </label>
                   <label>
                     Industry
-                    <input
+                    <input name="postjob-input-669"
                       type="text"
                       value={draft.industry}
                       onChange={(event) => setDraft((prev) => ({ ...prev, industry: event.target.value }))}
@@ -674,7 +674,7 @@ export default function PostJob() {
                   </label>
                   <label>
                     Location
-                    <input
+                    <input name="postjob-input-677"
                       type="text"
                       value={draft.location}
                       onChange={(event) => setDraft((prev) => ({ ...prev, location: event.target.value }))}
@@ -682,7 +682,7 @@ export default function PostJob() {
                   </label>
                   <label>
                     Team Size
-                    <input
+                    <input name="postjob-input-685"
                       type="text"
                       value={draft.size}
                       onChange={(event) => setDraft((prev) => ({ ...prev, size: event.target.value }))}
@@ -690,7 +690,7 @@ export default function PostJob() {
                   </label>
                   <label>
                     Stage
-                    <input
+                    <input name="postjob-input-693"
                       type="text"
                       value={draft.stage}
                       onChange={(event) => setDraft((prev) => ({ ...prev, stage: event.target.value }))}
@@ -698,7 +698,7 @@ export default function PostJob() {
                   </label>
                   <label>
                     Website
-                    <input
+                    <input name="postjob-input-701"
                       type="url"
                       value={draft.website}
                       onChange={(event) => setDraft((prev) => ({ ...prev, website: event.target.value }))}
@@ -706,7 +706,7 @@ export default function PostJob() {
                   </label>
                   <label>
                     Contact Email
-                    <input
+                    <input name="postjob-input-709"
                       type="email"
                       value={draft.contactEmail}
                       onChange={(event) => setDraft((prev) => ({ ...prev, contactEmail: event.target.value }))}
@@ -744,7 +744,7 @@ export default function PostJob() {
                   <span className="company-manage-label">
                     Job Title <span className="company-manage-required">Required</span>
                   </span>
-                  <input
+                  <input name="postjob-input-747"
                     type="text"
                     value={jobDraft.title}
                     onChange={(event) => setJobDraft((prev) => ({ ...prev, title: event.target.value }))}
@@ -752,7 +752,7 @@ export default function PostJob() {
                 </label>
                 <label>
                   Location
-                  <input
+                  <input name="postjob-input-755"
                     type="text"
                     value={jobDraft.location}
                     onChange={(event) => setJobDraft((prev) => ({ ...prev, location: event.target.value }))}
@@ -760,7 +760,7 @@ export default function PostJob() {
                 </label>
                 <label>
                   Salary
-                  <input
+                  <input name="postjob-input-763"
                     type="text"
                     value={jobDraft.salary}
                     onChange={(event) => setJobDraft((prev) => ({ ...prev, salary: event.target.value }))}
@@ -768,7 +768,7 @@ export default function PostJob() {
                 </label>
                 <label>
                   Experience
-                  <input
+                  <input name="postjob-input-771"
                     type="text"
                     value={jobDraft.experience}
                     onChange={(event) => setJobDraft((prev) => ({ ...prev, experience: event.target.value }))}
@@ -776,7 +776,7 @@ export default function PostJob() {
                 </label>
                 <label>
                   Track
-                  <input
+                  <input name="postjob-input-779"
                     type="text"
                     value={jobDraft.track}
                     onChange={(event) => setJobDraft((prev) => ({ ...prev, track: event.target.value }))}
@@ -784,7 +784,7 @@ export default function PostJob() {
                 </label>
                 <label>
                   Duration (days)
-                  <input
+                  <input name="postjob-input-787"
                     type="number"
                     min="1"
                     step="1"
@@ -796,7 +796,7 @@ export default function PostJob() {
                 </label>
                 <label>
                   Apply URL
-                  <input
+                  <input name="postjob-input-799"
                     type="url"
                     value={jobDraft.applyUrl}
                     onChange={(event) => setJobDraft((prev) => ({ ...prev, applyUrl: event.target.value }))}
@@ -804,7 +804,7 @@ export default function PostJob() {
                 </label>
                 <label className="full">
                   Skills (comma or new line separated)
-                  <textarea
+                  <textarea name="postjob-textarea-807"
                     rows={3}
                     value={jobDraft.skillsText}
                     onChange={(event) => setJobDraft((prev) => ({ ...prev, skillsText: event.target.value }))}
@@ -812,7 +812,7 @@ export default function PostJob() {
                 </label>
                 <label className="full">
                   About the Role
-                  <textarea
+                  <textarea name="postjob-textarea-815"
                     rows={4}
                     value={jobDraft.description}
                     onChange={(event) => setJobDraft((prev) => ({ ...prev, description: event.target.value }))}
@@ -820,7 +820,7 @@ export default function PostJob() {
                 </label>
                 <label className="full">
                   Responsibilities
-                  <textarea
+                  <textarea name="postjob-textarea-823"
                     rows={4}
                     value={jobDraft.responsibilitiesText}
                     onChange={(event) => setJobDraft((prev) => ({ ...prev, responsibilitiesText: event.target.value }))}
@@ -828,7 +828,7 @@ export default function PostJob() {
                 </label>
                 <label className="full">
                   Requirements
-                  <textarea
+                  <textarea name="postjob-textarea-831"
                     rows={4}
                     value={jobDraft.requirementsText}
                     onChange={(event) => setJobDraft((prev) => ({ ...prev, requirementsText: event.target.value }))}
@@ -836,7 +836,7 @@ export default function PostJob() {
                 </label>
                 <label className="full">
                   Benefits
-                  <textarea
+                  <textarea name="postjob-textarea-839"
                     rows={4}
                     value={jobDraft.benefitsText}
                     onChange={(event) => setJobDraft((prev) => ({ ...prev, benefitsText: event.target.value }))}
@@ -880,7 +880,7 @@ export default function PostJob() {
               </div>
               <div className="company-job-filters">
                 <label className="company-job-toggle">
-                  <input
+                  <input name="postjob-input-883"
                     type="checkbox"
                     checked={showExpiredJobs}
                     onChange={(event) => setShowExpiredJobs(event.target.checked)}

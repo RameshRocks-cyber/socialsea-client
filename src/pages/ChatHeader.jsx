@@ -16,6 +16,15 @@ import {
 } from "react-icons/fi";
 import { useChat, DISAPPEARING_MESSAGE_OPTIONS } from "./hooks/useChat";
 
+const normalizeAvatarImageSrc = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const pathOnly = raw.replace(/^https?:\/\/[^/]+/i, "").split(/[?#]/)[0] || "";
+  if (/^\/?api\/[a-z]{1,2}$/i.test(pathOnly)) return "";
+  if (/^\/?[a-z]{1,2}$/i.test(pathOnly)) return "";
+  return raw;
+};
+
 export default function ChatHeader({ onOpenUtilityPanel, onOpenSearch }) {
   const {
     isConversationRoute,
@@ -61,6 +70,7 @@ export default function ChatHeader({ onOpenUtilityPanel, onOpenSearch }) {
   } = useChat();
 
   if (!activeContact) return null;
+  const avatarImageSrc = normalizeAvatarImageSrc(activeContact.profilePic);
 
   const openUtilityPanel = (panel) => {
     if (typeof onOpenUtilityPanel === "function") {
@@ -111,8 +121,8 @@ export default function ChatHeader({ onOpenUtilityPanel, onOpenSearch }) {
         </button>
         <button type="button" className="chat-header-main" onClick={() => goToProfile(activeContact)}>
           <span className="chat-avatar">
-            {activeContact.profilePic ? (
-              <img src={activeContact.profilePic} alt={activeContact.name} className="chat-avatar-img" />
+            {avatarImageSrc ? (
+              <img src={avatarImageSrc} alt={activeContact.name} className="chat-avatar-img" />
             ) : (
               activeContact.avatar
             )}
@@ -247,7 +257,7 @@ export default function ChatHeader({ onOpenUtilityPanel, onOpenSearch }) {
                   <strong>Mute notifications</strong>
                 </span>
                 <span className="chat-switch">
-                  <input
+                  <input name="chatheader-input-260"
                     type="checkbox"
                     checked={activeMuted}
                     onChange={(e) => setActiveContactMuted(e.target.checked)}
@@ -263,7 +273,7 @@ export default function ChatHeader({ onOpenUtilityPanel, onOpenSearch }) {
                 </span>
                 <strong>Disappearing messages</strong>
               </span>
-              <select
+              <select name="chatheader-select-276"
                 className="chat-translate-select"
                 value={activeDisappearingValue}
                 onChange={(e) => setActiveDisappearingSetting(e.target.value)}
@@ -281,7 +291,7 @@ export default function ChatHeader({ onOpenUtilityPanel, onOpenSearch }) {
                   <strong>Translator</strong>
                 </span>
                 <span className="chat-switch">
-                  <input
+                  <input name="chatheader-input-294"
                     type="checkbox"
                     checked={translatorEnabled}
                     onChange={(e) => setTranslatorEnabled(e.target.checked)}
@@ -296,7 +306,7 @@ export default function ChatHeader({ onOpenUtilityPanel, onOpenSearch }) {
                   <strong>Auto-speak</strong>
                 </span>
                 <span className="chat-switch">
-                  <input
+                  <input name="chatheader-input-309"
                     type="checkbox"
                     checked={signAssistAutoSpeak}
                     onChange={(e) => setAutoSpeakEnabled(e.target.checked)}
@@ -314,7 +324,7 @@ export default function ChatHeader({ onOpenUtilityPanel, onOpenSearch }) {
                   <strong>Speak-to-type mic</strong>
                 </span>
                 <span className="chat-switch">
-                  <input
+                  <input name="chatheader-input-327"
                     type="checkbox"
                     checked={showSpeechTypingMic}
                     onChange={(e) => setShowSpeechTypingMic(e.target.checked)}
@@ -328,7 +338,7 @@ export default function ChatHeader({ onOpenUtilityPanel, onOpenSearch }) {
                 <span className="chat-menu-label-group">
                   <strong>Language</strong>
                 </span>
-                <select
+                <select name="chatheader-select-341"
                   className="chat-translate-select"
                   value={translatorLang}
                   onChange={(e) => setTranslatorLang(e.target.value)}
@@ -345,7 +355,7 @@ export default function ChatHeader({ onOpenUtilityPanel, onOpenSearch }) {
               <span className="chat-menu-label-group">
                 <strong>Speak language</strong>
               </span>
-              <select className="chat-translate-select" value={speechLang} onChange={(e) => setSpeechLang(e.target.value)}>
+              <select name="chatheader-select-358" className="chat-translate-select" value={speechLang} onChange={(e) => setSpeechLang(e.target.value)}>
                 {speechLangOptions.map((opt) => (
                   <option key={opt.value} value={opt.value}>
                     {opt.label}
@@ -357,7 +367,7 @@ export default function ChatHeader({ onOpenUtilityPanel, onOpenSearch }) {
               <span className="chat-menu-label-group">
                 <strong>Voice</strong>
               </span>
-              <select
+              <select name="chatheader-select-370"
                 className="chat-translate-select"
                 value={speechVoiceGender}
                 onChange={(e) => setSpeechVoiceGender(e.target.value)}

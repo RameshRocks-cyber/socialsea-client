@@ -1270,7 +1270,7 @@ export default function Profile() {
       return;
     }
     if (kind === "reel") {
-      navigate("/upload?type=reel");
+      navigate("/upload?type=clip");
       return;
     }
     if (kind === "long-video") {

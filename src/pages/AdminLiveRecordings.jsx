@@ -574,7 +574,7 @@ export default function AdminLiveRecordings() {
             <h3>SOS Alerts: Exact Location + Nearby Users (5km)</h3>
             <p className="admin-head-note">Shows who triggered SOS, exact coordinates, and nearby users.</p>
           </div>
-          <input
+          <input name="adminliverecordings-input-577"
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}

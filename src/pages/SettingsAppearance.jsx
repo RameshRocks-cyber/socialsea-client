@@ -107,27 +107,27 @@ export default function SettingsAppearance() {
             <div className="settings-custom-theme">
               <label>
                 <span>Primary</span>
-                <input type="color" value={customThemeColors.accent} onChange={(e) => updateCustomColor("accent", e.target.value)} />
+                <input name="settingsappearance-input-110" type="color" value={customThemeColors.accent} onChange={(e) => updateCustomColor("accent", e.target.value)} />
               </label>
               <label>
                 <span>Secondary</span>
-                <input type="color" value={customThemeColors.accent2} onChange={(e) => updateCustomColor("accent2", e.target.value)} />
+                <input name="settingsappearance-input-114" type="color" value={customThemeColors.accent2} onChange={(e) => updateCustomColor("accent2", e.target.value)} />
               </label>
               <label>
                 <span>Background</span>
-                <input type="color" value={customThemeColors.bg} onChange={(e) => updateCustomColor("bg", e.target.value)} />
+                <input name="settingsappearance-input-118" type="color" value={customThemeColors.bg} onChange={(e) => updateCustomColor("bg", e.target.value)} />
               </label>
               <label>
                 <span>Surface</span>
-                <input type="color" value={customThemeColors.bgSoft} onChange={(e) => updateCustomColor("bgSoft", e.target.value)} />
+                <input name="settingsappearance-input-122" type="color" value={customThemeColors.bgSoft} onChange={(e) => updateCustomColor("bgSoft", e.target.value)} />
               </label>
               <label>
                 <span>Border</span>
-                <input type="color" value={customThemeColors.border} onChange={(e) => updateCustomColor("border", e.target.value)} />
+                <input name="settingsappearance-input-126" type="color" value={customThemeColors.border} onChange={(e) => updateCustomColor("border", e.target.value)} />
               </label>
               <label>
                 <span>Text</span>
-                <input type="color" value={customThemeColors.text} onChange={(e) => updateCustomColor("text", e.target.value)} />
+                <input name="settingsappearance-input-130" type="color" value={customThemeColors.text} onChange={(e) => updateCustomColor("text", e.target.value)} />
               </label>
             </div>
           )}

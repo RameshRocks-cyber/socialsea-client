@@ -200,7 +200,7 @@ export default function AdminPosts() {
             <p className="admin-head-note">Search any post, inspect engagement and take moderation action.</p>
             <p className="admin-head-meta">Showing {filtered.length} of {posts.length} posts</p>
           </div>
-          <input
+          <input name="adminposts-input-203"
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -262,7 +262,7 @@ export default function AdminPosts() {
                     <td>{formatDateTime(getCreatedAt(post))}</td>
                     <td>
                       <div className="admin-action-stack">
-                        <textarea
+                        <textarea name="adminposts-textarea-265"
                           value={noticeTextByPostId[post.id] || ""}
                           onChange={(e) => setNoticeTextByPostId((prev) => ({ ...prev, [post.id]: e.target.value }))}
                           placeholder="Write a moderation note"

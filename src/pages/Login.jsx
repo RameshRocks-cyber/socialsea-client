@@ -53,6 +53,15 @@ function persistAuthValue(key, value) {
   localStorage.setItem(key, safe);
 }
 
+function clearAuthRecoveryLock() {
+  try {
+    sessionStorage.removeItem("socialsea_auth_recovery_lock_v1");
+    localStorage.removeItem("socialsea_auth_recovery_lock_v1");
+  } catch {
+    // ignore storage failures
+  }
+}
+
 export default function Login() {
   const navigate = useNavigate();
   const isLocalHost =
@@ -76,6 +85,7 @@ export default function Login() {
     if (!token) throw new Error("Login failed: token missing");
 
     clearAuthStorage();
+    clearAuthRecoveryLock();
     persistAuthValue("accessToken", token);
     persistAuthValue("token", token);
     if (userId != null) persistAuthValue("userId", userId);

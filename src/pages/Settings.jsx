@@ -674,7 +674,7 @@ export default function Settings() {
 
         <div className="settings-option-search-wrap">
           <span className="settings-option-search-icon">⌕</span>
-          <input
+          <input name="settings-input-677"
             type="search"
             className="settings-option-search-input"
             placeholder="Search settings options"
@@ -1044,12 +1044,12 @@ export default function Settings() {
             </div>
             {colorTheme === "custom" && (
               <div className="settings-custom-theme">
-                <label><span>Primary</span><input type="color" value={customThemeColors.accent} onChange={(e) => setCustomThemeColorsState((prev) => ({ ...prev, accent: e.target.value }))} /></label>
-                <label><span>Secondary</span><input type="color" value={customThemeColors.accent2} onChange={(e) => setCustomThemeColorsState((prev) => ({ ...prev, accent2: e.target.value }))} /></label>
-                <label><span>Background</span><input type="color" value={customThemeColors.bg} onChange={(e) => setCustomThemeColorsState((prev) => ({ ...prev, bg: e.target.value }))} /></label>
-                <label><span>Surface</span><input type="color" value={customThemeColors.bgSoft} onChange={(e) => setCustomThemeColorsState((prev) => ({ ...prev, bgSoft: e.target.value }))} /></label>
-                <label><span>Border</span><input type="color" value={customThemeColors.border} onChange={(e) => setCustomThemeColorsState((prev) => ({ ...prev, border: e.target.value }))} /></label>
-                <label><span>Text</span><input type="color" value={customThemeColors.text} onChange={(e) => setCustomThemeColorsState((prev) => ({ ...prev, text: e.target.value }))} /></label>
+                <label><span>Primary</span><input name="settings-input-1047" type="color" value={customThemeColors.accent} onChange={(e) => setCustomThemeColorsState((prev) => ({ ...prev, accent: e.target.value }))} /></label>
+                <label><span>Secondary</span><input name="settings-input-1048" type="color" value={customThemeColors.accent2} onChange={(e) => setCustomThemeColorsState((prev) => ({ ...prev, accent2: e.target.value }))} /></label>
+                <label><span>Background</span><input name="settings-input-1049" type="color" value={customThemeColors.bg} onChange={(e) => setCustomThemeColorsState((prev) => ({ ...prev, bg: e.target.value }))} /></label>
+                <label><span>Surface</span><input name="settings-input-1050" type="color" value={customThemeColors.bgSoft} onChange={(e) => setCustomThemeColorsState((prev) => ({ ...prev, bgSoft: e.target.value }))} /></label>
+                <label><span>Border</span><input name="settings-input-1051" type="color" value={customThemeColors.border} onChange={(e) => setCustomThemeColorsState((prev) => ({ ...prev, border: e.target.value }))} /></label>
+                <label><span>Text</span><input name="settings-input-1052" type="color" value={customThemeColors.text} onChange={(e) => setCustomThemeColorsState((prev) => ({ ...prev, text: e.target.value }))} /></label>
               </div>
             )}
           </section>
@@ -1062,7 +1062,7 @@ export default function Settings() {
               <button type="button" onClick={() => setActivePanel("")}>Close</button>
             </header>
 
-            <input
+            <input name="settings-input-1065"
               type="text"
               className="settings-user-search"
               placeholder="Type name or email"

@@ -227,7 +227,7 @@ export default function ChatInput() {
           <button type="button" className="input-icon composer-emoji-btn" title="Emoji" onClick={toggleEmojiTray}>
             <FiSmile />
           </button>
-          <input
+          <input name="chatinput-input-230"
             className="composer-input"
             ref={composerInputRef}
             type="text"
@@ -276,14 +276,14 @@ export default function ChatInput() {
             )}
           </div>
         )}
-        <input
+        <input name="chatinput-input-279"
           ref={attachInputRef}
           type="file"
           accept="image/*,video/*,.pdf,.doc,.docx,.txt,.zip,.rar"
           className="chat-hidden-file-input"
           onChange={onFilePicked}
         />
-        <input
+        <input name="chatinput-input-286"
           ref={cameraInputRef}
           type="file"
           accept="image/*"
@@ -291,7 +291,7 @@ export default function ChatInput() {
           className="chat-hidden-file-input"
           onChange={onFilePicked}
         />
-        <input
+        <input name="chatinput-input-294"
           ref={stickerInputRef}
           type="file"
           accept="image/*"
