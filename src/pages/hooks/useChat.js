@@ -8391,7 +8391,7 @@ function useChatController() {
         const wsBase = base.replace(/\/api\/?$/, "") || base;
 
         const wsOrigin = wsBase.startsWith("ws") ? wsBase : wsBase.replace(/^http/i, "ws");
-        const transport = String(import.meta.env?.VITE_WS_TRANSPORT || "").trim().toLowerCase();
+        const transport = String(import.meta.env?.VITE_WS_TRANSPORT || "ws").trim().toLowerCase();
         const normalizeEndpoint = (value, fallback) => {
           const raw = String(value || "").trim();
           if (!raw) return fallback;
@@ -8399,6 +8399,7 @@ function useChatController() {
         };
         const nativeWsEndpoint = normalizeEndpoint(import.meta.env?.VITE_WS_NATIVE_ENDPOINT, "/ws-native");
         const sockJsEndpoint = normalizeEndpoint(import.meta.env?.VITE_WS_SOCKJS_ENDPOINT, "/ws");
+        const sockJsOptions = { transports: ["websocket"] };
         const isNativeTransport = ["ws", "websocket", "native"].includes(transport);
         const useSockJS = !isNativeTransport;
         const sockJsModule = useSockJS ? await import("sockjs-client/dist/sockjs") : null;
@@ -8406,7 +8407,10 @@ function useChatController() {
         const SockJS = sockJsModule?.default || sockJsModule;
         const client = new Client({
           ...(useSockJS
-            ? { webSocketFactory: () => new SockJS(`${wsBase}${sockJsEndpoint}?token=${encodeURIComponent(token)}`) }
+            ? {
+                webSocketFactory: () =>
+                  new SockJS(`${wsBase}${sockJsEndpoint}?token=${encodeURIComponent(token)}`, undefined, sockJsOptions)
+              }
             : { brokerURL: `${wsOrigin}${nativeWsEndpoint}?token=${encodeURIComponent(token)}` }),
           connectHeaders: { Authorization: `Bearer ${token}` },
           reconnectDelay: 3000,

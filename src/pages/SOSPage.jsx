@@ -571,11 +571,12 @@ export default function SOSPage() {
           if (!raw) return fallback;
           return raw.startsWith("/") ? raw : `/${raw}`;
         };
-        const transport = String(import.meta.env?.VITE_WS_TRANSPORT || "").trim().toLowerCase();
+        const transport = String(import.meta.env?.VITE_WS_TRANSPORT || "ws").trim().toLowerCase();
         const isNativeTransport = ["ws", "websocket", "native"].includes(transport);
         const useSockJS = !isNativeTransport;
         const nativeWsEndpoint = normalizeEndpoint(import.meta.env?.VITE_WS_NATIVE_ENDPOINT, "/ws-native");
         const sockJsEndpoint = normalizeEndpoint(import.meta.env?.VITE_WS_SOCKJS_ENDPOINT, "/ws");
+        const sockJsOptions = { transports: ["websocket"] };
         const sockJsModule = useSockJS ? await import("sockjs-client/dist/sockjs") : null;
         if (disposed) return;
         const SockJS = sockJsModule?.default || sockJsModule;
@@ -601,7 +602,10 @@ export default function SOSPage() {
           }
           client = new Client({
             ...(useSockJS
-              ? { webSocketFactory: () => new SockJS(`${base}${sockJsEndpoint}?token=${encodeURIComponent(token)}`) }
+              ? {
+                  webSocketFactory: () =>
+                    new SockJS(`${base}${sockJsEndpoint}?token=${encodeURIComponent(token)}`, undefined, sockJsOptions)
+                }
               : { brokerURL: `${base.replace(/^http/i, "ws")}${nativeWsEndpoint}?token=${encodeURIComponent(token)}` }),
             connectHeaders: { Authorization: `Bearer ${token}` },
             reconnectDelay: 0,

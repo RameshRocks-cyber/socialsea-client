@@ -99,15 +99,6 @@ body.ss-theme-white .profile-follow-btn {
   box-shadow: none !important;
 }
 
-body.ss-theme-white .profile-action-panel-right .profile-action-primary,
-body.ss-theme-white .profile-action-panel-right .profile-action-secondary,
-body.ss-theme-white .profile-action-panel-right .profile-action-icon {
-  background: transparent !important;
-  border: none !important;
-  border-radius: 0 !important;
-  box-shadow: none !important;
-}
-
 body.ss-theme-white .profile-action-panel-right .profile-actions-own {
   border-radius: 14px;
   overflow: hidden;
@@ -1948,6 +1939,10 @@ body.ss-theme-white .profile-post-options-btn.ghost {
   justify-content: stretch;
 }
 
+.profile-action-panel-right .profile-actions-row.profile-actions-row-wide {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .profile-action-panel-right .profile-action-primary,
 .profile-action-panel-right .profile-action-icon,
 .profile-action-panel-right .profile-action-secondary {
@@ -2022,6 +2017,12 @@ body.ss-theme-white .profile-post-options-btn.ghost {
 @media (max-width: 719px) {
   .profile-action-panel-right .profile-actions-row {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 1024px) {
+  .profile-action-panel-right .profile-actions-row.profile-actions-row-wide {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -2156,4 +2157,15 @@ body.ss-theme-white .profile-post-options-btn.ghost {
   body.ss-theme-white .profile-action-panel-right .profile-action-secondary:hover {
     filter: brightness(1.02);
   }
+}
+
+/* Clean flat mode: remove all shadows from the profile page surface. */
+.profile-page,
+.profile-page * {
+  box-shadow: none !important;
+  text-shadow: none !important;
+}
+
+.profile-page .profile-header::before {
+  display: none !important;
 }

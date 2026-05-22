@@ -1226,7 +1226,6 @@ export default function Profile() {
         : loadedPostsCount;
   const isPrivateLocked = Boolean(profile?.privateAccount) && profile?.canViewContent === false && !isOwnProfile;
   const displayName = profile?.name || profile?.email || profile?.username || "Profile";
-  const displayBio = profile?.bio || "No bio yet";
   const coverRaw =
     profile?.coverUrl ||
     profile?.coverPhotoUrl ||
@@ -1350,7 +1349,6 @@ export default function Profile() {
 
               <div className="profile-identity">
                 <h2 className="profile-name">{displayName}</h2>
-                <p className="bio">{displayBio}</p>
               </div>
 
               <div className="profile-stats-row">
@@ -1444,7 +1442,7 @@ export default function Profile() {
                                 <div>
                                   <h4>{job.title || "Job Role"}</h4>
                                   <small>
-                                    {[job.location, job.salary].filter(Boolean).join(" â€¢ ") || "Details pending"}
+                                    {[job.location, job.salary].filter(Boolean).join(" - ") || "Details pending"}
                                   </small>
                                 </div>
                                 <div className="profile-job-item-actions">
@@ -1486,17 +1484,17 @@ export default function Profile() {
                 )}
                 <div className="profile-action-panel-right">
                   <div className="profile-actions-own">
-                    <div className="profile-actions-row">
+                    <div className="profile-actions-row profile-actions-row-wide">
                       <button className="profile-action-primary" onClick={() => navigate("/profile-setup?mode=edit")}>
                         Edit Profile
                       </button>
                       <button className="profile-action-icon" onClick={() => navigate("/settings")}>
                         Settings
                       </button>
+                      <button className="profile-action-secondary" onClick={openCreateSheet}>
+                        Create
+                      </button>
                     </div>
-                    <button className="profile-action-secondary" onClick={openCreateSheet}>
-                      Create
-                    </button>
                   </div>
                 </div>
               </section>

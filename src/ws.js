@@ -5,7 +5,7 @@ const WS_RECONNECT_DELAY_MS = 12000;
 const WS_MAX_RECONNECT_DELAY_MS = 60000;
 const WS_CONNECT_DELAY_MS = import.meta.env?.DEV ? 120 : 0;
 const SOCKJS_OPTIONS = { transports: ["websocket"] };
-const WS_TRANSPORT_MODE = String(import.meta.env?.VITE_WS_TRANSPORT || "sockjs")
+const WS_TRANSPORT_MODE = String(import.meta.env?.VITE_WS_TRANSPORT || "ws")
   .trim()
   .toLowerCase();
 
