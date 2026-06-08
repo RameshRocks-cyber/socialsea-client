@@ -1,5 +1,6 @@
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
+import { visualizer } from 'rollup-plugin-visualizer'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
@@ -38,6 +39,9 @@ export default defineConfig(({ mode }) => {
   const devProxyOrigin = (env.VITE_DEV_PROXY_ORIGIN || '').trim() || 'http://localhost:5173'
   const devServerHost = (env.VITE_DEV_SERVER_HOST || '').trim() || '0.0.0.0'
   const devHmrHost = (env.VITE_DEV_HMR_HOST || '').trim()
+  const shouldAnalyzeBundle =
+    ['true', '1', 'yes'].includes(String(env.VITE_BUNDLE_ANALYZE || env.ANALYZE_BUNDLE || '').trim().toLowerCase()) ||
+    mode === 'analyze'
   const isLocalProxyTarget = (value) => {
     const raw = String(value || '').trim().toLowerCase()
     if (!raw) return false
@@ -62,7 +66,18 @@ export default defineConfig(({ mode }) => {
   }
 
   return {
-    plugins: [react()],
+    plugins: [
+      react(),
+      shouldAnalyzeBundle
+        ? visualizer({
+            filename: 'dist/bundle-report.html',
+            template: 'treemap',
+            gzipSize: true,
+            brotliSize: true,
+            open: false,
+          })
+        : null,
+    ].filter(Boolean),
     define: {
       'process.env': JSON.stringify(env),
     },
@@ -78,6 +93,7 @@ export default defineConfig(({ mode }) => {
     },
     build: {
       cssCodeSplit: true,
+      chunkSizeWarningLimit: 1600,
       rollupOptions: {
         output: {
           manualChunks(id) {
