@@ -1,6 +1,6 @@
 import axios from "axios";
 import { getApiBaseUrl } from "./baseUrl";
-import { clearAuthStorage } from "../auth";
+import { clearAuthStorage, setAuthSessionActive } from "../auth";
 import { getOrCreateDeviceId } from "../deviceId";
 import {
   buildGuardedResponse,
@@ -55,6 +55,14 @@ const BASE_RETRY_DELAY_MS = 700;
 const MAX_RETRY_DELAY_MS = 9000;
 const AUTH_RECOVERY_LOCK_KEY = "socialsea_auth_recovery_lock_v1";
 const AUTH_RECOVERY_LOCK_MAX_AGE_MS = 30 * 60 * 1000;
+const AUTH_SESSION_KEY = "socialsea_auth_session_v1";
+
+try {
+  // Clean up any legacy localStorage copy from previous app versions.
+  localStorage.removeItem(AUTH_RECOVERY_LOCK_KEY);
+} catch {
+  // ignore storage failures
+}
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -76,33 +84,20 @@ const AUTH_LOCK_NOISY_READ_PATHS = new Set([
   "/calls/inbox",
 ]);
 
-const getAuthTokenSnapshot = () => ({
-  accessToken: String(
-    sessionStorage.getItem("accessToken") ||
-      sessionStorage.getItem("token") ||
-      localStorage.getItem("accessToken") ||
-      localStorage.getItem("token") ||
-      ""
-  ).trim(),
-  refreshToken: String(
-    sessionStorage.getItem("refreshToken") || localStorage.getItem("refreshToken") || ""
-  ).trim(),
+const getAuthSessionSnapshot = () => ({
+  sessionState: String(sessionStorage.getItem(AUTH_SESSION_KEY) || "").trim(),
 });
 
 const readAuthRecoveryLock = () => {
   try {
-    const raw =
-      sessionStorage.getItem(AUTH_RECOVERY_LOCK_KEY) ||
-      localStorage.getItem(AUTH_RECOVERY_LOCK_KEY) ||
-      "";
+    const raw = sessionStorage.getItem(AUTH_RECOVERY_LOCK_KEY) || "";
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return null;
     const createdAt = Number(parsed.createdAt || 0);
-    const accessToken = String(parsed.accessToken || "");
-    const refreshToken = String(parsed.refreshToken || "");
+    const sessionState = String(parsed.sessionState || "");
     if (!Number.isFinite(createdAt) || createdAt <= 0) return null;
-    return { createdAt, accessToken, refreshToken };
+    return { createdAt, sessionState };
   } catch {
     return null;
   }
@@ -118,15 +113,13 @@ const clearAuthRecoveryLock = () => {
 };
 
 const persistAuthRecoveryLock = () => {
-  const snapshot = getAuthTokenSnapshot();
+  const snapshot = getAuthSessionSnapshot();
   const payload = JSON.stringify({
     createdAt: Date.now(),
-    accessToken: snapshot.accessToken,
-    refreshToken: snapshot.refreshToken,
+    sessionState: snapshot.sessionState,
   });
   try {
     sessionStorage.setItem(AUTH_RECOVERY_LOCK_KEY, payload);
-    localStorage.setItem(AUTH_RECOVERY_LOCK_KEY, payload);
   } catch {
     // ignore storage failures
   }
@@ -154,10 +147,9 @@ const shouldShortCircuitProtectedRead = (config) => {
     return false;
   }
 
-  const snapshot = getAuthTokenSnapshot();
+  const snapshot = getAuthSessionSnapshot();
   const lockMatchesSnapshot =
-    lock.accessToken === snapshot.accessToken &&
-    lock.refreshToken === snapshot.refreshToken;
+    lock.sessionState === snapshot.sessionState;
 
   if (!lockMatchesSnapshot) {
     clearAuthRecoveryLock();
@@ -247,6 +239,7 @@ if (previousBase && nextBase && previousBase !== nextBase) {
 
 const api = axios.create({
   baseURL: BASE_URL,
+  withCredentials: true,
 });
 
 const refreshClient = axios.create({
@@ -323,19 +316,7 @@ api.interceptors.request.use((config) => {
     // ignore device-id failures
   }
   if (config?.skipAuth) {
-    if (config.headers?.Authorization) {
-      delete config.headers.Authorization;
-    }
     return config;
-  }
-  const token =
-    sessionStorage.getItem("accessToken") ||
-    sessionStorage.getItem("token") ||
-    localStorage.getItem("accessToken") ||
-    localStorage.getItem("token");
-
-  if (token && token !== "null" && token !== "undefined") {
-    config.headers.Authorization = `Bearer ${token.trim()}`;
   }
 
   return config;
@@ -408,41 +389,11 @@ api.interceptors.response.use(
 
     originalRequest._retry = true;
 
-    const refreshToken =
-      sessionStorage.getItem("refreshToken") ||
-      localStorage.getItem("refreshToken");
-    if (!refreshToken) {
-      persistAuthRecoveryLock();
-      if (isTrustedOrigin) {
-        clearAuthStorage();
-        if (!originalRequest?.suppressAuthRedirect) {
-          window.location.href = "/login";
-        }
-      }
-      return Promise.reject(error);
-    }
-
     try {
-      const response = await refreshClient.post("/api/auth/refresh", {
-        refreshToken,
-      });
+      const response = await refreshClient.post("/api/auth/refresh", {});
 
-      const newAccessToken =
-        response.data?.accessToken || response.data?.token;
-
-      if (!newAccessToken) {
-        throw new Error("No new access token received");
-      }
-
+      setAuthSessionActive(true);
       clearAuthRecoveryLock();
-
-      // Keep auth tab-scoped to avoid cross-window account collisions.
-      sessionStorage.setItem("accessToken", newAccessToken);
-      sessionStorage.setItem("token", newAccessToken);
-      localStorage.setItem("accessToken", newAccessToken);
-      localStorage.setItem("token", newAccessToken);
-
-      originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
 
       return api(originalRequest);
     } catch (refreshError) {

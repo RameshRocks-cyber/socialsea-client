@@ -1100,6 +1100,8 @@ function useChatController() {
   const [searchUsers, setSearchUsers] = useState([]);
   const [sidebarSearchUsers, setSidebarSearchUsers] = useState([]);
   const [chatFallbackMode, setChatFallbackMode] = useState(false);
+  const [groupInfoLoading, setGroupInfoLoading] = useState(false);
+  const [groupInfoSaving, setGroupInfoSaving] = useState(false);
   const [pendingShareDraft, setPendingShareDraft] = useState("");
   const [shareHint, setShareHint] = useState("");
   const [reelPreviewById, setReelPreviewById] = useState({});
@@ -1145,6 +1147,12 @@ function useChatController() {
   const [groupRemoteTiles, setGroupRemoteTiles] = useState([]);
   const [groupInviteOpen, setGroupInviteOpen] = useState(false);
   const [groupInviteIds, setGroupInviteIds] = useState([]);
+  const [newGroupOpen, setNewGroupOpen] = useState(false);
+  const [newGroupIds, setNewGroupIds] = useState([]);
+  const [newGroupName, setNewGroupName] = useState("");
+  const [newGroupQuery, setNewGroupQuery] = useState("");
+  const [newGroupSearchUsers, setNewGroupSearchUsers] = useState([]);
+  const [newGroupBusy, setNewGroupBusy] = useState(false);
   const [callError, setCallError] = useState("");
   const [isMuted, setIsMuted] = useState(false);
   const [isCameraOff, setIsCameraOff] = useState(false);
@@ -2539,82 +2547,83 @@ function useChatController() {
       };
     };
 
+    const fetchRequestNotifications = async () => {
+      const notifRes = await requestChatArray({
+        endpoints: ["/api/notifications"],
+        params: { limit: 50 },
+        timeoutMs: 5000,
+        maxAttempts: 4
+      });
+      const notifList = Array.isArray(notifRes?.list) ? notifRes.list : [];
+      return {
+        list: notifList.filter(isFollowRequestNotification).map(mapNotificationToRequest),
+        url: String(notifRes?.url || "")
+      };
+    };
+
+    const fetchIncomingRequests = async () => {
+      try {
+        const incomingRes = await requestChatArray({
+          endpoints: ["/api/follow/requests"],
+          timeoutMs: 6000,
+          maxAttempts: 4
+        });
+        const incomingList = Array.isArray(incomingRes?.list) ? incomingRes.list : [];
+        if (incomingList.length > 0) {
+          return { list: incomingList, url: String(incomingRes?.url || "") };
+        }
+        try {
+          return await fetchRequestNotifications();
+        } catch {
+          return { list: incomingList, url: String(incomingRes?.url || "") };
+        }
+      } catch (err) {
+        const status = Number(err?.response?.status || 0);
+        if (status === 404 || status === 405) {
+          return fetchRequestNotifications();
+        }
+        throw err;
+      }
+    };
+
+    const fetchSentRequests = async () => {
+      try {
+        const sentRes = await requestChatArray({
+          endpoints: ["/api/follow/pending-requests"],
+          timeoutMs: 6000,
+          maxAttempts: 4
+        });
+        return {
+          list: Array.isArray(sentRes?.list) ? sentRes.list : [],
+          url: String(sentRes?.url || "")
+        };
+      } catch (err) {
+        const status = Number(err?.response?.status || 0);
+        if (status === 404 || status === 405) {
+          return { list: [], url: "" };
+        }
+        throw err;
+      }
+    };
+
     const loadRequests = async (showLoader = false) => {
       if (showLoader) setChatRequestsLoading(true);
       setChatRequestError("");
       try {
-        let res = null;
-        let usedNotifications = false;
-        let list = [];
-        let sourceUrl = "";
-        try {
-          res = await requestChatArray({
-            endpoints: ["/api/follow/requests", "/api/follow/pending-requests"],
-            timeoutMs: 6000,
-            maxAttempts: 8
-          });
-          list = Array.isArray(res?.list) ? res.list : [];
-          sourceUrl = String(res?.url || "");
-        } catch (err) {
-          const status = Number(err?.response?.status || 0);
-          if (status === 405) {
-            try {
-              const notifRes = await requestChatArray({
-                endpoints: ["/api/notifications"],
-                params: { limit: 50 },
-                timeoutMs: 5000,
-                maxAttempts: 4
-              });
-              const notifList = Array.isArray(notifRes?.list) ? notifRes.list : [];
-              list = notifList.filter(isFollowRequestNotification).map(mapNotificationToRequest);
-              sourceUrl = String(notifRes?.url || "");
-              usedNotifications = true;
-            } catch {
-              throw err;
-            }
-          } else {
-            throw err;
-          }
-        }
-        if (!usedNotifications && Array.isArray(list) && list.length === 0) {
-          try {
-            const notifRes = await requestChatArray({
-              endpoints: ["/api/notifications"],
-              params: { limit: 50 },
-              timeoutMs: 5000,
-              maxAttempts: 4
-            });
-            const notifList = Array.isArray(notifRes?.list) ? notifRes.list : [];
-            list = notifList.filter(isFollowRequestNotification).map(mapNotificationToRequest);
-            sourceUrl = String(notifRes?.url || sourceUrl);
-          } catch {
-            // ignore notification fallback failures
-          }
-        }
-        if (!active) return;
-        const pending = Array.isArray(list)
-          ? list.filter((item) => item && typeof item === "object" && isPendingRequest(item))
-          : [];
         const hasIdentity = Boolean(String(myUserId || "").trim() || String(myEmail || "").trim());
-        const normalizedSourceUrl = String(sourceUrl || "").toLowerCase();
-        if (!hasIdentity) {
-          setChatRequests(pending);
-          setSentChatRequests([]);
-        } else if (normalizedSourceUrl.includes("pending-requests")) {
-          setChatRequests([]);
-          setSentChatRequests(pending);
-        } else if (
-          normalizedSourceUrl.includes("/requests") &&
-          !normalizedSourceUrl.includes("pending-requests")
-        ) {
-          setChatRequests(pending);
-          setSentChatRequests([]);
-        } else {
-          const outgoing = pending.filter(isOutgoingRequest);
-          const incoming = pending.filter((req) => isIncomingRequest(req) && !isOutgoingRequest(req));
-          setChatRequests(incoming);
-          setSentChatRequests(outgoing);
-        }
+        const [incomingRes, sentRes] = await Promise.all([
+          fetchIncomingRequests(),
+          hasIdentity ? fetchSentRequests() : Promise.resolve({ list: [], url: "" })
+        ]);
+        if (!active) return;
+        const incoming = Array.isArray(incomingRes?.list)
+          ? incomingRes.list.filter((item) => item && typeof item === "object" && isPendingRequest(item))
+          : [];
+        const outgoing = Array.isArray(sentRes?.list)
+          ? sentRes.list.filter((item) => item && typeof item === "object" && isPendingRequest(item))
+          : [];
+        setChatRequests(incoming);
+        setSentChatRequests(hasIdentity ? outgoing : []);
       } catch (err) {
         if (!active) return;
         setChatRequests([]);
@@ -2639,7 +2648,47 @@ function useChatController() {
     };
   }, [isConversationRoute, myUserId, myEmail]);
 
-  const localThreadKey = (a, b) => [String(a || ""), String(b || "")].sort().join(":");
+  const LOCAL_THREAD_GROUP_TOKEN = "__SSCOLON__";
+  const escapeLocalThreadKeyPart = (value) => String(value || "").replace(/:/g, LOCAL_THREAD_GROUP_TOKEN);
+  const unescapeLocalThreadKeyPart = (value) => String(value || "").replace(new RegExp(LOCAL_THREAD_GROUP_TOKEN, "g"), ":");
+  const localThreadKey = (a, b) => [escapeLocalThreadKeyPart(a), escapeLocalThreadKeyPart(b)].sort().join(":");
+
+  const isGroupThreadId = (value) => {
+    if (value && typeof value === "object") {
+      return Boolean(
+        value.isGroup ||
+        String(value.threadType || "").trim().toLowerCase() === "group" ||
+        String(value.id || value.threadId || "").trim().toLowerCase().startsWith("group:") ||
+        value.groupId != null ||
+        value.group_id != null
+      );
+    }
+    return String(value || "").trim().toLowerCase().startsWith("group:");
+  };
+
+  const parseGroupId = (value) => {
+    if (value && typeof value === "object") {
+      const objectGroupId = String(value.groupId ?? value.group_id ?? value.group?.id ?? "").trim();
+      if (/^\d+$/.test(objectGroupId)) return objectGroupId;
+      const objectId = String(value.id || value.threadId || "").trim();
+      const objectMatch = objectId.match(/^group:(\d+)$/i);
+      if (objectMatch) return objectMatch[1];
+      return "";
+    }
+    const raw = String(value || "").trim();
+    const match = raw.match(/^group:(\d+)$/i);
+    return match ? match[1] : "";
+  };
+
+  const resolveGroupThreadId = (value) => {
+    if (!isGroupThreadId(value)) return "";
+    const groupId = parseGroupId(value);
+    if (groupId) return `group:${groupId}`;
+    if (value && typeof value === "object") {
+      return String(value.id || value.threadId || "").trim();
+    }
+    return String(value || "").trim();
+  };
 
   const localChatStorageKey = () => {
     const id = String(myUserId || safeGetItem("userId") || "").trim();
@@ -2655,7 +2704,7 @@ function useChatController() {
     const entries = Object.entries(data).filter(([key]) => {
       const parts = String(key || "")
         .split(":")
-        .map((value) => String(value || "").trim())
+        .map((value) => unescapeLocalThreadKeyPart(String(value || "").trim()))
         .filter(Boolean);
       return parts.includes(me);
     });
@@ -3079,6 +3128,17 @@ function useChatController() {
     String(contact?.email || ""),
     String(contact?.avatar || ""),
     String(contact?.profilePic || ""),
+    String(contact?.isGroup ? "1" : "0"),
+    String(contact?.threadType || ""),
+    String(contact?.groupId || ""),
+    String(contact?.bio || ""),
+    String(contact?.description || ""),
+    String(contact?.ownerId || ""),
+    String(contact?.ownerName || ""),
+    String(contact?.memberCount || ""),
+    String(contact?.canEdit ? "1" : "0"),
+    String(contact?.canEditGroup ? "1" : "0"),
+    String(contact?.isAdmin ? "1" : "0"),
     String(contact?.lastMessage || ""),
     String(contact?.lastActiveAt || ""),
     String(contact?.presenceUpdatedAt || ""),
@@ -3291,7 +3351,14 @@ function useChatController() {
     return [];
   };
 
-  const requestChatArray = async ({ endpoints, params = {}, mapList = null, timeoutMs = 9000, maxAttempts = Infinity }) => {
+  const requestChatArray = async ({
+    endpoints,
+    params = {},
+    mapList = null,
+    timeoutMs = 9000,
+    maxAttempts = Infinity,
+    preferNonEmpty = false
+  }) => {
     const endpointList = Array.isArray(endpoints) ? endpoints : [endpoints];
     const baseCandidates = buildChatBaseCandidates();
     let firstSuccess = null;
@@ -3323,6 +3390,10 @@ function useChatController() {
           const list = Array.isArray(mapped) ? mapped : [];
           const payload = { list, baseURL, url };
           if (!firstSuccess) firstSuccess = payload;
+          if (!preferNonEmpty) {
+            persistChatServerBase(baseURL);
+            return payload;
+          }
           if (list.length > 0) {
             persistChatServerBase(baseURL);
             return payload;
@@ -3543,6 +3614,109 @@ function useChatController() {
       ).trim();
       return { text, ts, senderId };
     };
+    const isGroupLike = Boolean(
+      userLike?.isGroup ||
+      String(userLike?.threadType || "").trim().toLowerCase() === "group" ||
+      String(userLike?.id || userLike?.threadId || "").trim().toLowerCase().startsWith("group:") ||
+      userLike?.groupId != null ||
+      userLike?.group_id != null
+    );
+    if (isGroupLike) {
+      const groupIdRaw = String(userLike?.groupId ?? userLike?.group_id ?? "").trim();
+      const threadId = resolveGroupThreadId(userLike) || String(userLike?.id || userLike?.threadId || "").trim();
+      const rawName = String(
+        userLike?.name ||
+        userLike?.groupName ||
+        userLike?.title ||
+        userLike?.displayName ||
+        userLike?.display_name ||
+        `Group ${groupIdRaw || threadId}`
+      ).trim();
+      const profilePicRaw = String(
+        userLike?.profilePicUrl ||
+        userLike?.profilePic ||
+        userLike?.avatarUrl ||
+        userLike?.avatar ||
+        ""
+      ).trim();
+      const bio = String(userLike?.bio ?? userLike?.description ?? "").trim();
+      const members = Array.isArray(userLike?.members) ? userLike.members : [];
+      const memberIds = Array.isArray(userLike?.memberIds)
+        ? userLike.memberIds.map((value) => String(value || "").trim()).filter(Boolean)
+        : [];
+      const memberCountRaw = Number(userLike?.memberCount ?? userLike?.member_count ?? members.length ?? 0);
+      const memberCount = Number.isFinite(memberCountRaw) ? Math.max(0, Math.floor(memberCountRaw)) : members.length;
+      const lastMessagePayload =
+        userLike?.latestMessage ||
+        userLike?.lastMessage ||
+        userLike?.message ||
+        u?.latestMessage ||
+        u?.lastMessage ||
+        u?.message ||
+        null;
+      const lastMessageMeta = extractMessageMeta(lastMessagePayload);
+      const lastMessageText = [
+        lastMessageMeta.text,
+        userLike?.lastMessageText,
+        userLike?.latestMessage?.text,
+        userLike?.message,
+        u?.lastMessageText,
+        u?.latestMessage?.text,
+        u?.message
+      ]
+        .map((value) => String(value || "").trim())
+        .find((value) => value) || "";
+      const lastMessageAt =
+        lastMessageMeta.ts ||
+        userLike?.lastMessageAt ||
+        userLike?.lastMessageTime ||
+        userLike?.lastMessageTimestamp ||
+        userLike?.latestMessageAt ||
+        userLike?.latestMessageTime ||
+        userLike?.latestMessageTimestamp ||
+        userLike?.lastAt ||
+        u?.lastMessageAt ||
+        u?.lastMessageTime ||
+        u?.lastMessageTimestamp ||
+        u?.latestMessageAt ||
+        u?.latestMessageTime ||
+        u?.latestMessageTimestamp ||
+        u?.lastAt ||
+        "";
+      const contactName = getContactDisplayName({
+        id: threadId || groupIdRaw,
+        name: rawName,
+        username: "",
+        email: ""
+      });
+      return {
+        id: threadId || groupIdRaw,
+        threadId: threadId || groupIdRaw,
+        threadType: "group",
+        isGroup: true,
+        groupId: userLike?.groupId ?? userLike?.group_id ?? (groupIdRaw || undefined),
+        name: contactName,
+        username: "",
+        email: "",
+        avatar: (contactName[0] || "G").toUpperCase(),
+        profilePic: normalizeContactProfilePic(profilePicRaw),
+        profilePicUrl: normalizeContactProfilePic(profilePicRaw),
+        lastMessage: lastMessageText,
+        ...(String(lastMessageAt || "").trim() ? { lastMessageAt: String(lastMessageAt).trim() } : {}),
+        ...(String(userLike?.createdAt || userLike?.created_at || "").trim()
+          ? { createdAt: String(userLike?.createdAt || userLike?.created_at).trim() }
+          : {}),
+        ...(bio ? { bio, description: bio } : {}),
+        ...(String(userLike?.ownerId ?? "").trim() ? { ownerId: userLike.ownerId } : {}),
+        ...(String(userLike?.ownerName || "").trim() ? { ownerName: String(userLike.ownerName).trim() } : {}),
+        ...(Number.isFinite(memberCount) ? { memberCount } : {}),
+        ...(memberIds.length ? { memberIds } : {}),
+        ...(members.length ? { members } : {}),
+        canEdit: Boolean(userLike?.canEdit ?? userLike?.canEditGroup ?? userLike?.isAdmin),
+        canEditGroup: Boolean(userLike?.canEditGroup ?? userLike?.canEdit ?? userLike?.isAdmin),
+        isAdmin: Boolean(userLike?.isAdmin ?? userLike?.canEdit ?? false)
+      };
+    }
     const me = String(myUserId || "").trim();
     const senderId = String(u?.senderId || userLike?.senderId || "").trim();
     const receiverId = String(u?.receiverId || userLike?.receiverId || "").trim();
@@ -3900,7 +4074,7 @@ function useChatController() {
       const last = normalized[normalized.length - 1];
       const keyIds = String(threadKey || "")
         .split(":")
-        .map((value) => String(value || "").trim())
+        .map((value) => unescapeLocalThreadKeyPart(String(value || "").trim()))
         .filter(Boolean);
       const threadIds = normalized
         .flatMap((item) => [String(item?.senderId || "").trim(), String(item?.receiverId || "").trim()])
@@ -3944,6 +4118,18 @@ function useChatController() {
       }
       if (!otherId) return;
 
+      const lastThreadType = String(last?.threadType || "").trim().toLowerCase();
+      const groupId = parseGroupId(otherId) || String(last?.groupId ?? last?.group_id ?? "").trim();
+      const isGroupThread = Boolean(
+        last?.isGroup ||
+        lastThreadType === "group" ||
+        keyIds.some((value) => /^group:\d+$/i.test(value)) ||
+        (groupId && String(otherId).trim().startsWith("group:"))
+      );
+      const resolvedThreadId = isGroupThread
+        ? (resolveGroupThreadId(otherId) || (groupId ? `group:${groupId}` : String(otherId)))
+        : String(otherId);
+
       const senderEmail = String(last?.senderEmail || last?.fromEmail || "").trim().toLowerCase();
       const receiverEmail = String(last?.receiverEmail || last?.toEmail || "").trim().toLowerCase();
       const candidateEmail =
@@ -3959,30 +4145,64 @@ function useChatController() {
         ""
       ).trim();
       const rawName = String(
-        last?.senderName ||
-        last?.fromName ||
-        last?.displayName ||
-        candidateEmail ||
-        `User ${otherId}`
+        isGroupThread
+          ? (last?.groupName || last?.group?.name || last?.threadName || last?.chatName || `Group ${groupId || resolvedThreadId}`)
+          : (last?.senderName ||
+            last?.fromName ||
+            last?.displayName ||
+            candidateEmail ||
+            `User ${resolvedThreadId}`)
       ).trim();
       const name = getContactDisplayName({
-        id: otherId,
+        id: resolvedThreadId,
         name: rawName,
         username: usernameRaw,
-        email: candidateEmail
+        email: isGroupThread ? "" : candidateEmail
       });
 
-      contactsFromLocal.push({
-        id: String(otherId),
-        name,
-        username: usernameRaw,
-        email: candidateEmail,
-        avatar: (name[0] || "U").toUpperCase(),
-        profilePic: "",
-        lastMessage: String(last?.text || last?.message || ""),
-        lastMessageAt: String(last?.createdAt || ""),
-        lastActiveAt: String(last?.createdAt || "")
-      });
+      contactsFromLocal.push(
+        isGroupThread
+          ? {
+              id: String(resolvedThreadId),
+              name,
+              username: "",
+              email: "",
+              avatar: (name[0] || "G").toUpperCase(),
+              profilePic: normalizeContactProfilePic(
+                last?.groupProfilePic ||
+                last?.profilePic ||
+                last?.profilePicUrl ||
+                ""
+              ),
+              lastMessage: String(last?.text || last?.message || ""),
+              lastMessageAt: String(last?.createdAt || ""),
+              lastActiveAt: String(last?.createdAt || ""),
+              isGroup: true,
+              threadType: "group",
+              groupId: groupId || undefined,
+              bio: String(last?.bio || last?.description || "").trim(),
+              description: String(last?.bio || last?.description || "").trim(),
+              ownerId: last?.ownerId ?? undefined,
+              ownerName: String(last?.ownerName || "").trim(),
+              memberCount: Array.isArray(last?.members) ? last.members.length : Number(last?.memberCount || 0) || undefined,
+              memberIds: Array.isArray(last?.memberIds) ? last.memberIds : undefined,
+              members: Array.isArray(last?.members) ? last.members : undefined,
+              canEdit: Boolean(last?.canEdit),
+              canEditGroup: Boolean(last?.canEditGroup ?? last?.canEdit),
+              isAdmin: Boolean(last?.isAdmin)
+            }
+          : {
+              id: String(resolvedThreadId),
+              name,
+              username: usernameRaw,
+              email: candidateEmail,
+              avatar: (name[0] || "U").toUpperCase(),
+              profilePic: "",
+              lastMessage: String(last?.text || last?.message || ""),
+              lastMessageAt: String(last?.createdAt || ""),
+              lastActiveAt: String(last?.createdAt || "")
+            }
+      );
     });
 
     return mergeContacts([], contactsFromLocal);
@@ -4059,7 +4279,7 @@ function useChatController() {
         const encodedTargetId = encodeURIComponent(String(normalizedTargetUserId));
         await requestChatMutation({
           method: "POST",
-          endpoints: [`/api/calls/signal/${encodedTargetId}`, `/calls/signal/${encodedTargetId}`],
+          endpoints: [`/api/calls/signal/${encodedTargetId}`],
           data: signalPayload
         });
         sentViaRest = true;
@@ -6191,6 +6411,12 @@ function useChatController() {
   };
 
   const onIncomingChatMessage = (payload) => {
+    const groupId = parseGroupId(payload);
+    const isGroupThread = Boolean(
+      payload?.isGroup ||
+      String(payload?.threadType || "").trim().toLowerCase() === "group" ||
+      groupId
+    );
     const senderId = String(
       payload?.senderId ??
         payload?.sender_id ??
@@ -6217,12 +6443,15 @@ function useChatController() {
         payload?.receiver?.user_id ??
         ""
     );
-    const contactIdForThread =
-      senderId && senderId !== String(myUserId)
-        ? senderId
-        : receiverId && receiverId !== String(myUserId)
-          ? receiverId
-          : "";
+    const contactIdForThread = isGroupThread
+      ? (resolveGroupThreadId(payload) || (groupId ? `group:${groupId}` : ""))
+      : (
+          senderId && senderId !== String(myUserId)
+            ? senderId
+            : receiverId && receiverId !== String(myUserId)
+              ? receiverId
+              : ""
+        );
     if (!contactIdForThread) return;
     if (senderId && senderId !== String(myUserId || "")) {
       setRemoteTypingState(contactIdForThread, false);
@@ -6312,32 +6541,71 @@ function useChatController() {
       const found = prev.find((c) => c.id === contactIdForThread);
       let next = prev;
       if (!found) {
-        const name = normalizeDisplayName(
-          payload?.senderName ||
-            payload?.sender_name ||
-            payload?.senderEmail ||
-            payload?.sender_email ||
-            payload?.fromName ||
-            payload?.from_name ||
-            payload?.fromEmail ||
-            payload?.from_email ||
-            `User ${contactIdForThread}`
-        );
-        next = mergeContacts(prev, [
-          {
-            id: contactIdForThread,
-            name,
-            email:
+        if (isGroupThread) {
+          const groupName = normalizeDisplayName(
+            payload?.groupName ||
+              payload?.group?.name ||
+              payload?.name ||
+              `Group ${groupId || contactIdForThread}`
+          );
+          next = mergeContacts(prev, [
+            {
+              id: contactIdForThread,
+              name: groupName,
+              email: "",
+              avatar: (groupName[0] || "G").toUpperCase(),
+              profilePic: normalizeContactProfilePic(
+                payload?.groupProfilePic ||
+                payload?.group?.profilePic ||
+                payload?.profilePic ||
+                payload?.profilePicUrl ||
+                ""
+              ),
+              lastMessage: preview || nextMessage.text,
+              lastMessageAt: nextMessage?.createdAt || new Date().toISOString(),
+              isGroup: true,
+              threadType: "group",
+              groupId: groupId || undefined,
+              bio: String(payload?.bio || payload?.description || "").trim(),
+              description: String(payload?.bio || payload?.description || "").trim(),
+              ownerId: payload?.ownerId ?? undefined,
+              ownerName: String(payload?.ownerName || "").trim(),
+              memberCount: Array.isArray(payload?.members) ? payload.members.length : Number(payload?.memberCount || 0) || undefined,
+              memberIds: Array.isArray(payload?.memberIds) ? payload.memberIds : undefined,
+              members: Array.isArray(payload?.members) ? payload.members : undefined,
+              canEdit: Boolean(payload?.canEdit),
+              canEditGroup: Boolean(payload?.canEditGroup ?? payload?.canEdit),
+              isAdmin: Boolean(payload?.isAdmin)
+            }
+          ]);
+        } else {
+          const name = normalizeDisplayName(
+            payload?.senderName ||
+              payload?.sender_name ||
               payload?.senderEmail ||
               payload?.sender_email ||
+              payload?.fromName ||
+              payload?.from_name ||
               payload?.fromEmail ||
               payload?.from_email ||
-              "",
-            avatar: (name[0] || "U").toUpperCase(),
-            lastMessage: preview || nextMessage.text,
-            lastMessageAt: nextMessage?.createdAt || new Date().toISOString()
-          }
-        ]);
+              `User ${contactIdForThread}`
+          );
+          next = mergeContacts(prev, [
+            {
+              id: contactIdForThread,
+              name,
+              email:
+                payload?.senderEmail ||
+                payload?.sender_email ||
+                payload?.fromEmail ||
+                payload?.from_email ||
+                "",
+              avatar: (name[0] || "U").toUpperCase(),
+              lastMessage: preview || nextMessage.text,
+              lastMessageAt: nextMessage?.createdAt || new Date().toISOString()
+            }
+          ]);
+        }
       }
       return next.map((c) =>
         c.id === contactIdForThread
@@ -6377,20 +6645,77 @@ function useChatController() {
 
   const openGroupInvite = () => {
     // Keep invite selection user-driven; do not auto-select participants.
+    setNewGroupOpen(false);
     setGroupInviteIds([]);
     setGroupInviteOpen(true);
     setCallError("");
   };
 
+  const getCallableContactIds = () => {
+    const meId = String(myUserId || "").trim();
+    return Array.from(
+      new Set(
+        (Array.isArray(contactsRef.current) ? contactsRef.current : [])
+          .map((contact) => {
+            if (contact?.isGroup) return "";
+            const id = String(contact?.id || "").trim();
+            if (!id || id === meId) return "";
+            return id;
+          })
+          .filter(Boolean)
+      )
+    );
+  };
+
+  const getGroupCreationCandidateIds = () => {
+    const meId = String(myUserId || "").trim();
+    return Array.from(
+      new Set(
+        [...(Array.isArray(contactsRef.current) ? contactsRef.current : []), ...newGroupSearchUsers]
+          .map((contact) => {
+            if (contact?.isGroup) return "";
+            const id = String(contact?.id || "").trim();
+            if (!id || id === meId) return "";
+            return id;
+          })
+          .filter(Boolean)
+      )
+    );
+  };
+
+  const getActiveGroupParticipantIds = () => {
+    const activeId = String(activeContactIdRef.current || activeContactId || "").trim();
+    if (!activeId) return [];
+    const currentGroup = (Array.isArray(contactsRef.current) ? contactsRef.current : []).find(
+      (contact) => String(contact?.id || "").trim() === activeId && contact?.isGroup
+    );
+    if (!currentGroup) return [];
+    const meId = String(myUserId || "").trim();
+    const memberIds = Array.isArray(currentGroup?.memberIds)
+      ? currentGroup.memberIds.map((value) => String(value || "").trim()).filter(Boolean)
+      : [];
+    const members = Array.isArray(currentGroup?.members)
+      ? currentGroup.members
+          .map((member) => String(member?.id ?? member?.userId ?? member?.memberId ?? "").trim())
+          .filter(Boolean)
+      : [];
+    return Array.from(new Set([...memberIds, ...members].filter((id) => id && id !== meId)));
+  };
+
   const openNewGroup = () => {
-    setGroupInviteIds([]);
-    setGroupInviteOpen(true);
+    setGroupInviteOpen(false);
+    setNewGroupIds([]);
+    setNewGroupName("");
+    setNewGroupQuery("");
+    setNewGroupSearchUsers([]);
+    setNewGroupOpen(true);
     setCallError("");
   };
 
   const toggleGroupInvite = (id) => {
     const key = String(id || "");
-    if (!key) return;
+    const allowedIds = new Set(getCallableContactIds());
+    if (!key || !allowedIds.has(key)) return;
     setGroupInviteIds((prev) => {
       const set = new Set(prev);
       if (set.has(key)) set.delete(key);
@@ -6399,13 +6724,76 @@ function useChatController() {
     });
   };
 
-  const startGroupCall = async () => {
+  const toggleNewGroupMember = (id) => {
+    const key = String(id || "");
+    const allowedIds = new Set(getGroupCreationCandidateIds());
+    if (!key || !allowedIds.has(key)) return;
+    setNewGroupIds((prev) => {
+      const set = new Set(prev);
+      if (set.has(key)) set.delete(key);
+      else set.add(key);
+      return Array.from(set);
+    });
+  };
+
+  const createGroupConversation = async () => {
+    const name = String(newGroupName || "").trim();
+    const allowedIds = new Set(getGroupCreationCandidateIds());
+    const memberIds = Array.from(new Set(newGroupIds.map((id) => String(id || "").trim()).filter((id) => allowedIds.has(id))));
+    if (!name) {
+      setCallError("Group name required.");
+      return null;
+    }
+    if (memberIds.length === 0) {
+      setCallError("Select at least one person.");
+      return null;
+    }
+    setNewGroupBusy(true);
+    setCallError("");
+    try {
+      const res = await requestChatMutation({
+        method: "POST",
+        endpoints: ["/api/chat/groups"],
+        data: { name, memberIds }
+      });
+      const mapped = mapUserToContact(res?.data || {});
+      if (!mapped?.id) throw new Error("missing-group-id");
+      setContacts((prev) => mergeContacts(prev, [mapped]));
+      setNewGroupOpen(false);
+      setNewGroupIds([]);
+      setNewGroupName("");
+      setNewGroupQuery("");
+      setNewGroupSearchUsers([]);
+      setActiveContactId(String(mapped.id));
+      navigate(`/chat/${mapped.id}`);
+      return mapped;
+    } catch (err) {
+      const status = Number(err?.response?.status || 0);
+      if (status === 401 || status === 403) {
+        setError("Session expired for this server. Please login again.");
+        clearAuthStorage();
+        navigate("/login", { replace: true });
+      } else {
+        setCallError(err?.response?.data?.message || "Could not create group.");
+      }
+      return null;
+    } finally {
+      setNewGroupBusy(false);
+    }
+  };
+
+  const startGroupCall = async (preferredMode = "video") => {
     if (groupCallActive) return;
     if (!navigator?.mediaDevices?.getUserMedia) {
       setCallError("Your browser does not support media calls");
       return;
     }
-    const selected = Array.from(new Set(groupInviteIds.map((id) => String(id)).filter(Boolean)));
+    const groupMode = preferredMode === "audio" ? "audio" : "video";
+    const allowedIds = new Set(getCallableContactIds());
+    const selectedFromInvite = Array.from(
+      new Set(groupInviteIds.map((id) => String(id || "").trim()).filter((id) => allowedIds.has(id)))
+    );
+    const selected = selectedFromInvite.length ? selectedFromInvite : getActiveGroupParticipantIds();
     if (selected.length === 0) {
       setCallError("Select at least one participant");
       return;
@@ -6423,7 +6811,7 @@ function useChatController() {
     setGroupInviteOpen(false);
     setCallState({
       phase: "dialing",
-      mode: "video",
+      mode: groupMode,
       peerId: "group",
       peerName: "Group Call",
       initiatedByMe: true
@@ -6434,12 +6822,12 @@ function useChatController() {
     }
 
     try {
-      const stream = localStreamRef.current || await ensureLocalStream("video");
+      const stream = localStreamRef.current || await ensureLocalStream(groupMode);
       if (callStateRef.current.phase !== "idle") {
         closeSinglePeerOnly();
         setCallState({
           phase: "connecting",
-          mode: "video",
+          mode: groupMode,
           peerId: "group",
           peerName: "Group Call",
           initiatedByMe: true
@@ -6447,16 +6835,16 @@ function useChatController() {
       }
       for (const peerId of members) {
         if (!peerId || peerId === String(myUserId || "")) continue;
-        const pc = createGroupPeerConnection(peerId, "video", roomId, members);
+        const pc = createGroupPeerConnection(peerId, groupMode, roomId, members);
         if (!pc) continue;
         stream.getTracks().forEach((track) => pc.addTrack(track, stream));
-        tuneSendersForQuality(pc, "video");
+        tuneSendersForQuality(pc, groupMode);
         const offer = await pc.createOffer();
-        offer.sdp = applySdpQualityHints(offer.sdp, "video");
+        offer.sdp = applySdpQualityHints(offer.sdp, groupMode);
         await pc.setLocalDescription(offer);
         sendSignal(peerId, {
           type: "offer",
-          mode: "video",
+          mode: groupMode,
           sdp: offer.sdp,
           roomId,
           group: true,
@@ -6469,7 +6857,10 @@ function useChatController() {
   };
 
   const addPeopleToGroupCall = async () => {
-    const selected = Array.from(new Set(groupInviteIds.map((id) => String(id)).filter(Boolean)));
+    const allowedIds = new Set(getCallableContactIds());
+    const selected = Array.from(
+      new Set(groupInviteIds.map((id) => String(id || "").trim()).filter((id) => allowedIds.has(id)))
+    );
     if (selected.length === 0) {
       setCallError("Select at least one participant");
       return;
@@ -6478,25 +6869,26 @@ function useChatController() {
     const currentMembers = Array.isArray(groupMembers) ? groupMembers.map((id) => String(id)) : [];
     const merged = Array.from(new Set([String(myUserId || ""), ...currentMembers, ...selected].filter(Boolean)));
     const roomId = groupRoomId || buildGroupRoomId();
+    const groupMode = callStateRef.current.mode === "audio" ? "audio" : "video";
     setGroupRoomId(roomId);
     setGroupMembers(merged);
     setGroupInviteOpen(false);
 
     try {
-      const stream = localStreamRef.current || await ensureLocalStream("video");
+      const stream = localStreamRef.current || await ensureLocalStream(groupMode);
       for (const peerId of merged) {
         if (!peerId || peerId === String(myUserId || "")) continue;
         if (groupPeersRef.current.has(peerId)) continue;
-        const pc = createGroupPeerConnection(peerId, "video", roomId, merged);
+        const pc = createGroupPeerConnection(peerId, groupMode, roomId, merged);
         if (!pc) continue;
         stream.getTracks().forEach((track) => pc.addTrack(track, stream));
-        tuneSendersForQuality(pc, "video");
+        tuneSendersForQuality(pc, groupMode);
         const offer = await pc.createOffer();
-        offer.sdp = applySdpQualityHints(offer.sdp, "video");
+        offer.sdp = applySdpQualityHints(offer.sdp, groupMode);
         await pc.setLocalDescription(offer);
         sendSignal(peerId, {
           type: "offer",
-          mode: "video",
+          mode: groupMode,
           sdp: offer.sdp,
           roomId,
           group: true,
@@ -7309,17 +7701,32 @@ function useChatController() {
         finalize();
         return;
       }
-      const res = await requestChatArray({
-        endpoints: ["/api/chat/conversations"],
-        params: { _: Date.now() },
-        mapList: (items) =>
-          items
-            .map(mapUserToContact)
-            .filter((contact) => String(contact?.id || "").trim()),
-        timeoutMs: 4000,
-        maxAttempts: 4
-      });
-      list = res.list;
+      const fetchContactsFromEndpoints = async (endpoints) => {
+        try {
+          const res = await requestChatArray({
+            endpoints,
+            params: { _: Date.now() },
+            mapList: (items) =>
+              items
+                .map(mapUserToContact)
+                .filter((contact) => String(contact?.id || "").trim()),
+            timeoutMs: 4000,
+            maxAttempts: 4
+          });
+          return Array.isArray(res.list) ? res.list : [];
+        } catch (err) {
+          const status = Number(err?.response?.status || 0);
+          if (status === 401 || status === 403) throw err;
+          if (isRetryableChatRouteStatus(status)) return [];
+          throw err;
+        }
+      };
+
+      const [directContacts, groupContacts] = await Promise.all([
+        fetchContactsFromEndpoints(["/api/chat/conversations", "/chat/conversations"]),
+        fetchContactsFromEndpoints(["/api/chat/groups", "/chat/groups"])
+      ]);
+      list = mergeContacts(directContacts, groupContacts);
       const fromLocal = extractContactsFromLocalHistory();
       const mergedList = mergeContacts(list, fromLocal);
       setContacts((prev) => mergeContacts(prev, mergedList));
@@ -7566,26 +7973,34 @@ function useChatController() {
 
   const loadThread = async (otherId) => {
     if (!otherId) return;
-    const hiddenIds = getHiddenMessageSetForContact(otherId);
+    const threadId = String(otherId || "").trim();
+    const groupId = parseGroupId(threadId);
+    const isGroupThread = Boolean(isGroupThreadId(threadId) || groupId);
+    if (isGroupThread && !groupId) {
+      setError("Unable to resolve group chat.");
+      return;
+    }
+    const resolvedThreadId = isGroupThread ? (resolveGroupThreadId(threadId) || `group:${groupId}`) : threadId;
+    const hiddenIds = getHiddenMessageSetForContact(resolvedThreadId);
     const shouldTrackUnread =
       !(Boolean(isConversationRouteRef.current) &&
-        String(activeContactIdRef.current || "") === String(otherId) &&
+        String(activeContactIdRef.current || "") === String(resolvedThreadId) &&
         (typeof document === "undefined" || document.visibilityState !== "hidden"));
     let localFallbackList = null;
     if (chatFallbackMode) {
       const all = readLocalChat();
-      const key = localThreadKey(myUserId, otherId);
-      const normalized = (Array.isArray(all[key]) ? all[key] : []).map((m) => normalizeMessage(m, otherId));
+      const key = localThreadKey(myUserId, resolvedThreadId);
+      const normalized = (Array.isArray(all[key]) ? all[key] : []).map((m) => normalizeMessage(m, resolvedThreadId));
       const deleteTargets = new Set(normalized.map((m) => parseDeleteTargetId(m?.text)).filter(Boolean).map(String));
       const visible = normalized.filter((m) => !parseDeleteTargetId(m?.text) && !parseReadReceiptUptoMs(m?.text));
       const list = applyDeleteTargetsToList(visible, deleteTargets).filter((m) => !hiddenIds.has(String(m?.id || "")));
       localFallbackList = list;
-      const existingThread = Array.isArray(messagesByContactRef.current?.[String(otherId)])
-        ? messagesByContactRef.current[String(otherId)]
+      const existingThread = Array.isArray(messagesByContactRef.current?.[String(resolvedThreadId)])
+        ? messagesByContactRef.current[String(resolvedThreadId)]
         : [];
       if (!existingThread.length) {
         setMessagesByContact((prev) => {
-          const threadKey = String(otherId);
+          const threadKey = String(resolvedThreadId);
           const existing = Array.isArray(prev[threadKey]) ? prev[threadKey] : [];
           if (existing.length > 0 || areMessageListsEquivalent(existing, list)) return prev;
           const next = { ...prev, [threadKey]: list };
@@ -7596,7 +8011,7 @@ function useChatController() {
     }
     if (isChatApiDisabled()) {
       const activeKey = String(activeContactIdRef.current || "");
-      const isActiveThread = String(otherId || "") === activeKey;
+      const isActiveThread = String(resolvedThreadId || "") === activeKey;
       const canTryLiveFetch = Boolean(isConversationRouteRef.current && isActiveThread);
       if (!canTryLiveFetch) {
         setChatFallbackMode(true);
@@ -7605,14 +8020,17 @@ function useChatController() {
     }
     try {
       const res = await requestChatArray({
-        endpoints: [
-          `/api/chat/${otherId}/messages`,
-          `/chat/${otherId}/messages`,
-          `/api/messages/${otherId}`,
-          `/messages/${otherId}`
-        ],
+        endpoints: isGroupThread
+          ? [
+              `/api/chat/groups/${groupId}/messages`,
+              `/chat/groups/${groupId}/messages`
+            ]
+          : [
+              `/api/chat/${threadId}/messages`,
+              `/chat/${threadId}/messages`
+            ],
         params: { _: Date.now() },
-        mapList: (items) => items.map((m) => normalizeMessage(m, otherId)),
+        mapList: (items) => items.map((m) => normalizeMessage(m, resolvedThreadId)),
         timeoutMs: chatFallbackMode ? 4500 : 9000,
         maxAttempts: chatFallbackMode ? 3 : Infinity
       });
@@ -7624,8 +8042,8 @@ function useChatController() {
           usedLocalHistory = true;
         }
         const all = readLocalChat();
-        const key = localThreadKey(myUserId, otherId);
-        const localNormalized = (Array.isArray(all[key]) ? all[key] : []).map((m) => normalizeMessage(m, otherId));
+        const key = localThreadKey(myUserId, resolvedThreadId);
+        const localNormalized = (Array.isArray(all[key]) ? all[key] : []).map((m) => normalizeMessage(m, resolvedThreadId));
         if (localNormalized.length > 0) {
           normalized = localNormalized;
           usedLocalHistory = true;
@@ -7635,7 +8053,7 @@ function useChatController() {
       const visible = normalized.filter((m) => !parseDeleteTargetId(m?.text) && !parseReadReceiptUptoMs(m?.text));
       const list = applyDeleteTargetsToList(visible, deleteTargets).filter((m) => !hiddenIds.has(String(m?.id || "")));
       setMessagesByContact((prev) => {
-        const key = String(otherId);
+        const key = String(resolvedThreadId);
         const oldList = Array.isArray(prev[key]) ? prev[key] : [];
         if (!usedLocalHistory && list.length === 0 && oldList.length > 0) {
           return prev;
@@ -7790,7 +8208,7 @@ function useChatController() {
             .filter((m) => !hiddenIds.has(String(m?.id || "")))
             .map((m) => toEpochMs(m?.createdAt || 0))
             .filter((ms) => Number.isFinite(ms) && ms > 0);
-          syncThreadUnreadFromIncomingTimes(otherId, incomingTimesMs, { allowDecrease: true });
+          syncThreadUnreadFromIncomingTimes(resolvedThreadId, incomingTimesMs, { allowDecrease: true });
         }
         if (areMessageListsEquivalent(oldList, merged)) {
           return prev;
@@ -7807,13 +8225,13 @@ function useChatController() {
         setChatFallbackMode(true);
         if (!localFallbackList) {
           const all = readLocalChat();
-          const key = localThreadKey(myUserId, otherId);
-          const normalized = (Array.isArray(all[key]) ? all[key] : []).map((m) => normalizeMessage(m, otherId));
+          const key = localThreadKey(myUserId, resolvedThreadId);
+          const normalized = (Array.isArray(all[key]) ? all[key] : []).map((m) => normalizeMessage(m, resolvedThreadId));
           const deleteTargets = new Set(normalized.map((m) => parseDeleteTargetId(m?.text)).filter(Boolean).map(String));
           const visible = normalized.filter((m) => !parseDeleteTargetId(m?.text) && !parseReadReceiptUptoMs(m?.text));
           const list = applyDeleteTargetsToList(visible, deleteTargets).filter((m) => !hiddenIds.has(String(m?.id || "")));
           setMessagesByContact((prev) => {
-            const threadKey = String(otherId);
+            const threadKey = String(resolvedThreadId);
             const existing = Array.isArray(prev[threadKey]) ? prev[threadKey] : [];
             if (areMessageListsEquivalent(existing, list)) return prev;
             const next = { ...prev, [threadKey]: list };
@@ -8201,7 +8619,7 @@ function useChatController() {
   }, [location.search, location.state]);
 
   useEffect(() => {
-    if (!pendingShareDraft || !activeContactId) return;
+    if (!pendingShareDraft || !activeContactId || !isConversationRoute) return;
     setInputText((prev) => {
       const base = String(prev || "").trim();
       return base ? `${base}\n${pendingShareDraft}` : pendingShareDraft;
@@ -8210,7 +8628,7 @@ function useChatController() {
     setPendingShareDraft("");
     const t = setTimeout(() => setShareHint(""), 1500);
     return () => clearTimeout(t);
-  }, [pendingShareDraft, activeContactId]);
+  }, [pendingShareDraft, activeContactId, isConversationRoute]);
 
   useEffect(() => {
     if (!activeContactId) return;
@@ -8278,9 +8696,7 @@ function useChatController() {
               const res = await requestChatArray({
                 endpoints: [
                   `/api/chat/${id}/messages`,
-                  `/chat/${id}/messages`,
-                  `/api/messages/${id}`,
-                  `/messages/${id}`
+                  `/chat/${id}/messages`
                 ],
                 params: { _: Date.now() },
                 mapList: (items) => items.map((m) => normalizeMessage(m, id)),
@@ -8526,7 +8942,7 @@ function useChatController() {
       busy = true;
       try {
         const res = await requestChatArray({
-          endpoints: ["/api/calls/inbox", "/calls/inbox"],
+          endpoints: ["/api/calls/inbox"],
           timeoutMs: 6500
         });
         const list = Array.isArray(res?.list) ? res.list : [];
@@ -8686,6 +9102,31 @@ function useChatController() {
     };
   }, [newChatQuery]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const q = newGroupQuery.trim();
+
+    if (q.length < 1) {
+      setNewGroupSearchUsers([]);
+      return undefined;
+    }
+
+    const timer = setTimeout(async () => {
+      try {
+        const data = await searchContacts(q);
+        if (cancelled) return;
+        setNewGroupSearchUsers(Array.isArray(data) ? data : []);
+      } catch {
+        if (!cancelled) setNewGroupSearchUsers([]);
+      }
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [newGroupQuery]);
+
   const isBlockedContact = (contact) => {
     const contactIdValue = String(contact?.id || "").trim();
     const emailValue = String(contact?.email || "").trim().toLowerCase();
@@ -8802,15 +9243,44 @@ function useChatController() {
     ].filter(Boolean);
   };
 
+  const resolveChatRequestActionInfo = (request, direction = "incoming", action = "accept") => {
+    const normalizedDirection = String(direction || "incoming").trim().toLowerCase();
+    const normalizedAction = String(action || "accept").trim().toLowerCase();
+    const requestId = String(request?.id || request?.requestId || request?.followRequestId || "").trim();
+    const contact = resolveChatRequestContact(request);
+    const fallbackKey = getRequestKey(contact) || String(contact?.id || "").trim();
+    const actionKey = requestId || fallbackKey;
+    const endpoints = [];
+
+    if (requestId && normalizedDirection === "incoming" && ["accept", "reject"].includes(normalizedAction)) {
+      endpoints.push(`/api/follow/requests/${encodeURIComponent(requestId)}/${normalizedAction}`);
+    }
+
+    return {
+      id: requestId,
+      actionKey,
+      direction: normalizedDirection,
+      action: normalizedAction,
+      contact,
+      endpoints
+    };
+  };
+
   const acceptChatRequest = async (request) => {
-    const idText = String(request?.id || "").trim();
-    if (!idText || chatRequestBusyById[idText]) return;
-    setChatRequestBusyById((prev) => ({ ...prev, [idText]: true }));
+    const actionInfo = resolveChatRequestActionInfo(request, "incoming", "accept");
+    const idText = actionInfo.id;
+    const actionKey = actionInfo.actionKey || idText;
+    if (!idText || !actionInfo.endpoints.length || chatRequestBusyById[actionKey]) return;
+    setChatRequestBusyById((prev) => ({ ...prev, [actionKey]: true }));
     setChatRequestError("");
     try {
-      await api.post(`/api/follow/requests/${encodeURIComponent(idText)}/accept`);
-      setChatRequests((prev) => prev.filter((entry) => String(entry?.id || "") !== idText));
-      const contact = resolveChatRequestContact(request);
+      await api.post(actionInfo.endpoints[0]);
+      setChatRequests((prev) =>
+        prev.filter(
+          (entry) => String(entry?.id || entry?.requestId || entry?.followRequestId || "").trim() !== idText
+        )
+      );
+      const contact = actionInfo.contact || resolveChatRequestContact(request);
       if (contact?.id && !contact?.requestFallback) {
         setContacts((prev) => mergeContacts(prev, [contact]));
         const identifiers = resolveChatRequestIdentifiers(request, contact);
@@ -8820,19 +9290,25 @@ function useChatController() {
     } catch {
       setChatRequestError("Unable to accept chat request.");
     } finally {
-      setChatRequestBusyById((prev) => ({ ...prev, [idText]: false }));
+      setChatRequestBusyById((prev) => ({ ...prev, [actionKey]: false }));
     }
   };
 
   const rejectChatRequest = async (request) => {
-    const idText = String(request?.id || "").trim();
-    if (!idText || chatRequestBusyById[idText]) return;
-    setChatRequestBusyById((prev) => ({ ...prev, [idText]: true }));
+    const actionInfo = resolveChatRequestActionInfo(request, "incoming", "reject");
+    const idText = actionInfo.id;
+    const actionKey = actionInfo.actionKey || idText;
+    if (!idText || !actionInfo.endpoints.length || chatRequestBusyById[actionKey]) return;
+    setChatRequestBusyById((prev) => ({ ...prev, [actionKey]: true }));
     setChatRequestError("");
     try {
-      await api.post(`/api/follow/requests/${encodeURIComponent(idText)}/reject`);
-      setChatRequests((prev) => prev.filter((entry) => String(entry?.id || "") !== idText));
-      const contact = resolveChatRequestContact(request);
+      await api.post(actionInfo.endpoints[0]);
+      setChatRequests((prev) =>
+        prev.filter(
+          (entry) => String(entry?.id || entry?.requestId || entry?.followRequestId || "").trim() !== idText
+        )
+      );
+      const contact = actionInfo.contact || resolveChatRequestContact(request);
       if (contact?.id && !contact?.requestFallback) {
         const identifiers = resolveChatRequestIdentifiers(request, contact);
         updateFollowCache(identifiers, false);
@@ -8841,7 +9317,7 @@ function useChatController() {
     } catch {
       setChatRequestError("Unable to reject chat request.");
     } finally {
-      setChatRequestBusyById((prev) => ({ ...prev, [idText]: false }));
+      setChatRequestBusyById((prev) => ({ ...prev, [actionKey]: false }));
     }
   };
 
@@ -8968,6 +9444,7 @@ function useChatController() {
 
   const canChatWith = (contact) => {
     if (!contact) return false;
+    if (isGroupThreadId(contact)) return true;
     if (isFollowingContact(contact)) return true;
     if (getRequestStatus(contact) === "following") return true;
     const id = String(contact?.id || "").trim();
@@ -9072,7 +9549,18 @@ function useChatController() {
 
     setError("");
     try {
-      await api.delete(`/api/chat/${id}`);
+      if (isGroupThreadId(contact) || id.startsWith("group:")) {
+        const groupId = parseGroupId(contact) || parseGroupId(id);
+        if (!groupId) {
+          throw new Error("Unable to resolve group chat.");
+        }
+        await requestChatMutation({
+          method: "DELETE",
+          endpoints: [`/api/chat/groups/${groupId}`, `/chat/groups/${groupId}`]
+        });
+      } else {
+        await api.delete(`/api/chat/${id}`);
+      }
     } catch (err) {
       if (!chatFallbackMode) {
         setError(err?.response?.data?.message || "Failed to delete chat.");
@@ -9119,8 +9607,138 @@ function useChatController() {
     setContactActionId("");
   };
 
-  const activeContact = contacts.find((c) => c.id === activeContactId) || null;
+  const buildRouteFallbackContact = (id) => {
+    const threadId = String(id || "").trim();
+    if (!threadId) return null;
+
+    const groupThread = Boolean(isGroupThreadId(threadId) || parseGroupId(threadId));
+    if (groupThread) {
+      const groupId = parseGroupId(threadId) || threadId;
+      return {
+        id: threadId,
+        threadId,
+        threadType: "group",
+        isGroup: true,
+        groupId,
+        name: `Group ${groupId}`,
+        username: `group:${groupId}`,
+        bio: "",
+        description: "",
+        profilePic: "",
+        profilePicUrl: "",
+        ownerId: null,
+        ownerName: "",
+        isAdmin: false,
+        canEdit: false,
+        canEditGroup: false,
+        memberCount: 0,
+        memberIds: [],
+        members: [],
+        lastMessage: "",
+        lastMessageAt: null,
+        lastAt: null
+      };
+    }
+
+    return {
+      id: threadId,
+      threadId,
+      threadType: "direct",
+      isGroup: false,
+      groupId: null,
+      name: threadId,
+      username: threadId,
+      bio: "",
+      description: "",
+      profilePic: "",
+      profilePicUrl: "",
+      ownerId: null,
+      ownerName: "",
+      isAdmin: false,
+      canEdit: false,
+      canEditGroup: false,
+      memberCount: 0,
+      memberIds: [],
+      members: [],
+      lastMessage: "",
+      lastMessageAt: null,
+      lastAt: null
+    };
+  };
+
+  const activeContact =
+    contacts.find((c) => c.id === activeContactId) ||
+    (isConversationRoute ? buildRouteFallbackContact(activeContactId || contactId) : null);
   const activeContactBlocked = activeContact ? isBlockedContact(activeContact) : false;
+  const resolveGroupContactPayload = (data) => {
+    const mapped = mapUserToContact(data);
+    if (!mapped?.id) return null;
+    setContacts((prev) => mergeContacts(prev, [mapped]));
+    return mapped;
+  };
+  const updateGroupInfo = async (patch = {}, targetGroup = activeContactId) => {
+    const groupThreadId = resolveGroupThreadId(targetGroup);
+    const groupId = parseGroupId(targetGroup);
+    if (!groupThreadId || !groupId) {
+      setError("Unable to resolve group chat.");
+      return null;
+    }
+    const cleanPatch = patch && typeof patch === "object" ? patch : {};
+    if (!Object.keys(cleanPatch).length) return null;
+    setGroupInfoSaving(true);
+    try {
+      const res = await requestChatMutation({
+        method: "PATCH",
+        endpoints: [`/api/chat/groups/${groupId}`, `/chat/groups/${groupId}`],
+        data: cleanPatch
+      });
+      return resolveGroupContactPayload(res?.data || null);
+    } catch (err) {
+      const status = Number(err?.response?.status || 0);
+      if (status === 401 || status === 403) {
+        setError("Session expired for this server. Please login again.");
+        clearAuthStorage();
+        navigate("/login", { replace: true });
+      } else {
+        setError(err?.response?.data?.message || "Could not update group.");
+      }
+      return null;
+    } finally {
+      setGroupInfoSaving(false);
+    }
+  };
+  const updateGroupPhoto = async (file, targetGroup = activeContactId) => {
+    const groupThreadId = resolveGroupThreadId(targetGroup);
+    const groupId = parseGroupId(targetGroup);
+    if (!groupThreadId || !groupId) {
+      setError("Unable to resolve group chat.");
+      return null;
+    }
+    if (!file) return null;
+    setGroupInfoSaving(true);
+    try {
+      const form = new FormData();
+      form.append("photo", file);
+      const res = await requestChatMutation({
+        method: "POST",
+        endpoints: [`/api/chat/groups/${groupId}/photo`, `/chat/groups/${groupId}/photo`],
+        data: form
+      });
+      return resolveGroupContactPayload(res?.data || null);
+    } catch (err) {
+      const status = Number(err?.response?.status || 0);
+      if (status === 401 || status === 403) {
+        setError("Session expired for this server. Please login again.");
+        clearAuthStorage();
+        navigate("/login", { replace: true });
+      } else {
+        setError(err?.response?.data?.message || "Could not update group photo.");
+      }
+      return null;
+    } finally {
+      setGroupInfoSaving(false);
+    }
+  };
   const activeContactKey = String(activeContactId || "");
   const activeMuted = Boolean(mutedChatsById[activeContactKey]);
   const activeDisappearingValue = String(disappearingByContact[activeContactKey] || "0");
@@ -10371,14 +10989,25 @@ function useChatController() {
       setError("Cannot send message to your own account.");
       return false;
     }
+    const groupId = parseGroupId(targetContactId);
+    const isGroupThread = Boolean(isGroupThreadId(targetContactId) || groupId);
+    if (isGroupThread && !groupId) {
+      setError("Unable to resolve group chat.");
+      return false;
+    }
+    const resolvedThreadId = isGroupThread ? (resolveGroupThreadId(targetContactId) || `group:${groupId}`) : targetContactId;
+    const threadName = String(activeContact?.name || "").trim();
+    const threadMeta = isGroupThread
+      ? { isGroup: true, threadType: "group", groupId, groupName: threadName }
+      : {};
 
-    const isActiveTarget = String(activeContactId || "") === targetContactId;
+    const isActiveTarget = String(activeContactId || "") === resolvedThreadId;
     const expiresAtMs = isActiveTarget ? buildActiveDisappearingExpiryMs() : 0;
     const expiresAtIso = expiresAtMs ? new Date(expiresAtMs).toISOString() : "";
     const useFallback = chatFallbackMode || isChatApiDisabled();
 
     const emitLocalPacket = (payload) => {
-      if (!payload || !myUserId || !targetContactId) return;
+      if (!payload || !myUserId || !resolvedThreadId) return;
       const packet = {
         kind: "chat-message",
         fromTab: tabIdRef.current,
@@ -10446,22 +11075,23 @@ function useChatController() {
         const mine = normalizeMessage({
           id: Date.now(),
           senderId: Number(myUserId) || null,
-          receiverId: Number(targetContactId) || null,
+          receiverId: isGroupThread ? null : (Number(targetContactId) || null),
+          ...(isGroupThread ? { groupId: Number(groupId) || groupId, threadType: "group", isGroup: true } : {}),
           text: cleanText,
           speechTyped: false,
           expiresAt: expiresAtIso || undefined,
           createdAt: new Date().toISOString(),
           mine: true
-        }, targetContactId);
+        }, resolvedThreadId);
         const all = readLocalChat();
-        const key = localThreadKey(myUserId, targetContactId);
+        const key = localThreadKey(myUserId, resolvedThreadId);
         const nextList = [...(Array.isArray(all[key]) ? all[key] : []), mine];
         all[key] = nextList;
         writeLocalChat(all);
-        setMessagesByContact((prev) => ({ ...prev, [targetContactId]: nextList }));
+        setMessagesByContact((prev) => ({ ...prev, [resolvedThreadId]: nextList }));
         setContacts((prev) =>
           prev.map((c) =>
-            String(c?.id || "") === targetContactId
+            String(c?.id || "") === resolvedThreadId
               ? { ...c, lastMessage: previewText, lastMessageAt: mine?.createdAt || new Date().toISOString() }
               : c
           )
@@ -10470,13 +11100,14 @@ function useChatController() {
         emitLocalPacket({
           id: mine.id,
           senderId: mine.senderId || Number(myUserId) || myUserId,
-          receiverId: mine.receiverId || Number(targetContactId) || targetContactId,
+          receiverId: mine.receiverId || (isGroupThread ? null : Number(targetContactId) || targetContactId),
+          ...threadMeta,
           text: cleanText,
           expiresAt: expiresAtIso || undefined,
           createdAt: mine.createdAt || new Date().toISOString(),
           senderEmail: myEmail || ""
         });
-        if (expiresAtMs) upsertMessageExpiry(mine.id, expiresAtMs, targetContactId);
+        if (expiresAtMs) upsertMessageExpiry(mine.id, expiresAtMs, resolvedThreadId);
         if (isActiveTarget) {
           shouldStickToBottomRef.current = true;
           setTimeout(() => scrollThreadToBottom("smooth"), 50);
@@ -10487,10 +11118,15 @@ function useChatController() {
 
       const res = await requestChatMutation({
         method: "POST",
-        endpoints: [
-          `/api/chat/${targetContactId}/send`,
-          `/chat/${targetContactId}/send`
-        ],
+        endpoints: isGroupThread
+          ? [
+              `/api/chat/groups/${groupId}/send`,
+              `/chat/groups/${groupId}/send`
+            ]
+          : [
+              `/api/chat/${resolvedThreadId}/send`,
+              `/chat/${resolvedThreadId}/send`
+            ],
         data: { text: cleanText }
       });
       const sent = normalizeMessage(
@@ -10501,19 +11137,20 @@ function useChatController() {
           expiresAt: expiresAtIso || undefined,
           mine: true,
           senderId: myUserId,
-          receiverId: targetContactId,
+          receiverId: isGroupThread ? null : targetContactId,
+          ...(threadMeta || {}),
           createdAt: (res?.data || {})?.createdAt || new Date().toISOString()
         },
-        targetContactId
+        resolvedThreadId
       );
-      if (expiresAtMs) upsertMessageExpiry(sent.id, expiresAtMs, targetContactId);
+      if (expiresAtMs) upsertMessageExpiry(sent.id, expiresAtMs, resolvedThreadId);
       setMessagesByContact((prev) => ({
         ...prev,
-        [targetContactId]: [...(prev[targetContactId] || []), sent]
+        [resolvedThreadId]: [...(prev[resolvedThreadId] || []), sent]
       }));
       setContacts((prev) =>
         prev.map((c) =>
-          String(c?.id || "") === targetContactId
+          String(c?.id || "") === resolvedThreadId
             ? { ...c, lastMessage: previewText, lastMessageAt: sent?.createdAt || new Date().toISOString() }
             : c
         )
@@ -10521,7 +11158,8 @@ function useChatController() {
       emitLocalPacket({
         id: sent.id,
         senderId: sent.senderId || Number(myUserId) || myUserId,
-        receiverId: sent.receiverId || Number(targetContactId) || targetContactId,
+        receiverId: sent.receiverId || (isGroupThread ? null : Number(targetContactId) || targetContactId),
+        ...threadMeta,
         text: cleanText,
         expiresAt: expiresAtIso || undefined,
         createdAt: sent.createdAt || new Date().toISOString(),
@@ -10576,6 +11214,14 @@ function useChatController() {
 
   const goToProfile = (contact) => {
     if (!contact) return;
+    const groupThreadId = resolveGroupThreadId(contact);
+    if (groupThreadId) {
+      const groupId = parseGroupId(contact);
+      if (groupId) {
+        navigate(`/groups/${encodeURIComponent(groupId)}`);
+        return;
+      }
+    }
     navigate(buildProfilePath(contact));
   };
 
@@ -10692,6 +11338,14 @@ function useChatController() {
 
   const sendMediaFile = async (file, options = {}) => {
     if (!file || !activeContactId) return;
+    const threadId = String(activeContactId || "").trim();
+    const groupId = parseGroupId(threadId);
+    const isGroupThread = Boolean(isGroupThreadId(threadId) || groupId);
+    if (isGroupThread && !groupId) {
+      setError("Unable to resolve group chat.");
+      return;
+    }
+    const resolvedThreadId = isGroupThread ? (resolveGroupThreadId(threadId) || `group:${groupId}`) : threadId;
     const type = String(file.type || "").toLowerCase();
     const forcedKind = String(options?.forcedKind || "").toLowerCase();
     const expiresAtMs = buildActiveDisappearingExpiryMs();
@@ -10718,7 +11372,8 @@ function useChatController() {
     const localPreview = normalizeMessage({
       id: localTempId,
       senderId: Number(myUserId) || null,
-      receiverId: Number(activeContactId) || null,
+      receiverId: isGroupThread ? null : (Number(threadId) || null),
+      ...(isGroupThread ? { groupId: Number(groupId) || groupId, threadType: "group", isGroup: true } : {}),
       text: previewText,
       mediaUrl: URL.createObjectURL(file),
       mediaType: kind,
@@ -10726,16 +11381,16 @@ function useChatController() {
       expiresAt: expiresAtIso || undefined,
       createdAt: new Date().toISOString(),
       mine: true
-    }, activeContactId);
-    if (expiresAtMs) upsertMessageExpiry(localTempId, expiresAtMs, activeContactId);
+    }, resolvedThreadId);
+    if (expiresAtMs) upsertMessageExpiry(localTempId, expiresAtMs, resolvedThreadId);
 
     setMessagesByContact((prev) => ({
       ...prev,
-      [activeContactId]: [...(prev[activeContactId] || []), localPreview]
+      [resolvedThreadId]: [...(prev[resolvedThreadId] || []), localPreview]
     }));
     setContacts((prev) =>
       prev.map((c) =>
-        String(c?.id || "") === String(activeContactId || "")
+        String(c?.id || "") === String(resolvedThreadId || "")
           ? { ...c, lastMessage: localPreview.text, lastMessageAt: localPreview?.createdAt || new Date().toISOString() }
           : c
       )
@@ -10753,26 +11408,33 @@ function useChatController() {
       form.append("file", file);
       const res = await requestChatMutation({
         method: "POST",
-        endpoints: [
-          `/api/chat/${activeContactId}/send-media`,
-          `/chat/${activeContactId}/send-media`,
-          `/api/chat/${activeContactId}/sendMedia`,
-          `/chat/${activeContactId}/sendMedia`
-        ],
+        endpoints: isGroupThread
+          ? [
+              `/api/chat/groups/${groupId}/send-media`,
+              `/chat/groups/${groupId}/send-media`,
+              `/api/chat/groups/${groupId}/send-audio`,
+              `/chat/groups/${groupId}/send-audio`
+            ]
+          : [
+              `/api/chat/${resolvedThreadId}/send-media`,
+              `/chat/${resolvedThreadId}/send-media`,
+              `/api/chat/${resolvedThreadId}/sendMedia`,
+              `/chat/${resolvedThreadId}/sendMedia`
+            ],
         data: form
       });
       const sent = normalizeMessage(
         { ...(res?.data || {}), expiresAt: expiresAtIso || undefined, mine: true },
-        activeContactId
+        resolvedThreadId
       );
-      if (expiresAtMs) upsertMessageExpiry(sent.id, expiresAtMs, activeContactId);
+      if (expiresAtMs) upsertMessageExpiry(sent.id, expiresAtMs, resolvedThreadId);
       setMessagesByContact((prev) => ({
         ...prev,
-        [activeContactId]: (prev[activeContactId] || []).map((m) => String(m?.id) === localTempId ? sent : m)
+        [resolvedThreadId]: (prev[resolvedThreadId] || []).map((m) => String(m?.id) === localTempId ? sent : m)
       }));
       setContacts((prev) =>
         prev.map((c) => (
-          String(c?.id || "") === String(activeContactId || "")
+          String(c?.id || "") === String(resolvedThreadId || "")
             ? {
                 ...c,
                 lastMessage: sent.text || (kind === "audio" ? "Voice message" : "[File]"),
@@ -12540,6 +13202,10 @@ function useChatController() {
   const sendVisibleReadReceipts = useCallback(() => {
     if (!isConversationRoute) return;
     if (!myUserId || !activeContactId) return;
+    const threadId = String(activeContactId || "").trim();
+    const groupId = parseGroupId(threadId);
+    const isGroupThread = Boolean(isGroupThreadId(threadId) || groupId);
+    if (isGroupThread && !groupId) return;
     const visibleIds = getVisibleThreadMessageIds();
     const incoming = (Array.isArray(activeMessages) ? activeMessages : []).filter((m) => {
       if (!m || m.mine) return false;
@@ -12600,7 +13266,9 @@ function useChatController() {
     // Persist and broadcast canonical read state from backend.
     void requestChatMutation({
       method: "POST",
-      endpoints: [`/api/chat/${encodeURIComponent(key)}/mark-read`, `/chat/${encodeURIComponent(key)}/mark-read`],
+      endpoints: isGroupThread
+        ? [`/api/chat/groups/${groupId}/mark-read`, `/chat/groups/${groupId}/mark-read`]
+        : [`/api/chat/${encodeURIComponent(key)}/mark-read`, `/chat/${encodeURIComponent(key)}/mark-read`],
       data: {}
     }).catch(() => {
       // ignore mark-read fallback failures
@@ -13110,6 +13778,16 @@ function useChatController() {
     setGroupInviteOpen,
     groupInviteIds,
     setGroupInviteIds,
+    newGroupOpen,
+    setNewGroupOpen,
+    newGroupIds,
+    setNewGroupIds,
+    newGroupName,
+    setNewGroupName,
+    newGroupQuery,
+    setNewGroupQuery,
+    newGroupSearchUsers,
+    newGroupBusy,
     callError,
     setCallError,
     isMuted,
@@ -13185,6 +13863,8 @@ function useChatController() {
     setShowWallpaperPanel,
     activeUtilityPanel,
     setActiveUtilityPanel,
+    groupInfoLoading,
+    groupInfoSaving,
     chatSearchQuery,
     setChatSearchQuery,
     highlightedMessageId,
@@ -13563,6 +14243,8 @@ function useChatController() {
     openGroupInvite,
     openNewGroup,
     toggleGroupInvite,
+    toggleNewGroupMember,
+    createGroupConversation,
     startGroupCall,
     addPeopleToGroupCall,
     startOutgoingCall,
@@ -13589,6 +14271,7 @@ function useChatController() {
     setRequestStatusByIdentifiers,
     resolveChatRequestContact,
     resolveChatRequestIdentifiers,
+    resolveChatRequestActionInfo,
     acceptChatRequest,
     rejectChatRequest,
     requestChatAccess,
@@ -13689,6 +14372,8 @@ function useChatController() {
     setContinuousModeEnabled,
     processVisibleAutoSpeak,
     goToProfile,
+    updateGroupInfo,
+    updateGroupPhoto,
     blockActiveContact,
     addComposerText,
     toggleEmojiTray,

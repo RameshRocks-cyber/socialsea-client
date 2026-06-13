@@ -621,7 +621,7 @@ export default function LiveRecordings() {
         <header className="live-recordings-head">
           <div>
             <h1>Recorded Live</h1>
-            <p>Protected page. Enter a 6-digit password.</p>
+            <p>View SOS recorded live videos. These are private and not shared in feed.</p>
           </div>
           <button type="button" onClick={() => navigate("/profile/me")}>Back to Profile</button>
         </header>
@@ -698,7 +698,7 @@ export default function LiveRecordings() {
       <header className="live-recordings-head">
         <div>
           <h1>Recorded Live</h1>
-          <p>Private SOS recordings. Visible only to you.</p>
+          <p>View SOS recorded live videos. These are private and not shared in feed.</p>
         </div>
         <button type="button" onClick={() => navigate("/profile/me")}>Back to Profile</button>
       </header>

@@ -40,7 +40,6 @@ export default function Dashboard() {
   const [charts, setCharts] = useState(null);
 
   useEffect(() => {
-    setLoading(true);
     api
       .get("/api/admin/dashboard/stats")
       .then((res) => setStats(res.data))

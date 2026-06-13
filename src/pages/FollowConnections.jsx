@@ -1,7 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { FiUserPlus } from "react-icons/fi";
 import api from "../api/axios";
+import { followConnectionsQueryKey, followSearchQueryKey } from "../api/queryKeys";
 import { recordSearchActivity } from "../services/activityStore";
+import { resolveFollowStateFromResponse, syncCurrentViewerFollowRelation } from "../services/followSync";
 import { buildProfilePath, getProfileIdentifier } from "../utils/profileRoute";
 import { toApiUrl } from "../api/baseUrl";
 import "./FollowConnections.css";
@@ -24,39 +28,7 @@ function readAuthHints() {
   addId(sessionStorage.getItem("userId") || localStorage.getItem("userId"));
   addEmail(sessionStorage.getItem("email") || localStorage.getItem("email"));
 
-  const token =
-    sessionStorage.getItem("accessToken") ||
-    sessionStorage.getItem("token") ||
-    localStorage.getItem("accessToken") ||
-    localStorage.getItem("token");
-
-  if (token && token.includes(".")) {
-    try {
-      const payload = JSON.parse(atob(token.split(".")[1]));
-      addId(payload?.userId || payload?.id || payload?.uid);
-      addEmail(payload?.email);
-      if (String(payload?.sub || "").includes("@")) addEmail(payload.sub);
-      if (String(payload?.username || "").includes("@")) addEmail(payload.username);
-    } catch {
-      // ignore invalid token payload
-    }
-  }
-
   return hints;
-}
-
-function readFollowingCache() {
-  try {
-    const raw = localStorage.getItem(FOLLOWING_CACHE_KEY);
-    const parsed = raw ? JSON.parse(raw) : {};
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-function writeFollowingCache(next) {
-  localStorage.setItem(FOLLOWING_CACHE_KEY, JSON.stringify(next || {}));
 }
 
 function readFollowingCacheKeys() {
@@ -71,33 +43,6 @@ function readFollowingCacheKeys() {
   } catch {
     return [];
   }
-}
-
-function makeFallbackUserFromKey(key) {
-  const raw = String(key || "").trim();
-  if (!raw) return null;
-  const emailLike = raw.includes("@");
-  const looksNumeric = /^\d+$/.test(raw);
-  const name = emailLike
-    ? raw.split("@")[0].replace(/[._-]+/g, " ").trim()
-    : raw.replace(/[._-]+/g, " ").trim();
-  const readableName = name
-    ? name
-        .split(" ")
-        .filter(Boolean)
-        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-        .join(" ")
-    : raw;
-
-  return {
-    id: `cached:${raw.toLowerCase()}`,
-    name: readableName || "User",
-    username: !emailLike && !looksNumeric ? raw : "",
-    email: emailLike ? raw : "",
-    bio: "",
-    profilePic: "",
-    initials: (readableName?.[0] || raw[0] || "U").toUpperCase()
-  };
 }
 
 function getPathCandidates(identifier, kind) {
@@ -288,6 +233,11 @@ function isAlreadyFollowing(user, followingSet) {
   return buildIdentityCandidates(user).some((key) => followingSet.has(key));
 }
 
+function isTrackedInIdentitySet(user, identitySet) {
+  if (!user || !identitySet || identitySet.size === 0) return false;
+  return buildIdentityCandidates(user).some((key) => identitySet.has(key));
+}
+
 const IS_HTTPS_PAGE =
   typeof window !== "undefined" && window.location.protocol === "https:";
 
@@ -404,11 +354,159 @@ async function loadFollowersFromNotifications() {
   }
 }
 
+async function loadFollowConnectionsPage({ username, kind }) {
+  const idCandidates = [String(username || "").trim()].filter(Boolean);
+  const authHints = readAuthHints();
+  const storedUserId = String(authHints.ids[0] || "").trim();
+  const storedEmail = String(authHints.emails[0] || "").trim();
+  const isOwnConnections =
+    (username || "").toLowerCase() === "me" ||
+    (!!storedUserId && String(username || "").trim() === storedUserId) ||
+    (!!storedEmail && String(username || "").trim().toLowerCase() === storedEmail.toLowerCase());
+  let cachedFollowingUsers = [];
+  if (kind === "following" && isOwnConnections) {
+    cachedFollowingUsers = await loadUsersFromFollowCache();
+  }
+  const inlineListCandidates = [];
+  let profile = null;
+  if ((username || "").toLowerCase() === "me") {
+    authHints.ids.forEach((id) => {
+      if (id && !idCandidates.includes(id)) idCandidates.push(id);
+    });
+    authHints.emails.forEach((email) => {
+      if (email && !idCandidates.includes(email)) idCandidates.push(email);
+    });
+  }
+
+  let titleName = username || "User";
+  try {
+    const profileRes = await requestJson(`/api/profile/${username}`);
+    profile = profileRes?.data?.user || profileRes?.data || {};
+    const readable = profile?.name || profile?.username || profile?.email || username;
+    titleName = String(readable || "").trim();
+
+    const profileId = String(profile?.id ?? "").trim();
+    const profileEmail = String(profile?.email ?? "").trim();
+    const profileUsername = String(profile?.username ?? "").trim();
+    [profileId, profileEmail, profileUsername].forEach((v) => {
+      if (v && !idCandidates.includes(v)) idCandidates.push(v);
+    });
+
+    const profileKindList = pickList(profileRes?.data, kind);
+    if (Array.isArray(profileKindList)) inlineListCandidates.push(profileKindList);
+    const nestedKindList = pickList(profile, kind);
+    if (Array.isArray(nestedKindList)) inlineListCandidates.push(nestedKindList);
+  } catch {
+    // If /profile/me fails, retry profile by stored userId.
+    if ((username || "").toLowerCase() === "me" && storedUserId) {
+      try {
+        const profileRes = await requestJson(`/api/profile/${storedUserId}`);
+        const profile = profileRes?.data?.user || profileRes?.data || {};
+        const readable = profile?.name || profile?.username || profile?.email || "Me";
+        titleName = String(readable || "").trim();
+        const profileId = String(profile?.id ?? "").trim();
+        const profileEmail = String(profile?.email ?? "").trim();
+        const profileUsername = String(profile?.username ?? "").trim();
+        [profileId, profileEmail, profileUsername].forEach((v) => {
+          if (v && !idCandidates.includes(v)) idCandidates.push(v);
+        });
+
+        const profileKindList = pickList(profileRes?.data, kind);
+        if (Array.isArray(profileKindList)) inlineListCandidates.push(profileKindList);
+        const nestedKindList = pickList(profile, kind);
+        if (Array.isArray(nestedKindList)) inlineListCandidates.push(nestedKindList);
+      } catch {
+        // ignore and continue with available candidates
+      }
+    }
+  }
+
+  if (profile?.privateAccount && profile?.canViewContent === false && !isOwnConnections) {
+    return {
+      users: [],
+      titleName,
+      error: "This account is private. Follow to view followers and following.",
+      cachedFollowingUsers: []
+    };
+  }
+
+  const candidates = [
+    ...(String(username || "").toLowerCase() === "me" ? getPathCandidates("me", kind) : []),
+    ...idCandidates.flatMap((id) => getPathCandidates(id, kind))
+  ]
+    .filter(Boolean)
+    .filter((path, index, arr) => arr.indexOf(path) === index);
+
+  let authBlocked = false;
+  let foundListPayload = false;
+  const resolvedLists = [];
+  for (const list of inlineListCandidates) {
+    foundListPayload = true;
+    const normalized = list.map(normalizeUser).filter((u) => u.id);
+    resolvedLists.push(normalized);
+  }
+
+  for (const path of candidates) {
+    try {
+      const res = await requestJson(path, 4500);
+      const rawList = pickList(res?.data, kind);
+      if (!Array.isArray(rawList)) continue;
+      foundListPayload = true;
+      const normalized = rawList.map(normalizeUser).filter((u) => u.id);
+      resolvedLists.push(normalized);
+      // Prefer non-empty payloads; keep probing if this endpoint returned an empty list.
+      if (normalized.length > 0) break;
+    } catch (err) {
+      const status = Number(err?.response?.status || 0);
+      if (status === 401 || status === 403) authBlocked = true;
+    }
+  }
+
+  if (foundListPayload) {
+    return {
+      users: dedupeUsers(resolvedLists.flat()),
+      titleName,
+      error: "",
+      cachedFollowingUsers: []
+    };
+  }
+
+  if (kind === "following" && isOwnConnections) {
+    return {
+      users: dedupeUsers(cachedFollowingUsers),
+      titleName,
+      error: cachedFollowingUsers.length ? "" : `Could not load ${kind}. Please check backend ${kind} endpoint.`,
+      cachedFollowingUsers
+    };
+  }
+
+  if (kind === "followers" && isOwnConnections) {
+    const fallbackUsers = await loadFollowersFromNotifications();
+    return {
+      users: dedupeUsers(fallbackUsers),
+      titleName,
+      error: fallbackUsers.length ? "" : `Could not load ${kind}. Please check backend ${kind} endpoint.`,
+      cachedFollowingUsers: []
+    };
+  }
+
+  return {
+    users: [],
+    titleName,
+    error: authBlocked
+      ? `Could not load ${kind}. Please login again.`
+      : `Could not load ${kind}. Please check backend ${kind} endpoint.`,
+    cachedFollowingUsers: []
+  };
+}
+
 export default function FollowConnections() {
   const { username } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const kind = location.pathname.endsWith("/following") ? "following" : "followers";
+  const searchInputRef = useRef(null);
   const [users, setUsers] = useState([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState([]);
@@ -416,198 +514,87 @@ export default function FollowConnections() {
   const [searchError, setSearchError] = useState("");
   const [followBusyIds, setFollowBusyIds] = useState({});
   const [followingSet, setFollowingSet] = useState(() => new Set(readFollowingCacheKeys().map((k) => k.toLowerCase())));
-  const [loading, setLoading] = useState(true);
+  const [requestedSet, setRequestedSet] = useState(() => new Set());
   const [error, setError] = useState("");
   const [titleName, setTitleName] = useState("");
+  const deferredSearchQuery = useDeferredValue(searchQuery.trim());
+  const connectionsQuery = useQuery({
+    queryKey: followConnectionsQueryKey(username, kind),
+    queryFn: () => loadFollowConnectionsPage({ username, kind }),
+    staleTime: 30_000,
+    retry: 1
+  });
 
   useEffect(() => {
-    let cancelled = false;
-
-    const load = async () => {
-      setLoading(true);
-      setError("");
+    if (connectionsQuery.data) {
+      setUsers(connectionsQuery.data.users || []);
+      setError(connectionsQuery.data.error || "");
+      setTitleName(connectionsQuery.data.titleName || username || "User");
+      return;
+    }
+    if (connectionsQuery.isError) {
       setUsers([]);
-      const idCandidates = [String(username || "").trim()].filter(Boolean);
+      setError(`Could not load ${kind}. Please check backend ${kind} endpoint.`);
+      setTitleName(username || "User");
+    }
+  }, [connectionsQuery.data, connectionsQuery.isError, username, kind]);
+
+  const loading = connectionsQuery.isPending && users.length === 0;
+
+  const searchQueryResult = useQuery({
+    queryKey: followSearchQueryKey(deferredSearchQuery, kind),
+    queryFn: async () => {
+      const query = String(deferredSearchQuery || "").trim();
+      if (!query || query.length < 2) return [];
+      const res = await requestJson(`/api/profile/search?q=${encodeURIComponent(query)}`, 5000);
+      const raw = Array.isArray(res?.data) ? res.data : [];
       const authHints = readAuthHints();
-      const storedUserId = String(authHints.ids[0] || "").trim();
-      const storedEmail = String(authHints.emails[0] || "").trim();
-      const isOwnConnections =
-        (username || "").toLowerCase() === "me" ||
-        (!!storedUserId && String(username || "").trim() === storedUserId) ||
-        (!!storedEmail && String(username || "").trim().toLowerCase() === storedEmail.toLowerCase());
-      let cachedFollowingUsers = [];
-      if (kind === "following" && isOwnConnections) {
-        cachedFollowingUsers = await loadUsersFromFollowCache();
-      }
-      const inlineListCandidates = [];
-      if ((username || "").toLowerCase() === "me") {
-        authHints.ids.forEach((id) => {
-          if (id && !idCandidates.includes(id)) idCandidates.push(id);
-        });
-        authHints.emails.forEach((email) => {
-          if (email && !idCandidates.includes(email)) idCandidates.push(email);
-        });
-      }
-
-      try {
-        const profileRes = await requestJson(`/api/profile/${username}`);
-        if (!cancelled) {
-          const profile = profileRes?.data?.user || profileRes?.data || {};
-          const readable = profile?.name || profile?.username || profile?.email || username;
-          setTitleName(String(readable || "").trim());
-
-          const profileId = String(profile?.id ?? "").trim();
-          const profileEmail = String(profile?.email ?? "").trim();
-          const profileUsername = String(profile?.username ?? "").trim();
-          [profileId, profileEmail, profileUsername].forEach((v) => {
-            if (v && !idCandidates.includes(v)) idCandidates.push(v);
-          });
-
-          const profileKindList = pickList(profileRes?.data, kind);
-          if (Array.isArray(profileKindList)) inlineListCandidates.push(profileKindList);
-          const nestedKindList = pickList(profile, kind);
-          if (Array.isArray(nestedKindList)) inlineListCandidates.push(nestedKindList);
-        }
-      } catch {
-        // If /profile/me fails, retry profile by stored userId.
-        if ((username || "").toLowerCase() === "me" && storedUserId) {
-          try {
-            const profileRes = await requestJson(`/api/profile/${storedUserId}`);
-            if (!cancelled) {
-              const profile = profileRes?.data?.user || profileRes?.data || {};
-              const readable = profile?.name || profile?.username || profile?.email || "Me";
-              setTitleName(String(readable || "").trim());
-              const profileId = String(profile?.id ?? "").trim();
-              const profileEmail = String(profile?.email ?? "").trim();
-              const profileUsername = String(profile?.username ?? "").trim();
-              [profileId, profileEmail, profileUsername].forEach((v) => {
-                if (v && !idCandidates.includes(v)) idCandidates.push(v);
-              });
-
-              const profileKindList = pickList(profileRes?.data, kind);
-              if (Array.isArray(profileKindList)) inlineListCandidates.push(profileKindList);
-              const nestedKindList = pickList(profile, kind);
-              if (Array.isArray(nestedKindList)) inlineListCandidates.push(nestedKindList);
-            }
-          } catch {
-            // ignore and continue with available candidates
-          }
-        }
-        if (!cancelled) setTitleName(username || "User");
-      }
-
-      const candidates = [
-        ...(String(username || "").toLowerCase() === "me"
-          ? getPathCandidates("me", kind)
-          : []),
-        ...idCandidates.flatMap((id) => getPathCandidates(id, kind))
-      ]
-        .filter(Boolean)
-        .filter((path, index, arr) => arr.indexOf(path) === index);
-      let authBlocked = false;
-      let foundListPayload = false;
-      const resolvedLists = [];
-      for (const list of inlineListCandidates) {
-        foundListPayload = true;
-        const normalized = list.map(normalizeUser).filter((u) => u.id);
-        resolvedLists.push(normalized);
-      }
-
-      for (const path of candidates) {
-        try {
-          const res = await requestJson(path, 4500);
-          const rawList = pickList(res?.data, kind);
-          if (!Array.isArray(rawList)) continue;
-          foundListPayload = true;
-          const normalized = rawList.map(normalizeUser).filter((u) => u.id);
-          resolvedLists.push(normalized);
-          // Prefer non-empty payloads; keep probing if this endpoint returned an empty list.
-          if (normalized.length > 0) break;
-        } catch (err) {
-          const status = Number(err?.response?.status || 0);
-          if (status === 401 || status === 403) authBlocked = true;
-        }
-      }
-
-      if (!cancelled) {
-        if (foundListPayload) {
-          const merged = dedupeUsers(resolvedLists.flat());
-          setUsers(merged);
-          setError("");
-        } else if (kind === "following" && isOwnConnections) {
-          setUsers(dedupeUsers(cachedFollowingUsers));
-          setError(cachedFollowingUsers.length ? "" : `Could not load ${kind}. Please check backend ${kind} endpoint.`);
-        } else if (kind === "followers" && isOwnConnections) {
-          const fallbackUsers = await loadFollowersFromNotifications();
-          setUsers(dedupeUsers(fallbackUsers));
-          setError(fallbackUsers.length ? "" : `Could not load ${kind}. Please check backend ${kind} endpoint.`);
-        } else {
-          setUsers([]);
-          setError(
-            authBlocked
-              ? `Could not load ${kind}. Please login again.`
-              : `Could not load ${kind}. Please check backend ${kind} endpoint.`
-          );
-        }
-        setLoading(false);
-      }
-    };
-
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, [username, kind]);
+      const myId = String(authHints.ids[0] || "").trim().toLowerCase();
+      const myEmail = String(authHints.emails[0] || "").trim().toLowerCase();
+      const normalized = raw.map(normalizeUser).filter((u) => u.id);
+      const filtered = normalized.filter((u) => {
+        const keys = buildIdentityCandidates(u);
+        if (myId && keys.includes(myId)) return false;
+        if (myEmail && keys.includes(myEmail)) return false;
+        return true;
+      });
+      recordSearchActivity({
+        query,
+        source: kind === "followers" ? "followers" : "following",
+        resultsCount: filtered.length
+      });
+      return dedupeUsers(filtered);
+    },
+    enabled: deferredSearchQuery.length >= 2,
+    staleTime: 60_000,
+    retry: 1
+  });
 
   useEffect(() => {
-    let cancelled = false;
-    const query = String(searchQuery || "").trim();
+    const query = String(deferredSearchQuery || "").trim();
     if (!query || query.length < 2) {
       setSearchResults([]);
       setSearchLoading(false);
       setSearchError("");
-      return undefined;
+      return;
     }
-
-    const timer = setTimeout(async () => {
+    if (searchQueryResult.isPending) {
       setSearchLoading(true);
       setSearchError("");
-      try {
-        const res = await requestJson(`/api/profile/search?q=${encodeURIComponent(query)}`, 5000);
-        const raw = Array.isArray(res?.data) ? res.data : [];
-        const authHints = readAuthHints();
-        const myId = String(authHints.ids[0] || "").trim().toLowerCase();
-        const myEmail = String(authHints.emails[0] || "").trim().toLowerCase();
-        const normalized = raw.map(normalizeUser).filter((u) => u.id);
-        const filtered = normalized.filter((u) => {
-          const keys = buildIdentityCandidates(u);
-          if (myId && keys.includes(myId)) return false;
-          if (myEmail && keys.includes(myEmail)) return false;
-          return true;
-        });
-        recordSearchActivity({
-          query,
-          source: kind === "followers" ? "followers" : "following",
-          resultsCount: filtered.length
-        });
-        if (!cancelled) {
-          setSearchResults(dedupeUsers(filtered));
-          setSearchLoading(false);
-        }
-      } catch {
-        if (!cancelled) {
-          setSearchResults([]);
-          setSearchLoading(false);
-          setSearchError("Search failed. Check backend connection.");
-        }
-      }
-    }, 350);
-
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [searchQuery]);
+      return;
+    }
+    if (searchQueryResult.data) {
+      setSearchResults(searchQueryResult.data);
+      setSearchLoading(false);
+      setSearchError("");
+      return;
+    }
+    if (searchQueryResult.isError) {
+      setSearchResults([]);
+      setSearchLoading(false);
+      setSearchError("Search failed. Check backend connection.");
+    }
+  }, [deferredSearchQuery, searchQueryResult.data, searchQueryResult.isPending, searchQueryResult.isError]);
 
   const heading = useMemo(() => {
     const person = titleName || username || "User";
@@ -624,22 +611,60 @@ export default function FollowConnections() {
     navigate(`/chat/${person.id}`);
   };
 
+  const openAddPeople = () => {
+    searchInputRef.current?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+    if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
+      window.requestAnimationFrame(() => {
+        searchInputRef.current?.focus?.();
+        searchInputRef.current?.select?.();
+      });
+      return;
+    }
+    searchInputRef.current?.focus?.();
+    searchInputRef.current?.select?.();
+  };
+
   const followUser = async (person) => {
     if (!person) return;
     const identifier = person?.email || person?.username || person?.id;
     if (!identifier) return;
     const key = String(person?.id || identifier || "").trim();
+    const identityKeys = buildIdentityCandidates(person);
     setFollowBusyIds((prev) => ({ ...prev, [key]: true }));
     try {
-      await api.post(`/api/follow/${encodeURIComponent(identifier)}`);
-      const nextSet = new Set(followingSet);
-      buildIdentityCandidates(person).forEach((k) => nextSet.add(k));
-      setFollowingSet(nextSet);
-      const cache = readFollowingCache();
-      buildIdentityCandidates(person).forEach((k) => {
-        cache[k] = true;
-      });
-      writeFollowingCache(cache);
+      const res = await api.post(`/api/follow/${encodeURIComponent(identifier)}`);
+      const nextState = resolveFollowStateFromResponse(res);
+      const messageText = String(res?.data?.message || res?.data || "").toLowerCase();
+
+      if (nextState === "requested") {
+        setRequestedSet((prev) => {
+          const next = new Set(prev);
+          identityKeys.forEach((candidate) => next.add(candidate));
+          return next;
+        });
+        syncCurrentViewerFollowRelation({
+          targetIdentifiers: [identifier, person?.id, person?.email, person?.username],
+          nextState,
+          countDelta: 0
+        });
+      } else if (nextState === "following") {
+        setRequestedSet((prev) => {
+          const next = new Set(prev);
+          identityKeys.forEach((candidate) => next.delete(candidate));
+          return next;
+        });
+        setFollowingSet((prev) => {
+          const next = new Set(prev);
+          identityKeys.forEach((candidate) => next.add(candidate));
+          return next;
+        });
+        syncCurrentViewerFollowRelation({
+          targetIdentifiers: [identifier, person?.id, person?.email, person?.username],
+          nextState,
+          countDelta: messageText.includes("already following") ? 0 : 1
+        });
+      }
+      void queryClient.invalidateQueries({ queryKey: followConnectionsQueryKey(username, kind) });
     } catch {
       // ignore follow failures
     } finally {
@@ -651,31 +676,49 @@ export default function FollowConnections() {
     <div className="follow-connections-page">
       <section className="follow-connections-card">
         <div className="follow-head">
-          <button
-            type="button"
-            className={`follow-tab ${kind === "followers" ? "active" : ""}`}
-            onClick={() => navigate(`/profile/${encodeURIComponent(getProfileIdentifier(titleName, username) || "me")}/followers`)}
-          >
-            Followers
-          </button>
-          <button
-            type="button"
-            className={`follow-tab ${kind === "following" ? "active" : ""}`}
-            onClick={() => navigate(`/profile/${encodeURIComponent(getProfileIdentifier(titleName, username) || "me")}/following`)}
-          >
-            Following
-          </button>
+          <div className="follow-head-tabs">
+            <button
+              type="button"
+              className={`follow-tab ${kind === "followers" ? "active" : ""}`}
+              onClick={() => navigate(`/profile/${encodeURIComponent(getProfileIdentifier(titleName, username) || "me")}/followers`)}
+            >
+              Followers
+            </button>
+            <button
+              type="button"
+              className={`follow-tab ${kind === "following" ? "active" : ""}`}
+              onClick={() => navigate(`/profile/${encodeURIComponent(getProfileIdentifier(titleName, username) || "me")}/following`)}
+            >
+              Following
+            </button>
+          </div>
+          {kind === "following" && (
+            <button
+              type="button"
+              className="follow-add-btn"
+              onClick={openAddPeople}
+              title="Add people"
+              aria-label="Add people to following"
+            >
+              <FiUserPlus aria-hidden="true" />
+            </button>
+          )}
         </div>
 
         <h2>{heading}</h2>
 
         <div className="follow-search">
-          <input name="followconnections-input-673"
+          <input
+            name="followconnections-input-673"
             type="search"
-            placeholder=""
+            placeholder={kind === "following" ? "Search following..." : "Search followers..."}
+            aria-label={`Search ${kind}`}
+            autoComplete="off"
+            spellCheck="false"
             value={searchQuery}
             onChange={(event) => setSearchQuery(event.target.value)}
             className="follow-search-input"
+            ref={searchInputRef}
           />
         </div>
         {searchLoading && <p className="follow-muted">Searching...</p>}
@@ -684,12 +727,13 @@ export default function FollowConnections() {
           <p className="follow-muted">No users found.</p>
         )}
         {!searchLoading && searchResults.length > 0 && (
-          <div className="follow-search-results">
-            {searchResults.map((person) => {
-              const busy = Boolean(followBusyIds[String(person?.id || "")]);
-              const followed = isAlreadyFollowing(person, followingSet);
-              return (
-                <div key={`search-${person.id}`} className="follow-item follow-search-item">
+            <div className="follow-search-results">
+              {searchResults.map((person) => {
+                const busy = Boolean(followBusyIds[String(person?.id || "")]);
+                const followed = isAlreadyFollowing(person, followingSet);
+                const requested = isTrackedInIdentitySet(person, requestedSet);
+                return (
+                  <div key={`search-${person.id}`} className="follow-item follow-search-item">
                   <button type="button" className="follow-identity" onClick={() => openProfile(person)}>
                     {person.profilePic ? (
                       <img src={person.profilePic} alt={person.name} className="follow-avatar-img" />
@@ -701,16 +745,16 @@ export default function FollowConnections() {
                       <small>{person.bio || person.username || person.email || "No bio yet"}</small>
                     </span>
                   </button>
-                  <button
-                    type="button"
-                    className="follow-follow-btn"
-                    onClick={() => followUser(person)}
-                    disabled={busy || followed}
-                  >
-                    {followed ? "Following" : busy ? "Following..." : "Follow"}
-                  </button>
-                </div>
-              );
+                    <button
+                      type="button"
+                      className="follow-follow-btn"
+                      onClick={() => followUser(person)}
+                      disabled={busy || followed || requested}
+                    >
+                      {followed ? "Following" : requested ? "Requested" : busy ? "Working..." : "Follow"}
+                    </button>
+                  </div>
+                );
             })}
           </div>
         )}

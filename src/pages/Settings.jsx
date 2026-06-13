@@ -1,6 +1,8 @@
 ﻿import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
+import { loadSavedPosts, syncSavedPostCache, syncSavedPostCacheFromIds, toggleSavedPost } from "../api/saved";
+import { getContentItemsByIds } from "../api/feed";
 import { logout } from "../auth";
 import { DEFAULT_SOUND_PREFS, SETTINGS_KEY, getSoundLabel, readSoundPrefs } from "./soundPrefs";
 import {
@@ -12,6 +14,7 @@ import {
 import { COLOR_THEME_OPTIONS, readTheme, setTheme, readCustomThemeColors, setCustomThemeColors } from "../theme";
 import { recordAccountHistoryEntry } from "../services/activityStore";
 import { getLanguageLabel } from "../i18n/languages";
+import { getPublicDisplayName } from "../utils/displayName";
 import { resolveMediaUrl } from "../utils/mediaUrl";
 import {
   getDeletedMediaPolicyLabel,
@@ -19,6 +22,7 @@ import {
   readRecentlyDeletedCount
 } from "../services/recentlyDeletedStore";
 import "./Settings.css";
+import { useRef } from "react";
 
 const CLOSE_FRIENDS_KEY = "socialsea_close_friends_v1";
 const BLOCKED_KEY = "socialsea_blocked_users_v1";
@@ -54,6 +58,7 @@ const defaultPrefs = {
   notificationBuddyVoiceRate: 1,
   notificationBuddyVoicePitch: 1,
   studyModeReels: false,
+  voloEnabled: false,
   gestureCursorEnabled: false,
   dailyTimeLimit: "2h/day",
   notificationSound: DEFAULT_SOUND_PREFS.notificationSound,
@@ -76,6 +81,7 @@ const SETTING_LABELS = {
   activityInFriendsTab: "Activity in Friends tab",
   showSosInNavbar: "SOS on Navbar",
   studyModeReels: "Study mode",
+  voloEnabled: "Volo mode",
   gestureCursorEnabled: "Hand gesture cursor",
   notifications: "Notifications",
   notificationBuddy: "Notification Character",
@@ -87,6 +93,15 @@ const SETTING_LABELS = {
   showMyStoriesOnProfile: "My Stories on profile",
   showAnonymousShortcutsOnProfile: "Anonymous shortcuts on profile"
 };
+
+const renderVoloSettingsIcon = () => (
+  <img
+    src="/icons/volo-symbol.svg"
+    alt=""
+    aria-hidden="true"
+    className="settings-row-icon-image settings-row-icon-image-volo"
+  />
+);
 
 const readIds = (key) => {
   try {
@@ -230,6 +245,9 @@ export default function Settings() {
   const [userQuery, setUserQuery] = useState("");
   const [userResults, setUserResults] = useState([]);
   const [settingsSearch, setSettingsSearch] = useState(() => String(searchParams.get("q") || ""));
+  const initialSavedIdsRef = useRef(savedIds);
+  const initialWatchLaterIdsRef = useRef(watchLaterIds);
+  const initialArchiveIdsRef = useRef(archiveIds);
   const jobMode =
     prefs.jobMode === "post" ? "post" :
     prefs.jobMode === "storage" ? "storage" :
@@ -346,20 +364,32 @@ export default function Settings() {
     let mounted = true;
     const load = async () => {
       try {
-        const [feedRes, reelsRes] = await Promise.all([
-          api.get("/api/feed").catch(() => ({ data: [] })),
-          api.get("/api/reels").catch(() => ({ data: [] }))
+        const lookupIds = Array.from(
+          new Set([
+            ...initialSavedIdsRef.current,
+            ...initialWatchLaterIdsRef.current,
+            ...initialArchiveIdsRef.current
+          ])
+        ).filter(
+          (id) => Number.isFinite(Number(id)) && Number(id) > 0
+        );
+        const [contentItems, savedItems] = await Promise.all([
+          getContentItemsByIds(lookupIds),
+          loadSavedPosts().catch(() => null)
         ]);
-        const all = [
-          ...(Array.isArray(feedRes.data) ? feedRes.data : []),
-          ...(Array.isArray(reelsRes.data) ? reelsRes.data : [])
-        ];
         const next = {};
-        all.forEach((item) => {
+        contentItems.forEach((item) => {
           if (!item?.id) return;
           next[item.id] = item;
         });
         if (mounted) setItemsById(next);
+        if (mounted && Array.isArray(savedItems)) {
+          const ids = savedItems
+            .map((item) => Number(item?.id))
+            .filter((id) => Number.isFinite(id) && id > 0);
+          setSavedIds(Array.from(new Set(ids)));
+          syncSavedPostCache(savedItems);
+        }
       } finally {
         if (mounted) setLoading(false);
       }
@@ -406,8 +436,7 @@ export default function Settings() {
   };
 
   const usernameFor = (post) => {
-    const raw = post?.user?.name || post?.username || post?.user?.email || "User";
-    return raw.includes("@") ? emailToName(raw) : raw;
+    return getPublicDisplayName(post?.user || post);
   };
 
   const panelIds = useMemo(() => {
@@ -521,12 +550,18 @@ export default function Settings() {
     setJobMode(jobMode === mode ? "off" : mode);
   };
 
-  const removeFromPanel = (id) => {
+  const removeFromPanel = async (id) => {
     if (activePanel === "saved") {
-      const next = savedIds.filter((x) => x !== id);
-      setSavedIds(next);
-      localStorage.setItem("savedPostIds", JSON.stringify(next));
-      localStorage.setItem("savedReelIds", JSON.stringify(next));
+      const safeId = Number(id);
+      if (!Number.isFinite(safeId) || safeId <= 0) return;
+      try {
+        await toggleSavedPost(safeId);
+        const next = savedIds.filter((x) => x !== safeId);
+        setSavedIds(next);
+        syncSavedPostCacheFromIds(next);
+      } catch {
+        // Keep server-backed saved state unchanged if the request fails.
+      }
       return;
     }
     if (activePanel === "watchLater") {
@@ -542,11 +577,13 @@ export default function Settings() {
     }
   };
 
-  const clearPanel = () => {
+  const clearPanel = async () => {
     if (activePanel === "saved") {
-      setSavedIds([]);
-      localStorage.setItem("savedPostIds", JSON.stringify([]));
-      localStorage.setItem("savedReelIds", JSON.stringify([]));
+      const idsToClear = [...savedIds];
+      const settled = await Promise.allSettled(idsToClear.map((savedId) => toggleSavedPost(savedId)));
+      const failedIds = idsToClear.filter((_, index) => settled[index]?.status !== "fulfilled");
+      setSavedIds(failedIds);
+      syncSavedPostCacheFromIds(failedIds);
       return;
     }
     if (activePanel === "watchLater") {
@@ -607,10 +644,18 @@ export default function Settings() {
     .filter(Boolean);
 
   const settingsSearchOptions = [
+    {
+      icon: "✏️",
+      title: "Edit Profile",
+      value: "Open",
+      keywords: ["edit", "profile", "bio", "username", "photo"],
+      onClick: () => navigate("/profile-setup?mode=edit")
+    },
     { icon: "🎨", title: "Appearance", value: colorThemeLabel, keywords: ["theme", "color"], onClick: () => navigate("/settings/appearance") },
     { icon: "🧩", title: "Content types", value: contentTypeSummary, keywords: ["content", "type"], onClick: () => navigate("/settings/content-types") },
     { icon: "🌐", title: "Language", value: preferredLanguageLabel, keywords: ["language", "translate"], onClick: () => navigate("/settings/language") },
     { icon: "🎓", title: "Study mode (hide Clips)", value: prefs.studyModeReels ? "On" : "Off", keywords: ["study", "clips"], onClick: () => setToggle("studyModeReels") },
+    { icon: renderVoloSettingsIcon(), title: "Volo mode (show Volo, hide Clips)", value: prefs.voloEnabled ? "On" : "Off", keywords: ["volo", "clips", "profile", "writer"], onClick: () => setToggle("voloEnabled") },
     { icon: "✋", title: "Hand gesture cursor", value: prefs.gestureCursorEnabled ? "On" : "Off", keywords: ["gesture", "cursor"], onClick: () => setToggle("gestureCursorEnabled") },
     { icon: "🚨", title: "SOS on Navbar", value: prefs.showSosInNavbar ? "On" : "Off", keywords: ["sos", "navbar"], onClick: () => setToggle("showSosInNavbar") },
     { icon: "🔔", title: "Notifications", value: prefs.notifications ? "On" : "Off", keywords: ["notification", "alerts"], onClick: () => navigate("/notifications") },
@@ -715,6 +760,11 @@ export default function Settings() {
         )}
 
         <section className="settings-section">
+          <h2>Profile</h2>
+          <Row icon={"✏️"} title="Edit Profile" value="Open" onClick={() => navigate("/profile-setup?mode=edit")} />
+        </section>
+
+        <section className="settings-section">
           <h2>Jobs</h2>
           <Row
             icon={"💼"}
@@ -752,6 +802,12 @@ export default function Settings() {
             title="Study mode (hide Clips)"
             value={prefs.studyModeReels ? "On" : "Off"}
             onClick={() => setToggle("studyModeReels")}
+          />
+          <Row
+            icon={renderVoloSettingsIcon()}
+            title="Volo mode (show Volo, hide Clips)"
+            value={prefs.voloEnabled ? "On" : "Off"}
+            onClick={() => setToggle("voloEnabled")}
           />
           <Row
             icon={"✋"}

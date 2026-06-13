@@ -43,6 +43,7 @@ export default function ChatHeader({ onOpenUtilityPanel, onOpenSearch }) {
     incomingCall,
     callMenuRef,
     startOutgoingCall,
+    startGroupCall,
     headerMenuRef,
     toggleSpeaker,
     isSpeakerOn,
@@ -71,6 +72,7 @@ export default function ChatHeader({ onOpenUtilityPanel, onOpenSearch }) {
 
   if (!activeContact) return null;
   const avatarImageSrc = normalizeAvatarImageSrc(activeContact.profilePic);
+  const isGroupThread = Boolean(activeContact?.isGroup);
 
   const openUtilityPanel = (panel) => {
     if (typeof onOpenUtilityPanel === "function") {
@@ -97,6 +99,24 @@ export default function ChatHeader({ onOpenUtilityPanel, onOpenSearch }) {
     openUtilityPanel("search");
   };
 
+  const handleCallButtonClick = () => {
+    if (callActive || !!incomingCall) return;
+    setShowCallMenu((prev) => !prev);
+    setShowHeaderMenu(false);
+    setShowWallpaperPanel(false);
+    setActiveUtilityPanel("");
+  };
+
+  const handleStartCall = (mode) => {
+    if (callActive || !!incomingCall) return;
+    if (isGroupThread) {
+      startGroupCall(mode);
+    } else {
+      startOutgoingCall(mode);
+    }
+    setShowCallMenu(false);
+  };
+
   const exitChatPage = () => {
     setShowHeaderMenu(false);
     setShowCallMenu(false);
@@ -119,7 +139,11 @@ export default function ChatHeader({ onOpenUtilityPanel, onOpenSearch }) {
         <button type="button" className="chat-back-btn chat-exit-action" onClick={exitChatPage} title="Exit chat">
           <FiArrowLeft />
         </button>
-        <button type="button" className="chat-header-main" onClick={() => goToProfile(activeContact)}>
+        <button
+          type="button"
+          className="chat-header-main"
+          onClick={() => goToProfile(activeContact)}
+        >
           <span className="chat-avatar">
             {avatarImageSrc ? (
               <img src={avatarImageSrc} alt={activeContact.name} className="chat-avatar-img" />
@@ -140,16 +164,11 @@ export default function ChatHeader({ onOpenUtilityPanel, onOpenSearch }) {
             type="button"
             className={`call-action call-action-menu ${showCallMenu ? "is-active" : ""}`}
             title="Call options"
-            onClick={() => {
-              if (callActive || !!incomingCall) return;
-              setShowCallMenu((prev) => !prev);
-              setShowHeaderMenu(false);
-              setShowWallpaperPanel(false);
-              setActiveUtilityPanel("");
-            }}
+            onClick={handleCallButtonClick}
             disabled={callActive || !!incomingCall}
             aria-haspopup="menu"
             aria-expanded={showCallMenu}
+            aria-label="Call options"
           >
             <FiPhone className="call-action-icon" />
             <FiChevronDown className="call-action-caret" />
@@ -159,10 +178,7 @@ export default function ChatHeader({ onOpenUtilityPanel, onOpenSearch }) {
               <button
                 type="button"
                 className="chat-call-menu-item"
-                onClick={() => {
-                  startOutgoingCall("audio");
-                  setShowCallMenu(false);
-                }}
+                onClick={() => handleStartCall("audio")}
                 role="menuitem"
               >
                 <FiPhone /> Voice call
@@ -170,10 +186,7 @@ export default function ChatHeader({ onOpenUtilityPanel, onOpenSearch }) {
               <button
                 type="button"
                 className="chat-call-menu-item"
-                onClick={() => {
-                  startOutgoingCall("video");
-                  setShowCallMenu(false);
-                }}
+                onClick={() => handleStartCall("video")}
                 role="menuitem"
               >
                 <FiVideo /> Video call
@@ -394,14 +407,16 @@ export default function ChatHeader({ onOpenUtilityPanel, onOpenSearch }) {
               <FiChevronRight />
             </button>
             {translatorError && <p className="chat-translate-error">{translatorError}</p>}
-            <button
-              type="button"
-              className="chat-header-menu-row chat-header-danger-btn"
-              onClick={blockActiveContact}
-              disabled={activeContactBlocked}
-            >
-              {activeContactBlocked ? "User blocked" : "Block user"}
-            </button>
+            {!isGroupThread && (
+              <button
+                type="button"
+                className="chat-header-menu-row chat-header-danger-btn"
+                onClick={blockActiveContact}
+                disabled={activeContactBlocked}
+              >
+                {activeContactBlocked ? "User blocked" : "Block user"}
+              </button>
+            )}
           </aside>
         )}
       </div>

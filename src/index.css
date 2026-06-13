@@ -158,7 +158,6 @@ body.ss-themed .chat-header-menu {
   border-color: var(--ss-theme-border) !important;
 }
 
-body.ss-themed .settings-row-icon,
 body.ss-themed .chat-avatar,
 body.ss-themed .settings-user-avatar {
   background: linear-gradient(145deg, color-mix(in srgb, var(--ss-theme-accent) 78%, #ffffff 22%), var(--ss-theme-accent-2)) !important;

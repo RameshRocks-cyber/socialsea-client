@@ -186,6 +186,44 @@ export default function AdminModerationNotices({ severity = "yellow" }) {
       setError(status ? `Failed to move red notice to yellow (${status}): ${message}` : `Failed to move red notice to yellow: ${message}`);
     });
 
+  const deleteUser = async (notice) =>
+    withBusy(notice.id, "delete-user", async () => {
+      setError("");
+
+      if (!notice?.userId) {
+        setError("This notice does not include a user id, so the user cannot be deleted from here.");
+        return;
+      }
+
+      const displayName = notice?.userName || notice?.userEmail || `User #${notice.userId}`;
+      const confirmed = window.confirm(
+        `Delete ${displayName} (#${notice.userId}) permanently?\nThis will remove the account and related content.`
+      );
+      if (!confirmed) return;
+
+      const baseCandidates = [activeBaseUrl, ...getBaseCandidates()].filter(
+        (value, index, arr) => value && arr.indexOf(value) === index
+      );
+      let lastError = null;
+
+      for (const baseURL of baseCandidates) {
+        try {
+          await api.delete(`/api/admin/users/${notice.userId}`, {
+            baseURL,
+            suppressAuthRedirect: true
+          });
+          setNotices((prev) => prev.filter((item) => String(item.userId) !== String(notice.userId)));
+          return;
+        } catch (err) {
+          lastError = err;
+        }
+      }
+
+      const status = Number(lastError?.response?.status || 0);
+      const message = lastError?.response?.data?.message || lastError?.message || "Failed to delete user";
+      setError(status ? `Failed to delete user (${status}): ${message}` : `Failed to delete user: ${message}`);
+    });
+
   const pageTitle = normalizedSeverity === "yellow" ? "Yellow Notice List" : "Red Notice List";
   const pageNote =
     normalizedSeverity === "yellow"
@@ -227,6 +265,7 @@ export default function AdminModerationNotices({ severity = "yellow" }) {
               const removeBusy = Boolean(busyByAction[busyKey(notice.id, `remove-${normalizedSeverity}`)]);
               const escalateBusy = Boolean(busyByAction[busyKey(notice.id, "escalate-red")]);
               const moveBusy = Boolean(busyByAction[busyKey(notice.id, "move-yellow")]);
+              const deleteBusy = Boolean(busyByAction[busyKey(notice.id, "delete-user")]);
               return (
                 <tr key={notice.id}>
                   <td>
@@ -284,6 +323,15 @@ export default function AdminModerationNotices({ severity = "yellow" }) {
                           </button>
                         </>
                       )}
+                      <button
+                        type="button"
+                        className="admin-btn danger"
+                        disabled={deleteBusy || !notice?.userId}
+                        onClick={() => deleteUser(notice)}
+                        title={notice?.userId ? "Delete the user account" : "User id is missing"}
+                      >
+                        {deleteBusy ? "Working..." : "Delete User"}
+                      </button>
                     </div>
                   </td>
                 </tr>

@@ -1,8 +1,6 @@
 export function downloadFile(url, filename) {
   fetch(url, {
-    headers: {
-      Authorization: `Bearer ${localStorage.getItem("accessToken")}`
-    }
+    credentials: "include"
   })
     .then(res => res.blob())
     .then(blob => {

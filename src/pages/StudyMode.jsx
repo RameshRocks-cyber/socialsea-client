@@ -796,7 +796,13 @@ const getLocalApiBase = () => {
 const describeAxiosError = (error) => {
   const status = error?.response?.status;
   const payloadMessage = error?.response?.data?.message || error?.response?.data?.error;
-  const baseMessage = payloadMessage || error?.message || "Request failed";
+  const rawMessage = String(payloadMessage || error?.message || "Request failed").trim();
+  const friendlyCapacityMessage =
+    /selected model is at capacity|at capacity|try a different model|resource exhausted|model is overloaded|server is overloaded/i
+      .test(rawMessage)
+      ? "AI assistant is busy right now. Please try again in a moment."
+      : "";
+  const baseMessage = friendlyCapacityMessage || rawMessage;
   return status ? `${baseMessage} (${status})` : baseMessage;
 };
 

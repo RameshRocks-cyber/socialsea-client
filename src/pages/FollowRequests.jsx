@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import api from "../api/axios";
+import { syncAcceptedFollowRequest } from "../services/followSync";
 
 export default function FollowRequests() {
   const [requests, setRequests] = useState([]);
@@ -39,10 +40,19 @@ export default function FollowRequests() {
     };
   }, []);
 
-  const accept = (id) => {
+  const accept = (request) => {
+    const id = request?.id;
     if (featureUnavailable) return;
+    if (!id) return;
     api.post(`/api/follow/requests/${id}/accept`)
       .then(() => {
+        syncAcceptedFollowRequest({
+          requesterIdentifiers: [
+            request?.sender?.id,
+            request?.sender?.email,
+            request?.sender?.username
+          ]
+        });
         setRequests((prev) => prev.filter((r) => r.id !== id));
       })
       .catch(console.error);
@@ -74,7 +84,7 @@ export default function FollowRequests() {
           <span className="font-semibold">{r.sender?.username || "User"}</span>
 
           <div className="flex gap-2">
-            <button onClick={() => accept(r.id)} className="bg-green-600 px-3 py-1 rounded hover:bg-green-700 transition">
+            <button onClick={() => accept(r)} className="bg-green-600 px-3 py-1 rounded hover:bg-green-700 transition">
               Accept
             </button>
             <button onClick={() => reject(r.id)} className="bg-red-600 px-3 py-1 rounded hover:bg-red-700 transition">

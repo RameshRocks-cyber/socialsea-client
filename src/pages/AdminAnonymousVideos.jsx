@@ -61,6 +61,44 @@ const statusSortScore = (status) => {
   return 2;
 };
 
+const fetchAnonymousVideos = async () => {
+  const responses = await Promise.allSettled(
+    STATUS_ENDPOINTS.map((entry) =>
+      api.get(entry.url, {
+        suppressAuthRedirect: true,
+        timeout: 12000
+      })
+    )
+  );
+
+  const byId = new Map();
+  let successCount = 0;
+
+  responses.forEach((result, index) => {
+    if (result.status !== "fulfilled") return;
+    successCount += 1;
+    const fallbackStatus = STATUS_ENDPOINTS[index]?.status || "pending";
+    const list = Array.isArray(result.value?.data) ? result.value.data : [];
+    list.forEach((item) => {
+      const normalized = normalizeAnonymousVideo(item, fallbackStatus);
+      if (!normalized) return;
+      const existing = byId.get(normalized.id);
+      if (!existing || statusSortScore(normalized.status) < statusSortScore(existing.status)) {
+        byId.set(normalized.id, normalized);
+      }
+    });
+  });
+
+  const sorted = Array.from(byId.values()).sort((a, b) => {
+    const aDate = new Date(a?.createdAt || 0).getTime();
+    const bDate = new Date(b?.createdAt || 0).getTime();
+    if (Number.isFinite(bDate - aDate) && bDate !== aDate) return bDate - aDate;
+    return Number(b.id) - Number(a.id);
+  });
+
+  return { sorted, successCount };
+};
+
 export default function AdminAnonymousVideos() {
   const [videos, setVideos] = useState([]);
   const [query, setQuery] = useState("");
@@ -71,48 +109,37 @@ export default function AdminAnonymousVideos() {
   const loadVideos = async () => {
     setLoading(true);
     setError("");
-
-    const responses = await Promise.allSettled(
-      STATUS_ENDPOINTS.map((entry) =>
-        api.get(entry.url, {
-          suppressAuthRedirect: true,
-          timeout: 12000
-        })
-      )
-    );
-
-    const byId = new Map();
-    let successCount = 0;
-
-    responses.forEach((result, index) => {
-      if (result.status !== "fulfilled") return;
-      successCount += 1;
-      const fallbackStatus = STATUS_ENDPOINTS[index]?.status || "pending";
-      const list = Array.isArray(result.value?.data) ? result.value.data : [];
-      list.forEach((item) => {
-        const normalized = normalizeAnonymousVideo(item, fallbackStatus);
-        if (!normalized) return;
-        const existing = byId.get(normalized.id);
-        if (!existing || statusSortScore(normalized.status) < statusSortScore(existing.status)) {
-          byId.set(normalized.id, normalized);
-        }
-      });
-    });
-
-    const sorted = Array.from(byId.values()).sort((a, b) => {
-      const aDate = new Date(a?.createdAt || 0).getTime();
-      const bDate = new Date(b?.createdAt || 0).getTime();
-      if (Number.isFinite(bDate - aDate) && bDate !== aDate) return bDate - aDate;
-      return Number(b.id) - Number(a.id);
-    });
-
-    setVideos(sorted);
-    if (successCount === 0) setError("Failed to load anonymous videos.");
-    setLoading(false);
+    try {
+      const { sorted, successCount } = await fetchAnonymousVideos();
+      setVideos(sorted);
+      if (successCount === 0) setError("Failed to load anonymous videos.");
+    } catch (err) {
+      console.error(err);
+      setError("Failed to load anonymous videos.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
-    void loadVideos();
+    let cancelled = false;
+    void fetchAnonymousVideos()
+      .then(({ sorted, successCount }) => {
+        if (cancelled) return;
+        setVideos(sorted);
+        if (successCount === 0) setError("Failed to load anonymous videos.");
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.error(err);
+        setError("Failed to load anonymous videos.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const filteredVideos = useMemo(() => {
@@ -257,4 +284,3 @@ export default function AdminAnonymousVideos() {
     </section>
   );
 }
-

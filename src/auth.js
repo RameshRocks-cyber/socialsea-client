@@ -1,44 +1,40 @@
 import { toApiUrl } from "./api/baseUrl";
 import { getOrCreateDeviceId } from "./deviceId";
 
-const getStoredToken = () =>
-  sessionStorage.getItem("accessToken") ||
-  sessionStorage.getItem("token") ||
-  localStorage.getItem("accessToken") ||
-  localStorage.getItem("token");
+const AUTH_SESSION_KEY = "socialsea_auth_session_v1";
 
-const parseJwt = (token) => {
+export const setAuthSessionActive = (active) => {
   try {
-    const payload = token?.split(".")?.[1];
-    if (!payload) return null;
-    return JSON.parse(atob(payload));
+    if (active) {
+      sessionStorage.setItem(AUTH_SESSION_KEY, "1");
+    } else {
+      sessionStorage.removeItem(AUTH_SESSION_KEY);
+    }
   } catch {
-    return null;
+    // ignore storage failures
   }
 };
 
-const isTokenUsable = (token) => {
-  if (!token) return false;
-  const payload = parseJwt(token);
-  // Some environments may return opaque/non-JWT access tokens.
-  // Treat them as usable and rely on backend 401 to invalidate.
-  if (!payload) return true;
-  if (!payload.exp) return true;
-  const nowSec = Math.floor(Date.now() / 1000);
-  const exp = Number(payload.exp);
-  if (!Number.isFinite(exp)) return true;
-  return exp > nowSec;
-};
-
 export const isAuthenticated = () => {
-  const token = getStoredToken();
-  if (!token) return false;
-  if (isTokenUsable(token)) return true;
-  clearAuthStorage();
-  return false;
+  try {
+    return sessionStorage.getItem(AUTH_SESSION_KEY) === "1";
+  } catch {
+    return false;
+  }
 };
 
-const AUTH_KEYS = ["accessToken", "token", "refreshToken", "userId", "role", "profileCompleted", "email", "username", "name"];
+const AUTH_KEYS = [
+  "accessToken",
+  "token",
+  "refreshToken",
+  "userId",
+  "role",
+  "profileCompleted",
+  "email",
+  "username",
+  "name",
+  AUTH_SESSION_KEY
+];
 
 export const clearAuthStorage = () => {
   AUTH_KEYS.forEach((key) => {
@@ -55,38 +51,27 @@ export const getUserRole = () => {
     return noPrefix.toUpperCase();
   };
 
-  const storedRole = localStorage.getItem("role") || sessionStorage.getItem("role");
+  const storedRole = sessionStorage.getItem("role");
   if (storedRole) return normalizeRole(storedRole);
-
-  const token = getStoredToken();
-  if (!token) return null;
-
-  try {
-    const payload = parseJwt(token);
-    if (!payload) return null;
-    const role = payload.role || (Array.isArray(payload.roles) ? payload.roles[0] : null);
-    return normalizeRole(role);
-  } catch (e) {
-    return null;
-  }
+  return null;
 };
 
 export const logout = () => {
-  try {
-    const token = getStoredToken();
-    if (token && token !== "null" && token !== "undefined") {
-      fetch(toApiUrl("/api/security/sessions/logout"), {
+  (async () => {
+    try {
+      await fetch(toApiUrl("/api/security/sessions/logout"), {
         method: "POST",
+        credentials: "include",
         headers: {
-          Authorization: `Bearer ${String(token).trim()}`,
           "X-Device-Id": getOrCreateDeviceId(),
         },
         keepalive: true,
-      }).catch(() => {});
+      });
+    } catch {
+      // ignore revoke failures
+    } finally {
+      clearAuthStorage();
+      window.location.href = "/login";
     }
-  } catch {
-    // ignore revoke failures
-  }
-  clearAuthStorage();
-  window.location.href = "/login";
+  })();
 };

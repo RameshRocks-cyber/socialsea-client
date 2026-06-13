@@ -1,5 +1,5 @@
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { getDefaultResume, loadResume, saveResume } from "../services/resumeStorage";
 import api from "../api/axios";
 import { clearAuthStorage } from "../auth";
@@ -126,10 +126,12 @@ const mergeMedia = (existing, nextUrls) => {
 
 export default function ResumeBuilder() {
   const navigate = useNavigate();
-  const location = useLocation();
   const [resume, setResume] = useState(() => getDefaultResume());
   const [hydrated, setHydrated] = useState(false);
-  const [openSection, setOpenSection] = useState("personal");
+  const [openSection, setOpenSection] = useState(() => {
+    const params = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
+    return params.get("section") || "personal";
+  });
   const saveTimerRef = useRef(null);
   const [projectUploadState, setProjectUploadState] = useState({});
   const [profileUpload, setProfileUpload] = useState({ uploading: false, error: "" });
@@ -145,14 +147,6 @@ export default function ResumeBuilder() {
       mounted = false;
     };
   }, []);
-
-  useEffect(() => {
-    const params = new URLSearchParams(location.search || "");
-    const target = params.get("section");
-    if (target) {
-      setOpenSection(target);
-    }
-  }, [location.search]);
 
   useEffect(() => {
     if (!hydrated) return;

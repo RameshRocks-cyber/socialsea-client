@@ -20,71 +20,6 @@ import "./Chat.css";
 
 export default function VideoCall({ placement = "page" }) {
   const ctx = useChat();
-
-  if (placement === "page") {
-    const {
-      groupCallActive,
-      groupInviteOpen,
-      contacts,
-      myUserId,
-      groupInviteIds,
-      getContactDisplayName,
-      toggleGroupInvite,
-      addPeopleToGroupCall,
-      startGroupCall,
-      setGroupInviteOpen
-    } = ctx;
-
-    return (
-      <>
-        {groupInviteOpen && (
-          <div className="group-call-overlay" role="dialog" aria-label="Start group call">
-            <div className="group-call-card">
-              <h3>Start group video call</h3>
-              <p>Select people for the call</p>
-              <div className="group-call-list">
-                {contacts
-                  .filter((c) => String(c?.id || "") !== String(myUserId))
-                  .map((c) => {
-                    const checked = groupInviteIds.includes(String(c.id));
-                    const displayName = getContactDisplayName(c);
-                    return (
-                      <label key={c.id} className="group-call-item">
-                        <input name="videocall-input-53"
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => toggleGroupInvite(c.id)}
-                        />
-                        <span>{displayName}</span>
-                      </label>
-                    );
-                  })}
-                {contacts.length === 0 && <p className="group-call-empty">No contacts available.</p>}
-              </div>
-              <div className="group-call-actions">
-                <button
-                  type="button"
-                  className="group-call-start"
-                  disabled={groupInviteIds.length === 0}
-                  onClick={() =>
-                    groupCallActive
-                      ? addPeopleToGroupCall()
-                      : startGroupCall()
-                  }
-                >
-                  {groupCallActive ? "Add people" : "Start call"}
-                </button>
-                <button type="button" className="group-call-cancel" onClick={() => setGroupInviteOpen(false)}>
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-      </>
-    );
-  }
-
   const {
     remoteAudioRef,
     incomingCall,
@@ -163,20 +98,41 @@ export default function VideoCall({ placement = "page" }) {
     signAssistStatus,
     signAssistDebugOpen,
     setSignAssistDebugOpen,
-    signAssistDebug
+    signAssistDebug,
+    groupInviteOpen,
+    newGroupOpen,
+    newGroupIds,
+    newGroupName,
+    newGroupQuery,
+    newGroupSearchUsers,
+    newGroupBusy,
+    contacts,
+    myUserId,
+    groupInviteIds,
+    getContactDisplayName,
+    toggleGroupInvite,
+    toggleNewGroupMember,
+    createGroupConversation,
+    addPeopleToGroupCall,
+    startGroupCall,
+    setGroupInviteOpen,
+    setNewGroupOpen,
+    setNewGroupName,
+    setNewGroupQuery,
   } = ctx;
 
   const [showCallMoreMenu, setShowCallMoreMenu] = useState(false);
   const isLocalPrimaryView = !groupCallActive && isLocalVideoPrimary;
-  const remoteDisplayedStream =
-    remoteVideoRef.current?.srcObject instanceof MediaStream ? remoteVideoRef.current.srcObject : null;
-  const remoteShouldUseScreenStyle = remoteIsScreenShare || isScreenShareStream(remoteDisplayedStream);
+  const remoteShouldUseScreenStyle = remoteIsScreenShare;
+  const groupCallTypeLabel = callState.mode === "video" ? "video" : "voice";
   const keepVideoPlaying = useCallback((event) => {
     event?.currentTarget?.play?.().catch(() => {});
   }, []);
 
   useEffect(() => {
-    if (!showVideoCallScreen) setShowCallMoreMenu(false);
+    if (showVideoCallScreen) return;
+    const timer = window.setTimeout(() => setShowCallMoreMenu(false), 0);
+    return () => window.clearTimeout(timer);
   }, [showVideoCallScreen]);
 
   useEffect(() => {
@@ -248,10 +204,151 @@ export default function VideoCall({ placement = "page" }) {
     [remoteVideoRef]
   );
 
+  const callInviteCandidates = contacts.filter((contact) => {
+    if (contact?.isGroup) return false;
+    const id = String(contact?.id || "").trim();
+    return id && id !== String(myUserId || "").trim();
+  });
+  const newGroupCandidates = Array.from(
+    new Map(
+      [...callInviteCandidates, ...(Array.isArray(newGroupSearchUsers) ? newGroupSearchUsers : [])]
+        .map((contact) => [String(contact?.id || "").trim(), contact])
+        .filter(([id]) => id)
+    ).values()
+  );
+  const filteredNewGroupCandidates = newGroupQuery.trim()
+    ? newGroupCandidates.filter((contact) => {
+      const query = newGroupQuery.trim().toLowerCase();
+      const searchable = [
+        getContactDisplayName(contact),
+        contact?.name,
+        contact?.username,
+        contact?.handle,
+        contact?.email,
+      ]
+        .map((value) => String(value || "").toLowerCase())
+        .filter(Boolean);
+      return searchable.some((value) => value.includes(query));
+    })
+    : newGroupCandidates;
+  const pageOverlays = placement === "page" ? (
+    <>
+      {newGroupOpen && (
+        <div className="group-call-overlay" role="dialog" aria-label="Create group chat">
+          <div className="group-call-card">
+            <h3>Create group</h3>
+            <p>Pick a name and select members for the chat</p>
+            {callError && <p className="call-error">{callError}</p>}
+            <input
+              name="videocall-input-group-name"
+              type="text"
+              className="chat-search"
+              placeholder="Group name"
+              value={newGroupName}
+              onChange={(event) => setNewGroupName(event.target.value)}
+            />
+            <input
+              name="videocall-input-group-search"
+              type="text"
+              className="chat-search"
+              placeholder="Search people"
+              value={newGroupQuery}
+              onChange={(event) => setNewGroupQuery(event.target.value)}
+            />
+            <div className="group-call-list">
+              {filteredNewGroupCandidates.map((contact) => {
+                const checked = newGroupIds.includes(String(contact.id));
+                const displayName = getContactDisplayName(contact);
+                return (
+                  <label key={contact.id} className="group-call-item">
+                    <input
+                      name="videocall-input-group-member"
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleNewGroupMember(contact.id)}
+                    />
+                    <span>{displayName}</span>
+                  </label>
+                );
+              })}
+              {filteredNewGroupCandidates.length === 0 && (
+                <p className="group-call-empty">No people available.</p>
+              )}
+            </div>
+            <div className="group-call-actions">
+              <button
+                type="button"
+                className="group-call-start"
+                disabled={newGroupBusy}
+                onClick={() => {
+                  void createGroupConversation();
+                }}
+              >
+                {newGroupBusy ? "Creating..." : "Create group"}
+              </button>
+              <button
+                type="button"
+                className="group-call-cancel"
+                onClick={() => setNewGroupOpen(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {groupInviteOpen && (
+        <div className="group-call-overlay" role="dialog" aria-label="Start group call">
+          <div className="group-call-card">
+            <h3>Start group video call</h3>
+            <p>Select people for the call</p>
+            {callError && <p className="call-error">{callError}</p>}
+            <div className="group-call-list">
+              {callInviteCandidates.map((c) => {
+                  const checked = groupInviteIds.includes(String(c.id));
+                  const displayName = getContactDisplayName(c);
+                  return (
+                    <label key={c.id} className="group-call-item">
+                      <input
+                        name="videocall-input-53"
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleGroupInvite(c.id)}
+                      />
+                      <span>{displayName}</span>
+                    </label>
+                  );
+                })}
+              {callInviteCandidates.length === 0 && <p className="group-call-empty">No contacts available.</p>}
+            </div>
+            <div className="group-call-actions">
+              <button
+                type="button"
+                className="group-call-start"
+                disabled={groupInviteIds.length === 0}
+                onClick={() =>
+                  groupCallActive
+                    ? addPeopleToGroupCall()
+                    : startGroupCall()
+                }
+              >
+                {groupCallActive ? "Add people" : "Start call"}
+              </button>
+              <button type="button" className="group-call-cancel" onClick={() => setGroupInviteOpen(false)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  ) : null;
+
   return (
     <>
+      {pageOverlays}
       <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: "none" }} aria-hidden="true" />
-      {incomingCall && (
+      {placement !== "page" && incomingCall && (
         <div
           ref={incomingCallPopupRef}
           className={`incoming-call-popup ${incomingCallPopupPos ? "is-dragged" : ""}`}
@@ -295,7 +392,7 @@ export default function VideoCall({ placement = "page" }) {
           </div>
         </div>
       )}
-      {callActive && callState.mode === "audio" && (
+      {placement !== "page" && callActive && callState.mode === "audio" && !incomingCall && !groupCallActive && (
         <div
           ref={activeCallPopupRef}
           className={`active-call-popup ${activeCallPopupPos ? "is-dragged" : ""}`}
@@ -351,7 +448,7 @@ export default function VideoCall({ placement = "page" }) {
           </div>
         </div>
       )}
-      {callActive && callState.mode === "audio" && !incomingCall && (
+      {placement !== "page" && callActive && callState.mode === "audio" && !incomingCall && !groupCallActive && (
         <button
           type="button"
           className="call-floating-end"
@@ -371,7 +468,7 @@ export default function VideoCall({ placement = "page" }) {
             title="Return to call"
           >
             <span className="wa-call-mini-bar-title">
-              {groupCallActive ? "Group video call" : "Video call"}
+              {groupCallActive ? `Group ${groupCallTypeLabel} call` : "Video call"}
             </span>
             <span className="wa-call-mini-bar-sub">
               {callStatusText} - {formatCallDuration(callDurationSec)} - Tap to return
@@ -389,7 +486,7 @@ export default function VideoCall({ placement = "page" }) {
                 setVideoCallMinimized(false);
               }
             }}
-            aria-label="Return to video call"
+            aria-label="Return to call"
             title="Return to call"
             style={
               miniVideoPos
@@ -503,7 +600,7 @@ export default function VideoCall({ placement = "page" }) {
           }`}
           role="dialog"
           aria-live="polite"
-          aria-label="Video call screen"
+          aria-label={groupCallActive ? `Group ${groupCallTypeLabel} call screen` : "Video call screen"}
         >
           {groupCallActive ? (
             <div className="wa-video-grid">
@@ -605,7 +702,9 @@ export default function VideoCall({ placement = "page" }) {
             >
               <MdPictureInPictureAlt />
             </button>
-            <p className="wa-video-peer">{callState.peerName || "User"}</p>
+            <p className="wa-video-peer">
+              {groupCallActive ? `Group ${groupCallTypeLabel} call` : callState.peerName || "User"}
+            </p>
             <p className="wa-video-state">
               {callStatusText} - {formatCallDuration(callDurationSec)}
             </p>
@@ -878,7 +977,13 @@ export default function VideoCall({ placement = "page" }) {
             <button type="button" className="call-control" onClick={toggleSpeaker} title="Speaker on/off">
               {isSpeakerOn ? <FiVolume2 /> : <FiVolumeX />}
             </button>
-            <button type="button" className="call-control" onClick={toggleCamera} title="Camera on/off">
+            <button
+              type="button"
+              className="call-control"
+              onClick={toggleCamera}
+              title="Camera on/off"
+              disabled={callState.mode !== "video"}
+            >
               {isCameraOff ? <FiVideoOff /> : <FiVideo />}
             </button>
             <button

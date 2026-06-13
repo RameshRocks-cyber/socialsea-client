@@ -1,14 +1,26 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { FiBookmark } from "react-icons/fi";
 import { BsBookmarkFill } from "react-icons/bs";
 import { IoArrowRedoOutline } from "react-icons/io5";
 import api from "../api/axios";
+import { loadSavedPosts, syncSavedPostCache, syncSavedPostCacheFromIds, toggleSavedPost } from "../api/saved";
+import { DEFAULT_FEED_PAGE_SIZE, getAnonymousFeedPosts, normalizeFeedPage, unwrapFeedList } from "../api/feed";
+import { getPostComments } from "../api/comments";
+import {
+  anonymousFeedQueryKey,
+  feedCommentsQueryKey,
+  feedTimelineQueryKey
+} from "../api/queryKeys";
 import { getApiBaseUrl } from "../api/baseUrl";
 import { recordCommentActivity, recordRepostActivity, recordSearchActivity } from "../services/activityStore";
+import { resolveFollowStateFromResponse, syncCurrentViewerFollowRelation } from "../services/followSync";
 import { readIdListFromStorage, readIdMapFromStorage, writeIdListToStorage, writeIdMapToStorage } from "../utils/idStorage";
+import { getPublicDisplayName } from "../utils/displayName";
 import { readLiveBroadcast, subscribeLiveBroadcast } from "../utils/liveBroadcast";
-import { resolveMediaUrl } from "../utils/mediaUrl";
+import { resolveMediaUrl, resolvePostImageUrl } from "../utils/mediaUrl";
 import { buildProfilePath } from "../utils/profileRoute";
 import {
   classifyVideoBucket,
@@ -26,10 +38,12 @@ const CHAT_SHARE_DRAFT_KEY = "socialsea_chat_share_draft_v1";
 const POST_GENRE_MAP_KEY = "socialsea_post_genre_map_v1";
 const FEED_CACHE_KEY = "socialsea_feed_cache_v1";
 const LIVE_PREVIEW_FRAME_KEY = "socialsea_live_preview_frame_v1";
+const FEED_QUERY_STALE_TIME = 5 * 60_000;
+const FEED_QUERY_GC_TIME = 30 * 60_000;
 const FEED_PAGE_SIZE = (() => {
-  const raw = Number(import.meta.env.VITE_FEED_PAGE_SIZE || 140);
-  if (!Number.isFinite(raw) || raw <= 0) return 140;
-  return Math.max(30, Math.min(300, Math.floor(raw)));
+  const raw = Number(import.meta.env.VITE_FEED_PAGE_SIZE || DEFAULT_FEED_PAGE_SIZE);
+  if (!Number.isFinite(raw) || raw <= 0) return DEFAULT_FEED_PAGE_SIZE;
+  return Math.max(DEFAULT_FEED_PAGE_SIZE, Math.min(300, Math.floor(raw)));
 })();
 const FEED_FILTER_PRIORITY_ORDER = [
   "general",
@@ -449,6 +463,67 @@ const readCachedFeedPosts = () => {
   }
 };
 
+const looksLikeHtmlResponse = (value) =>
+  typeof value === "string" && (/^\s*<!doctype html/i.test(value) || /<html[\s>]/i.test(value));
+
+const buildFeedBaseCandidates = () => {
+  const isLocalDev =
+    typeof window !== "undefined" &&
+    ["localhost", "127.0.0.1"].includes(String(window.location.hostname || "").toLowerCase());
+  const storedBase =
+    typeof window !== "undefined"
+      ? localStorage.getItem("socialsea_auth_base_url") || sessionStorage.getItem("socialsea_auth_base_url")
+      : "";
+  return [
+    api.defaults.baseURL,
+    storedBase,
+    getApiBaseUrl(),
+    import.meta.env.VITE_API_URL,
+    ...(isLocalDev ? ["http://localhost:8080", "http://127.0.0.1:8080", "/api"] : ["/api"]),
+  ].filter((v, i, arr) => v && arr.indexOf(v) === i);
+};
+
+const fetchFeedPage = async ({ page = 0, size = FEED_PAGE_SIZE } = {}) => {
+  const resolvedPage = Math.max(0, Number(page) || 0);
+  const resolvedSize = Math.max(1, Number(size) || FEED_PAGE_SIZE);
+  const baseCandidates = buildFeedBaseCandidates();
+  let lastErr = null;
+
+  for (const baseURL of baseCandidates) {
+    try {
+      const res = await api.request({
+        method: "GET",
+        url: "/api/feed",
+        baseURL,
+        timeout: 10000,
+        suppressAuthRedirect: true,
+        params: { page: resolvedPage, size: resolvedSize },
+      });
+      const body = res?.data;
+      if (looksLikeHtmlResponse(body)) {
+        const htmlErr = new Error("Received HTML instead of API JSON");
+        htmlErr.response = { status: 404, data: body };
+        throw htmlErr;
+      }
+      const normalized = normalizeFeedPage(body, resolvedPage, resolvedSize);
+      return {
+        ...normalized,
+        content: unwrapFeedList(normalized.content).filter((post) => post && !isYouTubeMedia(post)),
+      };
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+
+  throw lastErr || new Error("Failed to load feed");
+};
+
+const formatFeedLoadError = (err) => {
+  const status = Number(err?.response?.status || 0);
+  const message = String(err?.response?.data?.message || err?.message || "Failed to load feed");
+  return status ? `Failed to load feed (${status}) ${message}` : `Failed to load feed: ${message}`;
+};
+
 const FEED_PERSONALIZATION_VERSION = 1;
 const FEED_PERSONALIZATION_KEY_PREFIX = "socialsea_feed_personalization_v1";
 const FEED_SIGNAL_WEIGHTS = {
@@ -564,6 +639,7 @@ const collectPersonalizationTokens = (post, localGenreMap) => {
 export default function Feed() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const queryClient = useQueryClient();
   const feedUserKey = useMemo(() => resolveFeedUserKey(), []);
   const feedMode = useMemo(() => {
     const mode = String(searchParams.get("mode") || "").trim().toLowerCase();
@@ -577,10 +653,10 @@ export default function Feed() {
     else nextParams.delete("mode");
     setSearchParams(nextParams, { replace: true });
   }, [feedMode, searchParams, setSearchParams]);
+  const cachedFeedPosts = useMemo(() => readCachedFeedPosts(), []);
   const [feedMenuOpen, setFeedMenuOpen] = useState(false);
   const [contentTypeFilter, setContentTypeFilter] = useState("all");
   const [contentSubFilter, setContentSubFilter] = useState("all");
-  const [posts, setPosts] = useState(() => readCachedFeedPosts());
   const [personalizationState, setPersonalizationState] = useState(() => readFeedPersonalizationState(feedUserKey));
   const [liveBroadcast, setLiveBroadcast] = useState(() => readLiveBroadcast());
   const [livePreviewFrame, setLivePreviewFrame] = useState("");
@@ -591,8 +667,6 @@ export default function Feed() {
   const [savedPostIds, setSavedPostIds] = useState({});
   const [watchLaterPostIds, setWatchLaterPostIds] = useState({});
   const [shareMessageByPost, setShareMessageByPost] = useState({});
-  const [error, setError] = useState("");
-  const [isLoading, setIsLoading] = useState(() => readCachedFeedPosts().length === 0);
   const [query, setQuery] = useState("");
   const [localGenreMap, setLocalGenreMap] = useState({});
   const [activePostId, setActivePostId] = useState(null);
@@ -605,19 +679,19 @@ export default function Feed() {
   const [menuPlacement, setMenuPlacement] = useState(() => createDefaultLongMenuPlacement());
   const [hiddenPostIds, setHiddenPostIds] = useState({});
   const [blockedOwnerKeys, setBlockedOwnerKeys] = useState({});
+  const [windowWidth, setWindowWidth] = useState(() =>
+    typeof window !== "undefined" ? window.innerWidth : 1200
+  );
   const mediaClickTimerByPostRef = useRef({});
   const viewerVideoRefs = useRef({});
   const watchProgressByPostRef = useRef({});
-  const retryTimerRef = useRef(0);
-  const retryCountRef = useRef(0);
-  const inFlightLoadRef = useRef(false);
-  const lastLoadAtRef = useRef(0);
-  const postsCountRef = useRef(Array.isArray(posts) ? posts.length : 0);
   const skippedProfileLookupCandidatesRef = useRef(new Set());
+  const loadedLikeCountIdsRef = useRef(new Set());
   const closingPostViewRef = useRef(false);
   const menuRef = useRef(null);
   const feedMenuRef = useRef(null);
   const postViewBackdropRef = useRef(null);
+  const feedLoadMoreRef = useRef(null);
 
   const HIDDEN_POSTS_KEY = "feedHiddenPostIds";
   const BLOCKED_OWNERS_KEY = "feedBlockedOwnerKeys";
@@ -628,10 +702,6 @@ export default function Feed() {
   useEffect(() => {
     persistFeedPersonalizationState(feedUserKey, personalizationState);
   }, [feedUserKey, personalizationState]);
-
-  useEffect(() => {
-    postsCountRef.current = Array.isArray(posts) ? posts.length : 0;
-  }, [posts]);
 
   useEffect(() => {
     const unsubscribe = subscribeLiveBroadcast((next) => setLiveBroadcast(next));
@@ -713,233 +783,132 @@ export default function Feed() {
   }, [contentTypeFilter, contentSubFilter]);
 
   useEffect(() => {
-    let mounted = true;
-    const buildBaseCandidates = () => {
-      const isLocalDev =
-        typeof window !== "undefined" &&
-        ["localhost", "127.0.0.1"].includes(String(window.location.hostname || "").toLowerCase());
-      const storedBase =
-        typeof window !== "undefined"
-          ? localStorage.getItem("socialsea_auth_base_url") || sessionStorage.getItem("socialsea_auth_base_url")
-          : "";
-      return [
-        api.defaults.baseURL,
-        storedBase,
-        getApiBaseUrl(),
-        import.meta.env.VITE_API_URL,
-        ...(isLocalDev ? ["http://localhost:8080", "http://127.0.0.1:8080", "/api"] : ["/api"]),
-      ].filter((v, i, arr) => v && arr.indexOf(v) === i);
+    const onResize = () => {
+      if (typeof window === "undefined") return;
+      setWindowWidth(window.innerWidth || 1200);
     };
-    const extractList = (payload) =>
-      Array.isArray(payload)
-        ? payload
-        : Array.isArray(payload?.items)
-          ? payload.items
-          : Array.isArray(payload?.data)
-            ? payload.data
-            : Array.isArray(payload?.content)
-              ? payload.content
-              : [];
-    const fetchAnonymousFeedList = async (baseCandidates) => {
-      const endpoints = ["/api/feed/anonymous", "/api/anonymous/feed", "/anonymous/feed"];
-      let fallback = [];
-      for (const baseURL of baseCandidates) {
-        for (const url of endpoints) {
-          try {
-            const res = await api.request({
-              method: "GET",
-              url,
-              baseURL,
-              timeout: 10000,
-              suppressAuthRedirect: true,
-              params: { size: FEED_PAGE_SIZE },
-            });
-            const body = res?.data;
-            const looksLikeHtml =
-              typeof body === "string" && (/^\s*<!doctype html/i.test(body) || /<html[\s>]/i.test(body));
-            if (looksLikeHtml) continue;
-            const list = extractList(body);
-            if (!Array.isArray(list)) continue;
-            if (!fallback.length) fallback = list;
-            if (list.length > 0) return list;
-          } catch {
-            // Best-effort anonymous merge; keep main feed loading resilient.
-          }
-        }
-      }
-      return fallback;
-    };
-    const clearRetryTimer = () => {
-      if (retryTimerRef.current) {
-        clearTimeout(retryTimerRef.current);
-        retryTimerRef.current = 0;
-      }
-    };
-
-    const scheduleRetry = () => {
-      if (!mounted) return;
-      if (retryCountRef.current >= 4) return;
-      clearRetryTimer();
-      const delays = [1200, 2200, 4000, 6500];
-      const delay = delays[retryCountRef.current] || 6500;
-      retryTimerRef.current = window.setTimeout(() => {
-        if (!mounted) return;
-        retryCountRef.current += 1;
-        void load(true);
-      }, delay);
-    };
-
-    const load = async (silent = false) => {
-      if (inFlightLoadRef.current) return;
-      inFlightLoadRef.current = true;
-      lastLoadAtRef.current = Date.now();
-      if (!silent) setIsLoading(true);
-      try {
-        const baseCandidates = buildBaseCandidates();
-        const endpoints = ["/api/feed"];
-        let res = null;
-        let lastErr = null;
-        let fallbackRes = null;
-        for (const baseURL of baseCandidates) {
-          for (const url of endpoints) {
-            try {
-              const r = await api.request({
-                method: "GET",
-                url,
-                baseURL,
-                timeout: 10000,
-                suppressAuthRedirect: true,
-                params: { size: FEED_PAGE_SIZE },
-              });
-              const body = r?.data;
-              const looksLikeHtml =
-                typeof body === "string" && (/^\s*<!doctype html/i.test(body) || /<html[\s>]/i.test(body));
-              if (looksLikeHtml) {
-                const htmlErr = new Error("Received HTML instead of API JSON");
-                htmlErr.response = { status: 404, data: body };
-                throw htmlErr;
-              }
-              const listTry = extractList(body);
-              if (Array.isArray(listTry)) {
-                if (!fallbackRes) fallbackRes = { ...r, data: listTry };
-                if (listTry.length > 0) {
-                  res = { ...r, data: listTry };
-                  lastErr = null;
-                  break;
-                }
-              }
-            } catch (err) {
-              lastErr = err;
-            }
-          }
-          if (res) break;
-        }
-        if (!res && fallbackRes) res = fallbackRes;
-        if (!res) throw lastErr || new Error("Failed to load feed");
-        const listRaw = Array.isArray(res.data) ? res.data : [];
-        const mainFeedList = listRaw.filter((post) => post && !isYouTubeMedia(post));
-        const anonymousFeedList = await fetchAnonymousFeedList(baseCandidates);
-        const list = mergeAnonymousVideosIntoFeed(mainFeedList, anonymousFeedList).filter(
-          (post) => post && !isYouTubeMedia(post)
-        );
-        if (!mounted) return;
-        setPosts(list);
-        setLikeCounts((prev) => {
-          const next = { ...prev };
-          list.forEach((post) => {
-            const postId = String(post?.id || "").trim();
-            if (!postId) return;
-            const seeded = readAnonCount(post, ["likeCount", "likesCount", "likes"]);
-            if (!Number.isFinite(seeded) || seeded < 0) return;
-            const current = Number(next[postId]);
-            if (!Number.isFinite(current) || seeded > current) {
-              next[postId] = seeded;
-            }
-          });
-          return next;
-        });
-        try {
-          localStorage.setItem(FEED_CACHE_KEY, JSON.stringify({ updatedAt: Date.now(), posts: list }));
-        } catch {
-          // ignore cache issues
-        }
-        if (list.length > 0) {
-          setError("");
-          retryCountRef.current = 0;
-          clearRetryTimer();
-        } else {
-          scheduleRetry();
-        }
-
-        if (list.length === 0 && String(import.meta.env?.VITE_ENABLE_ACTUATOR_PROBE || "") === "true") {
-          try {
-            const healthRes = await api.get("/actuator/health", {
-              skipAuth: true,
-              suppressAuthRedirect: true,
-              timeout: 4000
-            });
-            const health = String(healthRes?.data?.status || "").toUpperCase();
-            if (health && health !== "UP") {
-              setError(`Backend health is ${health}. Feed may be empty due to backend DB/service issue.`);
-            }
-          } catch {
-            // ignore health probe failure
-          }
-        }
-      } catch (err) {
-        console.error(err);
-        if (!mounted) return;
-        const status = err?.response?.status;
-        const message = err?.response?.data?.message || err?.response?.data || "";
-        if (!postsCountRef.current) {
-          setError(status ? `Failed to load feed (${status}) ${message}` : "Failed to load feed");
-        }
-        scheduleRetry();
-      } finally {
-        inFlightLoadRef.current = false;
-        if (mounted) setIsLoading(false);
-      }
-    };
-
-    const refreshIfStale = () => {
-      if (!mounted) return;
-      const staleForMs = Date.now() - lastLoadAtRef.current;
-      if (staleForMs < 3000 && postsCountRef.current > 0) return;
-      void load(true);
-    };
-
-    const onOnline = () => refreshIfStale();
-    const onFocus = () => refreshIfStale();
-    const onVisibility = () => {
-      if (document.visibilityState === "visible") refreshIfStale();
-    };
-
-    window.addEventListener("online", onOnline);
-    window.addEventListener("focus", onFocus);
-    document.addEventListener("visibilitychange", onVisibility);
-
-    void load(postsCountRef.current > 0);
-    return () => {
-      mounted = false;
-      clearRetryTimer();
-      window.removeEventListener("online", onOnline);
-      window.removeEventListener("focus", onFocus);
-      document.removeEventListener("visibilitychange", onVisibility);
-    };
+    onResize();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
   }, []);
+
+  const feedQuery = useInfiniteQuery({
+    queryKey: feedTimelineQueryKey(feedUserKey),
+    initialPageParam: 0,
+    queryFn: ({ pageParam = 0 }) => fetchFeedPage({ page: pageParam, size: FEED_PAGE_SIZE }),
+    getNextPageParam: (lastPage) => {
+      if (!lastPage?.hasNext) return undefined;
+      return Math.max(0, Number(lastPage?.page) || 0) + 1;
+    },
+    staleTime: FEED_QUERY_STALE_TIME,
+    gcTime: FEED_QUERY_GC_TIME,
+    retry: 1,
+    refetchOnMount: true,
+    refetchOnReconnect: true,
+    refetchOnWindowFocus: false,
+  });
+
+  const anonymousFeedQuery = useQuery({
+    queryKey: anonymousFeedQueryKey(feedUserKey),
+    queryFn: async () => {
+      try {
+        return await getAnonymousFeedPosts(FEED_PAGE_SIZE);
+      } catch {
+        return [];
+      }
+    },
+    staleTime: FEED_QUERY_STALE_TIME,
+    gcTime: FEED_QUERY_GC_TIME,
+    retry: 1,
+  });
+  const feedHasNextPage = feedQuery.hasNextPage;
+  const feedIsFetchingNextPage = feedQuery.isFetchingNextPage;
+  const fetchNextFeedPage = feedQuery.fetchNextPage;
+
+  const mainFeedPosts = useMemo(() => {
+    const queryPages = Array.isArray(feedQuery.data?.pages) ? feedQuery.data.pages : [];
+    const fromQuery = queryPages.flatMap((page) => unwrapFeedList(page?.content ?? page));
+    if (fromQuery.length > 0) {
+      return fromQuery.filter((post) => post && !isYouTubeMedia(post));
+    }
+    if (feedQuery.data) return [];
+    return cachedFeedPosts;
+  }, [cachedFeedPosts, feedQuery.data]);
+
+  const anonymousFeedPosts = useMemo(() => {
+    const list = unwrapFeedList(anonymousFeedQuery.data);
+    return list.filter((post) => post && !isYouTubeMedia(post));
+  }, [anonymousFeedQuery.data]);
+
+  const posts = useMemo(() => {
+    return mergeAnonymousVideosIntoFeed(mainFeedPosts, anonymousFeedPosts).filter(
+      (post) => post && !isYouTubeMedia(post)
+    );
+  }, [mainFeedPosts, anonymousFeedPosts]);
+
+  const error = !posts.length && feedQuery.isError ? formatFeedLoadError(feedQuery.error) : "";
+  const isLoading = feedQuery.isPending && cachedFeedPosts.length === 0;
 
   useEffect(() => {
     if (!posts.length) return;
-    posts.forEach((post) => {
-      if (isAnonymousFeedItem(post)) return;
+    setLikeCounts((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      posts.forEach((post) => {
+        const postId = String(post?.id || "").trim();
+        if (!postId) return;
+        const seeded = readAnonCount(post, ["likeCount", "likesCount", "likes"]);
+        if (!Number.isFinite(seeded) || seeded < 0) return;
+        const current = Number(next[postId]);
+        if (!Number.isFinite(current) || seeded > current) {
+          next[postId] = seeded;
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+    try {
+      localStorage.setItem(FEED_CACHE_KEY, JSON.stringify({ updatedAt: Date.now(), posts }));
+    } catch {
+      // ignore cache issues
+    }
+  }, [posts]);
+  useEffect(() => {
+    if (!posts.length) return;
+    const pending = posts.filter((post) => {
+      if (isAnonymousFeedItem(post)) return false;
+      const postId = String(post?.id || "").trim();
+      if (!postId) return false;
+      if (loadedLikeCountIdsRef.current.has(postId)) return false;
+      loadedLikeCountIdsRef.current.add(postId);
+      return true;
+    });
+    pending.forEach((post) => {
       api.get(`/api/likes/${post.id}/count`)
         .then((res) => {
           const count = Number(res.data) || 0;
           setLikeCounts((prev) => ({ ...prev, [post.id]: count }));
         })
-        .catch(() => {});
+        .catch(() => {
+          loadedLikeCountIdsRef.current.delete(String(post?.id || "").trim());
+      });
     });
   }, [posts]);
+  useEffect(() => {
+    const target = feedLoadMoreRef.current;
+    if (!target || !feedHasNextPage) return undefined;
+    if (typeof IntersectionObserver === "undefined") return undefined;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        if (feedIsFetchingNextPage || !feedHasNextPage) return;
+        void fetchNextFeedPage();
+      },
+      { rootMargin: "800px 0px" }
+    );
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [feedHasNextPage, feedIsFetchingNextPage, fetchNextFeedPage]);
 
   useEffect(() => {
     const map = readIdMapFromStorage("likedPostIds");
@@ -947,8 +916,29 @@ export default function Feed() {
   }, []);
 
   useEffect(() => {
-    const map = readIdMapFromStorage("savedPostIds");
-    if (Object.keys(map).length) setSavedPostIds(map);
+    let mounted = true;
+    const loadSavedState = async () => {
+      try {
+        const savedItems = await loadSavedPosts();
+        if (!mounted) return;
+        const next = (Array.isArray(savedItems) ? savedItems : []).reduce((acc, item) => {
+          const id = Number(item?.id);
+          if (!Number.isFinite(id) || id <= 0) return acc;
+          acc[id] = true;
+          return acc;
+        }, {});
+        setSavedPostIds(next);
+        syncSavedPostCache(savedItems);
+      } catch {
+        if (!mounted) return;
+        const map = readIdMapFromStorage("savedPostIds");
+        if (Object.keys(map).length) setSavedPostIds(map);
+      }
+    };
+    loadSavedState();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -1065,23 +1055,8 @@ export default function Feed() {
     setFeedMenuOpen(false);
   };
 
-  const normalizeDisplayName = (value) => {
-    const raw = String(value || "").trim();
-    if (!raw) return "User";
-    const local = raw.includes("@") ? raw.split("@")[0] : raw;
-    const withoutDigits = local.replace(/\d+$/g, "");
-    const cleaned = withoutDigits.replace(/[._-]+/g, " ").replace(/\s+/g, " ").trim();
-    if (!cleaned) return "User";
-    return cleaned
-      .split(" ")
-      .filter(Boolean)
-      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-      .join(" ");
-  };
-
   const usernameFor = (post) => {
-    const raw = post?.user?.name || post?.username || post?.user?.email || "User";
-    return normalizeDisplayName(raw);
+    return getPublicDisplayName(post?.user || post);
   };
 
   const ownerCandidatesFor = (post) => {
@@ -1182,30 +1157,44 @@ export default function Feed() {
     return "not_following";
   };
 
-  const resolveFollowStateFromResponse = (response) => {
-    const text = String(
-      response?.data?.status ||
-      response?.data?.followStatus ||
-      response?.data?.relationship ||
-      response?.data ||
-      ""
-    ).trim().toLowerCase();
-    if (text.includes("request")) return "requested";
-    if (text.includes("following") || text.includes("followed")) return "following";
-    return "following";
-  };
-
   const followPostOwner = async (post) => {
     const followTarget = followTargetFor(post);
     const ownerKey = ownerKeyFor(post) || followTarget;
     if (!followTarget || !ownerKey || isOwnPost(post) || followBusyByOwner[ownerKey]) return;
+    const previousState = followStateByOwner[ownerKey] || followStateHintFor(post);
+    setFollowStateByOwner((prev) => ({ ...prev, [ownerKey]: "following" }));
     setFollowBusyByOwner((prev) => ({ ...prev, [ownerKey]: true }));
     try {
       const res = await api.post(`/api/follow/${encodeURIComponent(followTarget)}`);
       const nextState = resolveFollowStateFromResponse(res);
+      const messageText = String(res?.data?.message || res?.data || "").toLowerCase();
+      const countDelta =
+        nextState === "following" &&
+        previousState !== "following" &&
+        !messageText.includes("already following")
+          ? 1
+          : 0;
       setFollowStateByOwner((prev) => ({ ...prev, [ownerKey]: nextState }));
+      syncCurrentViewerFollowRelation({
+        targetIdentifiers: [
+          post?.user?.id,
+          post?.userId,
+          post?.user?.username,
+          post?.username,
+          post?.user?.email,
+          post?.email,
+          followTarget
+        ],
+        nextState,
+        countDelta
+      });
     } catch {
-      // noop
+      setFollowStateByOwner((prev) => {
+        const next = { ...prev };
+        if (previousState) next[ownerKey] = previousState;
+        else delete next[ownerKey];
+        return next;
+      });
     } finally {
       setFollowBusyByOwner((prev) => ({ ...prev, [ownerKey]: false }));
     }
@@ -1501,8 +1490,13 @@ export default function Feed() {
 
   const loadComments = async (postId) => {
     try {
-      const res = await api.get(`/api/comments/${postId}`);
-      setCommentsByPost((prev) => ({ ...prev, [postId]: Array.isArray(res.data) ? res.data : [] }));
+      const comments = await queryClient.fetchQuery({
+        queryKey: feedCommentsQueryKey(postId),
+        queryFn: () => getPostComments(postId),
+        staleTime: 30_000,
+        gcTime: 10 * 60_000
+      });
+      setCommentsByPost((prev) => ({ ...prev, [postId]: Array.isArray(comments) ? comments : [] }));
     } catch {
       // noop
     }
@@ -1514,60 +1508,68 @@ export default function Feed() {
     };
     const targetPost = postById[String(postId)];
     const isAnonymousTarget = isAnonymousFeedItem(targetPost);
+    const previousLiked = !!likedPostIds[postId];
+    const previousCount = Number(likeCounts[postId] || 0);
 
-    try {
-      if (isAnonymousTarget) {
-        if (likedPostIds[postId]) return;
-        const anonId = String(targetPost?.anonymousPostId || "").trim();
-        if (!anonId) return;
-        const res = await api.post(`/api/anonymous/${encodeURIComponent(anonId)}/like`);
-        const seeded = readAnonCount(res?.data || {}, ["likeCount", "likesCount", "likes"]);
-        setLikeCounts((prev) => ({
-          ...prev,
-          [postId]: seeded > 0 ? seeded : (prev[postId] || 0) + 1
-        }));
-        setLikedPostIds((prev) => {
-          const next = { ...prev, [postId]: true };
-          persistLikedMap(next);
-          return next;
-        });
-        if (targetPost) trackFeedInteraction(targetPost, "like");
-        return;
-      }
-
-      if (likedPostIds[postId]) {
-        await api.delete(`/api/likes/${postId}`);
-        setLikedPostIds((prev) => {
-          if (!prev[postId]) return prev;
-          const next = { ...prev };
-          delete next[postId];
-          persistLikedMap(next);
-          return next;
-        });
-        setLikeCounts((prev) => ({ ...prev, [postId]: Math.max(0, (prev[postId] || 0) - 1) }));
-        return;
-      }
-
-      const res = await api.post(`/api/likes/${postId}`);
-      const message = String(res?.data || "").toLowerCase();
-      if (message.includes("already")) {
-        setLikedPostIds((prev) => {
-          const next = { ...prev, [postId]: true };
-          persistLikedMap(next);
-          return next;
-        });
-        if (targetPost) trackFeedInteraction(targetPost, "like");
-        return;
-      }
-      setLikeCounts((prev) => ({ ...prev, [postId]: (prev[postId] || 0) + 1 }));
+    const rollback = () => {
+      setLikeCounts((prev) => ({ ...prev, [postId]: previousCount }));
       setLikedPostIds((prev) => {
-        const next = { ...prev, [postId]: true };
+        const next = { ...prev };
+        if (previousLiked) next[postId] = true;
+        else delete next[postId];
         persistLikedMap(next);
         return next;
       });
-      if (targetPost) trackFeedInteraction(targetPost, "like");
+    };
+
+    try {
+      if (isAnonymousTarget) {
+        if (previousLiked) return;
+        const anonId = String(targetPost?.anonymousPostId || "").trim();
+        if (!anonId) return;
+        setLikeCounts((prev) => ({ ...prev, [postId]: previousCount + 1 }));
+        setLikedPostIds((prev) => {
+          const next = { ...prev, [postId]: true };
+          persistLikedMap(next);
+          return next;
+        });
+        const res = await api.post(`/api/anonymous/${encodeURIComponent(anonId)}/like`);
+        const seeded = readAnonCount(res?.data || {}, ["likeCount", "likesCount", "likes"]);
+        if (seeded > 0) {
+          setLikeCounts((prev) => ({ ...prev, [postId]: seeded }));
+        }
+        if (targetPost) trackFeedInteraction(targetPost, "like");
+        return;
+      }
+
+      const nextLiked = !previousLiked;
+      const optimisticCount = Math.max(0, previousCount + (nextLiked ? 1 : -1));
+      setLikeCounts((prev) => ({ ...prev, [postId]: optimisticCount }));
+      setLikedPostIds((prev) => {
+        const next = { ...prev };
+        if (nextLiked) next[postId] = true;
+        else delete next[postId];
+        persistLikedMap(next);
+        return next;
+      });
+
+      if (nextLiked) {
+        const res = await api.post(`/api/likes/${postId}`);
+        const message = String(res?.data || "").toLowerCase();
+        if (message.includes("already")) {
+          setLikeCounts((prev) => ({ ...prev, [postId]: previousCount }));
+          setLikedPostIds((prev) => {
+            const next = { ...prev, [postId]: true };
+            persistLikedMap(next);
+            return next;
+          });
+        }
+        if (targetPost) trackFeedInteraction(targetPost, "like");
+      } else {
+        await api.delete(`/api/likes/${postId}`);
+      }
     } catch {
-      // noop
+      rollback();
     }
   };
 
@@ -1667,16 +1669,32 @@ export default function Feed() {
     const text = (commentTextByPost[postId] || "").trim();
     if (!text) return;
     const targetPost = posts.find((post) => String(post?.id) === String(postId));
+    const tempId = `pending-comment-${postId}-${Date.now()}`;
+    const optimisticComment = {
+      id: tempId,
+      text,
+      user: { name: "You" },
+      pending: true,
+    };
+    setCommentsByPost((prev) => ({
+      ...prev,
+      [postId]: [...(Array.isArray(prev[postId]) ? prev[postId] : []), optimisticComment],
+    }));
+    setCommentTextByPost((prev) => ({ ...prev, [postId]: "" }));
     try {
       await api.post(`/api/comments/${postId}`, text, {
         headers: { "Content-Type": "text/plain" }
       });
-      setCommentTextByPost((prev) => ({ ...prev, [postId]: "" }));
       await loadComments(postId);
+      void queryClient.invalidateQueries({ queryKey: feedCommentsQueryKey(postId) });
       if (targetPost) trackFeedInteraction(targetPost, "comment");
       recordCommentActivity({ postId, text, item: targetPost, source: "feed" });
     } catch {
-      // noop
+      setCommentsByPost((prev) => ({
+        ...prev,
+        [postId]: (Array.isArray(prev[postId]) ? prev[postId] : []).filter((comment) => comment?.id !== tempId),
+      }));
+      setCommentTextByPost((prev) => ({ ...prev, [postId]: text }));
     }
   };
 
@@ -1810,14 +1828,22 @@ export default function Feed() {
     }
   };
 
-  const toggleSave = (postId) => {
-    setSavedPostIds((prev) => {
-      const next = { ...prev };
-      if (next[postId]) delete next[postId];
-      else next[postId] = true;
-      writeIdMapToStorage("savedPostIds", next);
-      return next;
-    });
+  const toggleSave = async (postId) => {
+    const safeId = Number(postId);
+    if (!Number.isFinite(safeId) || safeId <= 0) return;
+    try {
+      const result = await toggleSavedPost(safeId);
+      const isSaved = Boolean(result?.isSaved);
+      setSavedPostIds((prev) => {
+        const next = { ...prev };
+        if (isSaved) next[safeId] = true;
+        else delete next[safeId];
+        syncSavedPostCacheFromIds(Object.keys(next));
+        return next;
+      });
+    } catch {
+      // Keep the backend as the source of truth if the toggle fails.
+    }
   };
 
   const toggleWatchLater = (postId) => {
@@ -1912,27 +1938,6 @@ export default function Feed() {
     if (String(activePostId || "") === postParam) return;
     void openPost(target.id, false);
   }, [searchParams, posts, activePostId, videoDurationByPost, navigate]);
-
-  const openPostFromGrid = async (post) => {
-    const type = mediaTypeFor(post);
-    if (feedMode === "all" && type === "VIDEO") {
-      trackFeedInteraction(post, "watch");
-      navigate(`/clips?post=${post.id}`);
-      return;
-    }
-    const bucket = classifyVideoBucket(post, {
-      durationHint: Number(videoDurationByPost[post.id] || 0),
-      shortSeconds: SHORT_VIDEO_SECONDS,
-      defaultUnknown: "long"
-    });
-    const isShortVideo = type === "VIDEO" && bucket === "short";
-    if (isShortVideo) {
-      trackFeedInteraction(post, "watch");
-      navigate(`/clips?post=${post.id}`);
-      return;
-    }
-    await openPost(post.id, false, false, "watch");
-  };
 
   const moveFeedItem = async (direction) => {
     if (activeFeedIndex < 0 || !feedPosts.length) return;
@@ -2199,6 +2204,21 @@ export default function Feed() {
   const liveSubtitle = liveBroadcast?.startedAt ? formatLiveElapsed(liveBroadcast.startedAt) : "Live now";
   const hasLongContent = Boolean(liveBroadcast) || longVideoFeedPosts.length > 0;
   const hasFeedContent = Boolean(liveBroadcast) || feedPosts.length > 0;
+  const longVideoColumnCount = useMemo(() => {
+    if (windowWidth <= 520) return 1;
+    if (windowWidth <= 1100) return 2;
+    if (windowWidth >= 1500) return 4;
+    return 3;
+  }, [windowWidth]);
+  const shouldVirtualizeLongFeed = feedMode === "long" && longVideoFeedPosts.length > 48;
+  const longVideoRowCount = Math.ceil(longVideoFeedPosts.length / longVideoColumnCount);
+  const longVideoRowVirtualizer = useWindowVirtualizer({
+    count: shouldVirtualizeLongFeed ? longVideoRowCount : 0,
+    estimateSize: () => (windowWidth <= 520 ? 430 : windowWidth <= 1100 ? 360 : 320),
+    overscan: 4,
+    enabled: shouldVirtualizeLongFeed,
+  });
+  const virtualLongVideoRows = longVideoRowVirtualizer.getVirtualItems();
 
   const renderLivePreview = (className) => {
     if (livePreviewFrame) {
@@ -2208,6 +2228,158 @@ export default function Feed() {
       <div className={`${className} live-preview-fallback`}>
         <span>Live</span>
       </div>
+    );
+  };
+
+  const renderLongFeedCard = (post) => {
+    const rawUrl = post.contentUrl || post.mediaUrl || "";
+    const mediaUrl = rawUrl.trim() ? resolveMediaUrl(rawUrl.trim()) : "";
+    if (!mediaUrl) return null;
+    const user = usernameFor(post);
+    const profilePic = profilePicFor(post);
+    const duration = videoDurationByPost[post.id] || 0;
+    const isMenuOpen = menuOpenPostId === post.id;
+    const menuClassName = [
+      "long-feed-menu",
+      isMenuOpen && menuPlacement.postId === post.id && menuPlacement.vertical === "up" ? "is-open-up" : "",
+      isMenuOpen && menuPlacement.postId === post.id && menuPlacement.horizontal === "left" ? "is-open-left" : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+    const menuStyle =
+      isMenuOpen && menuPlacement.postId === post.id
+        ? { "--long-feed-menu-max-height": `${menuPlacement.maxHeight}px` }
+        : undefined;
+    const buildWatchPath = () => {
+      const id = String(post?.id || "").trim();
+      const nextParams = new URLSearchParams();
+      const mediaRaw = String(rawUrl || "").trim();
+      if (mediaRaw) nextParams.set("media", mediaRaw);
+      const posterRaw = String(
+        post?.posterUrl ||
+        post?.thumbnailUrl ||
+        post?.thumbUrl ||
+        post?.mediumUrl ||
+        post?.coverImageUrl ||
+        post?.coverImage ||
+        post?.previewUrl ||
+        post?.imageUrl ||
+        ""
+      ).trim();
+      if (posterRaw) nextParams.set("poster", posterRaw);
+      const titleRaw = String(captionFor(post) || "").trim();
+      if (titleRaw) nextParams.set("title", titleRaw);
+      if (user) nextParams.set("author", user);
+      if (isAnonymousFeedItem(post)) {
+        nextParams.set("anon", "1");
+        const anonId = String(post?.anonymousPostId || "").trim();
+        if (anonId) nextParams.set("aid", anonId);
+      }
+      const query = nextParams.toString();
+      const base = `/watch/${encodeURIComponent(id)}`;
+      return query ? `${base}?${query}` : base;
+    };
+
+    return (
+      <article
+        key={`long-${post.id}`}
+        className="long-feed-card"
+        onClick={() => {
+          trackFeedInteraction(post, "watch");
+          navigate(buildWatchPath());
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            trackFeedInteraction(post, "watch");
+            navigate(buildWatchPath());
+          }
+        }}
+        role="button"
+        tabIndex={0}
+        title={user}
+      >
+        <div className="long-feed-thumb-wrap">
+          <video
+            src={mediaUrl}
+            muted
+            playsInline
+            preload="metadata"
+            className="long-feed-thumb"
+            onLoadedMetadata={(e) => {
+              const next = Number(e.currentTarget.duration) || 0;
+              setVideoDurationByPost((prev) => (prev[post.id] === next ? prev : { ...prev, [post.id]: next }));
+            }}
+          />
+          <span className="long-feed-duration">{formatDuration(duration)}</span>
+        </div>
+        <div className="long-feed-meta">
+          {profilePic ? (
+            <img src={profilePic} alt={user} className="long-feed-avatar long-feed-avatar-img" loading="lazy" decoding="async" />
+          ) : (
+            <span className="long-feed-avatar">{user.charAt(0).toUpperCase()}</span>
+          )}
+          <div className="long-feed-text">
+            <p className="long-feed-title">{captionFor(post)}</p>
+            <p className="long-feed-sub">{user} | {(likeCounts[post.id] || 0).toLocaleString()} likes</p>
+            {shareMessageByPost[post.id] && <p className="long-feed-status">{shareMessageByPost[post.id]}</p>}
+          </div>
+          <div className="long-feed-actions-wrap">
+            <button
+              type="button"
+              className="long-feed-share-btn"
+              title="Share outside SocialSea"
+              aria-label="Share outside SocialSea"
+              onClick={(e) => {
+                e.stopPropagation();
+                void sharePostOutside(post);
+              }}
+            >
+              <IoArrowRedoOutline className="long-feed-share-icon" aria-hidden="true" />
+            </button>
+            <div className="long-feed-menu-wrap" ref={isMenuOpen ? menuRef : null}>
+              <button
+                type="button"
+                className="long-feed-menu-btn"
+                aria-label="More options"
+                aria-haspopup="menu"
+                aria-expanded={isMenuOpen}
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                }}
+                onTouchStart={(e) => {
+                  e.stopPropagation();
+                }}
+                onClick={(e) => {
+                  togglePostMenu(e, post.id);
+                }}
+              >
+                {"\u22EE"}
+              </button>
+              {isMenuOpen && (
+                <div
+                  className={menuClassName}
+                  style={menuStyle}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onTouchStart={(e) => e.stopPropagation()}
+                  onTouchMove={(e) => e.stopPropagation()}
+                  onWheel={(e) => e.stopPropagation()}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <button type="button" onClick={(e) => void handleMenuItemClick(e, "share", post)}>Share outside SocialSea</button>
+                  <button type="button" onClick={(e) => void handleMenuItemClick(e, "playlist", post)}>Save to playlist</button>
+                  <button type="button" onClick={(e) => void handleMenuItemClick(e, "not_interested", post)}>Not interested</button>
+                  <button type="button" onClick={(e) => void handleMenuItemClick(e, "dont_recommend", post)}>Don't recommend this video</button>
+                  <button type="button" onClick={(e) => void handleMenuItemClick(e, "report", post)}>Report</button>
+                  <button type="button" onClick={(e) => void handleMenuItemClick(e, "watch_later", post)}>Save to Watch Later</button>
+                  <button type="button" onClick={(e) => void handleMenuItemClick(e, "play_next", post)}>Play next</button>
+                  <button type="button" onClick={(e) => void handleMenuItemClick(e, "queue", post)}>In queue</button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </article>
     );
   };
 
@@ -2238,34 +2410,6 @@ export default function Feed() {
             onChange={(e) => setQuery(e.target.value)}
             className="explore-search-input"
           />
-          <div className="feed-filter-menu" ref={feedMenuRef}>
-            <button
-              type="button"
-              className="feed-filter-btn"
-              aria-haspopup="menu"
-              aria-expanded={feedMenuOpen}
-              aria-label="Feed options"
-              onClick={() => setFeedMenuOpen((prev) => !prev)}
-            >
-              ...
-            </button>
-            {feedMenuOpen && (
-              <div className="feed-filter-panel" role="menu">
-                {FEED_CONTENT_TYPES.map((item) => (
-                  <button
-                    key={`filter-${item.value}`}
-                    type="button"
-                    className={contentTypeFilter === item.value ? "is-active" : ""}
-                    role="menuitemradio"
-                    aria-checked={contentTypeFilter === item.value}
-                    onClick={() => selectContentType(item.value)}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
         </div>
 
         <div className="feed-mode-switch" role="tablist" aria-label="Feed mode">
@@ -2287,6 +2431,35 @@ export default function Feed() {
           >
             Feed
           </button>
+        </div>
+
+        <div className="feed-filter-menu" ref={feedMenuRef}>
+          <button
+            type="button"
+            className="feed-filter-btn"
+            aria-haspopup="menu"
+            aria-expanded={feedMenuOpen}
+            aria-label="Feed options"
+            onClick={() => setFeedMenuOpen((prev) => !prev)}
+          >
+            ...
+          </button>
+          {feedMenuOpen && (
+            <div className="feed-filter-panel" role="menu">
+              {FEED_CONTENT_TYPES.map((item) => (
+                <button
+                  key={`filter-${item.value}`}
+                  type="button"
+                  className={contentTypeFilter === item.value ? "is-active" : ""}
+                  role="menuitemradio"
+                  aria-checked={contentTypeFilter === item.value}
+                  onClick={() => selectContentType(item.value)}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
@@ -2362,7 +2535,7 @@ export default function Feed() {
               </div>
             </article>
           )}
-          {longVideoFeedPosts.map((post) => {
+          {!shouldVirtualizeLongFeed && longVideoFeedPosts.map((post) => {
             const rawUrl = post.contentUrl || post.mediaUrl || "";
             const mediaUrl = rawUrl.trim() ? resolveMediaUrl(rawUrl.trim()) : "";
             if (!mediaUrl) return null;
@@ -2387,9 +2560,10 @@ export default function Feed() {
               const mediaRaw = String(rawUrl || "").trim();
               if (mediaRaw) nextParams.set("media", mediaRaw);
               const posterRaw = String(
-                post?.posterUrl ||
+                  post?.posterUrl ||
                   post?.thumbnailUrl ||
                   post?.thumbUrl ||
+                  post?.mediumUrl ||
                   post?.coverImageUrl ||
                   post?.coverImage ||
                   post?.previewUrl ||
@@ -2444,7 +2618,7 @@ export default function Feed() {
                 </div>
                 <div className="long-feed-meta">
                   {profilePic ? (
-                    <img src={profilePic} alt={user} className="long-feed-avatar long-feed-avatar-img" />
+                    <img src={profilePic} alt={user} className="long-feed-avatar long-feed-avatar-img" loading="lazy" decoding="async" />
                   ) : (
                     <span className="long-feed-avatar">{user.charAt(0).toUpperCase()}</span>
                   )}
@@ -2511,6 +2685,37 @@ export default function Feed() {
               </article>
             );
           })}
+          {shouldVirtualizeLongFeed && (
+            <div
+              className="long-video-feed long-video-feed-virtual"
+              style={{ position: "relative", display: "block", height: `${longVideoRowVirtualizer.getTotalSize()}px` }}
+            >
+              {virtualLongVideoRows.map((virtualRow) => {
+                const startIndex = virtualRow.index * longVideoColumnCount;
+                const rowPosts = longVideoFeedPosts.slice(startIndex, startIndex + longVideoColumnCount);
+                return (
+                  <div
+                    key={virtualRow.key}
+                    data-index={virtualRow.index}
+                    ref={longVideoRowVirtualizer.measureElement}
+                    className="long-video-feed-row"
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      width: "100%",
+                      transform: `translateY(${virtualRow.start}px)`,
+                      display: "grid",
+                      gridTemplateColumns: `repeat(${longVideoColumnCount}, minmax(0, 1fr))`,
+                      gap: windowWidth <= 520 ? "12px 10px" : "20px 14px",
+                    }}
+                  >
+                    {rowPosts.map((post) => renderLongFeedCard(post))}
+                  </div>
+                );
+              })}
+            </div>
+          )}
             </div>
           </div>
         </section>
@@ -2585,7 +2790,7 @@ export default function Feed() {
                   }}
                 />
               ) : (
-                <img src={mediaUrl} alt="post" className="explore-media" />
+                <img src={resolvePostImageUrl(post, "thumbnail") || mediaUrl} alt="post" className="explore-media" loading="lazy" decoding="async" />
               )}
               <div className="explore-overlay">
                 <span>{"\u25B7"} {(likeCounts[post.id] || 0).toLocaleString()}</span>
@@ -2595,6 +2800,8 @@ export default function Feed() {
         })}
         </section>
       )}
+
+      <div ref={feedLoadMoreRef} className="feed-load-more-sentinel" aria-hidden="true" />
 
       {activePost && (
         <div
@@ -2633,6 +2840,8 @@ export default function Feed() {
                         src={profilePicFor(post)}
                         alt={usernameFor(post)}
                         className="feed-avatar feed-avatar-img"
+                        loading="lazy"
+                        decoding="async"
                       />
                     ) : (
                       <div className="feed-avatar">{usernameFor(post).charAt(0).toUpperCase()}</div>
@@ -2683,7 +2892,7 @@ export default function Feed() {
                         }}
                       />
                     ) : (
-                      <img src={mediaUrl} alt="post" className="feed-media-view" />
+                      <img src={resolvePostImageUrl(post, "medium") || mediaUrl} alt="post" className="feed-media-view" loading="lazy" decoding="async" />
                     )
                   )}
 
@@ -2744,7 +2953,7 @@ export default function Feed() {
 
                       {(commentsByPost[post.id] || []).map((comment) => (
                         <div className="feed-comment-item" key={comment.id}>
-                          <strong>{normalizeDisplayName(comment.user?.name || comment.user?.email || "User")}:</strong>{" "}
+                          <strong>{getPublicDisplayName(comment.user)}:</strong>{" "}
                           {comment.text}
                         </div>
                       ))}

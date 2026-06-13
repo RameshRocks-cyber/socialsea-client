@@ -1,4 +1,5 @@
 import api from "../api/axios";
+import { getContentItemsByIds } from "../api/feed";
 import { toApiUrl } from "../api/baseUrl";
 import { isStoryOwnedByIdentity, readArchivedStories, readStoryIdentity } from "./storyStorage";
 
@@ -528,19 +529,30 @@ export const readTimeSpentSummary = () => {
 export const loadActivitySnapshot = async () => {
   const identity = readActivityIdentity();
 
-  const [feedItems, reelItems, ownPosts, notificationsFromApi] = await Promise.all([
-    requestActivityData("/api/feed"),
-    requestActivityData("/api/reels"),
+  const contentLookupIds = [
+    ...readIdList("likedPostIds"),
+    ...readIdList("savedPostIds"),
+    ...readIdList("savedReelIds"),
+    ...readIdList("watchLaterPostIds"),
+    ...readIdList("archivedPostIds"),
+    ...readIdList("feedHiddenPostIds")
+  ];
+
+  const [contentItems, ownPosts, notificationsFromApi] = await Promise.all([
+    getContentItemsByIds(contentLookupIds),
     requestActivityData("/api/profile/me/posts"),
     requestActivityData("/api/notifications", readNotificationsCache())
   ]);
 
-  const feedEntries = feedItems.map((item) => buildContentEntry(item, "feed")).filter(Boolean);
-  const reelEntries = reelItems.map((item) => buildContentEntry(item, "reels")).filter(Boolean);
+  const contentEntries = contentItems
+    .map((item) => buildContentEntry(item, item?.reel || item?.isReel ? "reels" : "feed"))
+    .filter(Boolean);
   const ownPostEntries = ownPosts.map((item) => buildContentEntry(item, "profile")).filter(Boolean);
+  const reelEntries = contentEntries.filter((entry) => entry?.source === "reels");
+  const feedEntries = contentEntries.filter((entry) => entry?.source === "feed");
 
   const contentIndex = new Map();
-  [...reelEntries, ...feedEntries, ...ownPostEntries].forEach((entry) => {
+  [...contentEntries, ...ownPostEntries].forEach((entry) => {
     const key = normalizeString(entry?.contentId || entry?.id);
     if (!key || contentIndex.has(key)) return;
     contentIndex.set(key, entry);

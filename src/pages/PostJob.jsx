@@ -16,6 +16,7 @@ import {
   writeCompanyProfile
 } from "../services/companyProfileStore";
 import { getStoredProfileIdentifier } from "../utils/profileRoute";
+import { compressImageFile } from "../utils/imageCompression";
 import "./PostJob.css";
 
 const JOBS_KEY = "socialsea_company_jobs_v1";
@@ -224,18 +225,29 @@ export default function PostJob() {
     setEditMode(false);
   };
 
-  const handleLogoChange = (event) => {
+  const handleLogoChange = async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      setDraft((prev) => ({
-        ...prev,
-        logoUrl: String(reader.result || "")
-      }));
-    };
-    reader.readAsDataURL(file);
-    event.target.value = "";
+    try {
+      const optimizedFile = String(file.type || "").startsWith("image/")
+        ? await compressImageFile(file, {
+            maxSizeMB: 0.8,
+            maxWidthOrHeight: 1024,
+            fileType: "image/webp",
+            initialQuality: 0.82
+          })
+        : file;
+      const reader = new FileReader();
+      reader.onload = () => {
+        setDraft((prev) => ({
+          ...prev,
+          logoUrl: String(reader.result || "")
+        }));
+      };
+      reader.readAsDataURL(optimizedFile || file);
+    } finally {
+      event.target.value = "";
+    }
   };
 
   const handleRemoveLogo = () => {

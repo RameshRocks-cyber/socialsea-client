@@ -2,9 +2,10 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import api from "../api/axios";
 import { loginWithPassword, registerWithPassword } from "../api/auth";
-import { clearAuthStorage } from "../auth";
+import { clearAuthStorage, setAuthSessionActive } from "../auth";
+import { useAuth } from "../context/AuthContext";
 import { recordAccountHistoryEntry } from "../services/activityStore";
-import { buildProfilePath, persistProfileIdentity } from "../utils/profileRoute";
+import { persistProfileIdentity } from "../utils/profileRoute";
 import "./AuthScreen.css";
 
 function parseErrorMessage(err, fallback) {
@@ -18,8 +19,18 @@ function parseErrorMessage(err, fallback) {
     return "Login server is slow or temporarily unreachable. Please retry in a few seconds.";
   }
   const data = err?.response?.data;
+  const normalize = (value) => String(value || "").trim().toLowerCase();
   if (typeof data === "string" && data.trim()) {
     const text = data.trim();
+    const normalized = normalize(text);
+    if (
+      normalized.includes("already registered") ||
+      normalized.includes("already linked") ||
+      normalized.includes("already has an account") ||
+      normalized.includes("one account")
+    ) {
+      return "That email already has an account. Please log in instead.";
+    }
     if (/too many requests/i.test(text)) {
       return "Too many login attempts. Wait 60 seconds, then try again.";
     }
@@ -31,7 +42,19 @@ function parseErrorMessage(err, fallback) {
   if (data && typeof data === "object") {
     const candidates = [data.message, data.error, data.details, data.title];
     for (const value of candidates) {
-      if (typeof value === "string" && value.trim()) return value;
+      if (typeof value === "string" && value.trim()) {
+        const text = value.trim();
+        const normalized = normalize(text);
+        if (
+          normalized.includes("already registered") ||
+          normalized.includes("already linked") ||
+          normalized.includes("already has an account") ||
+          normalized.includes("one account")
+        ) {
+          return "That email already has an account. Please log in instead.";
+        }
+        return text;
+      }
     }
   }
   const generic = err?.message;
@@ -50,7 +73,6 @@ function persistAuthValue(key, value) {
   if (value == null) return;
   const safe = String(value);
   sessionStorage.setItem(key, safe);
-  localStorage.setItem(key, safe);
 }
 
 function clearAuthRecoveryLock() {
@@ -64,6 +86,7 @@ function clearAuthRecoveryLock() {
 
 export default function Login() {
   const navigate = useNavigate();
+  const { login: setAuthUser } = useAuth();
   const isLocalHost =
     typeof window !== "undefined" &&
     ["localhost", "127.0.0.1"].includes(String(window.location.hostname || "").toLowerCase());
@@ -77,20 +100,19 @@ export default function Login() {
   const [msg, setMsg] = useState("");
 
   const completeLogin = async (resData) => {
-    const token = resData?.accessToken || resData?.token;
-    const refreshToken = resData?.refreshToken || resData?.refresh_token;
+    const userData = resData?.user || null;
     const userId = resData?.userId || resData?.user?.id;
-    const role = normalizeRole(resData?.role || resData?.user?.role || (Array.isArray(resData?.roles) ? resData.roles[0] : null));
-
-    if (!token) throw new Error("Login failed: token missing");
+    const role = normalizeRole(resData?.role || userData?.role || (Array.isArray(resData?.roles) ? resData.roles[0] : null));
 
     clearAuthStorage();
     clearAuthRecoveryLock();
-    persistAuthValue("accessToken", token);
-    persistAuthValue("token", token);
+    setAuthSessionActive(true);
     if (userId != null) persistAuthValue("userId", userId);
-    if (refreshToken) persistAuthValue("refreshToken", refreshToken);
     if (role) persistAuthValue("role", role);
+    if (userData && typeof userData === "object") {
+      setAuthUser(userData);
+      persistProfileIdentity(userData);
+    }
 
     if (role === "ADMIN") {
       navigate("/admin");
@@ -100,6 +122,7 @@ export default function Login() {
     try {
       const profileRes = await api.get("/api/profile/me");
       const profile = profileRes?.data || {};
+      setAuthUser(profile);
       persistProfileIdentity(profile);
       recordAccountHistoryEntry({
         action: "Signed in",
@@ -112,7 +135,7 @@ export default function Login() {
         Boolean(String(profile?.profilePic || profile?.profilePicUrl || "").trim());
       persistAuthValue("profileCompleted", completed ? "true" : "false");
       if (completed) {
-        navigate(buildProfilePath(profile, userId), { replace: true });
+        navigate("/feed", { replace: true });
         return;
       }
     } catch {

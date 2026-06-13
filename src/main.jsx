@@ -3,26 +3,30 @@ import './index.css'
 import App from './App.jsx'
 import { AuthProvider } from "./context/AuthContext";
 import { NotificationProvider } from "./context/NotificationContext";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import { applyStoredTheme } from "./theme";
 import { applyUiLanguageFromStorage } from "./i18n/uiLanguage";
+import { queryClient } from "./queryClient";
 
 applyStoredTheme();
 applyUiLanguageFromStorage();
 
 createRoot(document.getElementById('root')).render(
-  <AuthProvider>
-    <NotificationProvider>
-      <App />
-      <ToastContainer
-        position="top-right"
-        autoClose={3000}
-        hideProgressBar={false}
-        closeOnClick
-        pauseOnHover
-        theme="dark"
-      />
-    </NotificationProvider>
-  </AuthProvider>,
+  <QueryClientProvider client={queryClient}>
+    <AuthProvider>
+      <NotificationProvider>
+        <App />
+        <ToastContainer
+          position="top-right"
+          autoClose={3000}
+          hideProgressBar={false}
+          closeOnClick
+          pauseOnHover
+          theme="dark"
+        />
+      </NotificationProvider>
+    </AuthProvider>
+  </QueryClientProvider>,
 )

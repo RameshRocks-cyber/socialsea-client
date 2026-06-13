@@ -177,7 +177,13 @@ export function getApiBaseUrl() {
     if (isLocalHost) {
       const envUrl = normalizeApiUrl(import.meta.env.VITE_API_URL);
       const envHost = hostFromUrl(envUrl);
-      // In local dev, prefer local backend/proxy by default.
+      // In local dev, prefer the Vite same-origin proxy so auth cookies work
+      // whether the page is opened on localhost or 127.0.0.1.
+      if (isDevMode) {
+        persistAuthBaseUrl("/api");
+        return "/api";
+      }
+      // Outside Vite dev, fall back to the direct local backend.
       if (!envUrl || envUrl.startsWith("/") || isFrontendLikeHost(envHost)) {
         persistAuthBaseUrl("http://localhost:8080");
         return "http://localhost:8080";

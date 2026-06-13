@@ -13,7 +13,10 @@ export default function PendingAnonymousPosts() {
   };
 
   useEffect(() => {
-    loadPosts();
+    const timer = window.setTimeout(() => {
+      loadPosts();
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   const approve = async (id) => {

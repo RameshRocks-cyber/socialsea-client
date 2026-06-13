@@ -90,10 +90,10 @@ body.ss-theme-white .settings-page {
 }
 
 body.ss-theme-white .settings-row-icon {
-  border-color: rgba(94, 136, 184, 0.52) !important;
-  background: linear-gradient(145deg, #739dca, #5f88b6) !important;
-  color: #f5f9ff !important;
-  box-shadow: 0 6px 14px rgba(49, 84, 129, 0.22);
+  border: none !important;
+  background: transparent !important;
+  color: #173c65 !important;
+  box-shadow: none !important;
 }
 
 body.ss-theme-white .settings-back,
@@ -280,18 +280,30 @@ body.ss-theme-white .settings-page .settings-theme-mode button.active:focus-visi
 }
 
 .settings-row-icon {
-  width: 28px;
-  height: 28px;
-  border-radius: 9px;
-  border: 1px solid rgba(80, 80, 80, 0.7);
-  background: linear-gradient(145deg, rgba(24, 24, 24, 0.9), rgba(10, 10, 10, 0.9));
+  width: 34px;
+  height: 34px;
+  border-radius: 0;
+  border: none;
+  background: transparent;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
+  font-size: 22px;
   font-weight: 700;
   letter-spacing: 0;
   line-height: 1;
+  box-shadow: none;
+}
+
+.settings-row-icon-image {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+  display: block;
+}
+
+.settings-row-icon-image-volo {
+  filter: drop-shadow(0 2px 4px rgba(28, 109, 193, 0.22));
 }
 
 .settings-row-title {

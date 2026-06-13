@@ -1,0 +1,759 @@
+.volo-page {
+  min-height: calc(100vh - 86px);
+  background:
+    radial-gradient(120% 120% at 10% -10%, rgba(40, 116, 255, 0.2), transparent 60%),
+    radial-gradient(110% 110% at 100% 0%, rgba(8, 176, 137, 0.18), transparent 58%),
+    #06090f;
+  color: #eaf3ff;
+  padding: 18px 14px 110px;
+}
+
+.volo-shell {
+  width: min(860px, 100%);
+  margin: 0 auto;
+  display: grid;
+  gap: 14px;
+}
+
+.volo-head {
+  padding: 4px 2px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.volo-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.volo-brand-mark {
+  width: 58px;
+  height: 58px;
+  object-fit: cover;
+  filter: drop-shadow(0 8px 14px rgba(19, 121, 232, 0.28));
+}
+
+.volo-head h1 {
+  margin: 0;
+  font-size: clamp(1.35rem, 2.6vw, 1.8rem);
+  letter-spacing: 0.3px;
+}
+
+.volo-question-trigger {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: none;
+  background: transparent;
+  color: #d9ebff;
+  font-size: 1.22rem;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.volo-question-trigger.is-open {
+  background: transparent;
+  color: #75c0ff;
+}
+
+.volo-question-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  border: none;
+  background: rgba(2, 8, 16, 0.52);
+  z-index: 1180;
+  cursor: pointer;
+}
+
+.volo-question-sheet {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: auto;
+  width: 50vw;
+  height: 100vh;
+  border: 1px solid rgba(124, 157, 201, 0.38);
+  border-top: none;
+  border-right: none;
+  border-bottom: none;
+  border-top-left-radius: 20px;
+  border-bottom-left-radius: 20px;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  background: linear-gradient(180deg, rgba(8, 14, 24, 0.98), rgba(6, 10, 18, 0.98));
+  padding: 12px;
+  z-index: 1200;
+  display: grid;
+  gap: 10px;
+  overflow-y: auto;
+  transform: translateX(105%);
+  transition: transform 0.22s ease;
+}
+
+.volo-question-sheet.is-open {
+  transform: translateX(0);
+}
+
+.volo-question-sheet-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.volo-question-sheet-head h2 {
+  margin: 0;
+  font-size: 1.06rem;
+}
+
+.volo-question-sheet-head p {
+  margin: 3px 0 0;
+  color: rgba(184, 217, 252, 0.84);
+  font-size: 0.82rem;
+}
+
+.volo-question-sheet-close {
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  border: 1px solid rgba(124, 157, 201, 0.4);
+  background: rgba(9, 16, 27, 0.95);
+  color: #deeeff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.volo-question-group {
+  display: grid;
+  gap: 8px;
+}
+
+.volo-question-group-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.volo-question-group-head h3 {
+  margin: 0;
+  font-size: 0.93rem;
+}
+
+.volo-question-group-head span {
+  font-size: 0.78rem;
+  color: rgba(182, 216, 251, 0.84);
+}
+
+.volo-question-list {
+  display: grid;
+  gap: 8px;
+}
+
+.volo-question-empty {
+  margin: 0;
+  border: 1px dashed rgba(122, 154, 201, 0.44);
+  border-radius: 10px;
+  padding: 9px 10px;
+  color: rgba(188, 220, 252, 0.86);
+  font-size: 0.82rem;
+}
+
+.volo-question-row {
+  border: 1px solid rgba(122, 154, 201, 0.32);
+  border-radius: 11px;
+  padding: 9px 10px;
+  background: rgba(9, 14, 23, 0.88);
+  display: grid;
+  gap: 6px;
+}
+
+.volo-question-row.is-top {
+  border-color: rgba(88, 161, 240, 0.58);
+}
+
+.volo-question-row-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.volo-question-rank {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 33px;
+  border-radius: 999px;
+  border: 1px solid rgba(96, 170, 252, 0.6);
+  padding: 2px 8px;
+  font-size: 0.74rem;
+  color: #d5ecff;
+  font-weight: 700;
+}
+
+.volo-question-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(114, 177, 251, 0.86);
+}
+
+.volo-question-row-time {
+  color: rgba(179, 212, 249, 0.78);
+  font-size: 0.77rem;
+}
+
+.volo-question-row-copy {
+  margin: 0;
+  color: #eef6ff;
+  font-size: 0.9rem;
+  line-height: 1.35;
+  font-weight: 600;
+}
+
+.volo-question-row-meta {
+  margin: 0;
+  color: rgba(178, 212, 250, 0.84);
+  font-size: 0.78rem;
+}
+
+.volo-top-question {
+  border: 1px solid rgba(124, 157, 201, 0.36);
+  border-radius: 14px;
+  background: linear-gradient(145deg, rgba(12, 20, 33, 0.95), rgba(8, 13, 22, 0.95));
+  padding: 11px 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.volo-top-question-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.volo-top-question-tag {
+  border: 1px solid rgba(109, 169, 239, 0.52);
+  border-radius: 999px;
+  padding: 3px 9px;
+  color: #d6ebff;
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.volo-top-question-count {
+  color: rgba(185, 216, 251, 0.8);
+  font-size: 0.78rem;
+}
+
+.volo-top-question-text {
+  margin: 0;
+  color: #f1f8ff;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.volo-question-compose {
+  border-color: rgba(110, 171, 242, 0.5);
+}
+
+.volo-compose {
+  background: linear-gradient(180deg, rgba(16, 23, 38, 0.92), rgba(9, 13, 21, 0.98));
+  border: 1px solid rgba(119, 150, 197, 0.34);
+  border-radius: 16px;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.volo-input {
+  width: 100%;
+  border: 1px solid rgba(122, 154, 201, 0.34);
+  border-radius: 10px;
+  background: rgba(8, 13, 21, 0.9);
+  color: #eaf3ff;
+  padding: 10px 12px;
+  font-size: 0.92rem;
+  outline: none;
+}
+
+.volo-input:focus {
+  border-color: rgba(83, 156, 255, 0.82);
+  box-shadow: 0 0 0 2px rgba(72, 145, 255, 0.26);
+}
+
+.volo-text {
+  min-height: 108px;
+  resize: vertical;
+  line-height: 1.42;
+}
+
+.volo-field-list {
+  display: grid;
+  gap: 8px;
+}
+
+.volo-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.volo-tool-btn {
+  border: 1px solid rgba(124, 157, 201, 0.34);
+  border-radius: 999px;
+  background: rgba(11, 18, 29, 0.9);
+  color: #d9ebff;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.volo-inline-field {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.volo-inline-field > svg {
+  color: rgba(159, 200, 255, 0.9);
+}
+
+.volo-icon-btn {
+  border: 1px solid rgba(122, 154, 201, 0.4);
+  background: rgba(10, 17, 27, 0.94);
+  color: #d9ebff;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.volo-compose-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.volo-btn {
+  border-radius: 999px;
+  padding: 6px 11px;
+  border: 1px solid rgba(130, 162, 210, 0.35);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  font-size: 0.82rem;
+  line-height: 1;
+  min-height: 34px;
+  cursor: pointer;
+  transition: transform 0.15s ease, filter 0.15s ease;
+}
+
+.volo-btn.ghost {
+  background: rgba(8, 12, 20, 0.92);
+  color: #d7e9ff;
+}
+
+.volo-btn.primary {
+  background: linear-gradient(135deg, #2997ff, #58bfff);
+  color: #041425;
+  border-color: rgba(95, 177, 255, 0.6);
+}
+
+.volo-btn:not(:disabled):hover {
+  transform: translateY(-1px);
+  filter: saturate(1.05);
+}
+
+.volo-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.volo-feed {
+  display: grid;
+  gap: 10px;
+}
+
+.volo-empty {
+  margin: 0;
+  border: 1px solid rgba(124, 157, 201, 0.3);
+  border-radius: 14px;
+  padding: 16px 14px;
+  background: rgba(10, 16, 26, 0.84);
+  color: rgba(222, 237, 255, 0.75);
+}
+
+.volo-card {
+  border: 1px solid rgba(124, 157, 201, 0.3);
+  border-radius: 14px;
+  padding: 12px;
+  background: rgba(10, 16, 26, 0.88);
+  display: grid;
+  gap: 10px;
+}
+
+.volo-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.volo-owner-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.volo-owner-avatar {
+  width: clamp(1.2rem, 4.8vw, 1.45rem);
+  height: clamp(1.2rem, 4.8vw, 1.45rem);
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid rgba(124, 157, 201, 0.45);
+  background: rgba(8, 12, 20, 0.95);
+  flex-shrink: 0;
+}
+
+.volo-owner-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.volo-owner {
+  color: #f2f8ff;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.volo-handle {
+  color: rgba(173, 206, 247, 0.85);
+  margin-left: 8px;
+  font-size: 0.84rem;
+}
+
+.volo-me {
+  margin-left: 8px;
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: #cce4ff;
+  border: 1px solid rgba(96, 140, 199, 0.45);
+}
+
+.volo-question-pill {
+  margin-left: 2px;
+  font-size: 0.72rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: #d3ebff;
+  border: 1px solid rgba(96, 140, 199, 0.45);
+  background: rgba(18, 45, 76, 0.45);
+}
+
+.volo-time {
+  color: rgba(173, 206, 247, 0.72);
+  font-size: 0.8rem;
+}
+
+.volo-copy {
+  margin: 0;
+  line-height: 1.45;
+  color: #eef6ff;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.volo-copy-question {
+  font-weight: 700;
+}
+
+.volo-answers-wrap {
+  border-top: 1px solid rgba(120, 153, 199, 0.28);
+  padding-top: 8px;
+  display: grid;
+  gap: 8px;
+}
+
+.volo-answer-count {
+  margin: 0;
+  color: rgba(181, 214, 250, 0.85);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.volo-answer-list {
+  display: grid;
+  gap: 6px;
+}
+
+.volo-answer-item {
+  border: 1px solid rgba(117, 149, 194, 0.3);
+  border-radius: 10px;
+  background: rgba(7, 13, 22, 0.84);
+  padding: 7px 9px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: #e8f4ff;
+  font-size: 0.84rem;
+  line-height: 1.35;
+}
+
+.volo-answer-empty {
+  margin: 0;
+  color: rgba(173, 206, 247, 0.75);
+  font-size: 0.82rem;
+}
+
+.volo-answer-compose {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.volo-answer-compose .volo-btn {
+  padding: 6px 10px;
+  min-height: 32px;
+}
+
+.volo-links {
+  display: grid;
+  gap: 6px;
+}
+
+.volo-links a {
+  color: #7ec3ff;
+  text-decoration: none;
+  word-break: break-all;
+  font-size: 0.9rem;
+}
+
+.volo-links a:hover {
+  text-decoration: underline;
+}
+
+.volo-media {
+  display: grid;
+  gap: 8px;
+}
+
+.volo-media img,
+.volo-media video {
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid rgba(122, 154, 201, 0.3);
+  background: #02060c;
+  max-height: min(420px, 60vh);
+  object-fit: cover;
+}
+
+.volo-fab-wrap {
+  position: fixed;
+  right: max(14px, env(safe-area-inset-right));
+  bottom: calc(84px + env(safe-area-inset-bottom));
+  z-index: 1100;
+  display: grid;
+  justify-items: end;
+  gap: 10px;
+}
+
+.volo-fab-menu {
+  border: 1px solid rgba(120, 153, 199, 0.38);
+  border-radius: 14px;
+  padding: 8px;
+  background: rgba(9, 14, 23, 0.97);
+  width: min(240px, 80vw);
+  display: grid;
+  gap: 6px;
+  box-shadow: 0 18px 28px rgba(0, 0, 0, 0.4);
+}
+
+.volo-fab-menu button {
+  border: 1px solid rgba(124, 157, 201, 0.34);
+  border-radius: 10px;
+  background: rgba(14, 22, 36, 0.92);
+  color: #deeeff;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.volo-fab {
+  width: 52px;
+  height: 52px;
+  border: none;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #1f8eff, #35b6ff);
+  color: #02111f;
+  box-shadow: 0 14px 28px rgba(21, 88, 173, 0.55);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  cursor: pointer;
+  transition: transform 0.14s ease;
+}
+
+.volo-fab:hover {
+  transform: translateY(-1px) scale(1.01);
+}
+
+.volo-fab.is-open {
+  transform: rotate(45deg);
+}
+
+body.ss-theme-white .volo-page {
+  background: #f7f8fb;
+  color: #163a61;
+}
+
+body.ss-theme-white .volo-compose,
+body.ss-theme-white .volo-card,
+body.ss-theme-white .volo-empty,
+body.ss-theme-white .volo-top-question {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: rgba(132, 169, 211, 0.48);
+}
+
+body.ss-theme-white .volo-input {
+  background: #f6fbff;
+  color: #163a61;
+  border-color: rgba(132, 169, 211, 0.52);
+}
+
+body.ss-theme-white .volo-icon-btn,
+body.ss-theme-white .volo-btn.ghost,
+body.ss-theme-white .volo-fab-menu button,
+body.ss-theme-white .volo-tool-btn {
+  background: #f2f8ff;
+  color: #1a446e;
+  border-color: rgba(132, 169, 211, 0.5);
+}
+
+body.ss-theme-white .volo-owner,
+body.ss-theme-white .volo-copy {
+  color: #15375d;
+}
+
+body.ss-theme-white .volo-question-trigger {
+  background: transparent;
+  color: #1a446e;
+  border: none;
+}
+
+body.ss-theme-white .volo-question-sheet-backdrop {
+  background: rgba(11, 28, 47, 0.16);
+}
+
+body.ss-theme-white .volo-question-sheet {
+  background: #f7f8fb;
+  border-color: rgba(132, 169, 211, 0.58);
+}
+
+body.ss-theme-white .volo-question-sheet-head p,
+body.ss-theme-white .volo-question-group-head span,
+body.ss-theme-white .volo-question-row-time,
+body.ss-theme-white .volo-question-row-meta,
+body.ss-theme-white .volo-question-empty {
+  color: rgba(47, 90, 134, 0.82);
+}
+
+body.ss-theme-white .volo-question-sheet-close {
+  background: #f2f8ff;
+  color: #1a446e;
+  border-color: rgba(132, 169, 211, 0.55);
+}
+
+body.ss-theme-white .volo-question-row {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: rgba(132, 169, 211, 0.5);
+}
+
+body.ss-theme-white .volo-question-row-copy {
+  color: #163a61;
+}
+
+body.ss-theme-white .volo-question-rank {
+  color: #1b4a78;
+  border-color: rgba(96, 150, 210, 0.62);
+}
+
+body.ss-theme-white .volo-top-question-text {
+  color: #15375d;
+}
+
+body.ss-theme-white .volo-question-pill {
+  color: #1c4b79;
+  background: rgba(201, 226, 252, 0.72);
+}
+
+body.ss-theme-white .volo-answer-item {
+  background: #f6fbff;
+  border-color: rgba(132, 169, 211, 0.5);
+  color: #163a61;
+}
+
+body.ss-theme-white .volo-answer-count,
+body.ss-theme-white .volo-answer-empty,
+body.ss-theme-white .volo-top-question-count {
+  color: rgba(47, 90, 134, 0.8);
+}
+
+body.ss-theme-white .volo-owner-avatar {
+  border-color: rgba(132, 169, 211, 0.55);
+  background: #ffffff;
+}
+
+body.ss-theme-white .volo-handle,
+body.ss-theme-white .volo-time {
+  color: rgba(47, 90, 134, 0.75);
+}
+
+body.ss-theme-white .volo-links a {
+  color: #1f76c4;
+}
+
+@media (max-width: 700px) {
+  .volo-page {
+    padding: 14px 10px 108px;
+  }
+
+  .volo-fab-wrap {
+    right: 12px;
+    bottom: calc(76px + env(safe-area-inset-bottom));
+  }
+
+  .volo-fab-menu {
+    width: min(220px, 88vw);
+  }
+}

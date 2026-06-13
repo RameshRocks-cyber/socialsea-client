@@ -1,17 +1,21 @@
 .notify-page {
   width: 100%;
   margin: 0;
-  padding: 10px 0 12px;
+  padding: 2px 0 14px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   background: transparent;
 }
 
 .notify-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
   border: 0;
   border-radius: 0;
-  padding: 4px 2px 0;
+  padding: 0 2px 2px;
   background: transparent;
   box-shadow: none;
 }
@@ -19,21 +23,29 @@
 .notify-brand {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
+  min-width: 0;
+}
+
+.notify-brand-copy {
+  min-width: 0;
 }
 
 .notify-logo {
   width: 28px;
   height: 28px;
-  border-radius: 10px;
-  border: 1px solid rgba(84, 84, 84, 0.72);
-  object-fit: cover;
+  border-radius: 999px;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  object-fit: contain;
 }
 
 .notify-brand h2 {
   margin: 0;
   color: #eef6ff;
-  font-size: 1.08rem;
+  font-size: 1.14rem;
+  font-weight: 800;
   line-height: 1.1;
 }
 
@@ -43,13 +55,53 @@
   font-size: 0.74rem;
 }
 
+.notify-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.notify-stat {
+  min-width: 0;
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.notify-stat span {
+  color: #6a87a8;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.notify-stat strong {
+  color: #173c65;
+  font-size: 1.02rem;
+  line-height: 1;
+}
+
+.notify-stat.is-highlight {
+  background: transparent;
+  border-color: transparent;
+}
+
 .notify-list {
   display: flex;
   flex-direction: column;
   gap: 0;
-  border: 1px solid rgba(58, 58, 58, 0.65);
-  border-radius: 14px;
-  background: rgba(12, 12, 12, 0.55);
+  border: 1px solid rgba(58, 58, 58, 0.55);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(13, 13, 13, 0.58), rgba(10, 10, 10, 0.52));
+  box-shadow: 0 18px 34px rgba(0, 0, 0, 0.12);
   overflow: hidden;
 }
 
@@ -68,11 +120,12 @@
 .notify-card {
   border: 0;
   border-radius: 0;
-  padding: 7px 10px;
+  padding: 10px 12px;
   display: flex;
   gap: 8px;
   background: transparent;
   box-shadow: none;
+  transition: background-color 0.16s ease, transform 0.16s ease;
 }
 
 .notify-card.is-clickable {
@@ -82,6 +135,7 @@
 
 .notify-card.is-clickable:hover {
   background: rgba(255, 255, 255, 0.04);
+  transform: translateX(2px);
 }
 
 .notify-card.is-clickable:focus-visible {
@@ -109,6 +163,7 @@
   color: #fff;
   font-size: 0.82rem;
   border: 1px solid rgba(255, 255, 255, 0.25);
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.18);
 }
 
 .notify-avatar-btn {
@@ -319,7 +374,10 @@
 }
 
 body.ss-theme-white .notify-page {
-  background: transparent !important;
+  background:
+    radial-gradient(120% 70% at 14% 0%, rgba(42, 98, 156, 0.1), transparent 58%),
+    radial-gradient(100% 60% at 100% 0%, rgba(76, 111, 152, 0.08), transparent 54%),
+    linear-gradient(180deg, #f8fbff 0%, #ffffff 38%) !important;
 }
 
 body.ss-theme-white .notify-head {
@@ -336,9 +394,32 @@ body.ss-theme-white .notify-brand p {
   color: #4a6f98 !important;
 }
 
+body.ss-theme-white .notify-stat {
+  background: transparent !important;
+  border-color: transparent !important;
+}
+
+body.ss-theme-white .notify-stat span {
+  color: #4a6f98 !important;
+}
+
+body.ss-theme-white .notify-stat strong {
+  color: #173c65 !important;
+}
+
+body.ss-theme-white .notify-stat.is-highlight {
+  background: transparent !important;
+  border-color: transparent !important;
+}
+
 body.ss-theme-white .notify-list {
   border-color: rgba(96, 142, 191, 0.32) !important;
-  background: #ffffff !important;
+  background: rgba(255, 255, 255, 0.9) !important;
+  box-shadow: 0 18px 36px rgba(30, 77, 130, 0.1) !important;
+}
+
+body.ss-theme-white .notify-card + .notify-card {
+  border-top: 1px solid rgba(96, 142, 191, 0.12);
 }
 
 body.ss-theme-white .notify-card {
@@ -348,6 +429,7 @@ body.ss-theme-white .notify-card {
 
 body.ss-theme-white .notify-card.is-clickable:hover {
   background: #f4f8ff !important;
+  transform: translateX(2px);
 }
 
 body.ss-theme-white .notify-empty {
@@ -442,6 +524,19 @@ body.ss-theme-white .notify-emergency-btn.navigate {
 }
 
 @media (max-width: 560px) {
+  .notify-head {
+    align-items: flex-start;
+  }
+
+  .notify-meta {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .notify-stat {
+    flex: 0 0 auto;
+  }
+
   .notify-brand h2 {
     font-size: 1rem;
   }

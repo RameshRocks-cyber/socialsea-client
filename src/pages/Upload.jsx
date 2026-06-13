@@ -35,6 +35,7 @@ import {
 import { useLocation, useNavigate } from "react-router-dom";
 import api from "../api/axios";
 import { CONTENT_TYPE_OPTIONS, readContentTypePrefs } from "./contentPrefs";
+import { compressImageFile } from "../utils/imageCompression";
 import "./Upload.css";
 
 const POST_GENRE_MAP_KEY = "socialsea_post_genre_map_v1";
@@ -42,6 +43,15 @@ const MAX_IMAGE_UPLOAD_FILE_SIZE_BYTES = 80 * 1024 * 1024;
 const MAX_VIDEO_UPLOAD_FILE_SIZE_BYTES = 1024 * 1024 * 1024;
 const MAX_CLIP_DURATION_SECONDS = 2 * 60;
 const CLIP_DURATION_TOLERANCE_SECONDS = 0.35;
+
+const guessOutputExtension = (mimeType) => {
+  const t = String(mimeType || "").toLowerCase();
+  if (t.includes("png")) return "png";
+  if (t.includes("webp")) return "webp";
+  if (t.includes("gif")) return "gif";
+  if (t.includes("bmp")) return "bmp";
+  return "jpg";
+};
 
 const ASPECT_OPTIONS = [
   { label: "Original", value: "orig" },
@@ -5558,7 +5568,13 @@ export default function Upload() {
   };
 
   const processImage = async (sourceFile) => {
-    const bitmap = await createImageBitmap(sourceFile);
+    const optimizedSource = await compressImageFile(sourceFile, {
+      maxSizeMB: 1.5,
+      maxWidthOrHeight: 2560,
+      fileType: "image/webp",
+      initialQuality: 0.84
+    });
+    const bitmap = await createImageBitmap(optimizedSource || sourceFile);
     const [aw, ah] = (() => {
       if (edits.aspect === "1:1") return [1, 1];
       if (edits.aspect === "4:5") return [4, 5];
@@ -5619,9 +5635,12 @@ export default function Upload() {
       ctx.fillRect(0, 0, canvas.width, canvas.height);
     }
 
-    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
+    const blob =
+      (await new Promise((resolve) => canvas.toBlob(resolve, "image/webp", 0.9))) ||
+      (await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92)));
     if (!blob) return sourceFile;
-    return new File([blob], `edited_${Date.now()}.jpg`, { type: "image/jpeg" });
+    const outputExtension = guessOutputExtension(blob.type || "image/webp");
+    return new File([blob], `edited_${Date.now()}.${outputExtension}`, { type: blob.type || "image/webp" });
   };
 
   const resetUploadForm = () => {
@@ -5952,7 +5971,15 @@ export default function Upload() {
             })
           );
           if (customCoverFile) {
-            form.append("coverImage", customCoverFile);
+            const optimizedCoverImage = String(customCoverFile.type || "").startsWith("image/")
+              ? await compressImageFile(customCoverFile, {
+                  maxSizeMB: 0.8,
+                  maxWidthOrHeight: 1920,
+                  fileType: "image/webp",
+                  initialQuality: 0.82
+                })
+              : customCoverFile;
+            form.append("coverImage", optimizedCoverImage || customCoverFile);
           }
         }
 

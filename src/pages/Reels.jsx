@@ -10,13 +10,20 @@ import { BsBookmarkFill } from "react-icons/bs";
 import { HiHandThumbUp, HiOutlineHandThumbUp } from "react-icons/hi2";
 import { IoArrowRedoOutline } from "react-icons/io5";
 import api from "../api/axios";
+import { useQueryClient } from "@tanstack/react-query";
+import { loadSavedPosts, syncSavedPostCache, syncSavedPostCacheFromIds, toggleSavedPost } from "../api/saved";
+import { getPostComments } from "../api/comments";
+import { feedCommentsQueryKey } from "../api/queryKeys";
 import { getApiBaseUrl } from "../api/baseUrl";
 import { recordCommentActivity, recordRepostActivity, recordWatchHistory } from "../services/activityStore";
+import { resolveFollowStateFromResponse, syncCurrentViewerFollowRelation } from "../services/followSync";
 import { addStoryEntry, readStoryIdentity } from "../services/storyStorage";
+import { getPublicDisplayName } from "../utils/displayName";
 import { readIdMapFromStorage, writeIdMapToStorage } from "../utils/idStorage";
 import { resolveMediaUrl } from "../utils/mediaUrl";
 import { classifyVideoBucket } from "../utils/videoFeedClassifier";
 import { isYouTubeMedia } from "../utils/youtubeMedia";
+import { buildProfilePath } from "../utils/profileRoute";
 import {
   FEED_WATCH_PROGRESS_MILESTONES,
   FEED_WATCH_TIME_CHUNK_SECONDS,
@@ -178,6 +185,7 @@ const getGlobalGestureCache = () => {
 
 export default function Clips() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const viewerIdentity = useMemo(() => readStoryIdentity(), []);
   const [reels, setReels] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -196,6 +204,8 @@ export default function Clips() {
   const [shareMessageByPost, setShareMessageByPost] = useState({});
   const [tapLikeBurstByPost, setTapLikeBurstByPost] = useState({});
   const [followingByKey, setFollowingByKey] = useState(() => readFollowingCache());
+  const [requestedByKey, setRequestedByKey] = useState({});
+  const [followBusyByKey, setFollowBusyByKey] = useState({});
   const [likeBusyByPost, setLikeBusyByPost] = useState({});
   const [profilePicByOwner, setProfilePicByOwner] = useState({});
   const [allMuted, setAllMuted] = useState(() => {
@@ -242,10 +252,30 @@ export default function Clips() {
   const playLockTimerByPostRef = useRef({});
   const lastPlayTapAtByPostRef = useRef({});
   const location = useLocation();
-  const targetPostId = useMemo(() => {
+  const { targetPostId, profileFilterToken } = useMemo(() => {
     const params = new URLSearchParams(location.search);
-    return String(params.get("post") || "").trim();
+    const normalizeToken = (value) => String(value || "").trim().toLowerCase();
+    return {
+      targetPostId: String(params.get("post") || "").trim(),
+      profileFilterToken: normalizeToken(params.get("profile"))
+    };
   }, [location.search]);
+  const reelMatchesProfileFilter = (reel) => {
+    if (!profileFilterToken) return true;
+    const candidates = [
+      reel?.user?.id,
+      reel?.user?.username,
+      reel?.username,
+      reel?.user?.email,
+      reel?.email,
+      reel?.userId,
+      reel?.ownerId,
+      reel?.profileId
+    ]
+      .map((value) => String(value || "").trim().toLowerCase())
+      .filter(Boolean);
+    return candidates.some((candidate) => candidate === profileFilterToken);
+  };
 
   useEffect(() => {
     const refresh = () => setStudyModeReels(readStudyModeReels());
@@ -267,12 +297,12 @@ export default function Clips() {
       setError("");
       setReels([]);
     }
-  }, [studyModeReels, targetPostId]);
+  }, [studyModeReels, targetPostId, profileFilterToken]);
 
   useEffect(() => {
     if (studyModeReels) return undefined;
     let cancelled = false;
-    const cached = readReelsCache();
+    const cached = readReelsCache().filter(reelMatchesProfileFilter);
     if (cached.length) {
       setReels(cached);
       setError("");
@@ -458,7 +488,7 @@ export default function Clips() {
           needsProbe.push({ item, mediaUrl });
         });
 
-        let nextReels = normalizeList(confirmed);
+        let nextReels = normalizeList(confirmed).filter(reelMatchesProfileFilter);
         const shouldPublishInitial = nextReels.length > 0 || cached.length === 0;
         if (!cancelled && shouldPublishInitial) {
           setError("");
@@ -478,6 +508,7 @@ export default function Clips() {
 
         const pushIfValid = (item) => {
           if (!item?.id) return false;
+          if (!reelMatchesProfileFilter(item)) return false;
           if (nextReels.some((r) => String(r?.id) === String(item.id)))
             return false;
           nextReels = normalizeList([...nextReels, item]);
@@ -558,8 +589,29 @@ export default function Clips() {
   }, []);
 
   useEffect(() => {
-    const map = readIdMapFromStorage("savedReelIds");
-    if (Object.keys(map).length) setSavedPostIds(map);
+    let mounted = true;
+    const loadSavedState = async () => {
+      try {
+        const savedItems = await loadSavedPosts();
+        if (!mounted) return;
+        const next = (Array.isArray(savedItems) ? savedItems : []).reduce((acc, item) => {
+          const id = Number(item?.id);
+          if (!Number.isFinite(id) || id <= 0) return acc;
+          acc[id] = true;
+          return acc;
+        }, {});
+        setSavedPostIds(next);
+        syncSavedPostCache(savedItems);
+      } catch {
+        if (!mounted) return;
+        const map = readIdMapFromStorage("savedReelIds");
+        if (Object.keys(map).length) setSavedPostIds(map);
+      }
+    };
+    loadSavedState();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -723,37 +775,8 @@ export default function Clips() {
         })
       );
 
-  useEffect(() => {
-    if (studyModeReels) return undefined;
-    let cancelled = false;
-    let timerId = 0;
-
-    const warmGestureAssets = async () => {
-      try {
-        await ensureGestureModelReady();
-      } catch {
-        // keep silent; we'll retry when user toggles gestures on
-      }
-    };
-
-    if (typeof window.requestIdleCallback === "function") {
-      const idleId = window.requestIdleCallback(() => {
-        if (!cancelled) void warmGestureAssets();
-      }, { timeout: 1400 });
-      return () => {
-        cancelled = true;
-        window.cancelIdleCallback?.(idleId);
-      };
-    }
-
-    timerId = window.setTimeout(() => {
-      if (!cancelled) void warmGestureAssets();
-    }, 260);
-    return () => {
-      cancelled = true;
-      if (timerId) clearTimeout(timerId);
-    };
-  }, [studyModeReels]);
+  // Do not auto-preload TF/handpose on page idle. Under strict CSP this can
+  // trigger unsafe-eval errors even when gesture mode is not used.
 
   const fetchLikeCount = (postId) => {
     const idText = String(postId || "").trim();
@@ -947,17 +970,6 @@ export default function Clips() {
         trackFeedSignal(reel, "watch", milestone.weight);
       });
     }
-  };
-
-  const emailToName = (email) => {
-    const raw = (email || "").split("@")[0] || "";
-    const cleaned = raw.replace(/[._-]+/g, " ").trim();
-    if (!cleaned) return "User";
-    return cleaned
-      .split(" ")
-      .filter(Boolean)
-      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-      .join(" ");
   };
 
   const reelOwnerKey = (reel) =>
@@ -1206,17 +1218,46 @@ export default function Clips() {
 
     if (likeBusyByPostRef.current[postId]) return;
     const targetReel = reelsRef.current.find((item) => String(item?.id) === String(postId));
-
     const wasLiked = !!likedPostIdsRef.current[postId];
+    const previousCount = Number(likeCounts[postId] || 0);
     const nextLiked = !wasLiked;
+    const rollback = () => {
+      setLikeCounts((prev) => ({
+        ...prev,
+        [postId]: Math.max(0, previousCount),
+      }));
+      setLikedPostIds((prev) => {
+        const next = { ...prev };
+        if (wasLiked) next[postId] = true;
+        else delete next[postId];
+        likedPostIdsRef.current = next;
+        persistLikedMap(next);
+        return next;
+      });
+    };
+
     likeBusyByPostRef.current = {
       ...likeBusyByPostRef.current,
       [postId]: true,
     };
     setLikeBusyByPost((prev) => ({ ...prev, [postId]: true }));
 
+    setLikeCounts((prev) => ({
+      ...prev,
+      [postId]: Math.max(0, previousCount + (nextLiked ? 1 : -1)),
+    }));
+    setLikedPostIds((prev) => {
+      const next = { ...prev };
+      if (nextLiked) next[postId] = true;
+      else delete next[postId];
+      likedPostIdsRef.current = next;
+      persistLikedMap(next);
+      return next;
+    });
+
     try {
       let res;
+      let finalLiked = nextLiked;
       if (nextLiked) {
         res = await api.post(`/api/likes/${postId}`);
       } else {
@@ -1226,6 +1267,7 @@ export default function Clips() {
           const status = Number(err?.response?.status || 0);
           if (status === 400 || status === 404 || status === 405) {
             res = await api.post(`/api/likes/${postId}`);
+            finalLiked = true;
           } else {
             throw err;
           }
@@ -1233,7 +1275,22 @@ export default function Clips() {
       }
 
       const message = String(res?.data || "").toLowerCase();
-      if (nextLiked && message.includes("already")) {
+      if (finalLiked && !nextLiked) {
+        setLikedPostIds((prev) => {
+          const next = { ...prev, [postId]: true };
+          likedPostIdsRef.current = next;
+          persistLikedMap(next);
+          return next;
+        });
+        setLikeCounts((prev) => ({
+          ...prev,
+          [postId]: previousCount + 1,
+        }));
+      } else if (nextLiked && message.includes("already")) {
+        setLikeCounts((prev) => ({
+          ...prev,
+          [postId]: previousCount,
+        }));
         setLikedPostIds((prev) => {
           const next = { ...prev, [postId]: true };
           likedPostIdsRef.current = next;
@@ -1250,17 +1307,13 @@ export default function Clips() {
           return next;
         });
       }
-      setLikeCounts((prev) => ({
-        ...prev,
-        [postId]: Math.max(0, (prev[postId] || 0) + (nextLiked ? 1 : -1)),
-      }));
 
-      if (nextLiked) {
+      if (finalLiked) {
         triggerLikeBurst();
         if (targetReel) trackFeedSignal(targetReel, "like");
       }
     } catch {
-      // keep prior UI state on failure
+      rollback();
     } finally {
       likeBusyByPostRef.current = {
         ...likeBusyByPostRef.current,
@@ -1272,10 +1325,15 @@ export default function Clips() {
 
   const loadComments = async (postId) => {
     try {
-      const res = await api.get(`/api/comments/${postId}`);
+      const comments = await queryClient.fetchQuery({
+        queryKey: feedCommentsQueryKey(postId),
+        queryFn: () => getPostComments(postId),
+        staleTime: 30_000,
+        gcTime: 10 * 60_000
+      });
       setCommentsByPost((prev) => ({
         ...prev,
-        [postId]: Array.isArray(res.data) ? res.data : [],
+        [postId]: Array.isArray(comments) ? comments : [],
       }));
     } catch {
       // noop
@@ -1292,16 +1350,31 @@ export default function Clips() {
     const text = (commentTextByPost[postId] || "").trim();
     if (!text) return;
     const reel = reels.find((item) => String(item?.id) === String(postId));
+    const tempId = `pending-comment-${postId}-${Date.now()}`;
+    const optimisticComment = {
+      id: tempId,
+      text,
+      user: { name: "You" },
+      pending: true,
+    };
+    setCommentsByPost((prev) => ({
+      ...prev,
+      [postId]: [...(Array.isArray(prev[postId]) ? prev[postId] : []), optimisticComment],
+    }));
+    setCommentTextByPost((prev) => ({ ...prev, [postId]: "" }));
     try {
       await api.post(`/api/comments/${postId}`, text, {
         headers: { "Content-Type": "text/plain" },
       });
-      setCommentTextByPost((prev) => ({ ...prev, [postId]: "" }));
       await loadComments(postId);
       recordCommentActivity({ postId, text, item: reel, source: "reels" });
       if (reel) trackFeedSignal(reel, "comment");
     } catch {
-      // noop
+      setCommentsByPost((prev) => ({
+        ...prev,
+        [postId]: (Array.isArray(prev[postId]) ? prev[postId] : []).filter((comment) => comment?.id !== tempId),
+      }));
+      setCommentTextByPost((prev) => ({ ...prev, [postId]: text }));
     }
   };
 
@@ -1371,40 +1444,74 @@ export default function Clips() {
   };
 
   const toggleSave = (postId) => {
-    setSavedPostIds((prev) => {
-      const next = { ...prev };
-      if (next[postId]) delete next[postId];
-      else next[postId] = true;
-      writeIdMapToStorage("savedReelIds", next);
-      return next;
-    });
+    const safeId = Number(postId);
+    if (!Number.isFinite(safeId) || safeId <= 0) return;
+    toggleSavedPost(safeId)
+      .then((result) => {
+        const isSaved = Boolean(result?.isSaved);
+        setSavedPostIds((prev) => {
+          const next = { ...prev };
+          if (isSaved) next[safeId] = true;
+          else delete next[safeId];
+          syncSavedPostCacheFromIds(Object.keys(next));
+          return next;
+        });
+      })
+      .catch(() => {
+        // Keep the backend as the source of truth if the toggle fails.
+      });
   };
 
   const followOwner = async (reel) => {
     const followTarget = reel?.user?.email || reel?.username;
     if (!followTarget) return;
     const followKeys = reelOwnerFollowKeys(reel);
+    const primaryKey = followKeys[0] || normalizeFollowKey(followTarget);
+    if (!primaryKey || followBusyByKey[primaryKey]) return;
+    setFollowBusyByKey((prev) => ({ ...prev, [primaryKey]: true }));
     try {
-      const res = await api.post(
-        `/api/follow/${encodeURIComponent(followTarget)}`,
-      );
-      const status = String(res?.data?.status || res?.data || "").toLowerCase();
-      if (
-        res.status >= 200 &&
-        res.status < 300 &&
-        status.includes("following")
-      ) {
+      const res = await api.post(`/api/follow/${encodeURIComponent(followTarget)}`);
+      const nextState = resolveFollowStateFromResponse(res);
+      const messageText = String(res?.data?.message || res?.data || "").toLowerCase();
+
+      if (nextState === "following") {
         setFollowingByKey((prev) => {
           const next = { ...prev };
           followKeys.forEach((key) => {
-            next[key] = true;
+            next[normalizeFollowKey(key)] = true;
           });
           return next;
         });
-        updateFollowCache(followKeys, true);
+        setRequestedByKey((prev) => {
+          const next = { ...prev };
+          followKeys.forEach((key) => {
+            delete next[normalizeFollowKey(key)];
+          });
+          return next;
+        });
+        syncCurrentViewerFollowRelation({
+          targetIdentifiers: [followTarget, ...followKeys],
+          nextState,
+          countDelta: messageText.includes("already following") ? 0 : 1
+        });
+      } else if (nextState === "requested") {
+        setRequestedByKey((prev) => {
+          const next = { ...prev };
+          followKeys.forEach((key) => {
+            next[normalizeFollowKey(key)] = true;
+          });
+          return next;
+        });
+        syncCurrentViewerFollowRelation({
+          targetIdentifiers: [followTarget, ...followKeys],
+          nextState,
+          countDelta: 0
+        });
       }
     } catch {
-      // noop
+      // Keep the pre-request state if the follow fails.
+    } finally {
+      setFollowBusyByKey((prev) => ({ ...prev, [primaryKey]: false }));
     }
   };
 
@@ -1736,15 +1843,13 @@ export default function Clips() {
           if (!videoUrl || isYouTubeMedia(reel)) return null;
 
           const comments = commentsByPost[reel.id] || [];
-          const ownerNameRaw =
-            reel?.user?.name || reel?.user?.email || reel?.username || "User";
-          const ownerName = ownerNameRaw.includes("@")
-            ? emailToName(ownerNameRaw)
-            : ownerNameRaw;
+          const ownerName = getPublicDisplayName(reel?.user || reel);
           const ownerFollowKeys = reelOwnerFollowKeys(reel);
           const ownerPic = reelOwnerProfilePic(reel);
           const isOwnReel = Number(reel?.user?.id) === myUserId;
           const isFollowing = ownerFollowKeys.some((key) => followingByKey[key] === true);
+          const isRequested = ownerFollowKeys.some((key) => requestedByKey[key] === true);
+          const isFollowBusy = ownerFollowKeys.some((key) => followBusyByKey[key] === true);
           const caption =
             reel?.description || reel?.content || "Watch this clip";
 
@@ -1863,16 +1968,15 @@ export default function Clips() {
                         src={ownerPic}
                         alt={ownerName}
                         className="reel-owner-avatar reel-owner-avatar-img"
+                        loading="lazy"
+                        decoding="async"
                       />
                     ) : (
                       <span className="reel-owner-avatar">
                         {ownerName.charAt(0).toUpperCase()}
                       </span>
                     )}
-                    <Link
-                      to={`/profile/${reel.user?.email || reel.user?.username || reel.username || "me"}`}
-                      className="reel-owner hover:underline"
-                    >
+                    <Link to={buildProfilePath(reel)} className="reel-owner hover:underline">
                       {ownerName}
                     </Link>
                     {!isOwnReel && (
@@ -1880,9 +1984,9 @@ export default function Clips() {
                         type="button"
                         className="reel-follow-btn"
                         onClick={() => followOwner(reel)}
-                        disabled={isFollowing}
+                        disabled={isFollowing || isRequested || isFollowBusy}
                       >
-                        {isFollowing ? "Following" : "Follow +"}
+                        {isFollowing ? "Following" : isRequested ? "Requested" : isFollowBusy ? "..." : "Follow +"}
                       </button>
                     )}
                   </div>
@@ -1919,7 +2023,7 @@ export default function Clips() {
                     {comments.map((comment) => (
                       <div className="reel-comment-item" key={comment.id}>
                         <strong>
-                          {comment.user?.name || comment.user?.email || "User"}:
+                          {getPublicDisplayName(comment.user)}:
                         </strong>{" "}
                         {comment.text}
                       </div>

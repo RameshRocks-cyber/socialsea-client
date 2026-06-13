@@ -25,7 +25,27 @@ export default function PendingAnonymousPosts() {
   };
 
   useEffect(() => {
-    loadPosts();
+    let cancelled = false;
+    void api
+      .get("/api/admin/anonymous/pending")
+      .then((res) => {
+        if (cancelled) return;
+        setPosts(Array.isArray(res.data) ? res.data : []);
+        setError("");
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        console.error(e);
+        const status = e?.response?.status;
+        const message = e?.response?.data?.message || e?.response?.data || "";
+        setError(status ? `Failed to load pending posts (${status}) ${message}` : "Failed to load pending posts");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const approve = async (id) => {
@@ -33,7 +53,7 @@ export default function PendingAnonymousPosts() {
       await api.post(`/api/admin/anonymous/approve/${id}`);
       successToast("Post approved");
       loadPosts();
-    } catch (e) {
+    } catch {
       errorToast("Failed to approve post");
     }
   };
@@ -50,7 +70,7 @@ export default function PendingAnonymousPosts() {
       });
       successToast("Post rejected");
       loadPosts();
-    } catch (e) {
+    } catch {
       errorToast("Failed to reject post");
     }
   };

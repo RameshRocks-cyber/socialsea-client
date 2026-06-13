@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { uploadAnonymousPost } from "../api/anonymous";
+import { compressImageFile } from "../utils/imageCompression";
 
 const AnonymousUpload = () => {
   const [file, setFile] = useState(null);
@@ -30,8 +31,16 @@ const AnonymousUpload = () => {
       setMsg("File is required");
       return;
     }
+    const uploadFile = String(file?.type || "").startsWith("image/")
+      ? await compressImageFile(file, {
+          maxSizeMB: 1.2,
+          maxWidthOrHeight: 1920,
+          fileType: "image/webp",
+          initialQuality: 0.84
+        })
+      : file;
     const form = new FormData();
-    form.append("file", file);
+    form.append("file", uploadFile || file);
     form.append("description", description || "");
 
     try {
@@ -55,7 +64,7 @@ const AnonymousUpload = () => {
     <div style={styles.page}>
       <div style={styles.card}>
         <h1 style={styles.title}>Anonymous Upload</h1>
-        <p style={styles.subtitle}>Share your thoughts privately. No identity stored.</p>
+        <p style={styles.subtitle}>Share safely without exposing your profile identity.</p>
 
         <label style={styles.uploadBox}>
           <input name="anonymousupload-input-61"

@@ -549,16 +549,7 @@ export default function SOSPage() {
   };
 
   useEffect(() => {
-    const token = String(
-      sessionStorage.getItem("accessToken") ||
-        sessionStorage.getItem("token") ||
-        localStorage.getItem("accessToken") ||
-        localStorage.getItem("token") ||
-        localStorage.getItem("authToken") ||
-        sessionStorage.getItem("authToken") ||
-        ""
-    ).trim();
-    if (!token) return undefined;
+    if (!myUserId) return undefined;
     let disposed = false;
     let client = null;
 
@@ -571,7 +562,7 @@ export default function SOSPage() {
           if (!raw) return fallback;
           return raw.startsWith("/") ? raw : `/${raw}`;
         };
-        const transport = String(import.meta.env?.VITE_WS_TRANSPORT || "ws").trim().toLowerCase();
+        const transport = String(import.meta.env?.VITE_WS_TRANSPORT || "sockjs").trim().toLowerCase();
         const isNativeTransport = ["ws", "websocket", "native"].includes(transport);
         const useSockJS = !isNativeTransport;
         const nativeWsEndpoint = normalizeEndpoint(import.meta.env?.VITE_WS_NATIVE_ENDPOINT, "/ws-native");
@@ -604,10 +595,9 @@ export default function SOSPage() {
             ...(useSockJS
               ? {
                   webSocketFactory: () =>
-                    new SockJS(`${base}${sockJsEndpoint}?token=${encodeURIComponent(token)}`, undefined, sockJsOptions)
+                    new SockJS(`${base}${sockJsEndpoint}`, undefined, sockJsOptions)
                 }
-              : { brokerURL: `${base.replace(/^http/i, "ws")}${nativeWsEndpoint}?token=${encodeURIComponent(token)}` }),
-            connectHeaders: { Authorization: `Bearer ${token}` },
+              : { brokerURL: `${base.replace(/^http/i, "ws")}${nativeWsEndpoint}` }),
             reconnectDelay: 0,
             debug: () => {}
           });

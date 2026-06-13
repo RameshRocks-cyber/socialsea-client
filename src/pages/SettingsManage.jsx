@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import api from "../api/axios";
+import { getContentItemsByIds } from "../api/feed";
 import { recordAccountHistoryEntry } from "../services/activityStore";
 import {
   DELETED_MEDIA_POLICIES,
@@ -278,16 +279,12 @@ export default function SettingsManage() {
     setLoadingItems(true);
     const load = async () => {
       try {
-        const [feedRes, reelsRes] = await Promise.all([
-          api.get("/api/feed").catch(() => ({ data: [] })),
-          api.get("/api/reels").catch(() => ({ data: [] }))
-        ]);
-        const all = [
-          ...(Array.isArray(feedRes.data) ? feedRes.data : []),
-          ...(Array.isArray(reelsRes.data) ? reelsRes.data : [])
-        ];
+        const lookupIds = Array.from(new Set(archiveIds)).filter(
+          (id) => Number.isFinite(Number(id)) && Number(id) > 0
+        );
+        const contentItems = await getContentItemsByIds(lookupIds);
         const next = {};
-        all.forEach((item) => {
+        contentItems.forEach((item) => {
           if (!item?.id) return;
           next[item.id] = item;
         });
@@ -300,7 +297,7 @@ export default function SettingsManage() {
     return () => {
       mounted = false;
     };
-  }, [isArchiveConfig]);
+  }, [isArchiveConfig, archiveIds]);
 
   useEffect(() => {
     localStorage.setItem(CLOSE_FRIENDS_KEY, JSON.stringify(closeFriends));

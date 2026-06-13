@@ -2,14 +2,18 @@
 import { BrowserRouter, Routes, Route, useLocation, Navigate, useNavigate } from "react-router-dom";
 import { useLayoutEffect } from "react";
 import ProtectedRoute from "./components/ProtectedRoute";
+import { profilePageQueryKey } from "./api/queryKeys";
 import { applyUiLanguageFromStorage, readPreferredLanguageSetting, syncPreferredLanguageFromBackend } from "./i18n/uiLanguage";
 import { getUserRole, isAuthenticated } from "./auth";
 import { getApiBaseUrl } from "./api/baseUrl";
 import api from "./api/axios";
 import { pingChatPresence } from "./api/chatPresence";
 import PageErrorBoundary from "./components/PageErrorBoundary";
+import { useAuth } from "./context/AuthContext";
 import { recordExternalLinkActivity, recordTimeSpent, resolveRouteLabel } from "./services/activityStore";
+import { queryClient } from "./queryClient";
 import { lazyWithRetry } from "./utils/lazyWithRetry";
+import { getStoredProfileIdentifier } from "./utils/profileRoute";
 import "./App.css";
 
 const Feed = lazy(lazyWithRetry(() => import("./components/Feed"), "feed-page"));
@@ -18,9 +22,11 @@ const Register = lazy(lazyWithRetry(() => import("./pages/Register"), "register-
 const ForgotPassword = lazy(lazyWithRetry(() => import("./pages/ForgotPassword"), "forgot-password-page"));
 const Upload = lazy(lazyWithRetry(() => import("./pages/Upload"), "upload-page"));
 const ClipsPage = lazy(lazyWithRetry(() => import("./pages/Reels"), "clips-page"));
+const VoloPage = lazy(lazyWithRetry(() => import("./pages/Volo"), "volo-page"));
 const HighlightsCreate = lazy(lazyWithRetry(() => import("./pages/HighlightsCreate"), "highlights-create-page"));
 const Notifications = lazy(lazyWithRetry(() => import("./pages/Notifications"), "notifications-page"));
 const Profile = lazy(lazyWithRetry(() => import("./pages/Profile"), "profile-page"));
+const GroupProfile = lazy(lazyWithRetry(() => import("./pages/GroupProfile"), "group-profile-page"));
 const AnonymousFeed = lazy(lazyWithRetry(() => import("./pages/AnonymousFeed"), "anonymous-feed-page"));
 const AnonymousUpload = lazy(lazyWithRetry(() => import("./pages/AnonymousUpload"), "anonymous-upload-page"));
 const AdminDashboard = lazy(lazyWithRetry(() => import("./AdminDashboard"), "admin-dashboard-page"));
@@ -77,6 +83,7 @@ const AppliedJobs = lazy(lazyWithRetry(() => import("./pages/AppliedJobs.jsx"), 
 const ApplicantProfile = lazy(lazyWithRetry(() => import("./pages/ApplicantProfile.jsx"), "applicant-profile-page"));
 const AuthedRealtimeShell = lazy(lazyWithRetry(() => import("./components/AuthedRealtimeShell"), "authed-realtime-shell"));
 const Chat = lazy(lazyWithRetry(() => import("./pages/Chat"), "chat-page"));
+const ChatRouteShell = lazy(lazyWithRetry(() => import("./components/ChatRouteShell"), "chat-route-shell"));
 const Navbar = lazy(lazyWithRetry(() => import("./components/Navbar"), "navbar"));
 const NotificationBuddyBoundary = lazy(
   lazyWithRetry(() => import("./components/NotificationBuddyBoundary"), "notification-buddy-boundary")
@@ -129,9 +136,22 @@ const readAmbulanceNavigationEnabled = () => {
   }
 };
 
+const readVoloEnabled = () => {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw);
+    if (typeof parsed?.voloEnabled === "boolean") return parsed.voloEnabled;
+    return false;
+  } catch {
+    return false;
+  }
+};
+
 const getSwipeTabs = () => {
   const showSosInNavbar = readShowSosInNavbar();
   const ambulanceNavigationEnabled = readAmbulanceNavigationEnabled();
+  const voloEnabled = readVoloEnabled();
 
   const tabs = [
     { path: "/feed", match: (pathname) => pathname === "/feed" || pathname === "/home" || pathname === "/" },
@@ -140,7 +160,9 @@ const getSwipeTabs = () => {
           path: "/ambulance",
           match: (pathname) => pathname === "/ambulance" || pathname.startsWith("/ambulance/")
         }
-      : { path: "/clips", match: (pathname) => pathname === "/clips" || pathname === "/reels" },
+      : voloEnabled
+        ? { path: "/volo", match: (pathname) => pathname === "/volo" || pathname.startsWith("/volo/") }
+        : { path: "/clips", match: (pathname) => pathname === "/clips" || pathname === "/reels" },
     { path: "/chat", match: (pathname) => pathname === "/chat" || pathname.startsWith("/chat/") },
     { path: "/notifications", match: (pathname) => pathname === "/notifications" },
     { path: "/profile/me", match: (pathname) => pathname.startsWith("/profile") },
@@ -159,6 +181,64 @@ const getSwipeTabs = () => {
 const getSwipeTabIndex = (pathname, tabs) => tabs.findIndex((tab) => tab.match(pathname));
 
 const resolveSwipeTabPath = (index, tabs) => tabs[index]?.path || "";
+
+const FEED_SCROLL_STORAGE_KEY = "feedScroll";
+const PROFILE_PREFETCH_STALE_TIME = 5 * 60_000;
+
+const readFeedScrollPosition = () => {
+  try {
+    const raw = sessionStorage.getItem(FEED_SCROLL_STORAGE_KEY);
+    const value = Number(raw || 0);
+    return Number.isFinite(value) && value > 0 ? value : 0;
+  } catch {
+    return 0;
+  }
+};
+
+const writeFeedScrollPosition = (value) => {
+  try {
+    const next = Math.max(0, Math.round(Number(value) || 0));
+    sessionStorage.setItem(FEED_SCROLL_STORAGE_KEY, String(next));
+  } catch {
+    // ignore storage issues
+  }
+};
+
+const buildPrefetchedProfileSnapshot = (response) => {
+  const data = response?.data?.user || response?.data || {};
+  if (!data || typeof data !== "object" || Array.isArray(data) || Object.keys(data).length === 0) {
+    throw new Error("empty_profile");
+  }
+
+  return {
+    profile: data,
+    posts: [],
+    followers:
+      Number(data?.followers ?? data?.followersCount ?? response?.data?.followers ?? response?.data?.followersCount ?? 0) || 0,
+    followingCount:
+      Number(data?.following ?? data?.followingCount ?? response?.data?.following ?? response?.data?.followingCount ?? 0) || 0,
+    isFollowing: true,
+    requested: false,
+    postsLoaded: false,
+    errorMessage: "",
+    authError: false,
+    redirectTo: null,
+    updatedAt: Date.now()
+  };
+};
+
+const fetchPrefetchedProfileSnapshot = async (identifier) => {
+  const safeIdentifier = String(identifier || "").trim() || "me";
+  const endpoint = safeIdentifier.toLowerCase() === "me"
+    ? "/api/profile/me"
+    : `/api/profile/${encodeURIComponent(safeIdentifier)}`;
+  const response = await api.get(endpoint, {
+    suppressAuthRedirect: true,
+    timeout: 6000,
+    params: { _: Date.now() }
+  });
+  return buildPrefetchedProfileSnapshot(response);
+};
 
 const shouldIgnoreSwipeTarget = (target) => {
   if (!(target instanceof Element)) return false;
@@ -190,9 +270,24 @@ function PublicOnlyRoute({ children }) {
   return <Navigate to={getUserRole() === "ADMIN" ? "/admin/dashboard" : "/feed"} replace />;
 }
 
+const chatLoadingFallback = <div style={{ padding: 20, color: "#fff" }}>Loading chat...</div>;
+
+function ChatRouteBoundary({ children }) {
+  return (
+    <ProtectedRoute>
+      <PageErrorBoundary title="Chat crashed">
+        <Suspense fallback={chatLoadingFallback}>
+          <ChatRouteShell>{children}</ChatRouteShell>
+        </Suspense>
+      </PageErrorBoundary>
+    </ProtectedRoute>
+  );
+}
+
 function AppRoutes() {
   const location = useLocation();
   const navigate = useNavigate();
+  const { authReady } = useAuth();
   const authed = isAuthenticated();
   const isAuthScreen =
     location.pathname === "/login" ||
@@ -203,6 +298,7 @@ function AppRoutes() {
   const isChatConversationRoute =
     location.pathname.startsWith("/chat/") && !location.pathname.startsWith("/chat/requests");
   const isUploadRoute = location.pathname === "/upload";
+  const isFeedRoute = location.pathname === "/feed";
   const shouldMountUserNavbar = authed && !location.pathname.startsWith("/admin") && !isAuthScreen;
   const showUserNavbar = shouldMountUserNavbar && !isChatConversationRoute && !isUploadRoute;
   const appMainRef = useRef(null);
@@ -326,6 +422,7 @@ function AppRoutes() {
       () => import("./pages/Chat"),
       () => import("./pages/Notifications"),
       () => import("./pages/Profile"),
+      () => import("./pages/GroupProfile"),
       () => import("./pages/LongVideos"),
       () => import("./pages/Settings"),
       () => import("./pages/ResumeTemplates")
@@ -379,6 +476,76 @@ function AppRoutes() {
       clearTimers();
     };
   }, [authed]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.history || !("scrollRestoration" in window.history)) {
+      return undefined;
+    }
+
+    const previous = window.history.scrollRestoration;
+    window.history.scrollRestoration = "manual";
+    return () => {
+      window.history.scrollRestoration = previous || "auto";
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !authReady || !authed || !isFeedRoute) return undefined;
+
+    const savedScroll = readFeedScrollPosition();
+    const restoreScroll = () => {
+      window.scrollTo(0, savedScroll);
+    };
+
+    let rafId = 0;
+    let secondRafId = 0;
+    if (typeof window.requestAnimationFrame === "function") {
+      rafId = window.requestAnimationFrame(() => {
+        restoreScroll();
+        secondRafId = window.requestAnimationFrame(restoreScroll);
+      });
+    } else {
+      restoreScroll();
+    }
+
+    const handleBeforeUnload = () => {
+      writeFeedScrollPosition(window.scrollY || 0);
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => {
+      writeFeedScrollPosition(window.scrollY || 0);
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      if (rafId) window.cancelAnimationFrame(rafId);
+      if (secondRafId) window.cancelAnimationFrame(secondRafId);
+    };
+  }, [authReady, authed, isFeedRoute]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !authReady || !authed || !isFeedRoute) return undefined;
+
+    const targets = Array.from(
+      new Set(
+        [getStoredProfileIdentifier(), "me"]
+          .map((value) => String(value || "").trim())
+          .filter(Boolean)
+      )
+    );
+
+    if (!targets.length) return undefined;
+
+    void Promise.allSettled(
+      targets.map((identifier) =>
+        queryClient.prefetchQuery({
+          queryKey: profilePageQueryKey(identifier),
+          queryFn: () => fetchPrefetchedProfileSnapshot(identifier),
+          staleTime: PROFILE_PREFETCH_STALE_TIME
+        })
+      )
+    );
+
+    return undefined;
+  }, [authReady, authed, isFeedRoute]);
 
   useLayoutEffect(() => {
     if (typeof document === "undefined") return undefined;
@@ -738,6 +905,24 @@ function AppRoutes() {
     };
   }, [authed, showUserNavbar, location.pathname, navigate]);
 
+  if (!authReady) {
+    return (
+      <div
+        style={{
+          minHeight: "100vh",
+          display: "grid",
+          placeItems: "center",
+          background: "#050505",
+          color: "#fff",
+          fontSize: 16,
+          letterSpacing: "0.02em"
+        }}
+      >
+        Loading SocialSea...
+      </div>
+    );
+  }
+
   const appShell = (
     <>
       {showUserNavbar && (
@@ -765,7 +950,7 @@ function AppRoutes() {
       >
         <div className={`app-content ${isReelsRoute ? "reels-content" : ""} ${isChatRoute ? "chat-content" : ""}`}>
           <PageErrorBoundary title="Page crashed">
-            <Suspense fallback={<div style={{ padding: 20, color: "#fff" }}>Loading...</div>}>
+            <Suspense fallback={null}>
               <Routes>
               <Route path="/" element={<Navigate to={isAuthenticated() ? "/feed" : "/login"} replace />} />
               <Route path="/home" element={<Navigate to={isAuthenticated() ? "/feed" : "/login"} replace />} />
@@ -776,42 +961,17 @@ function AppRoutes() {
               <Route path="/upload" element={<ProtectedRoute><Upload /></ProtectedRoute>} />
               <Route path="/clips" element={<ProtectedRoute><ClipsPage /></ProtectedRoute>} />
               <Route path="/reels" element={<Navigate to="/clips" replace />} />
+              <Route path="/volo" element={<ProtectedRoute><VoloPage /></ProtectedRoute>} />
               <Route path="/watch" element={<ProtectedRoute><LongVideos /></ProtectedRoute>} />
               <Route path="/watch/:postId" element={<ProtectedRoute><LongVideos /></ProtectedRoute>} />
               <Route path="/notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
-              <Route
-                path="/chat"
-                element={
-                  <ProtectedRoute>
-                    <PageErrorBoundary title="Chat crashed">
-                      <Suspense fallback={<div style={{ padding: 20, color: "#fff" }}>Loading chat...</div>}><Chat /></Suspense>
-                    </PageErrorBoundary>
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/chat/requests"
-                element={
-                  <ProtectedRoute>
-                    <PageErrorBoundary title="Chat crashed">
-                      <Suspense fallback={<div style={{ padding: 20, color: "#fff" }}>Loading chat...</div>}><Chat /></Suspense>
-                    </PageErrorBoundary>
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/chat/:contactId"
-                element={
-                  <ProtectedRoute>
-                    <PageErrorBoundary title="Chat crashed">
-                      <Suspense fallback={<div style={{ padding: 20, color: "#fff" }}>Loading chat...</div>}><Chat /></Suspense>
-                    </PageErrorBoundary>
-                  </ProtectedRoute>
-                }
-              />
+              <Route path="/chat" element={<ChatRouteBoundary><Chat /></ChatRouteBoundary>} />
+              <Route path="/chat/requests" element={<ChatRouteBoundary><Chat /></ChatRouteBoundary>} />
+              <Route path="/chat/:contactId" element={<ChatRouteBoundary><Chat /></ChatRouteBoundary>} />
               <Route path="/profile/:username/followers" element={<ProtectedRoute><FollowConnections /></ProtectedRoute>} />
               <Route path="/profile/:username/following" element={<ProtectedRoute><FollowConnections /></ProtectedRoute>} />
               <Route path="/profile/:username" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+              <Route path="/groups/:groupId" element={<ProtectedRoute><GroupProfile /></ProtectedRoute>} />
               <Route path="/jobs" element={<ProtectedRoute><Jobs /></ProtectedRoute>} />
               <Route path="/jobs/:jobId" element={<ProtectedRoute><JobDetail /></ProtectedRoute>} />
               <Route path="/jobs/:jobId/apply" element={<ProtectedRoute><JobApply /></ProtectedRoute>} />

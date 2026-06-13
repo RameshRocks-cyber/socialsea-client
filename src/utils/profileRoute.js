@@ -13,21 +13,30 @@ export const getProfileIdentifier = (...sources) => {
     const candidates = [
       source.id,
       source.userId,
-      source.email,
       source.username,
-      source.user?.id,
-      source.user?.email,
-      source.actorId,
-      source.actorEmail,
-      source.profile?.id,
-      source.profile?.email,
+      source.handle,
       source.name,
-      source.user?.name,
+      source.displayName,
+      source.user?.id,
+      source.user?.userId,
       source.user?.username,
+      source.user?.handle,
+      source.user?.name,
+      source.user?.displayName,
+      source.profile?.id,
+      source.profile?.userId,
+      source.profile?.username,
+      source.profile?.handle,
+      source.profile?.name,
+      source.profile?.displayName,
+      source.actorId,
       source.actorName,
       source.actorUsername,
-      source.profile?.name,
-      source.profile?.username
+      source.actorDisplayName,
+      source.email,
+      source.user?.email,
+      source.actorEmail,
+      source.profile?.email
     ];
 
     for (const candidate of candidates) {
@@ -69,13 +78,13 @@ export const persistProfileIdentity = (profile) => {
 
 export const getStoredProfileIdentifier = () =>
   getProfileIdentifier(
-    sessionStorage.getItem("name"),
-    localStorage.getItem("name"),
     sessionStorage.getItem("username"),
     localStorage.getItem("username"),
-    sessionStorage.getItem("email"),
-    localStorage.getItem("email"),
+    sessionStorage.getItem("name"),
+    localStorage.getItem("name"),
     sessionStorage.getItem("userId"),
     localStorage.getItem("userId"),
+    sessionStorage.getItem("email"),
+    localStorage.getItem("email"),
     "me"
   );

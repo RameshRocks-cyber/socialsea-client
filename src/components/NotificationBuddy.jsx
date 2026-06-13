@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { FiBell } from "react-icons/fi";
 import api from "../api/axios";
@@ -917,6 +917,7 @@ export default function NotificationBuddy({ enabled = true }) {
   const [messagePetName, setMessagePetName] = useState(readMessagePetName);
   const initialPosition = useMemo(() => readStoredPosition(), []);
   const [position, setPosition] = useState(() => initialPosition || { x: 40, y: 0 });
+  const [walkAreaBounds, setWalkAreaBounds] = useState(() => ({ width: 0, height: 0 }));
   const positionRef = useRef(position);
   const hasStoredPositionRef = useRef(Boolean(initialPosition));
   const dragRef = useRef({
@@ -974,15 +975,6 @@ export default function NotificationBuddy({ enabled = true }) {
   }, [panelMode]);
 
   useEffect(() => {
-    setSpriteErrors((prev) => {
-      if (!prev?.[character]) return prev;
-      const next = { ...prev };
-      delete next[character];
-      return next;
-    });
-  }, [character]);
-
-  useEffect(() => {
     const config = CHARACTER_SHEETS[character];
     if (!config?.src) return undefined;
     let cancelled = false;
@@ -1006,25 +998,20 @@ export default function NotificationBuddy({ enabled = true }) {
 
   useEffect(() => {
     if (!isEnabled) return undefined;
-    if (!hasStoredPositionRef.current) {
+    const syncLayout = () => {
       const bounds = getBounds(walkAreaRef.current);
-      const fallback = getDefaultPosition(walkAreaRef.current);
-      const projected = pointToPerimeterProgress(fallback.x, fallback.y, bounds);
-      setPosition(projected.point);
-      walkProgressRef.current = projected.progress;
-      walkSignRef.current = -1;
-      hasStoredPositionRef.current = true;
-    } else {
-      setPosition((prev) => {
-        const bounds = getBounds(walkAreaRef.current);
-        const projected = pointToPerimeterProgress(prev.x, prev.y, bounds);
+      setWalkAreaBounds((prev) =>
+        prev.width === bounds.width && prev.height === bounds.height ? prev : bounds
+      );
+      if (!hasStoredPositionRef.current) {
+        const fallback = getDefaultPosition(walkAreaRef.current);
+        const projected = pointToPerimeterProgress(fallback.x, fallback.y, bounds);
+        setPosition(projected.point);
         walkProgressRef.current = projected.progress;
         walkSignRef.current = -1;
-        return projected.point;
-      });
-    }
-
-    const handleResize = () => {
+        hasStoredPositionRef.current = true;
+        return;
+      }
       setPosition((prev) => {
         const bounds = getBounds(walkAreaRef.current);
         const projected = pointToPerimeterProgress(prev.x, prev.y, bounds);
@@ -1033,8 +1020,10 @@ export default function NotificationBuddy({ enabled = true }) {
         return projected.point;
       });
     };
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
+
+    syncLayout();
+    window.addEventListener("resize", syncLayout);
+    return () => window.removeEventListener("resize", syncLayout);
   }, [isEnabled]);
 
   const unreadItems = useMemo(
@@ -1084,7 +1073,7 @@ export default function NotificationBuddy({ enabled = true }) {
     return output;
   }, [unreadItems]);
 
-  const showSpeech = (text, duration = 5200) => {
+  const showSpeech = useCallback((text, duration = 5200) => {
     setSpeechText(text);
     setSpeechVisible(true);
     setNoticeDismissed(false);
@@ -1092,9 +1081,9 @@ export default function NotificationBuddy({ enabled = true }) {
     speechTimerRef.current = window.setTimeout(() => {
       setSpeechVisible(false);
     }, duration);
-  };
+  }, []);
 
-  const maybeSpeak = (text) => {
+  const maybeSpeak = useCallback((text) => {
     const prefs = voicePrefsRef.current;
     if (prefs && prefs.enabled === false) return;
     if (!canSpeakRef.current) return;
@@ -1118,9 +1107,9 @@ export default function NotificationBuddy({ enabled = true }) {
     } catch {
       // speech synthesis failed or blocked
     }
-  };
+  }, []);
 
-  const triggerAlert = (text, speak = true) => {
+  const triggerAlert = useCallback((text, speak = true) => {
     setAlerting(true);
     showSpeech(text);
     if (alertTimerRef.current) window.clearTimeout(alertTimerRef.current);
@@ -1130,7 +1119,7 @@ export default function NotificationBuddy({ enabled = true }) {
     if (speak && !isOnNotificationsPage) {
       maybeSpeak(text);
     }
-  };
+  }, [isOnNotificationsPage, maybeSpeak, showSpeech]);
 
   const openPanel = (mode) => {
     setPanelMode(mode);
@@ -1312,32 +1301,35 @@ export default function NotificationBuddy({ enabled = true }) {
       lastMessageSpeechRef.current = msgText || "";
       if (speakableUnreadCount > 0) {
         const text = msgText || buildSpeechText(listenerName, speakableUnreadCount);
-        showSpeech(text, 4200);
+        window.setTimeout(() => showSpeech(text, 4200), 0);
       }
       return;
     }
     if (speakableUnreadCount > lastUnreadRef.current) {
       const text = msgText || buildSpeechText(listenerName, speakableUnreadCount);
-      triggerAlert(text, true);
+      window.setTimeout(() => triggerAlert(text, true), 0);
       if (msgText) lastMessageSpeechRef.current = msgText;
     } else if (msgText && msgText !== lastMessageSpeechRef.current) {
       // Also announce when a new message arrives in the same unread thread.
-      triggerAlert(msgText, true);
+      window.setTimeout(() => triggerAlert(msgText, true), 0);
       lastMessageSpeechRef.current = msgText;
     } else if (!msgText) {
       lastMessageSpeechRef.current = "";
     }
     lastUnreadRef.current = speakableUnreadCount;
-  }, [loaded, speakableUnreadCount, speakableUnreadItems, displayName, isEnabled]);
+  }, [loaded, speakableUnreadCount, speakableUnreadItems, displayName, isEnabled, showSpeech, triggerAlert]);
 
   useEffect(() => {
     if (!softHidden) return;
     const gate = hiddenUntilUnreadRef.current;
     if (gate == null) return;
     if (unreadCount > gate) {
-      hiddenUntilUnreadRef.current = null;
-      setSoftHidden(false);
-      setNoticeDismissed(false);
+      const timer = window.setTimeout(() => {
+        hiddenUntilUnreadRef.current = null;
+        setSoftHidden(false);
+        setNoticeDismissed(false);
+      }, 0);
+      return () => window.clearTimeout(timer);
     }
   }, [softHidden, unreadCount]);
 
@@ -1359,17 +1351,21 @@ export default function NotificationBuddy({ enabled = true }) {
 
   useEffect(() => {
     if (isEnabled) return;
-    setPanelOpen(false);
-    setAlerting(false);
-    setSpeechVisible(false);
-    setNoticeDismissed(false);
+    const timer = window.setTimeout(() => {
+      setPanelOpen(false);
+      setAlerting(false);
+      setSpeechVisible(false);
+      setNoticeDismissed(false);
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [isEnabled]);
 
   useEffect(() => {
+    const longPressState = longPressRef.current;
     return () => {
       if (alertTimerRef.current) window.clearTimeout(alertTimerRef.current);
       if (speechTimerRef.current) window.clearTimeout(speechTimerRef.current);
-      if (longPressRef.current?.timer) window.clearTimeout(longPressRef.current.timer);
+      if (longPressState?.timer) window.clearTimeout(longPressState.timer);
     };
   }, []);
   const shouldRenderBuddy = isEnabled && !softHidden && !(hideWhenEmpty && unreadCount === 0);
@@ -1606,14 +1602,24 @@ export default function NotificationBuddy({ enabled = true }) {
       : "Long press buddy to see notification types.";
 
   const panelLayout = useMemo(() => {
-    const bounds = getBounds(walkAreaRef.current);
+    const bounds = walkAreaBounds;
+    const scaledHeight = BASE_HEIGHT * SHIMEJI_SCALE;
+    const fallbackLayout = {
+      width: PANEL_MAX_WIDTH,
+      offsetX: 0,
+      placeAbove: false,
+      belowOffset: Math.round(scaledHeight + PANEL_GAP_PX),
+      aboveOffset: Math.round(scaledHeight + PANEL_GAP_PX)
+    };
+    if (!bounds.width || !bounds.height) {
+      return fallbackLayout;
+    }
     const panelWidth = Math.max(200, Math.min(PANEL_MAX_WIDTH, bounds.width - PANEL_HORIZONTAL_MARGIN * 2));
     const buddyCenterX = position.x + (BASE_WIDTH * SHIMEJI_SCALE) / 2;
     const minCenter = panelWidth / 2 + PANEL_HORIZONTAL_MARGIN;
     const maxCenter = bounds.width - panelWidth / 2 - PANEL_HORIZONTAL_MARGIN;
     const clampedCenter = clampValue(buddyCenterX, minCenter, maxCenter);
     const offsetX = clampedCenter - buddyCenterX;
-    const scaledHeight = BASE_HEIGHT * SHIMEJI_SCALE;
     const panelHeight = PANEL_EST_HEIGHT + (panelMode === "list" ? 24 : 0);
     const buddyBottom = position.y + scaledHeight;
     const spaceBelow = bounds.height - buddyBottom - PANEL_HORIZONTAL_MARGIN;
@@ -1627,7 +1633,7 @@ export default function NotificationBuddy({ enabled = true }) {
       belowOffset,
       aboveOffset
     };
-  }, [position.x, position.y, panelMode]);
+  }, [position.x, position.y, panelMode, walkAreaBounds]);
 
   if (!shouldRenderBuddy) return null;
 

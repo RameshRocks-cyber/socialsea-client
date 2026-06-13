@@ -2,6 +2,11 @@
 import { useNavigate } from "react-router-dom";
 import api from "../api/axios";
 import { formatDateTime, getCreatedAt, getUserDisplayName } from "../admin/adminMetrics";
+import {
+  clearProfileCacheByKey,
+  invalidateFollowConnectionQueries,
+  updateFollowCache
+} from "../services/followSync";
 
 const normalizeNoticeList = (payload) => {
   if (Array.isArray(payload)) return payload;
@@ -49,6 +54,15 @@ export default function AdminUsers() {
       byId.set(String(user.id), user);
     }
     return Array.from(byId.values());
+  };
+
+  const clearUserCaches = (user) => {
+    const identifiers = [user?.id, user?.email, user?.name, user?.username]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean);
+    identifiers.forEach((identifier) => clearProfileCacheByKey(identifier, { emit: false }));
+    updateFollowCache(identifiers, false, { emit: false });
+    invalidateFollowConnectionQueries();
   };
 
   const getBaseCandidates = () => {
@@ -248,6 +262,7 @@ export default function AdminUsers() {
     setBusyByUserId((prev) => ({ ...prev, [user.id]: true }));
     try {
       await api.post(`/api/admin/users/${user.id}/${blocked ? "block" : "unblock"}`);
+      clearUserCaches(user);
       if (blocked) await issueNotice(user, "red");
       await loadUsers();
       await loadModerationNotices();
@@ -327,6 +342,7 @@ export default function AdminUsers() {
         setError("Delete API is not available on backend. User was blocked instead.");
       }
 
+      clearUserCaches(user);
       setUsers((prev) => prev.filter((item) => String(item?.id) !== String(user.id)));
       setUserBaseById((prev) => {
         const next = { ...prev };

@@ -66,7 +66,7 @@ const SIGN_ASSIST_OFFLINE_ONLY =
     .trim()
     .toLowerCase() === "true";
 const SIGN_LOCAL_MODEL_ORDER = Array.from(new Set(
-  String(import.meta.env.VITE_SIGN_LOCAL_MODEL_ORDER || "mediapipe,tfjs")
+  String(import.meta.env.VITE_SIGN_LOCAL_MODEL_ORDER || "mediapipe")
     .split(",")
     .map((item) => String(item || "").trim().toLowerCase())
     .filter(Boolean)

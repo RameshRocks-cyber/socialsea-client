@@ -30,6 +30,9 @@ const ITEMS = [
   { to: "/notifications", icon: FiBell, label: "Alerts", match: (p) => p === "/notifications" },
   { to: "/profile/me", icon: FiUser, label: "Profile", match: (p) => p.startsWith("/profile") },
 ];
+const VoloNavIcon = ({ className = "" }) => (
+  <img src="/icons/volo-symbol.svg" alt="" className={`ss-volo-nav-symbol ${className}`.trim()} aria-hidden="true" />
+);
 const CALL_ACCEPT_TARGET_KEY = "socialsea_call_accept_target_v1";
 const CALL_SIGNAL_LOCAL_KEY = "socialsea_call_signal_local_v1";
 const CALL_SIGNAL_CHANNEL = "socialsea-call-signal";
@@ -280,6 +283,17 @@ const readStudyModeReels = () => {
     if (!raw) return false;
     const parsed = JSON.parse(raw);
     return Boolean(parsed?.studyModeReels);
+  } catch {
+    return false;
+  }
+};
+
+const readVoloEnabled = () => {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw);
+    return Boolean(parsed?.voloEnabled);
   } catch {
     return false;
   }
@@ -664,6 +678,7 @@ export default function Navbar() {
   const [incomingCall, setIncomingCall] = useState(null);
   const [showSosInNavbar, setShowSosInNavbar] = useState(readShowSosInNavbar);
   const [studyModeReels, setStudyModeReels] = useState(readStudyModeReels);
+  const [voloEnabled, setVoloEnabled] = useState(readVoloEnabled);
   const [trafficAlertsEnabled, setTrafficAlertsEnabled] = useState(readTrafficAlertsEnabled);
   const [ambulanceNavigationEnabled, setAmbulanceNavigationEnabled] = useState(readAmbulanceNavigationEnabled);
   const [sosActive, setSosActive] = useState(readIsSosActive);
@@ -765,6 +780,15 @@ export default function Navbar() {
           label: "Navigation",
           match: (p) => p === "/ambulance" || p.startsWith("/ambulance/"),
           icon: FiMap
+        };
+      }
+      if (voloEnabled) {
+        return {
+          ...item,
+          to: "/volo",
+          label: "Volo",
+          match: (p) => p === "/volo" || p.startsWith("/volo/"),
+          icon: VoloNavIcon
         };
       }
       return {
@@ -950,6 +974,7 @@ export default function Navbar() {
     const refresh = () => {
       setShowSosInNavbar(readShowSosInNavbar());
       setStudyModeReels(readStudyModeReels());
+      setVoloEnabled(readVoloEnabled());
       setTrafficAlertsEnabled(readTrafficAlertsEnabled());
       setAmbulanceNavigationEnabled(readAmbulanceNavigationEnabled());
     };
@@ -1879,13 +1904,6 @@ export default function Navbar() {
       const isPublicEmergencyEndpoint = suffixText === "active";
       const params = buildEmergencyQueryParams();
       const mergedParams = params ? { ...params, includeReporter: true, includeNearby: true } : { includeReporter: true };
-      const authToken =
-        sessionStorage.getItem("accessToken") ||
-        sessionStorage.getItem("token") ||
-        localStorage.getItem("accessToken") ||
-        localStorage.getItem("token") ||
-        "";
-      const hasAuthToken = Boolean(authToken && authToken !== "null" && authToken !== "undefined");
       for (const url of urls) {
         const baseURL = /^https?:\/\//i.test(url) ? undefined : api.defaults.baseURL;
         const path = /^https?:\/\//i.test(url) ? url : url;
@@ -1901,7 +1919,7 @@ export default function Navbar() {
         } catch (err) {
           lastError = err;
           const status = Number(err?.response?.status || 0);
-          if ((status === 401 || status === 403) && isPublicEmergencyEndpoint && hasAuthToken) {
+          if ((status === 401 || status === 403) && isPublicEmergencyEndpoint) {
             try {
               res = await api.get(path, {
                 baseURL,
@@ -2028,13 +2046,6 @@ export default function Navbar() {
   }, [myUserId, location.pathname]);
 
   useEffect(() => {
-    const authToken =
-      sessionStorage.getItem("accessToken") ||
-      sessionStorage.getItem("token") ||
-      localStorage.getItem("accessToken") ||
-      localStorage.getItem("token") ||
-      "";
-    if (!authToken || authToken === "null" || authToken === "undefined") return undefined;
     if (!myEmail) return undefined;
 
     let disposed = false;
@@ -2058,13 +2069,7 @@ export default function Navbar() {
   }, [myEmail]);
 
   useEffect(() => {
-    const authToken =
-      sessionStorage.getItem("accessToken") ||
-      sessionStorage.getItem("token") ||
-      localStorage.getItem("accessToken") ||
-      localStorage.getItem("token") ||
-      "";
-    if (!authToken || authToken === "null" || authToken === "undefined") return undefined;
+    if (!myEmail) return undefined;
     let disposed = false;
 
     const pollEmergencyNotifications = async () => {
@@ -2145,13 +2150,6 @@ export default function Navbar() {
   }, [myEmail, myUserId]);
 
   useEffect(() => {
-    const authToken =
-      sessionStorage.getItem("accessToken") ||
-      sessionStorage.getItem("token") ||
-      localStorage.getItem("accessToken") ||
-      localStorage.getItem("token") ||
-      "";
-    if (!authToken || authToken === "null" || authToken === "undefined") return undefined;
     if (!myEmail) return undefined;
     let disposed = false;
 
@@ -2221,13 +2219,7 @@ export default function Navbar() {
 
   useEffect(() => {
     if (!trafficAlertsEnabled) return undefined;
-    const authToken =
-      sessionStorage.getItem("accessToken") ||
-      sessionStorage.getItem("token") ||
-      localStorage.getItem("accessToken") ||
-      localStorage.getItem("token") ||
-      "";
-    if (!authToken || authToken === "null" || authToken === "undefined") return undefined;
+    if (!myEmail) return undefined;
 
     let disposed = false;
 
@@ -3257,7 +3249,7 @@ export default function Navbar() {
     <header className={`ss-nav-wrap ${onChatConversationRoute ? "is-chat-conversation" : ""}`}>
       <nav className="ss-nav" aria-label="Main navigation">
         <Link to="/feed" className="ss-brand" aria-label="Go to feed">
-          <img src="/logo-light.png?v=1" alt="SocialSea" className="ss-brand-logo" />
+          <img src="/logo-clean-round.png?v=1" alt="SocialSea" className="ss-brand-logo" />
           <span className="ss-brand-text">SocialSea</span>
           <button
             type="button"

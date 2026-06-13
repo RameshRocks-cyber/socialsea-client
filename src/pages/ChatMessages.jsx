@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   FiArrowLeft,
   FiChevronDown,
@@ -43,6 +43,7 @@ import {
 } from "./hooks/useChat";
 import ChatHeader from "./ChatHeader";
 import ChatInput from "./ChatInput";
+import VideoCall from "./VideoCall";
 
 const MEDIA_FILTER_OPTIONS = [
   { value: "all", label: "All" },
@@ -205,14 +206,21 @@ export default function ChatMessages() {
     setShowWallpaperPanel,
     activeUtilityPanel,
     setActiveUtilityPanel,
+    groupInfoLoading,
+    groupInfoSaving,
     chatSearchQuery,
     setChatSearchQuery,
     highlightedMessageId,
     setHighlightedMessageId,
     s,
     h,
-    mutedChatsById,
+    mutedChatsById = {},
     setMutedChatsById,
+    pinnedChatsById = {},
+    archivedChatsById = {},
+    favoriteChatsById = {},
+    lockedChatsById = {},
+    chatListLabelsById = {},
     disappearingByContact,
     setDisappearingByContact,
     messageExpiryById,
@@ -575,7 +583,6 @@ export default function ChatMessages() {
     ensureSignalContact,
     onSignal,
     onIncomingChatMessage,
-    openGroupInvite,
     openNewGroup,
     toggleGroupInvite,
     startGroupCall,
@@ -604,6 +611,7 @@ export default function ChatMessages() {
     setRequestStatusByIdentifiers,
     resolveChatRequestContact,
     resolveChatRequestIdentifiers,
+    resolveChatRequestActionInfo,
     acceptChatRequest,
     rejectChatRequest,
     requestChatAccess,
@@ -621,6 +629,16 @@ export default function ChatMessages() {
     stopContactLongPress,
     handleContactPointerUp,
     handleContactKeyDown,
+    togglePinnedConversation,
+    toggleMutedConversation,
+    toggleArchivedConversation,
+    toggleFavoriteConversation,
+    toggleUnreadConversation,
+    toggleLockedConversation,
+    assignConversationToList,
+    removeConversationFromList,
+    clearConversation,
+    blockContact,
     deleteConversation,
     activeContact,
     activeContactBlocked,
@@ -704,6 +722,8 @@ export default function ChatMessages() {
     setContinuousModeEnabled,
     processVisibleAutoSpeak,
     goToProfile,
+    updateGroupInfo,
+    updateGroupPhoto,
     blockActiveContact,
     addComposerText,
     toggleEmojiTray,
@@ -778,20 +798,154 @@ export default function ChatMessages() {
   const [storyInsightsItems, setStoryInsightsItems] = useState([]);
   const [multiShareSelectedById, setMultiShareSelectedById] = useState({});
   const [multiShareSending, setMultiShareSending] = useState(false);
+  const [selectedChatIds, setSelectedChatIds] = useState({});
   const isMultiShareMode = Boolean(String(pendingShareDraft || "").trim());
   const selectedMultiShareIds = useMemo(
     () => Object.keys(multiShareSelectedById).filter((id) => multiShareSelectedById[id]),
     [multiShareSelectedById]
   );
+  const selectedChatIdList = useMemo(
+    () => Object.keys(selectedChatIds).filter((id) => selectedChatIds[id]),
+    [selectedChatIds]
+  );
+  const isChatBulkSelectMode = selectedChatIdList.length > 0;
 
   const [inlineSearchOpen, setInlineSearchOpen] = useState(false);
+  const [groupBioDraft, setGroupBioDraft] = useState("");
+  const [groupBioSavedNotice, setGroupBioSavedNotice] = useState("");
+  const groupPhotoInputRef = useRef(null);
   const isInlineSearchOpen = inlineSearchOpen;
+  const activeGroupMembers = useMemo(
+    () => (Array.isArray(activeContact?.members) ? activeContact.members : []),
+    [activeContact?.members]
+  );
+  const activeGroupMemberLabel = activeGroupMembers.length === 1 ? "member" : "members";
+  const activeGroupMemberLookup = useMemo(() => {
+    const lookup = new Map();
+    activeGroupMembers.forEach((member) => {
+      if (!member || typeof member !== "object") return;
+      const keys = [
+        member.id,
+        member.userId,
+        member.user_id,
+        member.memberId,
+        member.profileId,
+        member.email,
+        member.username
+      ]
+        .map((value) => String(value || "").trim().toLowerCase())
+        .filter(Boolean);
+      const displayName = String(getContactDisplayName(member) || "").trim().toLowerCase();
+      if (displayName) keys.push(displayName);
+      keys.forEach((key) => {
+        if (!lookup.has(key)) lookup.set(key, member);
+      });
+    });
+    return lookup;
+  }, [activeGroupMembers, getContactDisplayName]);
+  const resolveGroupMessageSender = useCallback(
+    (item) => {
+      const raw = item?.raw || {};
+      const senderId = String(
+        raw?.senderId ??
+          raw?.sender_id ??
+          raw?.fromUserId ??
+          raw?.from_user_id ??
+          raw?.fromId ??
+          raw?.from_id ??
+          raw?.userId ??
+          raw?.user_id ??
+          raw?.sender?.id ??
+          raw?.sender?.userId ??
+          raw?.sender?.user_id ??
+          raw?.sender?.senderId ??
+          raw?.sender?.sender_id ??
+          ""
+      ).trim();
+      const senderNameRaw = String(
+        raw?.senderName ??
+          raw?.sender_name ??
+          raw?.fromName ??
+          raw?.from_name ??
+          raw?.senderEmail ??
+          raw?.sender_email ??
+          raw?.fromEmail ??
+          raw?.from_email ??
+          raw?.sender?.name ??
+          raw?.sender?.username ??
+          raw?.sender?.email ??
+          raw?.sender?.displayName ??
+          ""
+      ).trim();
+      const lookupKey = (senderId || senderNameRaw).toLowerCase();
+      const member = lookupKey ? activeGroupMemberLookup.get(lookupKey) || null : null;
+      const memberDisplayName = member ? String(getContactDisplayName(member) || "").trim() : "";
+      const senderName = item?.mine
+        ? "You"
+        : memberDisplayName || senderNameRaw || (senderId ? `User ${senderId}` : "Member");
+      const avatarRaw = String(
+        member?.profilePic ??
+          member?.profilePicUrl ??
+          member?.avatarUrl ??
+          raw?.senderProfilePic ??
+          raw?.senderProfilePicUrl ??
+          raw?.senderAvatar ??
+          raw?.senderAvatarUrl ??
+          raw?.senderPhoto ??
+          raw?.senderImage ??
+          raw?.sender?.profilePic ??
+          raw?.sender?.profilePicUrl ??
+          raw?.sender?.avatarUrl ??
+          raw?.sender?.avatar ??
+          raw?.sender?.photoUrl ??
+          raw?.profilePic ??
+          raw?.avatar ??
+          ""
+      ).trim();
+      const senderKey = String(
+        member?.id ||
+          member?.userId ||
+          member?.user_id ||
+          senderId ||
+          senderNameRaw ||
+          senderName ||
+          "member"
+      ).trim().toLowerCase();
+      return {
+        senderName,
+        senderId,
+        senderKey,
+        member,
+        avatarSrc: normalizeAvatarImageSrc(avatarRaw),
+        avatarInitial: senderName ? senderName.charAt(0).toUpperCase() : "U"
+      };
+    },
+    [activeGroupMemberLookup, getContactDisplayName]
+  );
+  const activeGroupBio = String(activeContact?.bio || activeContact?.description || "").trim();
+  const canEditActiveGroup = Boolean(activeContact?.isGroup && activeContact?.canEditGroup);
 
   useEffect(() => {
     if (isMultiShareMode) return;
     setMultiShareSelectedById({});
     setMultiShareSending(false);
   }, [isMultiShareMode]);
+
+  useEffect(() => {
+    const visibleIds = new Set(filteredContacts.map((contact) => String(contact?.id || "").trim()).filter(Boolean));
+    setSelectedChatIds((prev) => {
+      const next = Object.entries(prev).reduce((acc, [id, selected]) => {
+        if (selected && visibleIds.has(id)) acc[id] = true;
+        return acc;
+      }, {});
+      const prevKeys = Object.keys(prev);
+      const nextKeys = Object.keys(next);
+      if (prevKeys.length === nextKeys.length && prevKeys.every((id) => next[id] === prev[id])) {
+        return prev;
+      }
+      return next;
+    });
+  }, [filteredContacts]);
 
   const toggleMultiShareRecipient = useCallback((contactId) => {
     const id = String(contactId || "").trim();
@@ -803,6 +957,30 @@ export default function ChatMessages() {
       return next;
     });
   }, []);
+
+  const toggleSelectedChat = useCallback((contactId) => {
+    const id = String(contactId || "").trim();
+    if (!id) return;
+    setSelectedChatIds((prev) => {
+      const next = { ...prev };
+      if (next[id]) delete next[id];
+      else next[id] = true;
+      return next;
+    });
+  }, []);
+
+  const clearSelectedChats = useCallback(() => {
+    setSelectedChatIds({});
+  }, []);
+
+  const selectAllVisibleChats = useCallback(() => {
+    const ids = filteredContacts
+      .map((contact) => String(contact?.id || "").trim())
+      .filter(Boolean);
+    if (!ids.length) return;
+    setSelectedChatIds(ids.reduce((acc, id) => ({ ...acc, [id]: true }), {}));
+    setContactActionId("");
+  }, [filteredContacts, setContactActionId]);
 
   const cancelMultiShare = useCallback(() => {
     if (multiShareSending) return;
@@ -967,6 +1145,26 @@ export default function ChatMessages() {
     openHeaderUtilityPanel("search");
   }, [closeInlineSearch, isInlineSearchOpen, openHeaderUtilityPanel]);
 
+  const saveGroupBio = useCallback(async () => {
+    if (!activeContact?.isGroup || !activeContact?.canEditGroup) return;
+    const updated = await updateGroupInfo({ bio: groupBioDraft.trim() });
+    if (updated) {
+      setGroupBioSavedNotice("Group bio updated");
+      window.setTimeout(() => setGroupBioSavedNotice(""), 1800);
+    }
+  }, [activeContact?.isGroup, activeContact?.canEditGroup, groupBioDraft, updateGroupInfo]);
+
+  const onGroupPhotoPicked = useCallback(async (event) => {
+    const file = event?.target?.files?.[0];
+    if (event?.target) event.target.value = "";
+    if (!file) return;
+    const updated = await updateGroupPhoto(file);
+    if (updated) {
+      setGroupBioSavedNotice("Group photo updated");
+      window.setTimeout(() => setGroupBioSavedNotice(""), 1800);
+    }
+  }, [updateGroupPhoto]);
+
   useEffect(() => {
     if (!activeContactId) {
       setInlineSearchOpen(false);
@@ -979,6 +1177,19 @@ export default function ChatMessages() {
     if (activeUtilityPanel !== "media") {
       setMediaFilter("all");
     }
+  }, [activeUtilityPanel]);
+
+  useEffect(() => {
+    if (!activeContact?.isGroup) {
+      setGroupBioDraft("");
+      setGroupBioSavedNotice("");
+      return;
+    }
+    setGroupBioDraft(String(activeContact?.bio || activeContact?.description || ""));
+  }, [activeContact?.id, activeContact?.bio, activeContact?.description, activeContact?.isGroup]);
+
+  useEffect(() => {
+    setGroupBioSavedNotice("");
   }, [activeUtilityPanel]);
 
   useEffect(() => {
@@ -1149,6 +1360,7 @@ export default function ChatMessages() {
   }, [storyViewerIndex, activeStory]);
   return (
     <div className={`chat-page ${isConversationRoute ? "chat-single-pane" : "chat-list-only"}`}>
+      <VideoCall placement="page" />
       {!isConversationRoute && !isRequestsRoute && (
         <aside className="chat-sidebar">
         <div className="chat-sidebar-head">
@@ -1300,12 +1512,35 @@ export default function ChatMessages() {
             </div>
           </div>
         )}
+        {!isMultiShareMode && isChatBulkSelectMode && (
+          <div className="chat-share-multi-bar chat-chat-select-bar">
+            <div className="chat-share-multi-copy">
+              <strong>Chats selected</strong>
+              <small>{selectedChatIdList.length} selected</small>
+            </div>
+            <div className="chat-share-multi-actions">
+              <button
+                type="button"
+                className="chat-share-multi-btn is-ghost"
+                onClick={clearSelectedChats}
+              >
+                Clear selection
+              </button>
+            </div>
+          </div>
+        )}
         <div className="chat-contact-list">
            {filteredContacts.map((c) => {
              const presence = getContactPresence(c);
              const displayName = getContactDisplayName(c);
              const contactId = c?.id != null ? String(c.id) : "";
              const isActive = isConversationRoute && String(activeContactId) === contactId;
+             const isPinned = Boolean(pinnedChatsById[contactId]);
+             const isArchived = Boolean(archivedChatsById[contactId]);
+             const isFavorited = Boolean(favoriteChatsById[contactId]);
+             const isLocked = Boolean(lockedChatsById[contactId]);
+             const contactListLabel = String(chatListLabelsById[contactId] || "").trim();
+             const isChatSelected = Boolean(selectedChatIds[contactId]);
              const unreadCount = contactId
                ? Math.max(0, Math.floor(Number(threadReadState?.[contactId]?.unread || 0)))
                : 0;
@@ -1344,16 +1579,21 @@ export default function ChatMessages() {
                callPreview ||
                serverPreview ||
                "Tap to start chatting";
+             const visiblePreviewText = isLocked ? "Locked chat" : previewText;
              const showUnread = unreadCount > 0 && !isActive;
-             const showActions = Boolean(contactId) && String(contactActionId) === contactId && !isMultiShareMode;
+             const showActions =
+               Boolean(contactId) &&
+               String(contactActionId) === contactId &&
+               !isMultiShareMode &&
+               !isChatBulkSelectMode;
              const isShareSelected = isMultiShareMode && Boolean(multiShareSelectedById[contactId]);
              const contactKey = contactId || c?.email || displayName;
              return (
                <div key={contactKey} className={`chat-contact-card ${isActive ? "active" : ""}`}>
                  <button
                    type="button"
-                   className={`chat-contact ${isActive ? "active" : ""} ${showUnread ? "has-unread" : ""} ${isShareSelected ? "is-share-selected" : ""}`}
-                   onPointerDown={isMultiShareMode ? undefined : startContactLongPress(contactId)}
+                   className={`chat-contact ${isActive ? "active" : ""} ${showUnread ? "has-unread" : ""} ${isShareSelected ? "is-share-selected" : ""} ${isChatSelected ? "is-selected" : ""}`}
+                   onPointerDown={isMultiShareMode || isChatBulkSelectMode ? undefined : startContactLongPress(contactId)}
                    onPointerUp={(e) => {
                      if (isMultiShareMode) {
                        e.preventDefault();
@@ -1361,29 +1601,42 @@ export default function ChatMessages() {
                        toggleMultiShareRecipient(contactId);
                        return;
                      }
+                     if (isChatBulkSelectMode) {
+                       e.preventDefault();
+                       e.stopPropagation();
+                       toggleSelectedChat(contactId);
+                       return;
+                     }
                      handleContactPointerUp(e, c);
                    }}
-                   onPointerLeave={isMultiShareMode ? undefined : stopContactLongPress}
-                   onPointerCancel={isMultiShareMode ? undefined : stopContactLongPress}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    if (isMultiShareMode) return;
-                    toggleContactActions(contactId);
-                  }}
-                  onDoubleClick={() => {
-                    if (isMultiShareMode) return;
-                    openContact(c);
-                  }}
-                  onKeyDown={(e) => {
-                    if (isMultiShareMode) {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        toggleMultiShareRecipient(contactId);
-                      }
-                      return;
-                    }
-                    handleContactKeyDown(e, c);
-                  }}
+                   onPointerLeave={isMultiShareMode || isChatBulkSelectMode ? undefined : stopContactLongPress}
+                   onPointerCancel={isMultiShareMode || isChatBulkSelectMode ? undefined : stopContactLongPress}
+                   onContextMenu={(e) => {
+                     e.preventDefault();
+                     if (isMultiShareMode || isChatBulkSelectMode) return;
+                     toggleContactActions(contactId);
+                   }}
+                   onDoubleClick={() => {
+                     if (isMultiShareMode || isChatBulkSelectMode) return;
+                     openContact(c);
+                   }}
+                   onKeyDown={(e) => {
+                     if (isMultiShareMode) {
+                       if (e.key === "Enter" || e.key === " ") {
+                         e.preventDefault();
+                         toggleMultiShareRecipient(contactId);
+                       }
+                       return;
+                     }
+                     if (isChatBulkSelectMode) {
+                       if (e.key === "Enter" || e.key === " ") {
+                         e.preventDefault();
+                         toggleSelectedChat(contactId);
+                       }
+                       return;
+                     }
+                     handleContactKeyDown(e, c);
+                   }}
                 >
                   <span className="chat-avatar">
                     {normalizeAvatarImageSrc(c.profilePic) ? (
@@ -1391,7 +1644,7 @@ export default function ChatMessages() {
                     ) : (
                       c.avatar
                     )}
-                    <span className={`chat-presence-dot ${presence.online ? "is-online" : ""}`} />
+                    {!c?.isGroup && <span className={`chat-presence-dot ${presence.online ? "is-online" : ""}`} />}
                   </span>
                   <span className="chat-meta">
                     <span className="chat-meta-row">
@@ -1400,12 +1653,26 @@ export default function ChatMessages() {
                         {presence.text}
                       </span>
                      </span>
-                     <small>{previewText}</small>
+                     <small>{visiblePreviewText}</small>
+                     {(isPinned || Boolean(mutedChatsById[contactId]) || isArchived || isFavorited || isLocked || contactListLabel) && (
+                       <span className="chat-contact-flags">
+                         {isPinned && <span className="chat-contact-flag">Pinned</span>}
+                         {Boolean(mutedChatsById[contactId]) && <span className="chat-contact-flag">Muted</span>}
+                         {isArchived && <span className="chat-contact-flag">Archived</span>}
+                         {isFavorited && <span className="chat-contact-flag">Favorite</span>}
+                         {isLocked && <span className="chat-contact-flag">Locked</span>}
+                         {!!contactListLabel && <span className="chat-contact-flag">List: {contactListLabel}</span>}
+                       </span>
+                     )}
                     </span>
-                   <span className="chat-contact-right" aria-hidden={!showUnread && !isMultiShareMode}>
+                   <span className="chat-contact-right" aria-hidden={!showUnread && !isMultiShareMode && !isChatBulkSelectMode}>
                      {isMultiShareMode ? (
-                       <span className={`chat-share-target-toggle ${isShareSelected ? "selected" : ""}`}>
-                         {isShareSelected ? "✓" : ""}
+                        <span className={`chat-share-target-toggle ${isShareSelected ? "selected" : ""}`}>
+                         {isShareSelected ? "v" : ""}
+                        </span>
+                     ) : isChatBulkSelectMode ? (
+                       <span className={`chat-share-target-toggle ${isChatSelected ? "selected" : ""}`}>
+                         {isChatSelected ? "v" : ""}
                        </span>
                      ) : showUnread ? (
                        <span className="chat-unread-badge" aria-label={`${unreadCount} unread messages`}>
@@ -1414,20 +1681,134 @@ export default function ChatMessages() {
                      ) : null}
                    </span>
                  </button>
-                 {showActions && (
-                   <div className="chat-contact-actions">
-                     <button
-                      type="button"
-                      className="chat-contact-delete"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        deleteConversation(c);
-                      }}
-                    >
-                      Delete chat
-                    </button>
-                  </div>
-                )}
+                  {showActions && (
+                    <div className="chat-contact-actions">
+                      <button
+                        type="button"
+                        className="chat-contact-action-btn"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          togglePinnedConversation(c);
+                        }}
+                      >
+                        {isPinned ? "Unpin chat" : "Pin chat"}
+                      </button>
+                      <button
+                        type="button"
+                        className="chat-contact-action-btn"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          toggleMutedConversation(c);
+                        }}
+                      >
+                        {mutedChatsById[contactId] ? "Unmute" : "Mute"}
+                      </button>
+                      <button
+                        type="button"
+                        className="chat-contact-action-btn"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          toggleArchivedConversation(c);
+                        }}
+                      >
+                        {isArchived ? "Unarchive" : "Archive"}
+                      </button>
+                      <button
+                        type="button"
+                        className="chat-contact-action-btn"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          toggleUnreadConversation(c);
+                        }}
+                      >
+                        {unreadCount > 0 ? "Mark as read" : "Mark as unread"}
+                      </button>
+                      <button
+                        type="button"
+                        className="chat-contact-action-btn"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          selectAllVisibleChats();
+                        }}
+                      >
+                        Select all
+                      </button>
+                      <button
+                        type="button"
+                        className="chat-contact-action-btn"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          toggleLockedConversation(c);
+                        }}
+                      >
+                        {isLocked ? "Unlock chat" : "Lock chat"}
+                      </button>
+                      <button
+                        type="button"
+                        className="chat-contact-action-btn"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          toggleFavoriteConversation(c);
+                        }}
+                      >
+                        {isFavorited ? "Remove from favorites" : "Add to favorites"}
+                      </button>
+                      <button
+                        type="button"
+                        className="chat-contact-action-btn"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          assignConversationToList(c);
+                        }}
+                      >
+                        {contactListLabel ? "Change list" : "Add to list"}
+                      </button>
+                      {!!contactListLabel && (
+                        <button
+                          type="button"
+                          className="chat-contact-action-btn"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            removeConversationFromList(c);
+                          }}
+                        >
+                          Remove from list
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="chat-contact-action-btn"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          clearConversation(c);
+                        }}
+                      >
+                        Clear chat
+                      </button>
+                      {!c?.isGroup && (
+                        <button
+                          type="button"
+                          className="chat-contact-action-btn is-danger"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            blockContact(c);
+                          }}
+                        >
+                          Block
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="chat-contact-action-btn is-danger"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          deleteConversation(c);
+                        }}
+                      >
+                        Delete chat
+                      </button>
+                    </div>
+                  )}
               </div>
             );
           })}
@@ -1456,9 +1837,15 @@ export default function ChatMessages() {
                   const displayName = getContactDisplayName(c);
                   const canChat = canChatWith(c);
                   const outgoingPending = hasOutgoingRequest(c);
+                  const requestKey = getRequestKey(c);
+                  const requestEntry = requestKey ? pendingChatRequests?.[requestKey] : null;
                   const rawRequestStatus = getRequestStatus(c);
+                  const requestAgeMs = Math.max(0, Date.now() - Number(requestEntry?.at || 0));
+                  const keepRecentLocalRequestState =
+                    (rawRequestStatus === "requested" || rawRequestStatus === "pending") &&
+                    requestAgeMs < 15_000;
                   const cleanedStatus =
-                    !chatRequestsLoading && !outgoingPending &&
+                    !chatRequestsLoading && !outgoingPending && !keepRecentLocalRequestState &&
                     (rawRequestStatus === "requested" || rawRequestStatus === "pending")
                       ? ""
                       : rawRequestStatus;
@@ -1518,109 +1905,112 @@ export default function ChatMessages() {
 
       {!isConversationRoute && isRequestsRoute && (
         <section className="chat-requests-page">
-          <div className="chat-requests-page-head">
-            <button
-              type="button"
-              className="chat-requests-back"
-              onClick={() => navigate("/chat")}
-            >
-              <FiArrowLeft /> Back
-            </button>
-            <h2>Chat Requests</h2>
-            <span className="chat-requests-summary">
-              {chatRequests.length} incoming / {filteredSentChatRequests.length} sent
-            </span>
-          </div>
-          <div className="chat-requests-grid">
-            <div className="chat-requests">
-              <div className="chat-requests-head">
-                <h3>Incoming</h3>
-                {chatRequests.length > 0 && <span className="chat-requests-count">{chatRequests.length}</span>}
-              </div>
-              <div className="chat-requests-list">
-                {chatRequestsLoading && <p className="chat-request-empty">Loading requests...</p>}
-                {!chatRequestsLoading && !chatRequestError && chatRequests.length === 0 && (
-                  <p className="chat-request-empty">No new requests</p>
-                )}
-                {chatRequestError && <p className="chat-request-error">{chatRequestError}</p>}
-                {chatRequests.map((req) => {
-                  const contact = resolveChatRequestContact(req);
-                  if (!contact) return null;
-                  const displayName = getContactDisplayName(contact);
-                  const requestId = String(req?.id || "").trim();
-                  const busy = Boolean(requestId && chatRequestBusyById[requestId]);
-                  const actionable = Boolean(requestId);
-                  return (
-                    <div key={requestId || contact.id} className="chat-request-card">
-                      <span className="chat-avatar">
-                        {normalizeAvatarImageSrc(contact.profilePic) ? (
-                          <img src={normalizeAvatarImageSrc(contact.profilePic)} alt={displayName} className="chat-avatar-img" />
-                        ) : (
-                          contact.avatar
-                        )}
-                      </span>
-                      <span className="chat-request-meta">
-                        <strong>{displayName}</strong>
-                        <small>{contact.email || contact.username || "Chat request"}</small>
-                      </span>
-                      <div className="chat-request-actions">
-                        <button
-                          type="button"
-                          className="chat-request-btn accept"
-                          onClick={() => acceptChatRequest(req)}
-                          disabled={!actionable || busy}
-                        >
-                          Accept
-                        </button>
-                        <button
-                          type="button"
-                          className="chat-request-btn reject"
-                          onClick={() => rejectChatRequest(req)}
-                          disabled={!actionable || busy}
-                        >
-                          Reject
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+          <div className="chat-requests-paper">
+            <div className="chat-requests-page-head">
+              <button
+                type="button"
+                className="chat-requests-back"
+                onClick={() => navigate("/chat")}
+              >
+                <FiArrowLeft /> Back
+              </button>
+              <h2>Chat Requests</h2>
+              <span className="chat-requests-summary">
+                {chatRequests.length} incoming / {filteredSentChatRequests.length} sent
+              </span>
             </div>
-            <div className="chat-requests chat-requests-sent">
-              <div className="chat-requests-head">
-                <h3>Sent</h3>
-                {filteredSentChatRequests.length > 0 && (
-                  <span className="chat-requests-count">{filteredSentChatRequests.length}</span>
-                )}
+            <div className="chat-requests-grid">
+              <div className="chat-requests">
+                <div className="chat-requests-head">
+                  <h3>Incoming</h3>
+                  {chatRequests.length > 0 && <span className="chat-requests-count">{chatRequests.length}</span>}
+                </div>
+                <div className="chat-requests-list">
+                  {chatRequestsLoading && <p className="chat-request-empty">Loading requests...</p>}
+                  {!chatRequestsLoading && !chatRequestError && chatRequests.length === 0 && (
+                    <p className="chat-request-empty">No new requests</p>
+                  )}
+                  {chatRequestError && <p className="chat-request-error">{chatRequestError}</p>}
+                  {chatRequests.map((req) => {
+                    const contact = resolveChatRequestContact(req, "incoming");
+                    if (!contact) return null;
+                    const displayName = getContactDisplayName(contact);
+                    const actionInfo = resolveChatRequestActionInfo(req, "incoming", "accept");
+                    const requestKey = actionInfo?.actionKey || String(req?.followRequestId || req?.requestId || req?.id || "").trim();
+                    const busy = Boolean(requestKey && chatRequestBusyById[requestKey]);
+                    const actionable = Boolean(actionInfo?.endpoints?.length);
+                    return (
+                      <div key={requestKey || contact.id} className="chat-request-card">
+                        <span className="chat-avatar">
+                          {normalizeAvatarImageSrc(contact.profilePic) ? (
+                            <img src={normalizeAvatarImageSrc(contact.profilePic)} alt={displayName} className="chat-avatar-img" />
+                          ) : (
+                            contact.avatar
+                          )}
+                        </span>
+                        <span className="chat-request-meta">
+                          <strong>{displayName}</strong>
+                          <small>{contact.email || contact.username || "Chat request"}</small>
+                        </span>
+                        <div className="chat-request-actions">
+                          <button
+                            type="button"
+                            className="chat-request-btn accept"
+                            onClick={() => acceptChatRequest(req)}
+                            disabled={!actionable || busy}
+                          >
+                            Accept
+                          </button>
+                          <button
+                            type="button"
+                            className="chat-request-btn reject"
+                            onClick={() => rejectChatRequest(req)}
+                            disabled={!actionable || busy}
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-              <div className="chat-requests-list">
-                {chatRequestsLoading && filteredSentChatRequests.length === 0 && (
-                  <p className="chat-request-empty">Loading requests...</p>
-                )}
-                {!chatRequestsLoading && filteredSentChatRequests.length === 0 && (
-                  <p className="chat-request-empty">No sent requests</p>
-                )}
-                {filteredSentChatRequests.map((req) => {
-                  const contact = resolveChatRequestContact(req);
-                  if (!contact) return null;
-                  const displayName = getContactDisplayName(contact);
-                  return (
-                    <div key={`sent-${req?.id || contact.id}`} className="chat-request-card">
-                      <span className="chat-avatar">
-                        {normalizeAvatarImageSrc(contact.profilePic) ? (
-                          <img src={normalizeAvatarImageSrc(contact.profilePic)} alt={displayName} className="chat-avatar-img" />
-                        ) : (
-                          contact.avatar
-                        )}
-                      </span>
-                      <span className="chat-request-meta">
-                        <strong>{displayName}</strong>
-                        <small>{contact.email || contact.username || "Awaiting response"}</small>
-                      </span>
-                      <span className="chat-request-status">Pending</span>
-                    </div>
-                  );
-                })}
+              <div className="chat-requests chat-requests-sent">
+                <div className="chat-requests-head">
+                  <h3>Sent</h3>
+                  {filteredSentChatRequests.length > 0 && (
+                    <span className="chat-requests-count">{filteredSentChatRequests.length}</span>
+                  )}
+                </div>
+                <div className="chat-requests-list">
+                  {chatRequestsLoading && filteredSentChatRequests.length === 0 && (
+                    <p className="chat-request-empty">Loading requests...</p>
+                  )}
+                  {!chatRequestsLoading && filteredSentChatRequests.length === 0 && (
+                    <p className="chat-request-empty">No sent requests</p>
+                  )}
+                  {filteredSentChatRequests.map((req) => {
+                    const contact = resolveChatRequestContact(req, "outgoing");
+                    if (!contact) return null;
+                    const displayName = getContactDisplayName(contact);
+                    return (
+                      <div key={`sent-${req?.id || contact.id}`} className="chat-request-card">
+                        <span className="chat-avatar">
+                          {normalizeAvatarImageSrc(contact.profilePic) ? (
+                            <img src={normalizeAvatarImageSrc(contact.profilePic)} alt={displayName} className="chat-avatar-img" />
+                          ) : (
+                            contact.avatar
+                          )}
+                        </span>
+                        <span className="chat-request-meta">
+                          <strong>{displayName}</strong>
+                          <small>{contact.email || contact.username || "Awaiting response"}</small>
+                        </span>
+                        <span className="chat-request-status">Pending</span>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           </div>
@@ -1765,19 +2155,25 @@ export default function ChatMessages() {
             {activeUtilityPanel && activeUtilityPanel !== "search" && (
               <div className="chat-utility-panel-backdrop" onClick={() => setActiveUtilityPanel("")}>
                 <div
-                  className="chat-utility-panel"
+                  className={`chat-utility-panel ${activeUtilityPanel === "group-info" ? "is-group-info" : ""}`}
                   ref={utilityPanelRef}
                   onClick={(e) => e.stopPropagation()}
                 >
                   <div className="chat-utility-panel-head">
                     <div className="chat-utility-panel-title">
                       <strong>
-                        {activeUtilityPanel === "media" ? "Media" : "Links and documents"}
+                        {activeUtilityPanel === "group-info"
+                          ? "Group info"
+                          : activeUtilityPanel === "media"
+                            ? "Media"
+                            : "Links and documents"}
                       </strong>
                       <small>
-                        {activeUtilityPanel === "media"
-                          ? `${mediaPanelItems.length} shared item${mediaPanelItems.length === 1 ? "" : "s"}`
-                          : `${linkDocumentItems.length} link or document${linkDocumentItems.length === 1 ? "" : "s"}`}
+                        {activeUtilityPanel === "group-info"
+                          ? `${activeGroupMembers.length} ${activeGroupMemberLabel}`
+                          : activeUtilityPanel === "media"
+                            ? `${mediaPanelItems.length} shared item${mediaPanelItems.length === 1 ? "" : "s"}`
+                            : `${linkDocumentItems.length} link or document${linkDocumentItems.length === 1 ? "" : "s"}`}
                       </small>
                     </div>
                     <button
@@ -1788,6 +2184,134 @@ export default function ChatMessages() {
                       Close
                     </button>
                   </div>
+
+                  {activeUtilityPanel === "group-info" && (
+                    <div className="chat-utility-list chat-group-info-panel">
+                      <div className="chat-group-info-hero">
+                        <div className="chat-group-info-avatar-wrap">
+                          <span className="chat-group-info-avatar">
+                            {normalizeAvatarImageSrc(activeContact?.profilePic) ? (
+                              <img
+                                src={normalizeAvatarImageSrc(activeContact?.profilePic)}
+                                alt={activeContact?.name || "Group"}
+                                className="chat-avatar-img"
+                              />
+                            ) : (
+                              String(activeContact?.avatar || activeContact?.name || "G").slice(0, 1).toUpperCase()
+                            )}
+                          </span>
+                          {canEditActiveGroup && (
+                            <button
+                              type="button"
+                              className="chat-group-info-photo-btn"
+                              onClick={() => groupPhotoInputRef.current?.click()}
+                              disabled={groupInfoSaving}
+                            >
+                              {groupInfoSaving ? "Updating..." : "Change photo"}
+                            </button>
+                          )}
+                          <input
+                            name="chatmessages-input-group-photo"
+                            ref={groupPhotoInputRef}
+                            type="file"
+                            accept="image/*"
+                            className="chat-hidden-file-input"
+                            onChange={onGroupPhotoPicked}
+                          />
+                        </div>
+                        <div className="chat-group-info-copy">
+                          <h3>{activeContact?.name || "Group"}</h3>
+                          <small>{activeGroupMembers.length} {activeGroupMemberLabel}</small>
+                          {activeContact?.ownerName && (
+                            <span className="chat-group-info-admin-tag">
+                              Admin: {activeContact.ownerName}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="chat-group-info-card">
+                        <div className="chat-group-info-card-head">
+                          <strong>Bio</strong>
+                          {groupInfoLoading && <small>Refreshing...</small>}
+                        </div>
+                        {canEditActiveGroup ? (
+                          <>
+                            <textarea
+                              name="chatmessages-textarea-group-bio"
+                              className="chat-group-info-bio-input"
+                              rows={4}
+                              maxLength={500}
+                              placeholder="Write a group bio..."
+                              value={groupBioDraft}
+                              onChange={(event) => setGroupBioDraft(event.target.value)}
+                            />
+                            <div className="chat-group-info-actions">
+                              <small>{groupBioDraft.trim().length}/500</small>
+                              <button
+                                type="button"
+                                className="chat-group-info-save"
+                                onClick={() => {
+                                  void saveGroupBio();
+                                }}
+                                disabled={groupInfoSaving}
+                              >
+                                {groupInfoSaving ? "Saving..." : "Save bio"}
+                              </button>
+                            </div>
+                          </>
+                        ) : (
+                          <p className="chat-group-info-bio-text">
+                            {activeGroupBio || "No group bio yet."}
+                          </p>
+                        )}
+                        {!canEditActiveGroup && activeGroupBio && (
+                          <small className="chat-group-info-hint">Only the group admin can change the photo and bio.</small>
+                        )}
+                        {!!groupBioSavedNotice && (
+                          <small className="chat-group-info-success">{groupBioSavedNotice}</small>
+                        )}
+                      </div>
+
+                      <div className="chat-group-info-card">
+                        <div className="chat-group-info-card-head">
+                          <strong>Members</strong>
+                          <small>{activeGroupMembers.length} total</small>
+                        </div>
+                        {activeGroupMembers.length === 0 ? (
+                          <p className="chat-utility-empty">No members found.</p>
+                        ) : (
+                          <div className="chat-group-member-list">
+                            {activeGroupMembers.map((member) => {
+                              const memberName = String(member?.name || member?.email || "Member").trim() || "Member";
+                              const memberPic = normalizeAvatarImageSrc(member?.profilePic);
+                              return (
+                                <button
+                                  key={String(member?.id || member?.email || memberName)}
+                                  type="button"
+                                  className="chat-group-member-item"
+                                  onClick={() => goToProfile(member)}
+                                >
+                                  <span className="chat-avatar">
+                                    {memberPic ? (
+                                      <img src={memberPic} alt={memberName} className="chat-avatar-img" />
+                                    ) : (
+                                      memberName.slice(0, 1).toUpperCase()
+                                    )}
+                                  </span>
+                                  <span className="chat-group-member-meta">
+                                    <strong>{memberName}</strong>
+                                    <small>{member?.isAdmin ? "Group admin" : member?.email || "Member"}</small>
+                                  </span>
+                                  {member?.isAdmin && <span className="chat-group-admin-pill">Admin</span>}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
 
                   {activeUtilityPanel === "media" && (
                     <div className="chat-utility-list">
@@ -1901,7 +2425,7 @@ export default function ChatMessages() {
               </div>
             )}
 
-            {(incomingCall || (callActive && callState.mode === "audio") || callError) && (
+            {(incomingCall || (callActive && callState.mode === "audio" && !groupCallActive) || callError) && (
               <div className="call-panel">
                 {callLabel && <p className="call-status">{callLabel}</p>}
                 {callError && <p className="call-error">{callError}</p>}
@@ -1917,7 +2441,7 @@ export default function ChatMessages() {
                   </div>
                 )}
 
-                {callActive && (
+                {callActive && !incomingCall && (
                   <>
                     {callState.mode === "audio" && (
                       <div className="audio-call-pill">
@@ -1936,15 +2460,6 @@ export default function ChatMessages() {
                         <>
                           <button type="button" className="call-control" onClick={upgradeCallToVideo} title="Switch to video">
                             <FiVideo />
-                          </button>
-                          <button
-                            type="button"
-                            className="call-control"
-                            onClick={openGroupInvite}
-                            title="Group video call"
-                            disabled={!!incomingCall}
-                          >
-                            <FiUsers />
                           </button>
                         </>
                       )}
@@ -1965,7 +2480,7 @@ export default function ChatMessages() {
               data-no-page-swipe
             >
 
-              {chatItems.map((item) => {
+              {chatItems.map((item, index) => {
                 if (item.kind === "day") {
                   return (
                     <div key={item.id} className="chat-day-sep">
@@ -2088,146 +2603,180 @@ export default function ChatMessages() {
                 };
                 const enableBubbleMenu = item.kind === "message";
                 const callCard = item.kind === "call" ? formatCallCard(item.raw) : null;
+                const isGroupThread = Boolean(activeContact?.isGroup);
+                const senderMeta = isGroupThread && item.kind === "message" ? resolveGroupMessageSender(item) : null;
+                let previousMessageMeta = null;
+                if (isGroupThread && item.kind === "message") {
+                  for (let prevIndex = index - 1; prevIndex >= 0; prevIndex -= 1) {
+                    const prevItem = chatItems[prevIndex];
+                    if (!prevItem || prevItem.kind !== "message") continue;
+                    previousMessageMeta = resolveGroupMessageSender(prevItem);
+                    break;
+                  }
+                }
+                const showGroupSenderBadge =
+                  isGroupThread &&
+                  item.kind === "message" &&
+                  Boolean(senderMeta?.senderKey) &&
+                  senderMeta.senderKey !== previousMessageMeta?.senderKey;
                 return (
                   <div
                     key={item.id}
-                    className={`chat-bubble ${
-                      item.kind === "call" ? `call-log ${item.mine ? "mine" : "their"}` : item.mine ? "mine" : "their"
-                    } ${
-                      item.kind === "message" && String(item.raw?.id || "") === highlightedMessageId ? "is-highlighted" : ""
-                    }`}
-                    data-chat-msg-id={item.kind === "message" ? String(item.raw?.id || "") : undefined}
-                    onContextMenu={enableBubbleMenu ? (e) => openBubbleMenu(e, item) : undefined}
-                    onPointerUp={enableBubbleMenu ? (e) => openBubbleMenuOnClick(e, item) : undefined}
-                    onTouchStart={enableBubbleMenu ? (e) => onBubbleTouchStart(item, e) : undefined}
-                    onTouchMove={enableBubbleMenu ? (e) => onBubbleTouchMove(item, e) : undefined}
-                    onTouchEnd={enableBubbleMenu ? onBubbleTouchEnd : undefined}
-                    onTouchCancel={enableBubbleMenu ? onBubbleTouchEnd : undefined}
+                    className={`chat-message-row ${item.mine ? "mine" : "their"} ${
+                      isGroupThread && item.kind === "message" ? "is-group" : ""
+                    } ${item.kind === "call" ? "is-call" : ""}`}
                   >
-                    <div className={`chat-bubble-line ${item.kind === "call" ? "call-line" : ""}`}>
-                      {item.kind === "message" && item.raw?.replyTo && (
-                        <div className={`chat-reply-chip ${item.mine ? "mine" : "their"}`}>
-                          <small>
-                            {String(item.raw.replyTo.senderId || "") === String(myUserId)
-                              ? "You"
-                              : item.raw.replyTo.senderName || "Message"}
-                          </small>
-                          <span>{trimReplyPreview(item.raw.replyTo.preview || "Message")}</span>
-                        </div>
-                      )}
-                      {item.kind === "message" && item.raw?.audioUrl ? (
-                        <div className={`chat-voice-note ${item.mine ? "mine" : "their"}`}>
-                          {item.mine && (
-                            <span className="chat-voice-note-icon" aria-hidden="true">
-                              <FiVolume2 />
-                            </span>
+                    {showGroupSenderBadge && (
+                      <div className="chat-message-sender" title={senderMeta?.senderName || "Member"}>
+                        <span className="chat-message-sender-avatar" aria-hidden="true">
+                          {senderMeta?.avatarSrc ? (
+                            <img src={senderMeta.avatarSrc} alt={senderMeta.senderName} className="chat-avatar-img" />
+                          ) : (
+                            senderMeta?.avatarInitial || "U"
                           )}
-                          <audio controls preload="metadata" className="chat-audio" src={toApiUrl(item.raw.audioUrl)} />
-                        </div>
-                      ) : item.kind === "message" && item.raw?.mediaUrl ? (
-                        (() => {
-                          const mediaUrl = resolveMediaUrl(item.raw.mediaUrl);
-                          const fileName = String(item.raw?.fileName || "");
-                          const textLabel = String(item.raw?.text || "");
-                          const looksAudio =
-                            item.raw?.mediaType === "audio" ||
-                            /\.(webm|ogg|mp3|m4a|wav|aac|opus)(\?|#|$)/i.test(fileName) ||
-                            /\.(webm|ogg|mp3|m4a|wav|aac|opus)(\?|#|$)/i.test(textLabel) ||
-                            /\.(webm|ogg|mp3|m4a|wav|aac|opus)(\?|#|$)/i.test(mediaUrl);
-                          if (looksAudio) {
-                            return (
-                              <div className={`chat-voice-note ${item.mine ? "mine" : "their"}`}>
-                                {item.mine && (
-                                  <span className="chat-voice-note-icon" aria-hidden="true">
-                                    <FiVolume2 />
-                                  </span>
-                                )}
-                                <audio controls preload="metadata" className="chat-audio" src={mediaUrl} />
-                              </div>
-                            );
-                          }
-                          if (item.raw?.mediaType === "image") {
-                            return (
-                              <button
-                                type="button"
-                                className="chat-media-image-btn"
-                                onClick={() => openImagePreview(mediaUrl, fileName || "image")}
-                              >
-                                <img
-                                  src={mediaUrl}
-                                  alt={fileName || "image"}
-                                  className="chat-media-image"
-                                />
-                              </button>
-                            );
-                          }
-                          if (item.raw?.mediaType === "video") {
-                            if (reelShare) {
-                              return renderReelShareCard(mediaUrl);
-                            }
-                            if (feedShare) {
-                              return renderFeedShareCard(mediaUrl);
-                            }
-                            return (
-                              <video controls preload="metadata" className="chat-media-video" src={mediaUrl} />
-                            );
-                          }
-                          return (
-                            <a className="chat-file-link" href={mediaUrl} target="_blank" rel="noreferrer">
-                              File: {fileName || "Download file"}
-                            </a>
-                          );
-                        })()
-                      ) : item.kind === "message" && reelShare ? (
-                        renderReelShareCard("")
-                      ) : item.kind === "message" && feedShare ? (
-                        renderFeedShareCard("")
-                      ) : item.kind === "message" && /^\[Attachment:\s*.+\]$/i.test(String(item.raw?.text || "")) ? (
-                        <span className="chat-attachment-text">{String(item.raw?.text || "")}</span>
-                      ) : item.kind === "call" ? (
-                        <div className="call-card">
-                          <span className={`call-dot ${callCard?.tone ? `is-${callCard.tone}` : ""}`} aria-hidden="true">
-                            {callCard?.icon === "video" ? <FiVideo /> : callCard?.icon === "off" ? <FiPhoneOff /> : <FiPhone />}
-                          </span>
-                          <span className="call-card-text">
-                            <strong>{callCard?.title || "Call"}</strong>
-                            <small>{callCard?.subtitle || ""}</small>
-                          </span>
-                        </div>
-                      ) : (
-                        <>
-                          <span>{decodeSignAssistText(item.raw?.text || item.text)?.text || item.text}</span>
-                          {item.kind === "message" && canTranslateMessage(item.raw) && translatorEnabled && (() => {
-                            const msgKey = String(item.raw?.id || `${item.raw?.createdAt}_${item.raw?.text}`);
-                            const translated = String(translatedIncomingById[msgKey] || "").trim();
-                            if (!translated) return null;
-                            if (translated.toLowerCase() === String(item.text || "").trim().toLowerCase()) return null;
-                            return (
-                              <small className="chat-translated-text" title="Translated">
-                                {translated}
-                              </small>
-                            );
-                          })()}
-                        </>
-                      )}
-                    </div>
-                    <small className="chat-bubble-time">
-                      {formatMessageTime(item.createdAt)}
-                      {item.kind === "message" && item.mine && (item.raw?.audioUrl || item.raw?.mediaType === "audio") && (
-                        <span className="chat-voice-status-icon" title="Voice note" aria-label="Voice note">
-                          <FiVolume2 />
                         </span>
-                      )}
-                      {item.kind === "message" && item.mine && (() => {
-                        const tickState = getMessageTickState(item.raw);
-                        if (!tickState) return null;
-                        return (
-                          <span className={`chat-read-ticks ${tickState}`} aria-label={tickState}>
-                            {getTickSymbol(tickState)}
+                        <strong>{senderMeta?.senderName || "Member"}</strong>
+                      </div>
+                    )}
+                    <div
+                      className={`chat-bubble ${
+                        item.kind === "call" ? `call-log ${item.mine ? "mine" : "their"}` : item.mine ? "mine" : "their"
+                      } ${
+                        item.kind === "message" && String(item.raw?.id || "") === highlightedMessageId ? "is-highlighted" : ""
+                      }`}
+                      data-chat-msg-id={item.kind === "message" ? String(item.raw?.id || "") : undefined}
+                      onContextMenu={enableBubbleMenu ? (e) => openBubbleMenu(e, item) : undefined}
+                      onPointerUp={enableBubbleMenu ? (e) => openBubbleMenuOnClick(e, item) : undefined}
+                      onTouchStart={enableBubbleMenu ? (e) => onBubbleTouchStart(item, e) : undefined}
+                      onTouchMove={enableBubbleMenu ? (e) => onBubbleTouchMove(item, e) : undefined}
+                      onTouchEnd={enableBubbleMenu ? onBubbleTouchEnd : undefined}
+                      onTouchCancel={enableBubbleMenu ? onBubbleTouchEnd : undefined}
+                    >
+                      <div className={`chat-bubble-line ${item.kind === "call" ? "call-line" : ""}`}>
+                        {item.kind === "message" && item.raw?.replyTo && (
+                          <div className={`chat-reply-chip ${item.mine ? "mine" : "their"}`}>
+                            <small>
+                              {String(item.raw.replyTo.senderId || "") === String(myUserId)
+                                ? "You"
+                                : item.raw.replyTo.senderName || "Message"}
+                            </small>
+                            <span>{trimReplyPreview(item.raw.replyTo.preview || "Message")}</span>
+                          </div>
+                        )}
+                        {item.kind === "message" && item.raw?.audioUrl ? (
+                          <div className={`chat-voice-note ${item.mine ? "mine" : "their"}`}>
+                            {item.mine && (
+                              <span className="chat-voice-note-icon" aria-hidden="true">
+                                <FiVolume2 />
+                              </span>
+                            )}
+                            <audio controls preload="metadata" className="chat-audio" src={toApiUrl(item.raw.audioUrl)} />
+                          </div>
+                        ) : item.kind === "message" && item.raw?.mediaUrl ? (
+                          (() => {
+                            const mediaUrl = resolveMediaUrl(item.raw.mediaUrl);
+                            const fileName = String(item.raw?.fileName || "");
+                            const textLabel = String(item.raw?.text || "");
+                            const looksAudio =
+                              item.raw?.mediaType === "audio" ||
+                              /\.(webm|ogg|mp3|m4a|wav|aac|opus)(\?|#|$)/i.test(fileName) ||
+                              /\.(webm|ogg|mp3|m4a|wav|aac|opus)(\?|#|$)/i.test(textLabel) ||
+                              /\.(webm|ogg|mp3|m4a|wav|aac|opus)(\?|#|$)/i.test(mediaUrl);
+                            if (looksAudio) {
+                              return (
+                                <div className={`chat-voice-note ${item.mine ? "mine" : "their"}`}>
+                                  {item.mine && (
+                                    <span className="chat-voice-note-icon" aria-hidden="true">
+                                      <FiVolume2 />
+                                    </span>
+                                  )}
+                                  <audio controls preload="metadata" className="chat-audio" src={mediaUrl} />
+                                </div>
+                              );
+                            }
+                            if (item.raw?.mediaType === "image") {
+                              return (
+                                <button
+                                  type="button"
+                                  className="chat-media-image-btn"
+                                  onClick={() => openImagePreview(mediaUrl, fileName || "image")}
+                                >
+                                  <img
+                                    src={mediaUrl}
+                                    alt={fileName || "image"}
+                                    className="chat-media-image"
+                                  />
+                                </button>
+                              );
+                            }
+                            if (item.raw?.mediaType === "video") {
+                              if (reelShare) {
+                                return renderReelShareCard(mediaUrl);
+                              }
+                              if (feedShare) {
+                                return renderFeedShareCard(mediaUrl);
+                              }
+                              return (
+                                <video controls preload="metadata" className="chat-media-video" src={mediaUrl} />
+                              );
+                            }
+                            return (
+                              <a className="chat-file-link" href={mediaUrl} target="_blank" rel="noreferrer">
+                                File: {fileName || "Download file"}
+                              </a>
+                            );
+                          })()
+                        ) : item.kind === "message" && reelShare ? (
+                          renderReelShareCard("")
+                        ) : item.kind === "message" && feedShare ? (
+                          renderFeedShareCard("")
+                        ) : item.kind === "message" && /^\[Attachment:\s*.+\]$/i.test(String(item.raw?.text || "")) ? (
+                          <span className="chat-attachment-text">{String(item.raw?.text || "")}</span>
+                        ) : item.kind === "call" ? (
+                          <div className="call-card">
+                            <span className={`call-dot ${callCard?.tone ? `is-${callCard.tone}` : ""}`} aria-hidden="true">
+                              {callCard?.icon === "video" ? <FiVideo /> : callCard?.icon === "off" ? <FiPhoneOff /> : <FiPhone />}
+                            </span>
+                            <span className="call-card-text">
+                              <strong>{callCard?.title || "Call"}</strong>
+                              <small>{callCard?.subtitle || ""}</small>
+                            </span>
+                          </div>
+                        ) : (
+                          <>
+                            <span>{decodeSignAssistText(item.raw?.text || item.text)?.text || item.text}</span>
+                            {item.kind === "message" && canTranslateMessage(item.raw) && translatorEnabled && (() => {
+                              const msgKey = String(item.raw?.id || `${item.raw?.createdAt}_${item.raw?.text}`);
+                              const translated = String(translatedIncomingById[msgKey] || "").trim();
+                              if (!translated) return null;
+                              if (translated.toLowerCase() === String(item.text || "").trim().toLowerCase()) return null;
+                              return (
+                                <small className="chat-translated-text" title="Translated">
+                                  {translated}
+                                </small>
+                              );
+                            })()}
+                          </>
+                        )}
+                      </div>
+                      <small className="chat-bubble-time">
+                        {formatMessageTime(item.createdAt)}
+                        {item.kind === "message" && item.mine && (item.raw?.audioUrl || item.raw?.mediaType === "audio") && (
+                          <span className="chat-voice-status-icon" title="Voice note" aria-label="Voice note">
+                            <FiVolume2 />
                           </span>
-                        );
-                      })()}
-                    </small>
+                        )}
+                        {item.kind === "message" && item.mine && (() => {
+                          const tickState = getMessageTickState(item.raw);
+                          if (!tickState) return null;
+                          return (
+                            <span className={`chat-read-ticks ${tickState}`} aria-label={tickState}>
+                              {getTickSymbol(tickState)}
+                            </span>
+                          );
+                        })()}
+                      </small>
+                    </div>
                   </div>
                 );
               })}

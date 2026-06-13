@@ -316,7 +316,9 @@ export default function StorageVault() {
   };
 
   const handleResetLock = async () => {
-    const ok = window.confirm("Reset vault lock? Your stored files stay, but you must choose new pictures.");
+    const ok = window.confirm(
+      "Reset vault lock? Your stored files stay, but you must choose new secret pictures from your device."
+    );
     if (!ok) return;
     clearVaultUnlocked();
     await clearVaultLockSynced();

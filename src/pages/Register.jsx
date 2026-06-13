@@ -5,11 +5,24 @@ import "./AuthScreen.css";
 
 function parseErrorMessage(err, fallback) {
   const data = err?.response?.data;
+  const normalize = (value) => String(value || "").trim().toLowerCase();
   if (typeof data === "string" && data.trim()) return data;
   if (data && typeof data === "object") {
     const candidates = [data.message, data.error, data.details, data.title];
     for (const value of candidates) {
-      if (typeof value === "string" && value.trim()) return value;
+      if (typeof value === "string" && value.trim()) {
+        const text = value.trim();
+        const normalized = normalize(text);
+        if (
+          normalized.includes("already registered") ||
+          normalized.includes("already linked") ||
+          normalized.includes("already has an account") ||
+          normalized.includes("one account")
+        ) {
+          return "That email already has an account. Please log in instead.";
+        }
+        return text;
+      }
     }
   }
   const generic = err?.message;

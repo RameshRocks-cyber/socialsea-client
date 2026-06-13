@@ -1,26 +1,60 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api from "./api/axios";
+import { adminNotificationsQueryKey } from "./api/queryKeys";
 import "./NotificationsPage.css";
 
-export default function NotificationsPage() {
-  const [notifications, setNotifications] = useState([]);
+const fetchAdminNotifications = async () => {
+  try {
+    const res = await api.get("/api/admin/notifications");
+    return Array.isArray(res.data) ? res.data : [];
+  } catch {
+    return [];
+  }
+};
 
-  useEffect(() => {
-    api.get("/api/admin/notifications").then((res) => {
-      setNotifications(res.data);
-    });
-  }, []);
+export default function NotificationsPage() {
+  const queryClient = useQueryClient();
+  const notificationsQuery = useQuery({
+    queryKey: adminNotificationsQueryKey(),
+    queryFn: fetchAdminNotifications,
+    staleTime: 30_000,
+    retry: 1
+  });
+  const notifications = Array.isArray(notificationsQuery.data) ? notificationsQuery.data : [];
+  const loading = notificationsQuery.isPending && notifications.length === 0;
 
   const unreadCount = useMemo(
     () => notifications.filter((n) => !n.read).length,
     [notifications]
   );
 
-  const markRead = async (id) => {
-    await api.post(`/api/admin/notifications/${id}/read`);
-    setNotifications((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, read: true } : n))
-    );
+  const markReadMutation = useMutation({
+    mutationFn: async (id) => {
+      await api.post(`/api/admin/notifications/${id}/read`);
+      return id;
+    },
+    onMutate: async (id) => {
+      const queryKey = adminNotificationsQueryKey();
+      await queryClient.cancelQueries({ queryKey });
+      const previous = queryClient.getQueryData(queryKey);
+      queryClient.setQueryData(queryKey, (current) =>
+        (Array.isArray(current) ? current : []).map((n) => (n.id === id ? { ...n, read: true } : n))
+      );
+      return { previous };
+    },
+    onError: (_error, _id, context) => {
+      if (context?.previous !== undefined) {
+        queryClient.setQueryData(adminNotificationsQueryKey(), context.previous);
+      }
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: adminNotificationsQueryKey() });
+    }
+  });
+
+  const markRead = (id) => {
+    markReadMutation.mutate(id);
   };
 
   const getKind = (message = "") => {
@@ -54,7 +88,14 @@ export default function NotificationsPage() {
       </header>
 
       <div className="admin-notifs-list">
-        {notifications.length === 0 && (
+        {loading && (
+          <div className="admin-notifs-empty">
+            <div className="admin-notifs-empty-badge">Loading</div>
+            <p>Loading notifications...</p>
+          </div>
+        )}
+
+        {!loading && notifications.length === 0 && (
           <div className="admin-notifs-empty">
             <div className="admin-notifs-empty-badge">All clear</div>
             <p>No notifications yet.</p>

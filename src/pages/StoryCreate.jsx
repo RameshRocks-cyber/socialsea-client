@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { FiCamera } from "react-icons/fi";
 import api from "../api/axios";
 import { getApiBaseUrl } from "../api/baseUrl";
+import { compressImageFile } from "../utils/imageCompression";
 import { addStoryEntry } from "../services/storyStorage";
 import "./StoryCreate.css";
 
@@ -123,9 +124,9 @@ export default function StoryCreate() {
     return null;
   };
 
-  const buildStoryForm = () => {
+  const buildStoryForm = (mediaFile = file) => {
     const form = new FormData();
-    form.append("file", file);
+    form.append("file", mediaFile);
     form.append("isStory", "true");
     form.append("storyPrivacy", privacy);
     form.append("storyExpiresHours", String(expiryHours));
@@ -147,7 +148,7 @@ export default function StoryCreate() {
     return form;
   };
 
-  const tryPublishStory = async () => {
+  const tryPublishStory = async (mediaFile = file) => {
     const defaultBase = normalizeBase(api?.defaults?.baseURL);
     const envBase = normalizeBase(getApiBaseUrl());
     const baseCandidates = [defaultBase, envBase, "https://api.socialsea.co.in"]
@@ -163,7 +164,7 @@ export default function StoryCreate() {
     for (const baseURL of baseCandidates) {
       for (const endpoint of endpointCandidates) {
         try {
-          const res = await api.post(endpoint, buildStoryForm(), {
+          const res = await api.post(endpoint, buildStoryForm(mediaFile), {
             baseURL,
             timeout: 30000,
             suppressAuthRedirect: true
@@ -198,7 +199,15 @@ export default function StoryCreate() {
 
     setLoading(true);
     try {
-      const res = await tryPublishStory();
+      const uploadFile = isVideo
+        ? file
+        : await compressImageFile(file, {
+            maxSizeMB: 1.2,
+            maxWidthOrHeight: 1920,
+            fileType: "image/webp",
+            initialQuality: 0.84
+          });
+      const res = await tryPublishStory(uploadFile || file);
 
       const mediaUrl =
         res?.data?.mediaUrl ||

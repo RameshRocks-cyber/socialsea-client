@@ -57,54 +57,58 @@ const safeLocalRemove = (key) => {
   }
 };
 
-const sanitizeImageIds = (ids) =>
-  (Array.isArray(ids) ? ids : [])
-    .map((id) => String(id || "").trim())
+const sanitizeLockValues = (values) =>
+  (Array.isArray(values) ? values : [])
+    .map((value) => String(value || "").trim())
     .filter(Boolean);
+
+const readLockSignatures = (value) => sanitizeLockValues(value?.fileSignatures);
+const readLegacyImageIds = (value) => sanitizeLockValues(value?.imageIds);
+
+const normalizeLock = (value) => {
+  const fileSignatures = readLockSignatures(value);
+  const explicitLegacy = value?.legacy === true;
+  const legacyImageIds = fileSignatures.length ? [] : readLegacyImageIds(value);
+  const normalized = fileSignatures.length ? fileSignatures : legacyImageIds;
+  if (!normalized.length) return null;
+  return {
+    fileSignatures: normalized,
+    createdAt: Number(value?.createdAt || Date.now()),
+    legacy: explicitLegacy || (!fileSignatures.length && legacyImageIds.length > 0)
+  };
+};
 
 export const readVaultLock = () => {
   try {
     const raw = safeLocalGet(VAULT_LOCK_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") return null;
-    const imageIds = sanitizeImageIds(parsed.imageIds);
-    if (!imageIds.length) {
+    const lock = normalizeLock(parsed);
+    if (!lock) {
       safeLocalRemove(VAULT_LOCK_KEY);
       return null;
     }
-    return {
-      imageIds,
-      createdAt: Number(parsed.createdAt || Date.now())
-    };
+    return lock;
   } catch {
     return null;
   }
 };
 
 export const saveVaultLock = (lock) => {
-  const imageIds = sanitizeImageIds(lock?.imageIds);
-  if (!imageIds.length) return;
+  const normalized = normalizeLock(lock);
+  if (!normalized) return;
   safeLocalSet(
     VAULT_LOCK_KEY,
     JSON.stringify({
-      imageIds,
-      createdAt: Number(lock.createdAt || Date.now())
+      fileSignatures: normalized.fileSignatures,
+      createdAt: normalized.createdAt,
+      legacy: Boolean(normalized.legacy)
     })
   );
 };
 
 export const clearVaultLock = () => {
   safeLocalRemove(VAULT_LOCK_KEY);
-};
-
-const normalizeLock = (value) => {
-  const imageIds = sanitizeImageIds(value?.imageIds);
-  if (!imageIds.length) return null;
-  return {
-    imageIds,
-    createdAt: Number(value?.createdAt || Date.now())
-  };
 };
 
 export const readVaultLockSynced = async () => {
@@ -146,9 +150,13 @@ export const clearVaultLockSynced = async () => {
 };
 
 const buildVaultSig = (lock) => {
-  const imageIds = sanitizeImageIds(lock?.imageIds);
-  if (!imageIds.length) return "";
-  return imageIds.join("|");
+  const fileSignatures = sanitizeLockValues(lock?.fileSignatures);
+  if (fileSignatures.length) {
+    return lock?.legacy ? `legacy:${fileSignatures.join("|")}` : fileSignatures.join("|");
+  }
+  const legacyImageIds = sanitizeLockValues(lock?.imageIds);
+  if (legacyImageIds.length) return `legacy:${legacyImageIds.join("|")}`;
+  return "";
 };
 
 export const isVaultUnlocked = (lock) => {

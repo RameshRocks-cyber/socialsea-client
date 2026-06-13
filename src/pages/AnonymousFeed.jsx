@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import api from "../api/axios";
 import { getApiBaseUrl, toApiUrl } from "../api/baseUrl";
 
@@ -219,18 +218,10 @@ export default function AnonymousFeed() {
 
   return (
     <div style={styles.container}>
-      <nav style={styles.nav}>
-        <div style={styles.navStart}>
-          <h2 style={styles.logo}>
-            SocialSea <span style={{ fontSize: "14px", color: "color-mix(in srgb, var(--ss-theme-text) 58%, transparent)", fontWeight: "normal" }}>Anonymous</span>
-          </h2>
-        </div>
-        <div style={styles.navEnd}>
-          <Link to="/anonymous-feed" style={styles.navLink}>Home</Link>
-          <Link to="/anonymous/upload" style={styles.navLink}>Upload</Link>
-          <Link to="/feed" style={styles.navLink}>Main Feed</Link>
-        </div>
-      </nav>
+      <header style={styles.pageHeader}>
+        <h1 style={styles.pageTitle}>Anonymous Feed</h1>
+        <p style={styles.pageSubtitle}>See all approved anonymous posts and interactions.</p>
+      </header>
 
       <div style={styles.grid}>
         {loading && <p style={styles.info}>Loading...</p>}
@@ -294,33 +285,20 @@ const styles = {
     color: "var(--ss-theme-text)",
     fontFamily: "Sora, Segoe UI, sans-serif"
   },
-  nav: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: "0 14px",
-    blockSize: "54px",
-    background:
-      "radial-gradient(130% 140% at 5% -20%, color-mix(in srgb, var(--ss-theme-accent) 18%, transparent), transparent 50%), color-mix(in srgb, var(--ss-theme-bg-soft) 88%, transparent)",
-    position: "sticky",
-    insetBlockStart: 0,
-    zIndex: 100,
-    borderBlockEnd: "1px solid var(--ss-theme-border)",
-    backdropFilter: "blur(10px)"
+  pageHeader: {
+    maxInlineSize: "1180px",
+    margin: "12px auto 0",
+    paddingInline: "16px"
   },
-  navStart: { display: "flex", alignItems: "center" },
-  logo: { color: "var(--ss-theme-text)", margin: 0, fontSize: "24px", letterSpacing: "-0.4px", fontWeight: 800 },
-  navEnd: { display: "flex", gap: "14px" },
-  navLink: {
-    color: "var(--ss-theme-text)",
-    textDecoration: "none",
-    fontSize: "13px",
-    fontWeight: "700",
-    padding: "6px 10px",
-    border: "1px solid var(--ss-theme-border)",
-    borderRadius: "999px",
-    background:
-      "linear-gradient(135deg, color-mix(in srgb, var(--ss-theme-bg-soft) 86%, white 14%), color-mix(in srgb, var(--ss-theme-bg) 90%, white 10%))"
+  pageTitle: {
+    margin: 0,
+    fontSize: "22px",
+    letterSpacing: "-0.3px"
+  },
+  pageSubtitle: {
+    margin: "6px 0 0",
+    color: "color-mix(in srgb, var(--ss-theme-text) 70%, transparent)",
+    fontSize: "14px"
   },
   grid: {
     display: "grid",

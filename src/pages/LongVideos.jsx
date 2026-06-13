@@ -1,8 +1,14 @@
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
+import { useQueryClient } from "@tanstack/react-query";
+import { DEFAULT_FEED_PAGE_SIZE } from "../api/feed";
+import { getPostComments } from "../api/comments";
+import { feedCommentsQueryKey } from "../api/queryKeys";
+import { loadSavedPosts, syncSavedPostCache, syncSavedPostCacheFromIds, toggleSavedPost } from "../api/saved";
 import { getApiBaseUrl } from "../api/baseUrl";
 import { recordCommentActivity, recordSearchActivity, recordWatchHistory } from "../services/activityStore";
+import { getPublicDisplayName } from "../utils/displayName";
 import { readIdMapFromStorage, writeIdMapToStorage } from "../utils/idStorage";
 import { readLiveBroadcast, subscribeLiveBroadcast } from "../utils/liveBroadcast";
 import { resolveMediaUrl } from "../utils/mediaUrl";
@@ -137,6 +143,7 @@ export default function LongVideos() {
   const { postId } = useParams();
   const [searchParams] = useSearchParams();
   const isWatchMode = Boolean(postId);
+  const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [liveBroadcast, setLiveBroadcast] = useState(() => readLiveBroadcast());
   const playerRef = useRef(null);
@@ -325,7 +332,7 @@ export default function LongVideos() {
       baseURL: baseURL || undefined,
       timeout: timeoutMs,
       suppressAuthRedirect: true,
-      params: { page: 0, size: 180 }
+      params: { page: 0, size: DEFAULT_FEED_PAGE_SIZE }
     });
     const firstPayload = first?.data;
     const looksLikeHtml =
@@ -343,7 +350,7 @@ export default function LongVideos() {
             baseURL: baseURL || undefined,
             timeout: timeoutMs,
             suppressAuthRedirect: true,
-            params: { page, size: 120 }
+            params: { page, size: DEFAULT_FEED_PAGE_SIZE }
           })
         );
       }
@@ -366,7 +373,7 @@ export default function LongVideos() {
           baseURL: baseURL || undefined,
           timeout: timeoutMs,
           suppressAuthRedirect: true,
-          params: { page, size: 120 }
+          params: { page, size: DEFAULT_FEED_PAGE_SIZE }
         });
         const nextItems = toList(next?.data);    if (!nextItems.length) break;
         merged = merged.concat(nextItems);    if (!hasNextPage(next?.data)) break;
@@ -416,9 +423,11 @@ export default function LongVideos() {
   const requestedPoster = String(searchParams.get("poster") || "").trim();
   const requestedTitle = String(searchParams.get("title") || "").trim();
   const requestedAuthor = String(searchParams.get("author") || "").trim();
+  const requestedProfile = String(searchParams.get("profile") || "").trim();
   const requestedAnonId = String(searchParams.get("aid") || "").trim();
   const requestedIsAnonymous = String(searchParams.get("anon") || "").trim() === "1";
   const requestedMediaIdentity = normalizeMediaIdentity(requestedMedia);
+  const requestedProfileToken = String(requestedProfile || "").trim().toLowerCase();
 
   const requestedVirtualVideo = useMemo(() => {
     if (!requestedMedia) return null;
@@ -731,24 +740,61 @@ export default function LongVideos() {
     });
     setLikedPostIds(normalizedLiked);
     setDislikedPostIds(disliked);
-    setSavedPostIds(readIdMap("savedPostIds"));
+    let mounted = true;
+    const loadSavedState = async () => {
+      try {
+        const savedItems = await loadSavedPosts();
+        if (!mounted) return;
+        const next = (Array.isArray(savedItems) ? savedItems : []).reduce((acc, item) => {
+          const id = Number(item?.id);
+          if (!Number.isFinite(id) || id <= 0) return acc;
+          acc[id] = true;
+          return acc;
+        }, {});
+        setSavedPostIds(next);
+        syncSavedPostCache(savedItems);
+      } catch {
+        if (!mounted) return;
+        setSavedPostIds(readIdMap("savedPostIds"));
+      }
+    };
+    loadSavedState();
     setWatchLaterPostIds(readIdMap("watchLaterPostIds"));
     setDislikeCounts(readNumberMap("dislikeCountsByPost"));
     persistIdMap("likedPostIds", normalizedLiked);
     persistIdMap("dislikedPostIds", disliked);
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   const usernameFor = (post) => {
-    const raw = post?.user?.name || post?.username || post?.user?.email || "User";
-    const local = raw.includes("@") ? raw.split("@")[0] : raw;
-    return local
-      .replace(/[._-]+/g, " ")
-      .replace(/\s+/g, " ")
-      .trim()
-      .split(" ")
-      .filter(Boolean)
-      .map((x) => x.charAt(0).toUpperCase() + x.slice(1))
-      .join(" ");
+    return getPublicDisplayName(post?.user || post);
+  };
+  const watchOwnerCandidates = (post) => {
+    const emailLocal = (value) => {
+      const raw = String(value || "").trim();
+      if (!raw.includes("@")) return raw;
+      return raw.split("@")[0].trim();
+    };
+    return [
+      post?.user?.id,
+      post?.user?.username,
+      post?.username,
+      post?.user?.email,
+      emailLocal(post?.user?.email),
+      post?.email,
+      emailLocal(post?.email),
+      post?.userId,
+      post?.ownerId,
+      post?.profileId
+    ]
+      .map((value) => String(value || "").trim().toLowerCase())
+      .filter(Boolean);
+  };
+  const matchesRequestedProfile = (post) => {
+    if (!requestedProfileToken) return true;
+    return watchOwnerCandidates(post).some((candidate) => candidate === requestedProfileToken);
   };
 
   const profilePicFor = (postLike) => {
@@ -847,17 +893,24 @@ export default function LongVideos() {
     const routeCandidateById = allPosts.find(
       (post) => String(post?.id ?? "") === String(postId ?? "") && isWatchRouteCandidate(post)
     );
+    const scopedBaseList = requestedProfileToken
+      ? baseList.filter((post) => matchesRequestedProfile(post))
+      : baseList;
+    const scopedRouteCandidateByMedia =
+      routeCandidateByMedia && matchesRequestedProfile(routeCandidateByMedia) ? routeCandidateByMedia : null;
+    const scopedRouteCandidateById =
+      routeCandidateById && matchesRequestedProfile(routeCandidateById) ? routeCandidateById : null;
 
-    if (routeCandidateByMedia) return uniqueByPostKey([routeCandidateByMedia, ...baseList]);
+    if (scopedRouteCandidateByMedia) return uniqueByPostKey([scopedRouteCandidateByMedia, ...scopedBaseList]);
     if (requestedMediaIdentity && requestedVirtualVideo && !isYouTubeMedia(requestedVirtualVideo)) {
-      return uniqueByPostKey([requestedVirtualVideo, ...baseList]);
+      return uniqueByPostKey([requestedVirtualVideo, ...scopedBaseList]);
     }
-    if (routeCandidateById) return uniqueByPostKey([routeCandidateById, ...baseList]);
+    if (scopedRouteCandidateById) return uniqueByPostKey([scopedRouteCandidateById, ...scopedBaseList]);
     if (requestedVirtualVideo && !isYouTubeMedia(requestedVirtualVideo)) {
-      return uniqueByPostKey([requestedVirtualVideo, ...baseList]);
+      return uniqueByPostKey([requestedVirtualVideo, ...scopedBaseList]);
     }
-    return baseList;
-  }, [longVideos, videoPosts, allPosts, postId, requestedMediaIdentity, requestedVirtualVideo]);
+    return scopedBaseList;
+  }, [longVideos, videoPosts, allPosts, postId, requestedMediaIdentity, requestedVirtualVideo, requestedProfileToken]);
 
   useEffect(() => {
     if (isLoading && watchableVideos.length) {
@@ -1026,16 +1079,25 @@ export default function LongVideos() {
     if (node) syncWatchProgressCursor(activeVideo.id, node.currentTime || 0);
   }, [activeVideo?.id]);
 
-  useEffect(() => {    if (!activeVideo?.id) return;
-    api.get(`/api/comments/${activeVideo.id}`)
-      .then((res) => {
+  useEffect(() => {
+    if (!activeVideo?.id) return;
+    const postId = String(activeVideo.id).trim();
+    if (!postId) return;
+    void queryClient
+      .fetchQuery({
+        queryKey: feedCommentsQueryKey(postId),
+        queryFn: () => getPostComments(postId),
+        staleTime: 30_000,
+        gcTime: 10 * 60_000
+      })
+      .then((comments) => {
         setCommentsByPost((prev) => ({
           ...prev,
-          [activeVideo.id]: Array.isArray(res?.data) ? res.data : []
+          [postId]: Array.isArray(comments) ? comments : []
         }));
       })
       .catch(() => {});
-  }, [activeVideo?.id]);
+  }, [activeVideo?.id, queryClient]);
 
   useEffect(() => {
     const text = String(searchText || "").trim();
@@ -1192,13 +1254,22 @@ export default function LongVideos() {
   };
 
   const toggleSave = (postId) => {
-    setSavedPostIds((prev) => {
-      const next = { ...prev };
-      if (next[postId]) delete next[postId];
-      else next[postId] = true;
-      persistIdMap("savedPostIds", next);
-      return next;
-    });
+    const safeId = Number(postId);
+    if (!Number.isFinite(safeId) || safeId <= 0) return;
+    toggleSavedPost(safeId)
+      .then((result) => {
+        const isSaved = Boolean(result?.isSaved);
+        setSavedPostIds((prev) => {
+          const next = { ...prev };
+          if (isSaved) next[safeId] = true;
+          else delete next[safeId];
+          syncSavedPostCacheFromIds(Object.keys(next));
+          return next;
+        });
+      })
+      .catch(() => {
+        // Keep the backend as the source of truth if the toggle fails.
+      });
   };
 
   const toggleWatchLater = (postId) => {
@@ -1209,19 +1280,6 @@ export default function LongVideos() {
       persistIdMap("watchLaterPostIds", next);
       return next;
     });
-  };
-
-  const normalizeDisplayName = (value) => {
-    const raw = String(value || "").trim();    if (!raw) return "User";
-    const local = raw.includes("@") ? raw.split("@")[0] : raw;
-    return local
-      .replace(/[._-]+/g, " ")
-      .replace(/\s+/g, " ")
-      .trim()
-      .split(" ")
-      .filter(Boolean)
-      .map((x) => x.charAt(0).toUpperCase() + x.slice(1))
-      .join(" ");
   };
 
   const formatDuration = (seconds) => {
@@ -2192,14 +2250,12 @@ export default function LongVideos() {
       "";
     return raw ? resolveUrl(String(raw).trim()) : "";
   })();
-  const currentUserDisplayName = normalizeDisplayName(
+  const currentUserDisplayName = getPublicDisplayName(
     (typeof window !== "undefined" &&
       (sessionStorage.getItem("name") ||
         localStorage.getItem("name") ||
         sessionStorage.getItem("username") ||
-        localStorage.getItem("username") ||
-        sessionStorage.getItem("email") ||
-        localStorage.getItem("email"))) ||
+        localStorage.getItem("username"))) ||
       "You"
   );
   const currentUserInitial = (currentUserDisplayName.charAt(0) || "Y").toUpperCase();
@@ -3034,14 +3090,7 @@ export default function LongVideos() {
                     )}
                     <div className={`watch-comments-list ${commentsExpanded ? "is-expanded" : "is-preview"}`}>
                       {visibleComments.map((comment, index) => {
-                        const author = normalizeDisplayName(
-                          comment?.user?.name ||
-                            comment?.user?.username ||
-                            comment?.user?.email ||
-                            comment?.username ||
-                            comment?.email ||
-                            "User"
-                        );
+                        const author = getPublicDisplayName(comment?.user || comment);
                         const commentText = String(comment?.text || comment?.content || "").trim();
                         if (!commentText) return null;
                         const authorInitial = (author.charAt(0) || "U").toUpperCase();

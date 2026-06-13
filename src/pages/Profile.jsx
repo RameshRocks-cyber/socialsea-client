@@ -1,82 +1,35 @@
-import { useEffect, useRef, useState } from "react";
+﻿import { useEffect, useRef, useState } from "react";
+import { useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { FiBookOpen, FiFilm, FiImage, FiRadio, FiStar, FiVideo } from "react-icons/fi";
+import { FiBookOpen, FiEdit, FiFilm, FiImage, FiLock, FiMessageSquare, FiRadio, FiStar, FiVideo } from "react-icons/fi";
 import api from "../api/axios";
-import { getApiBaseUrl, toApiUrl } from "../api/baseUrl";
+import { useQueryClient } from "@tanstack/react-query";
+import { profilePageQueryKey } from "../api/queryKeys";
+import { toApiUrl } from "../api/baseUrl";
 import { clearAuthStorage } from "../auth";
 import { SETTINGS_KEY } from "./soundPrefs";
 import { getJobsByOwner, removeCompanyJob } from "../data/jobStore";
 import { recordRecentlyDeleted } from "../services/activityStore";
-import { readActiveStories, readStoryIdentity, syncStoryCachesForIdentity } from "../services/storyStorage";
-import { getVaultCount } from "../services/vaultStorage";
-import { isExplicitReelPost, mediaTypeForPost, readVideoSettingsObject } from "../utils/videoFeedClassifier";
-import { buildProfilePath, getProfileIdentifier, persistProfileIdentity } from "../utils/profileRoute";
+import { resolveFollowStateFromResponse, syncCurrentViewerFollowRelation } from "../services/followSync";
+import { useProfilePageQuery } from "./hooks/useProfilePageQuery";
+import { VOLO_UPDATE_EVENT, isVoloOwnedByIdentity, readAllVolos, readVoloIdentity } from "../services/voloStorage";
+import { getPublicDisplayName } from "../utils/displayName";
+import { resolvePostImageUrl } from "../utils/mediaUrl";
+import { getProfileIdentifier } from "../utils/profileRoute";
+import anonymousFeedSymbol from "../assets/anonymous-feed-symbol.svg";
 import "./Profile.css";
 
-const FOLLOWING_CACHE_KEY = "socialsea_following_cache_v1";
 const HIDDEN_PROFILE_POSTS_KEY = "socialsea_hidden_profile_posts_v1";
 const PROFILE_CACHE_KEY = "socialsea_profile_cache_v1";
 const HIGHLIGHTS_STORAGE_KEY = "socialsea_highlights_v1";
-const PROFILE_REQ_TIMEOUT_MS = 6000;
-const POSTS_REQ_TIMEOUT_MS = 5000;
-const FOLLOWING_REQ_TIMEOUT_MS = 1800;
 const MAX_SHORT_VIDEO_SECONDS = 90;
-const VIDEO_FEED_SURFACE_TOKENS = new Set(["video_feed", "videofeed", "long_video", "longvideo", "watch_feed", "watch"]);
-const POST_FEED_SURFACE_TOKENS = new Set(["post_feed", "postfeed", "feed_post", "post_video", "postvideo", "post"]);
-const LONG_VIDEO_TYPE_TOKENS = new Set(["long_video", "longvideo", "watch", "long", "video_feed", "watch_feed"]);
-const POST_VIDEO_TYPE_TOKENS = new Set(["post_video", "postvideo", "post", "feed_post", "post_feed", "postfeed"]);
 
-const asProfileFeedToken = (value) => String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
-
-const readFirstProfileFeedToken = (values) => {
-  for (const value of values) {
-    const token = asProfileFeedToken(value);
-    if (token) return token;
-  }
+const profileMediaTokenForPost = (post) => {
+  const postId = String(post?.id ?? "").trim();
+  if (postId) return `id:${postId}`;
+  const mediaUrl = String(post?.contentUrl || "").trim();
+  if (mediaUrl) return `media:${mediaUrl}`;
   return "";
-};
-
-const classifyProfileFeedBucket = (post) => {
-  if (mediaTypeForPost(post) !== "VIDEO") return "posts";
-  if (isExplicitReelPost(post)) return "reels";
-
-  const settings = readVideoSettingsObject(post);
-  const surfaceToken = readFirstProfileFeedToken([
-    settings?.distributionSurface,
-    settings?.uploadSurface,
-    settings?.feedSurface,
-    settings?.uploadContext,
-    settings?.surface,
-    settings?.context,
-    settings?.destination,
-    settings?.creatorSettings?.distributionSurface,
-    settings?.creatorSettings?.uploadSurface,
-    settings?.creatorSettings?.feedSurface,
-    settings?.creatorSettings?.uploadContext
-  ]);
-  if (VIDEO_FEED_SURFACE_TOKENS.has(surfaceToken)) return "videos";
-  if (POST_FEED_SURFACE_TOKENS.has(surfaceToken)) return "posts";
-
-  const typeToken = readFirstProfileFeedToken([
-    post?.type,
-    post?.sourceType,
-    post?.source,
-    settings?.uploadType,
-    settings?.type,
-    settings?.postType,
-    settings?.sourceType,
-    settings?.uploadContext,
-    settings?.feedSurface,
-    settings?.creatorSettings?.uploadType,
-    settings?.creatorSettings?.type,
-    settings?.creatorSettings?.postType,
-    settings?.creatorSettings?.sourceType
-  ]);
-  if (LONG_VIDEO_TYPE_TOKENS.has(typeToken)) return "videos";
-  if (POST_VIDEO_TYPE_TOKENS.has(typeToken)) return "posts";
-
-  // Keep unknown videos inside Posts so profile tabs never mix by duration heuristics.
-  return "posts";
 };
 
 const readJobMode = () => {
@@ -137,70 +90,14 @@ const readLongVideosEnabled = () => {
   }
 };
 
-const readFollowingCache = () => {
+const readVoloEnabled = () => {
   try {
-    const raw = localStorage.getItem(FOLLOWING_CACHE_KEY);
+    const raw = localStorage.getItem(SETTINGS_KEY);
     const parsed = raw ? JSON.parse(raw) : {};
-    return parsed && typeof parsed === "object" ? parsed : {};
+    return Boolean(parsed?.voloEnabled);
   } catch {
-    return {};
+    return false;
   }
-};
-
-const writeFollowingCache = (value) => {
-  try {
-    localStorage.setItem(FOLLOWING_CACHE_KEY, JSON.stringify(value || {}));
-  } catch {
-    // ignore storage errors (quota / disabled storage)
-  }
-};
-
-const updateFollowCache = (identifiers, following) => {
-  const keys = identifiers
-    .map((x) => String(x || "").trim().toLowerCase())
-    .filter(Boolean);
-  if (!keys.length) return;
-  const cache = readFollowingCache();
-  keys.forEach((key) => {
-    cache[key] = Boolean(following);
-  });
-  writeFollowingCache(cache);
-};
-
-const getCachedFollowing = (identifiers) => {
-  const cache = readFollowingCache();
-  return identifiers
-    .map((x) => String(x || "").trim().toLowerCase())
-    .filter(Boolean)
-    .some((key) => cache[key] === true);
-};
-
-const getPathCandidates = (identifier, kind) => {
-  const safeId = encodeURIComponent(String(identifier || "").trim());
-  if (!safeId) return [];
-  return [
-    `/api/follow/${safeId}/${kind}/users`,
-    `/api/profile/${safeId}/${kind}`,
-    `/api/follow/${safeId}/${kind}`,
-    `/api/follow/${kind}/${safeId}`
-  ];
-};
-
-const pickList = (payload, kind) => {
-  if (Array.isArray(payload)) return payload;
-  if (!payload || typeof payload !== "object") return null;
-  if (Array.isArray(payload?.[kind])) return payload[kind];
-  if (Array.isArray(payload?.data?.[kind])) return payload.data[kind];
-  if (Array.isArray(payload?.users)) return payload.users;
-  if (Array.isArray(payload?.data?.users)) return payload.data.users;
-  if (Array.isArray(payload?.content)) return payload.content;
-  if (Array.isArray(payload?.data?.content)) return payload.data.content;
-  return null;
-};
-
-const normalizeUserId = (entry) => {
-  const user = entry?.user || entry?.sender || entry?.target || entry;
-  return String(user?.id ?? user?.userId ?? "").trim();
 };
 
 const readHiddenProfilePostIds = () => {
@@ -212,54 +109,6 @@ const readHiddenProfilePostIds = () => {
   } catch {
     return new Set();
   }
-};
-
-const normalizeMediaVariants = (raw) => {
-  const value = String(raw || "").trim();
-  if (!value) return [];
-  const absolute = value.startsWith("http") ? value : toApiUrl(value);
-  if (absolute && absolute !== value) return [value, absolute];
-  return [value];
-};
-
-const buildStoryMediaSet = (stories) => {
-  const set = new Set();
-  const list = Array.isArray(stories) ? stories : [];
-  list.forEach((story) => {
-    const media =
-      story?.mediaUrl ||
-      story?.url ||
-      story?.fileUrl ||
-      story?.storyUrl ||
-      story?.contentUrl ||
-      "";
-    normalizeMediaVariants(media).forEach((entry) => set.add(entry));
-  });
-  return set;
-};
-
-const readLocalStoryMediaSet = () => {
-  return buildStoryMediaSet(readActiveStories());
-};
-
-const isStoryMediaMatch = (mediaUrl, storySet) => {
-  if (!mediaUrl || !storySet || storySet.size === 0) return false;
-  return normalizeMediaVariants(mediaUrl).some((entry) => storySet.has(entry));
-};
-
-const filterOutStoryPosts = (posts, storySet) => {
-  const list = Array.isArray(posts) ? posts : [];
-  if (!storySet || storySet.size === 0) return list;
-  return list.filter((post) => {
-    const url =
-      post?.contentUrl ||
-      post?.mediaUrl ||
-      post?.imageUrl ||
-      post?.videoUrl ||
-      post?.media?.url ||
-      "";
-    return !isStoryMediaMatch(url, storySet);
-  });
 };
 
 const readHighlights = () => {
@@ -292,105 +141,6 @@ const persistHiddenProfilePostId = (postId) => {
   }
 };
 
-const getConnectionIdentityKeys = (entry) => {
-  const user = entry?.user || entry?.sender || entry?.target || entry;
-  const id = String(user?.id ?? user?.userId ?? entry?.id ?? entry?.userId ?? "").trim();
-  const email = String(user?.email ?? entry?.email ?? "").trim().toLowerCase();
-  const username = String(user?.username ?? entry?.username ?? "").trim().toLowerCase();
-  const name = String(user?.name ?? entry?.name ?? "").trim().toLowerCase();
-  const bio = String(user?.bio ?? entry?.bio ?? "").trim().toLowerCase();
-  const keys = [];
-  if (id) keys.push(`id:${id}`);
-  if (email) keys.push(`email:${email}`);
-  if (username) keys.push(`username:${username}`);
-  if (name || bio) keys.push(`profile:${name}|${bio}`);
-  return keys;
-};
-
-const requestWithTimeout = (path, config = {}, timeoutMs = 4500) => {
-  const requestConfig = config && typeof config === "object" ? { ...config } : {};
-  const method = String(requestConfig.method || "GET").trim().toUpperCase();
-  delete requestConfig.method;
-
-  return Promise.race([
-    api.request({
-      url: path,
-      method,
-      ...requestConfig
-    }),
-    new Promise((_, reject) => {
-      const timeoutError = new Error("timeout");
-      timeoutError.code = "ERR_REQUEST_TIMEOUT";
-      setTimeout(() => reject(timeoutError), timeoutMs);
-    })
-  ]);
-};
-
-const getRequestStatus = (error) => Number(error?.response?.status || 0);
-
-const isAuthRequestError = (error) => {
-  const status = getRequestStatus(error);
-  return status === 401 || status === 403;
-};
-
-const isNotFoundRequestError = (error) => getRequestStatus(error) === 404;
-
-const isTransientRequestError = (error) => {
-  const status = getRequestStatus(error);
-  if (status >= 500 || status === 429) return true;
-  if (status > 0) return false;
-
-  const message = String(error?.message || "").trim().toLowerCase();
-  const code = String(error?.code || "").trim().toLowerCase();
-  return (
-    code === "err_network" ||
-    code === "err_request_timeout" ||
-    code === "econnaborted" ||
-    message.includes("network error") ||
-    message.includes("network changed") ||
-    message.includes("connection closed") ||
-    message.includes("failed to fetch") ||
-    message.includes("timeout")
-  );
-};
-
-const extractFollowingFlag = (response, profileData) => {
-  const booleanCandidates = [
-    response?.data?.isFollowing,
-    profileData?.isFollowing,
-    response?.data?.followState?.isFollowing,
-    profileData?.followState?.isFollowing,
-    response?.data?.followInfo?.isFollowing,
-    profileData?.followInfo?.isFollowing
-  ];
-  if (booleanCandidates.some((v) => v === true)) return true;
-  if (booleanCandidates.some((v) => v === false)) return false;
-
-  const statusCandidates = [
-    response?.data?.followStatus,
-    profileData?.followStatus,
-    response?.data?.relationship,
-    profileData?.relationship
-  ]
-    .map((x) => String(x || "").toLowerCase())
-    .filter(Boolean);
-
-  if (statusCandidates.some((x) => x.includes("follow"))) return true;
-  if (statusCandidates.some((x) => x.includes("request"))) return false;
-  return null;
-};
-
-const readProfileCacheByKey = (key) => {
-  try {
-    const raw = localStorage.getItem(PROFILE_CACHE_KEY);
-    const parsed = raw ? JSON.parse(raw) : {};
-    const entry = parsed?.[key];
-    return entry && typeof entry === "object" ? entry : null;
-  } catch {
-    return null;
-  }
-};
-
 const writeProfileCacheByKey = (key, value) => {
   if (!key) return;
   try {
@@ -402,37 +152,6 @@ const writeProfileCacheByKey = (key, value) => {
   } catch {
     // ignore cache issues
   }
-};
-
-const durationFromPost = (post) => {
-  const candidates = [
-    post?.durationSeconds,
-    post?.videoDurationSeconds,
-    post?.duration,
-    post?.videoDuration,
-    post?.length,
-    post?.durationMs,
-    post?.videoDurationMs
-  ];
-
-  for (const raw of candidates) {
-    if (raw == null || raw === "") continue;
-    const text = String(raw).trim();
-    if (!text) continue;
-    if (/^\d+:\d{1,2}(:\d{1,2})?$/.test(text)) {
-      const parts = text.split(":").map((value) => Number(value));
-      if (parts.every((value) => Number.isFinite(value) && value >= 0)) {
-        if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
-        if (parts.length === 2) return parts[0] * 60 + parts[1];
-      }
-    }
-    const value = Number(text);
-    if (!Number.isFinite(value) || value <= 0) continue;
-    if (/ms$/i.test(text) || value > 10000) return value / 1000;
-    return value;
-  }
-
-  return 0;
 };
 
 export default function Profile() {
@@ -450,6 +169,7 @@ export default function Profile() {
     (normalizedMyUsername && normalizedRouteUsername === normalizedMyUsername) ||
     (normalizedMyEmail && normalizedRouteUsername === normalizedMyEmail);
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [profile, setProfile] = useState(null);
   const [posts, setPosts] = useState([]);
   const [postsLoaded, setPostsLoaded] = useState(false);
@@ -467,27 +187,40 @@ export default function Profile() {
   const [videoMetaByPost, setVideoMetaByPost] = useState({});
   const [profileTab, setProfileTab] = useState("posts");
   const [companyJobs, setCompanyJobs] = useState([]);
-  const [vaultCount, setVaultCount] = useState(0);
   const [jobMode, setJobMode] = useState(() => readJobMode());
   const [showMyStoriesOnProfile, setShowMyStoriesOnProfile] = useState(() => readShowMyStoriesOnProfile());
   const [showAnonymousShortcutsOnProfile, setShowAnonymousShortcutsOnProfile] = useState(() =>
     readShowAnonymousShortcutsOnProfile()
   );
   const [longVideosEnabled, setLongVideosEnabled] = useState(() => readLongVideosEnabled());
+  const [voloEnabled, setVoloEnabled] = useState(() => readVoloEnabled());
+  const [volos, setVolos] = useState([]);
+  const [postSublistOpen, setPostSublistOpen] = useState(false);
   const [createSheetOpen, setCreateSheetOpen] = useState(false);
   const [highlights, setHighlights] = useState(() => readHighlights());
   const [activeHighlight, setActiveHighlight] = useState(null);
   const [activeHighlightIndex, setActiveHighlightIndex] = useState(0);
+  const [profileMediaViewerOpen, setProfileMediaViewerOpen] = useState(false);
+  const [activeProfileMediaToken, setActiveProfileMediaToken] = useState("");
   const holdTimerRef = useRef(null);
   const suppressClickPostIdRef = useRef(null);
   const suppressClickTimerRef = useRef(null);
-  const storyMediaSetRef = useRef(new Set());
-  const cleanupStoryPostsRef = useRef(false);
   const profileRouteKey = getProfileIdentifier(profile, username) || String(username || "me");
+  const profileCacheKey = String(username || "").trim().toLowerCase();
+  const profileQuery = useProfilePageQuery({
+    username,
+    isOwnRouteRequest,
+    myUserId,
+    myEmail
+  });
 
   const isOwnProfile =
     isOwnRouteRequest ||
     String(profile?.id || "").trim().toLowerCase() === normalizedMyUserId;
+  const openFollowConnections = (kind) => {
+    const baseIdentifier = getProfileIdentifier(profile, username) || String(username || "me");
+    navigate(`/profile/${encodeURIComponent(baseIdentifier)}/${kind}`);
+  };
 
   useEffect(() => {
     const refreshFromSettings = () => {
@@ -495,6 +228,7 @@ export default function Profile() {
       setShowMyStoriesOnProfile(readShowMyStoriesOnProfile());
       setShowAnonymousShortcutsOnProfile(readShowAnonymousShortcutsOnProfile());
       setLongVideosEnabled(readLongVideosEnabled());
+      setVoloEnabled(readVoloEnabled());
     };
     const handleStorage = (event) => {
       if (event?.key === SETTINGS_KEY) {
@@ -515,460 +249,78 @@ export default function Profile() {
   }, [isOwnProfile, profileRouteKey, jobMode]);
 
   useEffect(() => {
-    let cancelled = false;
-    if (!isOwnProfile || jobMode !== "storage") return undefined;
-    getVaultCount()
-      .then((count) => {
-        if (!cancelled) setVaultCount(count);
-      })
-      .catch(() => {
-        if (!cancelled) setVaultCount(0);
-      });
-    return () => {
-      cancelled = true;
+    const loadVolos = () => {
+      const all = readAllVolos();
+      const profileIdentity = isOwnProfile
+        ? readVoloIdentity()
+        : {
+            userId: String(profile?.id || "").trim().toLowerCase(),
+            email: String(profile?.email || "").trim().toLowerCase(),
+            username: String(profile?.username || username || "").trim().toLowerCase()
+          };
+      setVolos(all.filter((item) => isVoloOwnedByIdentity(item, profileIdentity)));
     };
-  }, [isOwnProfile, jobMode]);
+    loadVolos();
+    const onUpdate = () => loadVolos();
+    const onStorage = (event) => {
+      if (!event || event.key === "socialsea_volos_v1") {
+        loadVolos();
+      }
+    };
+    window.addEventListener(VOLO_UPDATE_EVENT, onUpdate);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener(VOLO_UPDATE_EVENT, onUpdate);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, [isOwnProfile, profile?.id, profile?.email, profile?.username, username]);
 
   useEffect(() => {
-    let cancelled = false;
-    const cacheKey = String(username || "").trim().toLowerCase();
+    if (profileQuery.data) return;
     setError("");
     setPostActionError("");
+    setFollowError("");
+    setProfile(null);
+    setPosts([]);
     setPostsLoaded(false);
-    const localStorySet = readLocalStoryMediaSet();
-    storyMediaSetRef.current = localStorySet;
-    const cached = readProfileCacheByKey(cacheKey);
-    if (cached) {
-      setProfile(cached.profile || null);
-      const cachedPosts = Array.isArray(cached.posts) ? cached.posts : [];
-      setPosts(filterOutStoryPosts(cachedPosts, localStorySet));
-      setPostsLoaded(cachedPosts.length > 0);
-      setFollowers(Number(cached.followers || 0));
-      setFollowingCount(Number(cached.followingCount || 0));
-      setIsFollowing(Boolean(cached.isFollowing));
-    } else {
+    setFollowers(0);
+    setFollowingCount(0);
+    setIsFollowing(false);
+    setRequested(false);
+  }, [profileCacheKey, profileQuery.data]);
+
+  useEffect(() => {
+    const data = profileQuery.data;
+    if (!data) return;
+
+    if (data.authError) {
       setProfile(null);
       setPosts([]);
+      setPostsLoaded(false);
+      setFollowers(0);
+      setFollowingCount(0);
+      setIsFollowing(false);
+      setRequested(false);
+      setError(data.errorMessage || "Session expired");
+      navigate("/login");
+      return;
     }
 
-    if (!username) {
-      setError("User not found");
-      return undefined;
+    setError(data.errorMessage || "");
+    setPostActionError("");
+    setFollowError("");
+    setProfile(data.profile || null);
+    setPosts(Array.isArray(data.posts) ? data.posts : []);
+    setPostsLoaded(Boolean(data.postsLoaded));
+    setFollowers(Number(data.followers || 0));
+    setFollowingCount(Number(data.followingCount || 0));
+    setIsFollowing(Boolean(data.isFollowing));
+    setRequested(Boolean(data.requested));
+
+    if (data.redirectTo) {
+      navigate(data.redirectTo, { replace: true });
     }
-
-    const defaultBase = String(api?.defaults?.baseURL || "").replace(/\/+$/, "");
-    const storedBase = String(
-      localStorage.getItem("socialsea_auth_base_url") ||
-      sessionStorage.getItem("socialsea_auth_base_url") ||
-      ""
-    ).replace(/\/+$/, "");
-    const envBase = String(getApiBaseUrl() || "").replace(/\/+$/, "");
-    const isLocalHost =
-      typeof window !== "undefined" &&
-      ["localhost", "127.0.0.1"].includes(String(window.location.hostname || "").toLowerCase());
-    const localPreferredBases = isLocalHost
-      ? ["/api", "http://localhost:8080", "http://127.0.0.1:8080"]
-      : [];
-    const baseCandidates = [
-      ...localPreferredBases,
-      defaultBase || undefined,
-      storedBase || undefined,
-      envBase || undefined,
-      "/api"
-    ].filter((value, index, arr) => value && arr.indexOf(value) === index);
-
-      const normalizePosts = (items) => {
-        const list = Array.isArray(items) ? items : [];
-        const hiddenPostIds = readHiddenProfilePostIds();
-        return list
-          .map((post) => {
-            const contentUrl =
-              post?.contentUrl ||
-              post?.mediaUrl ||
-              post?.imageUrl ||
-              post?.videoUrl ||
-              post?.media?.url ||
-              "";
-            const durationSeconds = durationFromPost(post);
-            const isVideo = mediaTypeForPost(post) === "VIDEO";
-            const profileFeedBucket = classifyProfileFeedBucket(post);
-            const isShortVideo = profileFeedBucket === "reels";
-            return { ...post, contentUrl, isVideo, isShortVideo, durationSeconds, profileFeedBucket };
-          })
-          .filter((post) => {
-            const idText = String(post?.id || "").trim();
-            if (idText && hiddenPostIds.has(idText)) return false;
-            return String(post?.contentUrl || "").trim();
-          });
-      };
-
-    const loadStoryMediaSet = async (preferredBase) => {
-      const orderedBases = [preferredBase, ...baseCandidates.filter((b) => b && b !== preferredBase)].filter(Boolean);
-      for (const base of orderedBases.slice(0, 3)) {
-        try {
-          const res = await requestWithTimeout(
-            "/api/stories/mine",
-            {
-              baseURL: base,
-              suppressAuthRedirect: true,
-              params: { _: Date.now() },
-              headers: {
-                "Cache-Control": "no-cache",
-                Pragma: "no-cache"
-              }
-            },
-            5000
-          );
-          const set = buildStoryMediaSet(res?.data);
-          if (Array.isArray(res?.data)) {
-            syncStoryCachesForIdentity(readStoryIdentity(), res.data.slice(0, 120));
-          }
-          if (set.size) return set;
-        } catch {
-          // try next base
-        }
-      }
-      return readLocalStoryMediaSet();
-    };
-
-    const cleanupStoryPosts = async (preferredBase, storySet) => {
-      if (cleanupStoryPostsRef.current) return 0;
-      const mediaUrls = Array.from(storySet || []);
-      if (!mediaUrls.length) return 0;
-      cleanupStoryPostsRef.current = true;
-      try {
-        const res = await requestWithTimeout(
-          "/api/profile/me/posts/cleanup-stories",
-          {
-            baseURL: preferredBase,
-            method: "POST",
-            data: { mediaUrls },
-            suppressAuthRedirect: true
-          },
-          8000
-        );
-        const deleted = Number(res?.data?.deleted || 0);
-        return Number.isFinite(deleted) ? deleted : 0;
-      } catch {
-        return 0;
-      }
-    };
-
-    const loadProfile = async () => {
-      const fetchProfileAtBase = async (base) => {
-        const res = await requestWithTimeout(
-          `/api/profile/${username}`,
-          {
-            baseURL: base,
-            suppressAuthRedirect: true,
-            params: { _: Date.now() },
-            headers: {
-              "Cache-Control": "no-cache",
-              Pragma: "no-cache"
-            }
-          },
-          PROFILE_REQ_TIMEOUT_MS
-        );
-        const data = res?.data?.user || res?.data || {};
-        if (!data || typeof data !== "object" || Object.keys(data).length === 0) {
-          throw new Error("empty_profile");
-        }
-        return { base, res, data };
-      };
-
-      let payload = null;
-      let lastError = null;
-      const primaryBase = baseCandidates[0];
-      const fallbackBases = baseCandidates.filter((base) => base !== primaryBase);
-
-      try {
-        payload = await fetchProfileAtBase(primaryBase);
-      } catch (err) {
-        lastError = err;
-        if (fallbackBases.length) {
-          const settled = await Promise.allSettled(fallbackBases.map((base) => fetchProfileAtBase(base)));
-          const winner = settled.find((r) => r.status === "fulfilled");
-          if (winner?.status === "fulfilled") {
-            payload = winner.value;
-          } else {
-            const firstRejected = settled.find((r) => r.status === "rejected");
-            lastError = firstRejected?.reason || err;
-          }
-        }
-      }
-
-      if (payload) {
-        const { base, res, data } = payload;
-        if (cancelled) return null;
-        setProfile(data);
-
-        const followKeys = [data?.id, data?.email, data?.username, username];
-        const extracted = extractFollowingFlag(res, data);
-        if (extracted === null) {
-          setIsFollowing(getCachedFollowing(followKeys));
-        } else {
-          setIsFollowing(extracted);
-          updateFollowCache(followKeys, extracted);
-        }
-        const followStatus = String(data?.followStatus || data?.relationship || "").toLowerCase();
-        setRequested(!extracted && followStatus.includes("request"));
-
-        const followerCount = Number(
-          data?.followers ??
-          data?.followersCount ??
-          res?.data?.followers ??
-          res?.data?.followersCount ??
-          0
-        ) || 0;
-        setFollowers(Math.max(0, followerCount));
-        const initialFollowingCount = Number(
-          data?.following ??
-          data?.followingCount ??
-          res?.data?.following ??
-          res?.data?.followingCount ??
-          0
-        ) || 0;
-        setFollowingCount(Math.max(0, initialFollowingCount));
-
-        const ownProfile =
-          username === "me" || Number(username) === Number(myUserId) || data?.id === Number(myUserId);
-        if (ownProfile) {
-          persistProfileIdentity(data);
-        }
-
-        if (extracted === null && !ownProfile && myUserId) {
-          const viewerCandidates = [myUserId, myEmail].filter(Boolean);
-          const targetId = String(data?.id || "").trim();
-          const paths = viewerCandidates
-            .flatMap((id) => getPathCandidates(id, "following"))
-            .filter((path, index, arr) => arr.indexOf(path) === index);
-          const responses = await Promise.allSettled(
-            paths.map((path) => requestWithTimeout(path, {}, FOLLOWING_REQ_TIMEOUT_MS))
-          );
-          for (const result of responses) {
-            if (result.status !== "fulfilled") continue;
-            const list = pickList(result.value?.data, "following");
-            if (!Array.isArray(list)) continue;
-            const found = list.some((entry) => normalizeUserId(entry) === targetId);
-            if (found) {
-              if (!cancelled) setIsFollowing(true);
-              updateFollowCache(followKeys, true);
-              break;
-            }
-          }
-        }
-
-        return {
-          base,
-          profileId: data?.id,
-          profileData: data,
-          resolvedIsFollowing: extracted === null ? getCachedFollowing(followKeys) : extracted,
-          resolvedFollowers: Math.max(0, followerCount),
-          resolvedFollowingCount: Math.max(0, initialFollowingCount)
-        };
-      }
-
-      if (isAuthRequestError(lastError)) {
-        clearAuthStorage();
-        navigate("/login");
-        return null;
-      }
-      // Cached/stale numeric profile ids can break after backend/db switch.
-      // Fallback to current logged-in profile so app remains usable.
-      if (isNotFoundRequestError(lastError) && isOwnRouteRequest && String(username || "").toLowerCase() !== "me") {
-        try {
-          const meRes = await requestWithTimeout(
-            "/api/profile/me",
-            {
-              suppressAuthRedirect: true,
-              params: { _: Date.now() },
-              headers: {
-                "Cache-Control": "no-cache",
-                Pragma: "no-cache"
-              }
-            },
-            PROFILE_REQ_TIMEOUT_MS
-          );
-          const meData = meRes?.data?.user || meRes?.data || {};
-          if (meData && typeof meData === "object" && Object.keys(meData).length > 0) {
-            if (!cancelled) {
-              setProfile(meData);
-              persistProfileIdentity(meData);
-              navigate(buildProfilePath(meData), { replace: true });
-            }
-            return { base: defaultBase || undefined, profileId: meData?.id, profileData: meData };
-          }
-        } catch {
-          // continue to existing not-found flow
-        }
-      }
-      if (!cancelled) {
-        if (isNotFoundRequestError(lastError)) {
-          setError("User not found");
-        } else if (!cached) {
-          setError(
-            isTransientRequestError(lastError)
-              ? "Could not load profile. Check your connection and retry."
-              : "Could not load profile right now."
-          );
-        }
-      }
-      return null;
-    };
-
-    const loadPosts = async (preferredBase, profileId) => {
-      const orderedBases = [preferredBase, ...baseCandidates.filter((b) => b !== preferredBase)].filter(Boolean);
-      const endpointCandidates = [
-        `/api/profile/${username}/posts`,
-        profileId ? `/api/profile/${profileId}/posts` : null,
-        username === "me" ? "/api/profile/me/posts" : null
-      ].filter(Boolean);
-
-      let bestPosts = [];
-      const fastBases = orderedBases.slice(0, 1);
-      const fallbackBases = orderedBases.slice(1, 3);
-
-      for (const base of fastBases) {
-        for (const endpoint of endpointCandidates) {
-          try {
-            const res = await requestWithTimeout(
-              endpoint,
-              {
-                baseURL: base,
-                suppressAuthRedirect: true,
-                params: { _: Date.now() },
-                headers: {
-                  "Cache-Control": "no-cache",
-                  Pragma: "no-cache"
-                }
-              },
-              POSTS_REQ_TIMEOUT_MS
-            );
-            const normalized = normalizePosts(res?.data);
-            const filtered = filterOutStoryPosts(normalized, storyMediaSetRef.current);
-            if (filtered.length > bestPosts.length) {
-              bestPosts = filtered;
-            }
-          } catch {
-            // continue
-          }
-        }
-      }
-
-      if (!bestPosts.length) {
-        for (const base of fallbackBases) {
-          for (const endpoint of endpointCandidates) {
-            try {
-              const res = await requestWithTimeout(
-                endpoint,
-                {
-                baseURL: base,
-                suppressAuthRedirect: true,
-                params: { _: Date.now() },
-                headers: {
-                  "Cache-Control": "no-cache",
-                    Pragma: "no-cache"
-                  }
-                },
-                POSTS_REQ_TIMEOUT_MS
-              );
-              const normalized = normalizePosts(res?.data);
-              const filtered = filterOutStoryPosts(normalized, storyMediaSetRef.current);
-              if (filtered.length > bestPosts.length) {
-                bestPosts = filtered;
-              }
-            } catch {
-              // continue
-            }
-          }
-        }
-      }
-
-      if (!cancelled) setPosts(bestPosts);
-      if (!cancelled) setPostsLoaded(true);
-      return bestPosts;
-    };
-
-    const run = async () => {
-      try {
-        const profileResult = await loadProfile();
-        let loadedPosts = [];
-        if (profileResult?.profileId && !cancelled) {
-          const profileData = profileResult?.profileData || { id: profileResult.profileId };
-          const safeFollowers = Number(
-            profileData?.followers ??
-            profileData?.followersCount ??
-            0
-          ) || 0;
-          const safeFollowing = Number(
-            profileData?.following ??
-            profileData?.followingCount ??
-            0
-          ) || 0;
-          setFollowers(Math.max(0, safeFollowers));
-          setFollowingCount(Math.max(0, safeFollowing));
-        }
-        const canViewContent = profileResult?.profileData?.canViewContent !== false;
-        if (!canViewContent) {
-          if (!cancelled) setPosts([]);
-          if (!cancelled) setPostsLoaded(true);
-          loadedPosts = [];
-        } else {
-          const storySet = await loadStoryMediaSet(profileResult?.base);
-          storyMediaSetRef.current = storySet;
-          loadedPosts = await loadPosts(profileResult?.base, profileResult?.profileId);
-          if (isOwnProfile && storySet.size > 0) {
-            const deleted = await cleanupStoryPosts(profileResult?.base, storySet);
-            if (deleted > 0) {
-              loadedPosts = await loadPosts(profileResult?.base, profileResult?.profileId);
-            }
-          }
-        }
-        if (!cancelled && profileResult?.profileData) {
-          writeProfileCacheByKey(cacheKey, {
-            profile: profileResult.profileData,
-            posts: loadedPosts,
-            followers: profileResult.resolvedFollowers,
-            followingCount: profileResult.resolvedFollowingCount,
-            isFollowing: profileResult.resolvedIsFollowing
-          });
-        }
-      } catch (err) {
-        console.error("Profile load failed", err);
-        if (!cancelled) {
-          const text = String(err?.message || "").toLowerCase();
-          const baseMessage = text.includes("timeout")
-            ? "Profile load timeout. Check backend connection."
-            : "Failed to load profile";
-          const status = Number(err?.response?.status || 0);
-          if (status === 401 || status === 403) {
-            clearAuthStorage();
-            navigate("/login");
-            return;
-          }
-          const rawMessage = String(err?.message || "").trim();
-          const responseMessage =
-            typeof err?.response?.data === "string"
-              ? err.response.data.trim()
-              : String(err?.response?.data?.message || "").trim();
-          const debugParts = [];
-          if (status) debugParts.push(`HTTP ${status}`);
-          if (responseMessage) debugParts.push(responseMessage);
-          if (rawMessage && rawMessage.toLowerCase() !== "timeout") {
-            debugParts.push(rawMessage.length > 140 ? `${rawMessage.slice(0, 140)}...` : rawMessage);
-          }
-          const debugTail =
-            import.meta?.env?.DEV && debugParts.length ? ` (${debugParts.join(" - ")})` : "";
-          setError(`${baseMessage}${debugTail}`);
-        }
-      }
-    };
-
-    run();
-    return () => {
-      cancelled = true;
-    };
-  }, [username, navigate, myUserId, myEmail, myUsername]);
+  }, [navigate, profileQuery.data]);
 
   const handleFollow = async () => {
     if (loading) return;
@@ -984,15 +336,23 @@ export default function Profile() {
 
     try {
       const res = await api({ method, url: `/api/follow/${encodeURIComponent(followKey)}` });
-      const statusText = String(res?.data?.status || res?.data || "").toLowerCase();
-      const requestedNow = statusText.includes("request");
-      const nextFollowing = !isFollowing && !requestedNow;
+      const nextState = method === "DELETE" ? "not_following" : resolveFollowStateFromResponse(res, "following");
+      const requestedNow = nextState === "requested";
+      const nextFollowing = nextState === "following";
+      const messageText = String(res?.data?.message || res?.data || "").toLowerCase();
+      const countDelta =
+        method === "DELETE"
+          ? (isFollowing ? -1 : 0)
+          : (nextFollowing && !isFollowing && !messageText.includes("already following") ? 1 : 0);
+      const nextFollowers = Math.max(0, followers + countDelta);
       setIsFollowing(nextFollowing);
       setRequested(requestedNow);
-      if (!requestedNow) {
-        setFollowers((prev) => Math.max(0, prev + (nextFollowing ? 1 : -1)));
-      }
-      updateFollowCache([profile?.id, profile?.email, profile?.username, username], nextFollowing);
+      setFollowers(nextFollowers);
+      syncCurrentViewerFollowRelation({
+        targetIdentifiers: [profile?.id, profile?.email, profile?.username, username],
+        nextState,
+        countDelta
+      });
     } catch (err) {
       console.error(err);
       const status = err?.response?.status;
@@ -1008,6 +368,23 @@ export default function Profile() {
     const ok = window.confirm("Delete this post?");
     if (!ok) return;
     const deletedPost = posts.find((post) => String(post?.id) === String(postId));
+    const syncProfileCache = (nextPosts) => {
+      if (!profileCacheKey) return;
+      const nextProfileSnapshot = {
+        profile,
+        posts: nextPosts,
+        followers,
+        followingCount,
+        isFollowing,
+        requested,
+        postsLoaded: true,
+        errorMessage: "",
+        authError: false,
+        redirectTo: null
+      };
+      writeProfileCacheByKey(profileCacheKey, nextProfileSnapshot);
+      queryClient.setQueryData(profilePageQueryKey(profileCacheKey), nextProfileSnapshot);
+    };
 
     setPostActionError("");
     setDeletingPostIds((prev) => ({ ...prev, [postId]: true }));
@@ -1045,7 +422,11 @@ export default function Profile() {
             baseURL: base,
             suppressAuthRedirect: true
           });
-          setPosts((prev) => prev.filter((p) => String(p?.id) !== String(postId)));
+          setPosts((prev) => {
+            const next = prev.filter((p) => String(p?.id) !== String(postId));
+            syncProfileCache(next);
+            return next;
+          });
           setPostOptionsPost((current) => (String(current?.id || "") === String(postId) ? null : current));
           setDeletingPostIds((prev) => ({ ...prev, [postId]: false }));
           recordRecentlyDeleted({ item: deletedPost, source: "profile" });
@@ -1059,7 +440,11 @@ export default function Profile() {
     const status = lastError?.response?.status;
     const msg = lastError?.response?.data?.message || lastError?.message || "Unable to delete post";
     persistHiddenProfilePostId(postId);
-    setPosts((prev) => prev.filter((p) => String(p?.id) !== String(postId)));
+    setPosts((prev) => {
+      const next = prev.filter((p) => String(p?.id) !== String(postId));
+      syncProfileCache(next);
+      return next;
+    });
     setPostOptionsPost((current) => (String(current?.id || "") === String(postId) ? null : current));
     recordRecentlyDeleted({ item: deletedPost, source: "profile" });
     setPostActionError(
@@ -1089,10 +474,65 @@ export default function Profile() {
     return toApiUrl(url);
   };
 
+  const openProfileMediaViewer = (post) => {
+    const token = profileMediaTokenForPost(post);
+    if (!token) return;
+    setActiveProfileMediaToken(token);
+    setProfileMediaViewerOpen(true);
+  };
+
+  const closeProfileMediaViewer = () => {
+    setProfileMediaViewerOpen(false);
+    setActiveProfileMediaToken("");
+  };
+
+  const profileMediaCarouselPosts = posts.filter((post) => Boolean(String(post?.contentUrl || "").trim()));
+
+  const stepProfileMediaViewer = useCallback(
+    (offset) => {
+      if (!profileMediaCarouselPosts.length) return;
+      const currentIndex = profileMediaCarouselPosts.findIndex(
+        (post) => profileMediaTokenForPost(post) === activeProfileMediaToken
+      );
+      const safeCurrentIndex = currentIndex >= 0 ? currentIndex : 0;
+      const nextIndex = Math.min(
+        profileMediaCarouselPosts.length - 1,
+        Math.max(0, safeCurrentIndex + offset)
+      );
+      const nextToken = profileMediaTokenForPost(profileMediaCarouselPosts[nextIndex]);
+      if (!nextToken) return;
+      setActiveProfileMediaToken(nextToken);
+    },
+    [activeProfileMediaToken, profileMediaCarouselPosts]
+  );
+
   const openPostInPlayer = (post) => {
-    if (!post || !post?.isVideo) return;
+    if (!post) return;
+    if (!post?.isVideo) {
+      openProfileMediaViewer(post);
+      return;
+    }
     const postId = String(post?.id || "").trim();
     if (!postId) return;
+    const profileContext = String(
+      profile?.id || profile?.username || profile?.email || profileRouteKey || username || ""
+    ).trim();
+    const queryParams = new URLSearchParams();
+    queryParams.set("post", postId);
+    if (profileContext) queryParams.set("profile", profileContext);
+    const query = queryParams.toString();
+    const openClips = () => navigate(query ? `/clips?${query}` : "/clips");
+    const openWatch = () =>
+      navigate(query ? `/watch/${encodeURIComponent(postId)}?${query}` : `/watch/${encodeURIComponent(postId)}`);
+    const bucket = String(post?.profileFeedBucket || "").trim();
+    if (bucket === "reels") {
+      openClips();
+      return;
+    }
+    if (bucket === "videos") {
+      openWatch();
+      return;
+    }
     const measured = videoMetaByPost[postId] || {};
     const measuredDuration = Number(measured?.duration || 0);
     const measuredWidth = Number(measured?.width || 0);
@@ -1100,10 +540,10 @@ export default function Profile() {
     const isMeasuredPortrait = measuredWidth > 0 && measuredHeight > 0 && measuredHeight > measuredWidth;
     const isMeasuredShort = measuredDuration > 0 && measuredDuration <= MAX_SHORT_VIDEO_SECONDS;
     if (post?.isShortVideo || isMeasuredShort || isMeasuredPortrait) {
-      navigate(`/clips?post=${encodeURIComponent(postId)}`);
+      openClips();
       return;
     }
-    navigate(`/watch/${encodeURIComponent(postId)}`);
+    openWatch();
   };
 
   const handleProfileVideoMeta = (postId, event) => {
@@ -1205,18 +645,32 @@ export default function Profile() {
   const reels = posts.filter((post) => post?.profileFeedBucket === "reels");
   const longVideos = posts.filter((post) => post?.profileFeedBucket === "videos");
   const imagePosts = posts.filter((post) => post?.profileFeedBucket !== "reels" && post?.profileFeedBucket !== "videos");
+  const voloPosts = Array.isArray(volos) ? volos : [];
   const showLongVideosOnProfile = !isOwnProfile || longVideosEnabled;
+  const hideClipsForVoloMode = Boolean(isOwnProfile && voloEnabled);
   const activeProfileTab =
     !showLongVideosOnProfile && profileTab === "long-videos"
       ? "posts"
       : profileTab;
   const visiblePosts =
-    activeProfileTab === "reels" ? reels : activeProfileTab === "long-videos" ? longVideos : imagePosts;
+    activeProfileTab === "reels" ? reels : activeProfileTab === "long-videos" ? longVideos : activeProfileTab === "posts" ? imagePosts : [];
+  const activeProfileMediaIndex = profileMediaCarouselPosts.findIndex(
+    (post) => profileMediaTokenForPost(post) === activeProfileMediaToken
+  );
+  const resolvedActiveProfileMediaIndex = activeProfileMediaIndex >= 0 ? activeProfileMediaIndex : 0;
+  const activeProfileMediaPost =
+    profileMediaViewerOpen && profileMediaCarouselPosts.length > 0
+      ? profileMediaCarouselPosts[resolvedActiveProfileMediaIndex]
+      : null;
   const loadedPostsCount = (imagePosts?.length || 0) + (reels?.length || 0) + (longVideos?.length || 0);
-  const profileContentTitle =
-    activeProfileTab === "reels" ? "Clips" : activeProfileTab === "long-videos" ? "Videos" : "Posts";
   const emptyTabMessage =
-    activeProfileTab === "reels" ? "No clips yet" : activeProfileTab === "long-videos" ? "No videos yet" : "No posts yet";
+    activeProfileTab === "reels"
+      ? "No clips yet"
+      : activeProfileTab === "long-videos"
+        ? "No videos yet"
+        : activeProfileTab === "volo"
+          ? "No volos yet"
+          : "No posts yet";
   const postsCount = postsLoaded
     ? loadedPostsCount
     : Number.isFinite(Number(profile?.postsCount)) && Number(profile?.postsCount) >= 0
@@ -1225,7 +679,8 @@ export default function Profile() {
         ? Number(profile?.posts)
         : loadedPostsCount;
   const isPrivateLocked = Boolean(profile?.privateAccount) && profile?.canViewContent === false && !isOwnProfile;
-  const displayName = profile?.name || profile?.email || profile?.username || "Profile";
+  const resolvedDisplayName = getPublicDisplayName(profile);
+  const displayName = resolvedDisplayName === "User" ? "Profile" : resolvedDisplayName;
   const coverRaw =
     profile?.coverUrl ||
     profile?.coverPhotoUrl ||
@@ -1254,6 +709,42 @@ export default function Profile() {
     setCoverImageBroken(false);
   }, [coverUrl]);
 
+  useEffect(() => {
+    if (!profileMediaViewerOpen) return;
+    if (!profileMediaCarouselPosts.length) {
+      closeProfileMediaViewer();
+      return;
+    }
+    if (activeProfileMediaIndex >= 0) return;
+    const fallbackToken = profileMediaTokenForPost(profileMediaCarouselPosts[0]);
+    if (fallbackToken) {
+      setActiveProfileMediaToken(fallbackToken);
+      return;
+    }
+    closeProfileMediaViewer();
+  }, [activeProfileMediaIndex, profileMediaCarouselPosts, profileMediaViewerOpen]);
+
+  useEffect(() => {
+    if (!profileMediaViewerOpen) return;
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") {
+        closeProfileMediaViewer();
+        return;
+      }
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        stepProfileMediaViewer(-1);
+        return;
+      }
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        stepProfileMediaViewer(1);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [profileMediaViewerOpen, activeProfileMediaToken, profileMediaCarouselPosts, stepProfileMediaViewer]);
+
   const openCreateSheet = () => {
     setCreateSheetOpen(true);
   };
@@ -1275,6 +766,10 @@ export default function Profile() {
     if (kind === "long-video") {
       if (!longVideosEnabled) return;
       navigate("/upload?type=long-video");
+      return;
+    }
+    if (kind === "volo") {
+      navigate("/volo?compose=1");
       return;
     }
     if (kind === "live") {
@@ -1322,8 +817,7 @@ export default function Profile() {
 
   const showJobsOnProfile = jobMode === "profile";
   const showPostJobOnProfile = jobMode === "post";
-  const showStorageOnProfile = jobMode === "storage";
-  const showActionPanelLeft = showJobsOnProfile || showPostJobOnProfile || showStorageOnProfile;
+  const showActionPanelLeft = showJobsOnProfile || showPostJobOnProfile;
 
   return (
     <div className="profile-page">
@@ -1334,84 +828,114 @@ export default function Profile() {
         <>
                     <div className="profile-layout">
             <div className="profile-sidebar">
-  <section className="profile-hero">
-              <div className="profile-cover">
-                <img
-                  src={coverImageBroken ? "/default-avatar.png" : coverUrl}
-                  alt="Profile cover"
-                  className="profile-cover-img"
-                  onError={() => setCoverImageBroken(true)}
-                />
-                <div className="profile-avatar-wrap">
-                  <img src={profile.profilePicUrl || "/default-avatar.png"} alt="Profile" className="profile-avatar" />
+                <section className="profile-hero">
+                <div className="profile-cover">
+                  <img
+                    src={coverImageBroken ? "/default-avatar.png" : coverUrl}
+                    alt="Profile cover"
+                    className="profile-cover-img"
+                    onError={() => setCoverImageBroken(true)}
+                  />
+                  {isOwnProfile && (
+                    <button
+                      type="button"
+                      className="profile-cover-settings-btn"
+                      onClick={() => navigate("/settings")}
+                      title="Open Settings"
+                      aria-label="Open Settings"
+                    >
+                      <span />
+                      <span />
+                      <span />
+                    </button>
+                  )}
+                  <div className="profile-avatar-wrap">
+                    <img
+                      src={resolveMediaUrl(profile?.profilePicUrl || "/default-avatar.png")}
+                      alt={displayName}
+                      className="profile-avatar"
+                      onError={(event) => {
+                        event.currentTarget.onerror = null;
+                        event.currentTarget.src = "/default-avatar.png";
+                      }}
+                    />
+                  </div>
                 </div>
-              </div>
 
-              <div className="profile-identity">
-                <h2 className="profile-name">{displayName}</h2>
-              </div>
+                <div className="profile-identity">
+                  <h1 className="profile-name">{displayName}</h1>
+                </div>
 
-              <div className="profile-stats-row">
-                <button
-                  type="button"
-                  className="profile-stat-card"
-                  onClick={() => navigate(`/profile/${encodeURIComponent(profileRouteKey)}/followers`)}
-                >
-                  <b>{followers}</b>
-                  <span>Followers</span>
-                </button>
-                <button
-                  type="button"
-                  className="profile-stat-card"
-                  onClick={() => navigate(`/profile/${encodeURIComponent(profileRouteKey)}/following`)}
-                >
-                  <b>{followingCount}</b>
-                  <span>Following</span>
-                </button>
-                <button type="button" className="profile-stat-card" onClick={() => setProfileTab("posts")}>
-                  <b>{postsCount}</b>
-                  <span>Posts</span>
-                </button>
-              </div>
-
-              {!isOwnProfile && (
-                <div className="profile-actions">
+                <div className="profile-stats-row">
                   <button
-                    onClick={handleFollow}
-                    disabled={loading}
-                    className={`profile-follow-btn ${isFollowing ? "is-following" : ""} ${loading ? "is-loading" : ""}`}
+                    type="button"
+                    className="profile-stat-card"
+                    onClick={() => openFollowConnections("followers")}
+                    aria-label={`Open ${followers} followers`}
+                    title="Open followers list"
                   >
-                    {loading ? "Please wait..." : isFollowing ? "Following" : requested ? "Requested" : "Follow"}
+                    <b>{followers}</b>
+                    <span>Followers</span>
                   </button>
-                  {!!followError && <p className="profile-follow-error">{followError}</p>}
+                  <button
+                    type="button"
+                    className="profile-stat-card"
+                    onClick={() => openFollowConnections("following")}
+                    aria-label={`Open ${followingCount} following`}
+                    title="Open following list"
+                  >
+                    <b>{followingCount}</b>
+                    <span>Following</span>
+                  </button>
+                  <div className="profile-stat-card">
+                    <b>{postsCount}</b>
+                    <span>Posts</span>
+                  </div>
+                  {isOwnProfile && (
+                    <>
+                      <button
+                        type="button"
+                        className="profile-stat-card profile-stat-card-vault"
+                        onClick={() => navigate("/storage/unlock")}
+                        title="Storage Vault"
+                      >
+                        <b className="profile-stat-icon-wrap" aria-hidden="true">
+                          <FiLock />
+                        </b>
+                        <span>Vault</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="profile-stat-card profile-stat-card-create"
+                        onClick={openCreateSheet}
+                        title="Create"
+                      >
+                        <b className="profile-stat-icon-wrap" aria-hidden="true">
+                          <FiEdit />
+                        </b>
+                        <span>Create</span>
+                      </button>
+                    </>
+                  )}
                 </div>
-              )}
 
-            </section>
-            {isOwnProfile && (
-              <section
-                className={`profile-action-panel ${
-                  showActionPanelLeft ? "" : "is-jobs-hidden"
-                }`.trim()}
-              >
+                {!isOwnProfile && (
+                  <div className="profile-actions">
+                    <button
+                      onClick={handleFollow}
+                      disabled={loading}
+                      className={`profile-follow-btn ${isFollowing ? "is-following" : ""} ${loading ? "is-loading" : ""}`}
+                    >
+                      {loading ? "Please wait..." : isFollowing ? "Following" : requested ? "Requested" : "Follow"}
+                    </button>
+                    {!!followError && <p className="profile-follow-error">{followError}</p>}
+                  </div>
+                )}
+              </section>
+            {isOwnProfile && showActionPanelLeft && (
+              <section className="profile-action-panel is-jobs-hidden">
                 {showActionPanelLeft && (
                   <div className="profile-action-panel-left">
-                    {showStorageOnProfile && (
-                      <div className="profile-vault">
-                        <div className="profile-vault-header">
-                          <div>
-                            <h4>Storage Vault</h4>
-                            <p>Private files stored on this device.</p>
-                          </div>
-                          <button type="button" className="profile-vault-button" onClick={() => navigate("/storage/unlock")}>
-                            Open
-                          </button>
-                        </div>
-                        <div className="profile-vault-meta">
-                          <span>{vaultCount} item{vaultCount === 1 ? "" : "s"} saved</span>
-                        </div>
-                      </div>
-                    )}
                     {showJobsOnProfile && (
                       <>
                         <div className="profile-job-grid">
@@ -1482,57 +1006,107 @@ export default function Profile() {
                     )}
                   </div>
                 )}
-                <div className="profile-action-panel-right">
-                  <div className="profile-actions-own">
-                    <div className="profile-actions-row profile-actions-row-wide">
-                      <button className="profile-action-primary" onClick={() => navigate("/profile-setup?mode=edit")}>
-                        Edit Profile
-                      </button>
-                      <button className="profile-action-icon" onClick={() => navigate("/settings")}>
-                        Settings
-                      </button>
-                      <button className="profile-action-secondary" onClick={openCreateSheet}>
-                        Create
-                      </button>
-                    </div>
-                  </div>
-                </div>
               </section>
             )}
             {isOwnProfile && (
               <section className="profile-shortcuts">
-                {showAnonymousShortcutsOnProfile && (
-                  <button type="button" className="profile-shortcut-card" onClick={() => navigate("/anonymous/upload")}>
+                <div
+                  className={`profile-anonymous-shortcuts${showAnonymousShortcutsOnProfile ? "" : " profile-anonymous-shortcuts-single"}`}
+                >
+                  {showAnonymousShortcutsOnProfile && (
+                    <>
+                      <button
+                        type="button"
+                        className="profile-shortcut-card profile-shortcut-card-compact profile-anonymous-shortcut-text profile-anonymous-feed-shortcut"
+                        onClick={() => navigate("/anonymous-feed")}
+                      >
+                        <span className="profile-anonymous-feed-icon-wrap" aria-hidden="true">
+                          <img src={anonymousFeedSymbol} alt="" className="profile-anonymous-feed-icon" />
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        className="profile-shortcut-card profile-shortcut-card-compact profile-anonymous-shortcut-text"
+                        onClick={() => navigate("/anonymous/upload")}
+                      >
+                        <div>
+                          <h4>Anonymous Upload</h4>
+                        </div>
+                      </button>
+                    </>
+                  )}
+                  <button
+                    type="button"
+                    className="profile-shortcut-card profile-shortcut-card-compact profile-anonymous-shortcut-text"
+                    onClick={() => navigate("/live-recordings")}
+                  >
                     <div>
-                      <h4>Anonymous Upload</h4>
-                      <p>Share safely without exposing your profile identity.</p>
+                      <h4>Private Live</h4>
                     </div>
-                    <span className="profile-shortcut-arrow">{">"}</span>
                   </button>
-                )}
-                {showAnonymousShortcutsOnProfile && (
-                  <button type="button" className="profile-shortcut-card" onClick={() => navigate("/anonymous-feed")}>
-                    <div>
-                      <h4>Anonymous Feed</h4>
-                      <p>See all approved anonymous posts and interactions.</p>
+                </div>
+                <div className="profile-post-sublist-toggle-block">
+                  {postSublistOpen && (
+                    <div id="profile-post-sublist" className="profile-post-sublist-vertical" role="tablist" aria-label="Profile post filters">
+                      <button
+                        type="button"
+                        className={`profile-post-subitem ${profileTab === "posts" ? "is-active" : ""}`}
+                        onClick={() => setProfileTab("posts")}
+                        role="tab"
+                        aria-selected={profileTab === "posts"}
+                      >
+                        Posts ({imagePosts.length})
+                      </button>
+                      <button
+                        type="button"
+                        className={`profile-post-subitem ${profileTab === "reels" ? "is-active" : ""}`}
+                        onClick={() => setProfileTab("reels")}
+                        role="tab"
+                        aria-selected={profileTab === "reels"}
+                      >
+                        Clips ({reels.length})
+                      </button>
+                      <button
+                        type="button"
+                        className={`profile-post-subitem ${profileTab === "volo" ? "is-active" : ""}`}
+                        onClick={() => setProfileTab("volo")}
+                        role="tab"
+                        aria-selected={profileTab === "volo"}
+                      >
+                        Volo ({voloPosts.length})
+                      </button>
+                      {showLongVideosOnProfile && (
+                        <button
+                          type="button"
+                          className={`profile-post-subitem ${profileTab === "long-videos" ? "is-active" : ""}`}
+                          onClick={() => setProfileTab("long-videos")}
+                          role="tab"
+                          aria-selected={profileTab === "long-videos"}
+                        >
+                          Videos ({longVideos.length})
+                        </button>
+                      )}
                     </div>
-                    <span className="profile-shortcut-arrow">{">"}</span>
+                  )}
+                  <button
+                    type="button"
+                    className={`profile-post-sublist-toggle${postSublistOpen ? " is-open" : ""}`}
+                    onClick={() => setPostSublistOpen((prev) => !prev)}
+                    aria-expanded={postSublistOpen}
+                    aria-controls="profile-post-sublist"
+                    title={postSublistOpen ? "Hide post tabs" : "Show post tabs"}
+                  >
+                    <span className="profile-post-sublist-toggle-glyph" aria-hidden="true">
+                      ○
+                    </span>
                   </button>
-                )}
-                <button type="button" className="profile-shortcut-card" onClick={() => navigate("/live-recordings")}>
-                  <div>
-                    <h4>Private Live</h4>
-                    <p>View SOS recorded live videos. These are private and not shared in feed.</p>
-                  </div>
-                  <span className="profile-shortcut-arrow">{">"}</span>
-                </button>
+                </div>
                 {showMyStoriesOnProfile && (
                   <button type="button" className="profile-shortcut-card" onClick={() => navigate("/stories")}>
                     <div>
                       <h4>My Stories</h4>
                       <p>See all your stories saved in one place.</p>
                     </div>
-                    <span className="profile-shortcut-arrow">{">"}</span>
                   </button>
                 )}
               </section>
@@ -1574,7 +1148,7 @@ export default function Profile() {
                           onClick={() => deleteHighlight(highlight.id)}
                           title="Delete highlight"
                         >
-                          ×
+                          Ãƒâ€”
                         </button>
                       </div>
                     );
@@ -1586,87 +1160,140 @@ export default function Profile() {
           
             </div>
             <div className="profile-main">
-  <hr className="profile-divider" />
-
-            <div className="profile-posts-head">
-              <h3 className="profile-posts-title">{profileContentTitle}</h3>
-              <div
-                className={`profile-post-tabs ${showLongVideosOnProfile ? "" : "is-two-tabs"}`.trim()}
-                role="tablist"
-                aria-label="Profile post filters"
-              >
-                <button
-                  type="button"
-                  className={`profile-post-tab ${profileTab === "posts" ? "is-active" : ""}`}
-                  onClick={() => setProfileTab("posts")}
-                  role="tab"
-                  aria-selected={profileTab === "posts"}
+            {!isOwnProfile && (
+              <div className="profile-posts-head">
+                <div
+                  className={`profile-post-tabs ${showLongVideosOnProfile ? "is-four-tabs" : "is-three-tabs"}`.trim()}
+                  role="tablist"
+                  aria-label="Profile post filters"
                 >
-                  Posts ({imagePosts.length})
-                </button>
-                <button
-                  type="button"
-                  className={`profile-post-tab ${profileTab === "reels" ? "is-active" : ""}`}
-                  onClick={() => setProfileTab("reels")}
-                  role="tab"
-                  aria-selected={profileTab === "reels"}
-                >
-                  Clips ({reels.length})
-                </button>
-                {showLongVideosOnProfile && (
                   <button
                     type="button"
-                    className={`profile-post-tab ${profileTab === "long-videos" ? "is-active" : ""}`}
-                    onClick={() => setProfileTab("long-videos")}
+                    className={`profile-post-tab ${profileTab === "posts" ? "is-active" : ""}`}
+                    onClick={() => setProfileTab("posts")}
                     role="tab"
-                    aria-selected={profileTab === "long-videos"}
+                    aria-selected={profileTab === "posts"}
                   >
-                    Videos ({longVideos.length})
+                    Posts ({imagePosts.length})
                   </button>
-                )}
+                  <button
+                    type="button"
+                    className={`profile-post-tab ${profileTab === "reels" ? "is-active" : ""}`}
+                    onClick={() => setProfileTab("reels")}
+                    role="tab"
+                    aria-selected={profileTab === "reels"}
+                  >
+                    Clips ({reels.length})
+                  </button>
+                  <button
+                    type="button"
+                    className={`profile-post-tab ${profileTab === "volo" ? "is-active" : ""}`}
+                    onClick={() => setProfileTab("volo")}
+                    role="tab"
+                    aria-selected={profileTab === "volo"}
+                  >
+                    Volo ({voloPosts.length})
+                  </button>
+                  {showLongVideosOnProfile && (
+                    <button
+                      type="button"
+                      className={`profile-post-tab ${profileTab === "long-videos" ? "is-active" : ""}`}
+                      onClick={() => setProfileTab("long-videos")}
+                      role="tab"
+                      aria-selected={profileTab === "long-videos"}
+                    >
+                      Videos ({longVideos.length})
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
+            )}
             {postActionError && <p className="profile-posts-error">{postActionError}</p>}
             {isPrivateLocked && (
               <div className="profile-private-note">
                 {showLongVideosOnProfile
-                  ? "This account is private. Follow to see posts, clips, and videos."
-                  : "This account is private. Follow to see posts and clips."}
+                  ? hideClipsForVoloMode
+                    ? "This account is private. Follow to see posts, volos, and videos."
+                    : "This account is private. Follow to see posts, clips, volos, and videos."
+                  : hideClipsForVoloMode
+                    ? "This account is private. Follow to see posts and volos."
+                    : "This account is private. Follow to see posts, clips, and volos."}
               </div>
             )}
-            <div className="profile-posts-grid">
-              {visiblePosts.length === 0 && (
-                <p>{emptyTabMessage}</p>
-              )}
-              {visiblePosts.map((post, index) => (
-                <div
-                  key={`${String(post?.id ?? "post")}-${index}`}
-                  className={`profile-post-card ${post?.isVideo ? "is-playable" : ""} ${isOwnProfile ? "is-actionable" : ""}`.trim()}
-                  onClick={(event) => handleCardClick(event, post)}
-                  onContextMenu={(event) => handleCardContextMenu(event, post)}
-                  onPointerDown={(event) => handleCardPointerDown(event, post)}
-                  onPointerUp={handleCardPointerEnd}
-                  onPointerCancel={handleCardPointerEnd}
-                  onPointerLeave={handleCardPointerEnd}
-                >
-                  {!post.isVideo && post.contentUrl?.trim() && (
-                    <img src={resolveMediaUrl(post.contentUrl)} alt="" />
-                  )}
-                  {post.isVideo && post.contentUrl?.trim() && (
-                    <video
-                      src={resolveMediaUrl(post.contentUrl)}
-                      autoPlay
-                      muted
-                      loop
-                      preload="metadata"
-                      playsInline
-                      onLoadedMetadata={(event) => handleProfileVideoMeta(post?.id, event)}
-                      onContextMenu={(e) => e.preventDefault()}
-                    />
-                  )}
-                </div>
-              ))}
-            </div>
+            {activeProfileTab === "volo" ? (
+              <div className="profile-volo-list">
+                {voloPosts.length === 0 && <p>{emptyTabMessage}</p>}
+                {voloPosts.map((volo) => (
+                  <article key={volo.id} className="profile-volo-card">
+                    <header className="profile-volo-card-head">
+                      <b>{volo?.owner?.name || volo?.owner?.username || "User"}</b>
+                      <time>{volo?.createdAt ? new Date(volo.createdAt).toLocaleString() : "Now"}</time>
+                    </header>
+                    {volo?.text && <p className="profile-volo-copy">{volo.text}</p>}
+                    {Array.isArray(volo?.links) && volo.links.length > 0 && (
+                      <div className="profile-volo-links">
+                        {volo.links.map((url) => (
+                          <a key={`${volo.id}-${url}`} href={url} target="_blank" rel="noreferrer">
+                            {url}
+                          </a>
+                        ))}
+                      </div>
+                    )}
+                    {Array.isArray(volo?.media) && volo.media.length > 0 && (
+                      <div className="profile-volo-media">
+                        {volo.media.map((asset, index) =>
+                          asset.type === "video" ? (
+                            <video
+                              key={`${volo.id}-video-${index}`}
+                              src={asset.url}
+                              controls
+                              preload="metadata"
+                              playsInline
+                            />
+                          ) : (
+                            <img key={`${volo.id}-img-${index}`} src={asset.url} alt="Volo attachment" loading="lazy" decoding="async" />
+                          )
+                        )}
+                      </div>
+                    )}
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <div className="profile-posts-grid">
+                {visiblePosts.length === 0 && (
+                  <p>{emptyTabMessage}</p>
+                )}
+                {visiblePosts.map((post, index) => (
+                  <div
+                    key={`${String(post?.id ?? "post")}-${index}`}
+                    className={`profile-post-card ${post?.isVideo ? "is-playable" : ""} ${isOwnProfile ? "is-actionable" : ""}`.trim()}
+                    onClick={(event) => handleCardClick(event, post)}
+                    onContextMenu={(event) => handleCardContextMenu(event, post)}
+                    onPointerDown={(event) => handleCardPointerDown(event, post)}
+                    onPointerUp={handleCardPointerEnd}
+                    onPointerCancel={handleCardPointerEnd}
+                    onPointerLeave={handleCardPointerEnd}
+                  >
+                    {!post.isVideo && post.contentUrl?.trim() && (
+                      <img src={resolvePostImageUrl(post, "thumbnail") || resolveMediaUrl(post.contentUrl)} alt="" loading="lazy" decoding="async" />
+                    )}
+                    {post.isVideo && post.contentUrl?.trim() && (
+                      <video
+                        src={resolveMediaUrl(post.contentUrl)}
+                        autoPlay
+                        muted
+                        loop
+                        preload="metadata"
+                        playsInline
+                        onLoadedMetadata={(event) => handleProfileVideoMeta(post?.id, event)}
+                        onContextMenu={(e) => e.preventDefault()}
+                      />
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
 
             {isOwnProfile && (
               <button className="logout-btn-profile" onClick={logout}>
@@ -1679,11 +1306,55 @@ export default function Profile() {
         )}
 
 
+      {profileMediaViewerOpen && activeProfileMediaPost && (
+        <div className="profile-media-viewer-backdrop" onClick={closeProfileMediaViewer}>
+          <div className="profile-media-viewer" onClick={(event) => event.stopPropagation()}>
+            <button type="button" className="profile-media-viewer-close" onClick={closeProfileMediaViewer}>
+              Close
+            </button>
+            <div className="profile-media-viewer-media">
+              {activeProfileMediaPost?.isVideo ? (
+                <video
+                  src={resolveMediaUrl(activeProfileMediaPost.contentUrl)}
+                  autoPlay
+                  playsInline
+                  controls
+                  preload="metadata"
+                />
+              ) : (
+                <img src={resolvePostImageUrl(activeProfileMediaPost, "original") || resolveMediaUrl(activeProfileMediaPost.contentUrl)} alt="" decoding="async" />
+              )}
+            </div>
+            {profileMediaCarouselPosts.length > 1 && (
+              <div className="profile-media-viewer-nav">
+                <button
+                  type="button"
+                  onClick={() => stepProfileMediaViewer(-1)}
+                  disabled={resolvedActiveProfileMediaIndex <= 0}
+                >
+                  Prev
+                </button>
+                <span className="profile-media-viewer-count">
+                  {resolvedActiveProfileMediaIndex + 1} / {profileMediaCarouselPosts.length}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => stepProfileMediaViewer(1)}
+                  disabled={resolvedActiveProfileMediaIndex >= profileMediaCarouselPosts.length - 1}
+                >
+                  Next
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {activeHighlight && activeHighlight?.items?.length > 0 && (
         <div className="profile-highlight-viewer-backdrop" onClick={closeHighlight}>
           <div className="profile-highlight-viewer" onClick={(event) => event.stopPropagation()}>
             <button type="button" className="profile-highlight-viewer-close" onClick={closeHighlight}>
-              ×
+              Ãƒâ€”
             </button>
             {(() => {
               const items = activeHighlight.items || [];
@@ -1698,7 +1369,7 @@ export default function Profile() {
                       isVideo ? (
                         <video src={mediaUrl} autoPlay playsInline controls />
                       ) : (
-                        <img src={mediaUrl} alt={caption || activeHighlight.title} />
+                        <img src={mediaUrl} alt={caption || activeHighlight.title} loading="lazy" decoding="async" />
                       )
                     ) : (
                       <div className="profile-highlight-viewer-empty">Story media not available</div>
@@ -1766,6 +1437,14 @@ export default function Profile() {
                   </div>
                 </button>
               )}
+              <button type="button" className="profile-create-card accent-volo" onClick={() => handleCreateAction("volo")}>
+                <span className='profile-create-symbol' aria-hidden='true'>
+                  <FiMessageSquare />
+                </span>
+                <div>
+                  <span className="profile-create-label">Volo</span>
+                </div>
+              </button>
               <button type="button" className="profile-create-card accent-story" onClick={() => handleCreateAction("story")}>
                 <span className='profile-create-symbol' aria-hidden='true'>
                   <FiBookOpen />
@@ -1836,11 +1515,3 @@ export default function Profile() {
     </div>
   );
 }
-
-
-
-
-
-
-
-

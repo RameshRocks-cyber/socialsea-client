@@ -144,7 +144,7 @@ async function cropImageFileToAspect(file, aspectRatio, outputWidthPx, outputMim
 
     ctx.drawImage(decoded.source, rect.sx, rect.sy, rect.sw, rect.sh, 0, 0, outW, outH);
 
-    const blob = await canvasToBlob(canvas, outputMime, 0.92);
+    const blob = (await canvasToBlob(canvas, outputMime, 0.92)) || (outputMime === "image/jpeg" ? null : await canvasToBlob(canvas, "image/jpeg", 0.92));
     if (!blob) throw new Error("Failed to encode image");
 
     const originalName = String(file?.name || "image").replace(/\.[a-z0-9]+$/i, "");
@@ -230,7 +230,7 @@ export default function ProfileSetup() {
         persistProfileIdentity(p);
 
         if (completed && !isEditMode) {
-          navigate(buildProfilePath(p, id), { replace: true });
+          navigate("/feed", { replace: true });
           return;
         }
       })
@@ -316,7 +316,7 @@ export default function ProfileSetup() {
         localStorage.setItem("profile_cover_bust", bust);
       }
       localStorage.removeItem("socialsea_profile_cache_v1");
-      navigate(buildProfilePath(savedProfile, savedId), { replace: true });
+      navigate(isEditMode ? buildProfilePath(savedProfile, savedId) : "/feed", { replace: true });
     } catch (err) {
       const payload = err?.response?.data;
       const message =
@@ -368,7 +368,7 @@ export default function ProfileSetup() {
                   const token = (processingTokenRef.current.photo += 1);
                   setPhotoProcessing(true);
                   try {
-                    const processed = await cropImageFileToAspect(file, 1, AVATAR_OUTPUT_PX, "image/jpeg");
+                    const processed = await cropImageFileToAspect(file, 1, AVATAR_OUTPUT_PX, "image/webp");
                     if (processingTokenRef.current.photo !== token) return;
                     setPhoto(processed);
                     setPreview(URL.createObjectURL(processed));
@@ -414,7 +414,7 @@ export default function ProfileSetup() {
                     file,
                     COVER_ASPECT_RATIO,
                     COVER_OUTPUT_MAX_WIDTH_PX,
-                    "image/jpeg"
+                    "image/webp"
                   );
                   if (processingTokenRef.current.cover !== token) return;
                   setCoverPhoto(processed);

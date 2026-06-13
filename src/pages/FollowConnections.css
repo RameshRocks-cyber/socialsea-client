@@ -1,117 +1,220 @@
+@import url("https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&display=swap");
+
 .follow-connections-page {
+  --follow-page-bg: var(--ss-theme-bg);
+  --follow-page-surface: var(--ss-theme-bg-soft);
+  --follow-page-surface-strong: color-mix(in srgb, var(--ss-theme-bg-soft) 92%, var(--ss-theme-bg) 8%);
+  --follow-page-border: var(--ss-theme-border);
+  --follow-page-text: var(--ss-theme-text);
+  --follow-page-muted: color-mix(in srgb, var(--ss-theme-text) 68%, var(--ss-theme-bg) 32%);
+  --follow-page-accent: var(--ss-theme-accent);
+  --follow-page-accent-2: var(--ss-theme-accent-2);
   min-height: 100vh;
   padding: 18px clamp(10px, 3vw, 24px) 30px;
-  color: #edf3ff;
-  background:
-    radial-gradient(1000px 360px at 8% -10%, rgba(34, 34, 34, 0.16), transparent 70%),
-    radial-gradient(900px 320px at 92% -10%, rgba(18, 18, 18, 0.12), transparent 72%),
-    #050505;
+  color: var(--follow-page-text);
+  font-family: "Sora", "Segoe UI", sans-serif;
+  background-color: var(--follow-page-bg);
+  background-image:
+    radial-gradient(960px 360px at 8% -10%, color-mix(in srgb, var(--follow-page-accent) 18%, transparent), transparent 72%),
+    radial-gradient(900px 320px at 92% -10%, color-mix(in srgb, var(--follow-page-accent-2) 14%, transparent), transparent 74%);
 }
 
 .follow-connections-card {
-  max-width: 780px;
+  max-width: 860px;
   margin: 0 auto;
-  border: 1px solid rgba(62, 62, 62, 0.82);
-  border-radius: 20px;
-  background: linear-gradient(165deg, rgba(15, 15, 15, 0.96), rgba(8, 8, 8, 0.98));
-  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.34);
-  padding: 18px;
+  padding: 8px 0 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .follow-connections-card h2 {
-  margin: 12px 0 14px;
-  font-size: clamp(22px, 3.2vw, 32px);
+  margin: 16px 0 10px;
+  font-size: clamp(22px, 3.4vw, 32px);
+  line-height: 1.08;
   letter-spacing: 0.2px;
+  color: var(--follow-page-text);
 }
 
 .follow-search {
-  margin: 8px 0 14px;
+  margin: 8px 0 12px;
 }
 
 .follow-search-input {
   width: 100%;
-  border-radius: 999px;
-  border: 1px solid rgba(62, 62, 62, 0.82);
-  background: rgba(10, 10, 10, 0.9);
-  color: #f0f4ff;
-  padding: 10px 14px;
-  font-size: 0.9rem;
+  height: 44px;
+  border: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--follow-page-border) 88%, transparent);
+  border-radius: 0;
+  background: transparent;
+  color: var(--follow-page-text);
+  padding: 0 4px 8px;
+  font-size: 0.95rem;
   outline: none;
+  box-shadow: none;
 }
 
 .follow-search-input::placeholder {
-  color: rgba(190, 190, 190, 0.7);
+  color: var(--follow-page-muted);
+}
+
+.follow-search-input:focus-visible {
+  outline: none;
+  border-bottom-color: color-mix(in srgb, var(--follow-page-accent) 78%, white 22%);
+}
+
+.follow-tab:focus-visible,
+.follow-identity:focus-visible,
+.follow-follow-btn:focus-visible,
+.follow-chat-btn:focus-visible,
+.follow-add-btn:focus-visible {
+  outline: 1px solid color-mix(in srgb, var(--follow-page-accent) 70%, white 30%);
+  outline-offset: 4px;
 }
 
 .follow-search-results {
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 0;
   margin-bottom: 14px;
 }
 
 .follow-search-item {
-  border-color: rgba(88, 88, 88, 0.9);
+  border-bottom-color: color-mix(in srgb, var(--follow-page-border) 76%, var(--follow-page-accent) 24%);
 }
 
 .follow-follow-btn {
-  border: 1px solid rgba(120, 170, 230, 0.4);
-  border-radius: 999px;
-  background: linear-gradient(135deg, rgba(42, 98, 190, 0.4), rgba(18, 36, 78, 0.9));
-  color: #e7f0ff;
-  padding: 6px 12px;
+  min-width: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--follow-page-accent);
+  padding: 0;
   cursor: pointer;
   font-weight: 700;
-  font-size: 0.72rem;
+  font-size: 0.92rem;
   line-height: 1;
+  box-shadow: none;
+  transition: color 0.15s ease, text-decoration-color 0.15s ease;
+}
+
+.follow-follow-btn:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .follow-follow-btn:disabled {
-  opacity: 0.6;
+  opacity: 0.64;
   cursor: not-allowed;
+  text-decoration: none;
 }
 
 .follow-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 0 2px 4px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.follow-head-tabs {
   display: inline-flex;
-  gap: 8px;
-  padding: 6px;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.follow-add-btn {
+  width: 36px;
+  height: 36px;
   border-radius: 999px;
-  border: 1px solid rgba(70, 70, 70, 0.82);
-  background: rgba(16, 16, 16, 0.9);
+  border: 1px solid color-mix(in srgb, var(--follow-page-border) 85%, transparent);
+  background: color-mix(in srgb, var(--follow-page-surface) 92%, white 8%);
+  color: var(--follow-page-accent);
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: none;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+  flex: 0 0 auto;
+}
+
+.follow-add-btn:hover {
+  color: var(--follow-page-text);
+  background: color-mix(in srgb, var(--follow-page-surface) 84%, white 16%);
+  border-color: color-mix(in srgb, var(--follow-page-accent) 30%, var(--follow-page-border) 70%);
+  transform: translateY(-1px);
+}
+
+.follow-add-btn svg {
+  width: 18px;
+  height: 18px;
 }
 
 .follow-tab {
+  position: relative;
   border: none;
-  padding: 9px 16px;
-  border-radius: 999px;
-  color: #c2c2c2;
+  padding: 0 0 6px;
+  border-radius: 0;
+  color: var(--follow-page-muted);
   background: transparent;
   cursor: pointer;
   font-weight: 700;
+  font-size: 0.92rem;
+  transition: color 0.16s ease;
+}
+
+.follow-tab:hover {
+  color: var(--follow-page-text);
 }
 
 .follow-tab.active {
-  color: #fff;
-  background: linear-gradient(135deg, #2b2b2b, #121212);
-  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.35);
+  color: var(--follow-page-text);
+  font-weight: 800;
+}
+
+.follow-tab.active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--follow-page-accent) 70%, var(--follow-page-text) 30%);
 }
 
 .follow-list {
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 0;
 }
 
 .follow-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  border: 1px solid rgba(58, 58, 58, 0.76);
-  border-radius: 11px;
-  padding: 8px 9px;
-  background: linear-gradient(155deg, rgba(17, 17, 17, 0.96), rgba(5, 5, 5, 0.98));
-  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.26);
+  gap: 12px;
+  border: none;
+  border-bottom: none;
+  border-radius: 0;
+  padding: 14px 2px 14px 0;
+  background: transparent;
+  box-shadow: none;
+  transition: none;
+}
+
+.follow-item:hover {
+  border-bottom-color: transparent;
 }
 
 .follow-identity {
@@ -121,35 +224,40 @@
   cursor: pointer;
   padding: 0;
   min-width: 0;
+  flex: 1 1 auto;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   text-align: left;
 }
 
 .follow-avatar-img,
 .follow-avatar-fallback {
-  width: 38px;
-  height: 38px;
-  border-radius: 12px;
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
   flex-shrink: 0;
-  border: 1px solid rgba(78, 78, 78, 0.78);
-  box-shadow: 0 0 0 2px rgba(26, 26, 26, 0.36);
+  border: 1px solid color-mix(in srgb, var(--follow-page-border) 84%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--follow-page-bg) 80%, transparent);
 }
 
 .follow-avatar-img {
   object-fit: cover;
-  background: #121212;
+  background: color-mix(in srgb, var(--follow-page-surface) 90%, var(--follow-page-bg) 10%);
 }
 
 .follow-avatar-fallback {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
-  background: linear-gradient(135deg, #4a4a4a, #222222);
-  font-weight: 700;
-  font-size: 0.9rem;
+  color: var(--follow-page-text);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--follow-page-accent) 30%, var(--follow-page-surface) 70%),
+    color-mix(in srgb, var(--follow-page-accent-2) 24%, var(--follow-page-surface) 76%)
+  );
+  font-weight: 800;
+  font-size: 0.95rem;
 }
 
 .follow-text {
@@ -159,55 +267,105 @@
 }
 
 .follow-text strong {
-  font-size: 0.95rem;
+  font-size: 0.98rem;
+  line-height: 1.15;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .follow-text small {
-  color: #a8a8a8;
-  font-size: 0.78rem;
+  color: var(--follow-page-muted);
+  font-size: 0.8rem;
+  line-height: 1.3;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .follow-chat-btn {
-  border: 1px solid rgba(92, 92, 92, 0.78);
-  border-radius: 999px;
-  background: linear-gradient(180deg, rgba(44, 44, 44, 0.94), rgba(20, 20, 20, 0.96));
-  color: #fff;
-  padding: 5px 10px;
+  min-width: 0;
+  flex: 0 0 auto;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--follow-page-muted);
+  padding: 0;
+  margin-left: 12px;
   cursor: pointer;
   font-weight: 700;
-  font-size: 0.72rem;
+  font-size: 0.92rem;
   line-height: 1;
+  white-space: nowrap;
+  box-shadow: none;
+  transition: color 0.15s ease, text-decoration-color 0.15s ease;
 }
 
 .follow-chat-btn:hover {
-  filter: brightness(1.08);
+  color: var(--follow-page-text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.follow-muted,
+.follow-error {
+  margin: 0 0 12px;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  line-height: 1.4;
 }
 
 .follow-muted {
-  color: #9f9f9f;
-  margin: 0 0 12px;
+  color: var(--follow-page-muted);
 }
 
 .follow-error {
-  color: #ff98aa;
-  margin: 0 0 12px;
+  color: #ff9eb0;
 }
 
-@media (max-width: 620px) {
+@media (max-width: 640px) {
+  .follow-connections-card {
+    padding-top: 4px;
+  }
+
+  .follow-connections-card h2 {
+    margin-top: 14px;
+    font-size: clamp(22px, 6vw, 30px);
+  }
+
+  .follow-head {
+    width: 100%;
+    align-items: flex-start;
+  }
+
+  .follow-head-tabs {
+    gap: 14px;
+  }
+
+  .follow-tab {
+    padding-bottom: 5px;
+  }
+
+  .follow-add-btn {
+    margin-left: auto;
+  }
+
   .follow-item {
-    gap: 7px;
+    flex-direction: row;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .follow-identity {
+    min-width: 0;
   }
 
   .follow-avatar-img,
   .follow-avatar-fallback {
-    width: 34px;
-    height: 34px;
-    border-radius: 10px;
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
   }
 }

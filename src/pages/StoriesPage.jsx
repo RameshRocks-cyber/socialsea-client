@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import api from "../api/axios";
 import { toApiUrl } from "../api/baseUrl";
+import { resolveImageVariantUrl } from "../utils/mediaUrl";
 import {
   STORY_ACTIVE_STORAGE_KEY,
   STORY_ARCHIVE_STORAGE_KEY,
@@ -141,6 +142,7 @@ const StorySection = ({ title, emptyText, items, onOpen }) => (
       <div className="stories-grid">
         {items.map((story) => {
           const mediaUrl = resolveMediaUrl(story.mediaUrl);
+          const thumbnailUrl = resolveImageVariantUrl(mediaUrl, "thumbnail") || mediaUrl;
           const caption = getStoryLabel(story);
           const expired = isStoryExpired(story);
           const video = isVideoUrl(mediaUrl) || story?.isVideo === true;
@@ -162,7 +164,7 @@ const StorySection = ({ title, emptyText, items, onOpen }) => (
                   video ? (
                     <video src={mediaUrl} muted playsInline preload="metadata" />
                   ) : (
-                    <img src={mediaUrl} alt={caption || "Story"} />
+                    <img src={thumbnailUrl} alt={caption || "Story"} loading="lazy" decoding="async" />
                   )
                 ) : (
                   <div className="stories-thumb-empty">{isReelShare ? "Clip" : "Story"}</div>
@@ -496,8 +498,9 @@ export default function StoriesPage() {
                   <video src={activeStory.mediaUrl} autoPlay playsInline controls />
                 ) : (
                   <img
-                    src={activeStory.mediaUrl}
+                    src={resolveImageVariantUrl(activeStory.mediaUrl, "original") || activeStory.mediaUrl}
                     alt={activeStory.storyText || activeStory.caption || "Story"}
+                    decoding="async"
                   />
                 )}
               </div>
@@ -548,7 +551,7 @@ export default function StoriesPage() {
                           <div key={entryKey} className="stories-insights-item">
                             <div className="stories-insights-avatar" aria-hidden="true">
                               {avatarUrl ? (
-                                <img src={avatarUrl} alt={name} />
+                                <img src={avatarUrl} alt={name} loading="lazy" decoding="async" />
                               ) : (
                                 <span>{name.charAt(0).toUpperCase()}</span>
                               )}

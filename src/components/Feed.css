@@ -16,10 +16,10 @@ body.feed-no-swipe-back {
 .feed-top-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-bottom: 10px;
+  justify-content: flex-start;
+  flex-wrap: nowrap;
+  gap: 12px;
+  margin-bottom: 12px;
   min-width: 0;
 }
 
@@ -148,70 +148,115 @@ body.feed-no-swipe-back {
   box-shadow: none;
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex: 1 1 auto;
-  min-width: 0;
+  gap: 0;
+  flex: 0 1 320px;
+  max-width: 320px;
+  min-width: 170px;
 }
 
 .feed-mode-switch {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   margin: 0;
-  padding: 3px;
+  padding: 5px;
+  border: 1px solid rgba(145, 183, 239, 0.18);
   border-radius: 999px;
-  border: 1px solid rgba(42, 42, 42, 0.82);
-  background: linear-gradient(180deg, rgba(16, 16, 16, 0.96), rgba(7, 7, 7, 0.96));
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0)),
+    linear-gradient(180deg, rgba(20, 28, 40, 0.92), rgba(11, 16, 24, 0.96));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.18),
+    0 14px 30px rgba(0, 0, 0, 0.16);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   flex: 0 0 auto;
   white-space: nowrap;
+  overflow: hidden;
+}
+
+.feed-mode-switch::before {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  border-radius: inherit;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0));
+  pointer-events: none;
 }
 
 .feed-mode-btn {
   border: 0;
   border-radius: 999px;
-  padding: 7px 12px;
+  position: relative;
+  z-index: 1;
+  padding: 8px 15px;
   background: transparent;
-  color: #b8cae9;
-  font-size: 13px;
+  color: #bed0ea;
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.18);
+  box-shadow: inset 0 0 0 1px transparent;
+  transition: color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease, opacity 0.2s ease;
 }
 
 .feed-mode-btn.is-active {
-  background: linear-gradient(180deg, #2a2a2a, #151515);
-  color: #f6f6f6;
-  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.45);
+  color: #ffffff;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0)),
+    linear-gradient(135deg, #4d88ca, #24548d);
+  font-weight: 700;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.26),
+    inset 0 -1px 0 rgba(15, 41, 74, 0.28),
+    0 10px 22px rgba(32, 77, 130, 0.34);
 }
 
 .feed-mode-btn:hover {
-  color: #e7f0ff;
+  color: #eef5ff;
+  background: linear-gradient(180deg, rgba(142, 183, 246, 0.16), rgba(142, 183, 246, 0.08));
+  box-shadow: inset 0 0 0 1px rgba(142, 183, 246, 0.12);
+  transform: translateY(-1px);
+}
+
+.feed-mode-btn:focus-visible {
+  outline: 2px solid rgba(126, 163, 221, 0.45);
+  outline-offset: 4px;
 }
 
 .explore-search-icon {
   position: absolute;
   left: 14px;
   color: #92a3c5;
+  pointer-events: none;
 }
 
 .explore-search-input {
   width: 100%;
-  height: 42px;
+  height: 40px;
   border-radius: 999px;
-  border: 1px solid rgba(42, 42, 42, 0.82);
-  background: linear-gradient(180deg, #151515, #0c0c0c);
+  border: none;
+  background: linear-gradient(180deg, rgba(18, 24, 34, 0.94), rgba(10, 14, 20, 0.98));
   color: #f3f7ff;
-  padding: 0 14px 0 38px;
-  font-size: 14px;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
-  flex: 1 1 auto;
+  padding: 0 16px 0 38px;
+  font-size: 13.5px;
+  transition: box-shadow 0.2s ease, background 0.2s ease;
+  flex: 1 1 100%;
   min-width: 0;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 10px 20px rgba(0, 0, 0, 0.16);
 }
 
 .explore-search-input:focus {
   outline: none;
-  border-color: #545454;
-  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.24);
+  box-shadow: 0 0 0 2px rgba(126, 163, 221, 0.2), 0 10px 24px rgba(0, 0, 0, 0.22);
+}
+
+.explore-search-input::placeholder {
+  color: #94a7c7;
 }
 
 .feed-filter-menu {
@@ -219,20 +264,22 @@ body.feed-no-swipe-back {
   display: inline-flex;
   align-items: center;
   flex: 0 0 auto;
+  margin-left: auto;
 }
 
 .feed-filter-btn {
-  width: 42px;
-  height: 42px;
-  border-radius: 8px;
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
   border: none;
-  background: transparent;
+  background: linear-gradient(180deg, rgba(18, 24, 34, 0.94), rgba(10, 14, 20, 0.98));
   color: #d9e8ff;
-  font-size: 20px;
+  font-size: 18px;
   letter-spacing: 2px;
   line-height: 1;
   cursor: pointer;
-  transition: color 0.2s ease, transform 0.2s ease, opacity 0.2s ease;
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.16);
+  transition: color 0.2s ease, transform 0.2s ease, opacity 0.2s ease, box-shadow 0.2s ease;
 }
 
 .feed-filter-btn:hover {
@@ -240,6 +287,7 @@ body.feed-no-swipe-back {
   color: #f4f8ff;
   transform: translateY(-1px);
   opacity: 0.95;
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.2);
 }
 
 .feed-filter-btn:focus-visible {
@@ -640,6 +688,11 @@ body.ss-theme-white .feed-study-subject-chip.is-active {
   filter: brightness(1.03);
 }
 
+.feed-load-more-sentinel {
+  width: 100%;
+  height: 1px;
+}
+
 .long-feed-thumb-wrap {
   position: relative;
   width: 100%;
@@ -878,13 +931,15 @@ body.ss-theme-white .feed-study-subject-chip.is-active {
 
 body.ss-theme-white .feed-filter-btn {
   border: none;
-  background: transparent;
-  color: #2b3342;
+  background: linear-gradient(180deg, #ffffff, #f5f9ff);
+  color: #173c65;
+  box-shadow: 0 10px 20px rgba(30, 77, 130, 0.12);
 }
 
 body.ss-theme-white .feed-filter-btn:hover {
   outline: none;
-  color: #111827;
+  color: #0f3d66;
+  box-shadow: 0 12px 24px rgba(30, 77, 130, 0.16);
 }
 
 body.ss-theme-white .feed-filter-btn:focus-visible {
@@ -1497,6 +1552,62 @@ body.ss-theme-white .feed-media-view:not(.is-video-media) {
   background: #f3f6fb;
 }
 
+body.ss-theme-white .explore-search-icon {
+  color: #7690b0;
+}
+
+body.ss-theme-white .explore-search-input {
+  border: none;
+  background: linear-gradient(180deg, #ffffff, #f7faff);
+  color: #173c65;
+  box-shadow: 0 10px 22px rgba(30, 77, 130, 0.1);
+}
+
+body.ss-theme-white .explore-search-input::placeholder {
+  color: #7d92ad;
+}
+
+body.ss-theme-white .explore-search-input:focus {
+  box-shadow: 0 0 0 2px rgba(42, 98, 156, 0.14), 0 12px 24px rgba(30, 77, 130, 0.14);
+}
+
+body.ss-theme-white .feed-mode-btn {
+  color: #6783a5;
+  text-shadow: none;
+}
+
+body.ss-theme-white .feed-mode-btn.is-active {
+  color: #ffffff;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0)),
+    linear-gradient(135deg, #3d81c4, #1c578f);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.3),
+    inset 0 -1px 0 rgba(23, 60, 101, 0.18),
+    0 10px 20px rgba(42, 98, 156, 0.24);
+}
+
+body.ss-theme-white .feed-mode-btn:hover {
+  color: #1d456f;
+  background: linear-gradient(180deg, rgba(42, 98, 156, 0.12), rgba(42, 98, 156, 0.05));
+  box-shadow: inset 0 0 0 1px rgba(42, 98, 156, 0.1);
+}
+
+body.ss-theme-white .feed-mode-switch {
+  border-color: rgba(42, 98, 156, 0.14);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.55)),
+    linear-gradient(180deg, #f7fbff, #edf4fb);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    inset 0 -1px 0 rgba(90, 127, 168, 0.08),
+    0 12px 24px rgba(30, 77, 130, 0.1);
+}
+
+body.ss-theme-white .feed-mode-btn:focus-visible {
+  outline-color: rgba(42, 98, 156, 0.35);
+}
+
 @media (min-width: 1500px) {
   .explore-grid {
     grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -1530,28 +1641,42 @@ body.ss-theme-white .feed-media-view:not(.is-video-media) {
   }
 
   .feed-top-row {
-    gap: 6px;
-  }
-
-  .explore-search-wrap,
-  .feed-mode-switch {
-    width: 100%;
+    gap: 8px;
+    margin-bottom: 10px;
   }
 
   .explore-search-wrap {
-    padding: 0;
-    border-radius: 0;
+    flex: 1 1 0;
+    max-width: none;
+    min-width: 0;
   }
 
   .feed-mode-switch {
-    justify-content: flex-start;
+    gap: 4px;
+    padding: 4px;
   }
 
   .feed-mode-btn {
-    flex: 1 1 0;
+    flex: 0 0 auto;
     text-align: center;
-    padding: 7px 10px;
-    font-size: 12px;
+    padding: 7px 11px;
+    font-size: 13px;
+  }
+
+  .explore-search-input {
+    height: 38px;
+    padding: 0 14px 0 34px;
+    font-size: 13px;
+  }
+
+  .explore-search-icon {
+    left: 12px;
+  }
+
+  .feed-filter-btn {
+    width: 34px;
+    height: 34px;
+    font-size: 16px;
   }
 
   .feed-study-subject-row {

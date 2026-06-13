@@ -1,48 +1,48 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import api from "../api/axios";
+import { loadSavedPosts, readSavedPostIdsFromStorage, syncSavedPostCacheFromIds, toggleSavedPost } from "../api/saved";
+import { getContentItemsByIds } from "../api/feed";
+import { getPublicDisplayName } from "../utils/displayName";
 import { resolveMediaUrl } from "../utils/mediaUrl";
 import "./Saved.css";
 
 const LONG_VIDEO_SECONDS = 90;
 
-const readIds = (key) => {
-  try {
-    const raw = localStorage.getItem(key);
-    const arr = raw ? JSON.parse(raw) : [];
-    if (!Array.isArray(arr)) return [];
-    return arr.map((x) => Number(x)).filter((x) => Number.isFinite(x));
-  } catch {
-    return [];
-  }
-};
-
 export default function Saved() {
   const navigate = useNavigate();
-  const [itemsById, setItemsById] = useState({});
+  const [savedItems, setSavedItems] = useState([]);
   const [durationById, setDurationById] = useState({});
   const [loading, setLoading] = useState(true);
-  const [savedPostIds, setSavedPostIds] = useState(() => readIds("savedPostIds"));
-  const [savedReelIds, setSavedReelIds] = useState(() => readIds("savedReelIds"));
+  const [error, setError] = useState("");
 
   useEffect(() => {
     let mounted = true;
     const load = async () => {
+      setLoading(true);
+      setError("");
       try {
-        const [feedRes, reelsRes] = await Promise.all([
-          api.get("/api/feed").catch(() => ({ data: [] })),
-          api.get("/api/reels").catch(() => ({ data: [] }))
-        ]);
-        const all = [
-          ...(Array.isArray(feedRes.data) ? feedRes.data : []),
-          ...(Array.isArray(reelsRes.data) ? reelsRes.data : [])
-        ];
-        const next = {};
-        all.forEach((item) => {
-          if (!item?.id) return;
-          next[item.id] = item;
-        });
-        if (mounted) setItemsById(next);
+        const items = await loadSavedPosts();
+        if (!mounted) return;
+        const next = Array.isArray(items) ? items.filter(Boolean) : [];
+        setSavedItems(next);
+        syncSavedPostCacheFromIds(next.map((item) => item?.id));
+      } catch {
+        if (!mounted) return;
+        const fallbackIds = readSavedPostIdsFromStorage();
+        if (!fallbackIds.length) {
+          setSavedItems([]);
+          setError("Could not load saved posts right now.");
+          return;
+        }
+
+        try {
+          const fallbackItems = await getContentItemsByIds(fallbackIds);
+          setSavedItems(fallbackItems);
+          setError("");
+        } catch {
+          setSavedItems([]);
+          setError("Could not load saved posts right now.");
+        }
       } finally {
         if (mounted) setLoading(false);
       }
@@ -53,33 +53,7 @@ export default function Saved() {
     };
   }, []);
 
-  const usernameFor = (item) => {
-    const raw = item?.user?.name || item?.username || item?.user?.email || "User";
-    const local = raw.includes("@") ? raw.split("@")[0] : raw;
-    return local
-      .replace(/[._-]+/g, " ")
-      .replace(/\s+/g, " ")
-      .trim()
-      .split(" ")
-      .filter(Boolean)
-      .map((x) => x.charAt(0).toUpperCase() + x.slice(1))
-      .join(" ");
-  };
-
-  const savedIdsMerged = useMemo(() => {
-    const ordered = [...savedPostIds, ...savedReelIds];
-    const seen = new Set();
-    return ordered.filter((id) => {
-      if (seen.has(id)) return false;
-      seen.add(id);
-      return true;
-    });
-  }, [savedPostIds, savedReelIds]);
-
-  const savedItems = useMemo(
-    () => savedIdsMerged.map((id) => itemsById[id]).filter(Boolean),
-    [itemsById, savedIdsMerged]
-  );
+  const usernameFor = (item) => getPublicDisplayName(item?.user || item);
 
   const isVideo = (item) => {
     const type = (item?.type || "").toUpperCase();
@@ -103,13 +77,19 @@ export default function Saved() {
     navigate("/feed");
   };
 
-  const removeSaved = (id) => {
-    const nextPosts = savedPostIds.filter((x) => x !== Number(id));
-    const nextReels = savedReelIds.filter((x) => x !== Number(id));
-    setSavedPostIds(nextPosts);
-    setSavedReelIds(nextReels);
-    localStorage.setItem("savedPostIds", JSON.stringify(nextPosts));
-    localStorage.setItem("savedReelIds", JSON.stringify(nextReels));
+  const removeSaved = async (id) => {
+    const safeId = Number(id);
+    if (!Number.isFinite(safeId) || safeId <= 0) return;
+    try {
+      await toggleSavedPost(safeId);
+      setSavedItems((prev) => {
+        const next = prev.filter((item) => Number(item?.id) !== safeId);
+        syncSavedPostCacheFromIds(next.map((item) => item?.id));
+        return next;
+      });
+    } catch {
+      // Keep the server-backed saved list untouched if removal fails.
+    }
   };
 
   return (
@@ -120,6 +100,7 @@ export default function Saved() {
       </header>
 
       {loading && <p className="saved-empty">Loading saved posts...</p>}
+      {!loading && error && <p className="saved-empty">{error}</p>}
       {!loading && savedItems.length === 0 && (
         <div className="saved-empty-wrap">
           <p className="saved-empty">No saved posts yet.</p>

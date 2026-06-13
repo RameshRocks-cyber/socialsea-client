@@ -1,25 +1,26 @@
-import { useEffect, useState } from "react";
-import { getFeed, getAnonymousFeed } from "../api/feed";
+import { useQuery } from "@tanstack/react-query";
+import { getFeedPosts, getAnonymousFeedPosts } from "../api/feed";
+import { feedPageQueryKey } from "../api/queryKeys";
 
 const Feed = () => {
-  const [posts, setPosts] = useState([]);
-
-  useEffect(() => {
-    // Fetch both the main feed and anonymous feed
-    Promise.all([getFeed(), getAnonymousFeed()])
-      .then(([mainRes, anonRes]) => {
-        // Combine the data from both responses
-        const allPosts = [...mainRes.data, ...anonRes.data];
-        // Optional: Sort posts by ID (descending) to show newest first
-        // allPosts.sort((a, b) => b.id - a.id);
-        setPosts(allPosts);
-      })
-      .catch((err) => console.error("Failed to fetch feed:", err));
-  }, []);
+  const { data: posts = [], isPending, error } = useQuery({
+    queryKey: feedPageQueryKey(),
+    queryFn: async () => {
+      const [mainPosts, anonymousPosts] = await Promise.all([
+        getFeedPosts(),
+        getAnonymousFeedPosts()
+      ]);
+      return [...mainPosts, ...anonymousPosts];
+    },
+    staleTime: 60_000,
+    retry: 1
+  });
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
       <h2>Feed</h2>
+      {isPending && <p>Loading feed...</p>}
+      {error && <p>Failed to fetch feed.</p>}
       {posts.map((post) => (
         <div key={post.id} className="post">
           <strong>{post.username || "Anonymous"}</strong>

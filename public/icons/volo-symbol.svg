@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 380 340" role="img" aria-labelledby="voloTitle">
+  <title id="voloTitle">Volo symbol</title>
+  <defs>
+    <linearGradient id="voloWingTop" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#baf0ff"/>
+      <stop offset="52%" stop-color="#42b9ff"/>
+      <stop offset="100%" stop-color="#1d79ff"/>
+    </linearGradient>
+    <linearGradient id="voloWingMid" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1fe2ff"/>
+      <stop offset="55%" stop-color="#1e9cff"/>
+      <stop offset="100%" stop-color="#0f5dff"/>
+    </linearGradient>
+    <linearGradient id="voloWingLow" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#66f2ff"/>
+      <stop offset="56%" stop-color="#1ed3ff"/>
+      <stop offset="100%" stop-color="#16a5ff"/>
+    </linearGradient>
+    <radialGradient id="voloDotGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#ecf9ff"/>
+    </radialGradient>
+  </defs>
+
+  <g>
+    <path
+      d="M52 252C35 189 61 141 122 111C185 81 246 80 313 44C305 103 269 135 220 161C176 185 132 201 97 227C71 247 57 271 62 300C51 287 47 269 52 252Z"
+      fill="url(#voloWingMid)"
+    />
+    <path
+      d="M74 272C62 233 79 203 122 183C165 162 221 153 279 126C270 163 245 190 207 211C170 231 126 246 108 270C99 282 95 297 100 310C90 303 80 290 74 272Z"
+      fill="url(#voloWingLow)"
+    />
+    <path
+      d="M67 226C54 183 75 149 128 124C187 96 250 94 332 56C323 116 286 156 233 182C187 205 139 220 104 243C83 256 70 273 69 290C63 274 62 249 67 226Z"
+      fill="url(#voloWingTop)"
+      opacity="0.9"
+    />
+    <circle cx="318" cy="122" r="23" fill="url(#voloDotGlow)" />
+    <circle cx="318" cy="122" r="23" fill="none" stroke="#6ec8ff" stroke-width="1.2" opacity="0.9" />
+  </g>
+</svg>

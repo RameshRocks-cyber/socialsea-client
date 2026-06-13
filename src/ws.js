@@ -5,7 +5,7 @@ const WS_RECONNECT_DELAY_MS = 12000;
 const WS_MAX_RECONNECT_DELAY_MS = 60000;
 const WS_CONNECT_DELAY_MS = import.meta.env?.DEV ? 120 : 0;
 const SOCKJS_OPTIONS = { transports: ["websocket"] };
-const WS_TRANSPORT_MODE = String(import.meta.env?.VITE_WS_TRANSPORT || "ws")
+const WS_TRANSPORT_MODE = String(import.meta.env?.VITE_WS_TRANSPORT || "sockjs")
   .trim()
   .toLowerCase();
 
@@ -27,12 +27,6 @@ const loadSockJs = async () => {
   }
   return sockJsImportPromise;
 };
-
-const getStoredToken = () =>
-  sessionStorage.getItem("accessToken") ||
-  sessionStorage.getItem("token") ||
-  localStorage.getItem("accessToken") ||
-  localStorage.getItem("token");
 
 const normalizeAbsoluteBase = (rawValue) => {
   const value = String(rawValue || "").trim().replace(/\/+$/, "");
@@ -68,15 +62,14 @@ const toWsOrigin = (base) => {
   return normalized.startsWith("ws") ? normalized : normalized.replace(/^http/i, "ws");
 };
 
-const buildNativeBrokerUrl = (wsBase, token) =>
-  `${toWsOrigin(wsBase)}${WS_NATIVE_ENDPOINT}?token=${encodeURIComponent(token)}`;
+const buildNativeBrokerUrl = (wsBase) =>
+  `${toWsOrigin(wsBase)}${WS_NATIVE_ENDPOINT}`;
 
-const buildSockJsUrl = (wsBase, token) =>
-  `${String(wsBase || "").trim().replace(/\/+$/, "")}${WS_SOCKJS_ENDPOINT}?token=${encodeURIComponent(token)}`;
+const buildSockJsUrl = (wsBase) =>
+  `${String(wsBase || "").trim().replace(/\/+$/, "")}${WS_SOCKJS_ENDPOINT}`;
 
-const createStompClient = async (token, wsBase) => {
+const createStompClient = async (wsBase) => {
   const common = {
-    connectHeaders: { Authorization: `Bearer ${token}` },
     reconnectDelay: WS_RECONNECT_DELAY_MS,
     maxReconnectDelay: WS_MAX_RECONNECT_DELAY_MS,
     debug: () => {},
@@ -86,19 +79,18 @@ const createStompClient = async (token, wsBase) => {
     const SockJS = await loadSockJs();
     return new Client({
       ...common,
-      webSocketFactory: () => new SockJS(buildSockJsUrl(wsBase, token), undefined, SOCKJS_OPTIONS),
+      webSocketFactory: () => new SockJS(buildSockJsUrl(wsBase), undefined, SOCKJS_OPTIONS),
     });
   }
 
   return new Client({
     ...common,
-    brokerURL: buildNativeBrokerUrl(wsBase, token),
+    brokerURL: buildNativeBrokerUrl(wsBase),
   });
 };
 
 export const connectAdminNotifications = (onMessage) => {
-  const token = String(getStoredToken() || "").trim();
-  if (!token || typeof onMessage !== "function") return () => {};
+  if (typeof onMessage !== "function") return () => {};
 
   const wsBase = resolveWsBase();
   if (!wsBase) return () => {};
@@ -126,7 +118,7 @@ export const connectAdminNotifications = (onMessage) => {
   };
 
   const init = async () => {
-    client = await createStompClient(token, wsBase);
+    client = await createStompClient(wsBase);
     if (disposed || !client) return;
 
     client.onConnect = () => {
@@ -164,9 +156,8 @@ export const connectAdminNotifications = (onMessage) => {
 };
 
 export const connectUserNotifications = (email, onMessage) => {
-  const token = String(getStoredToken() || "").trim();
   const recipient = String(email || "").trim().toLowerCase();
-  if (!token || !recipient || typeof onMessage !== "function") return () => {};
+  if (!recipient || typeof onMessage !== "function") return () => {};
 
   const wsBase = resolveWsBase();
   if (!wsBase) return () => {};
@@ -213,7 +204,7 @@ export const connectUserNotifications = (email, onMessage) => {
   };
 
   const init = async () => {
-    client = await createStompClient(token, wsBase);
+    client = await createStompClient(wsBase);
     if (disposed || !client) return;
 
     client.onConnect = () => {
